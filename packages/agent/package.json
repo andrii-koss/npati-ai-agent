@@ -1,0 +1,18 @@
+{
+  "name": "@npati/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@npati/business-brain": "*",
+    "@npati/hub-connector": "*",
+    "@npati/memory": "*",
+    "@npati/omniroute-adapter": "*",
+    "@npati/shared": "*",
+    "@npati/skills": "*",
+    "@npati/workspace": "*",
+    "@npati/web-research": "*"
+  },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

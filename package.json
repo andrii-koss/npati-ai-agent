@@ -1,0 +1,20 @@
+{
+  "name": "npati-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open Source AI Business Agent",
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "catalog:generate": "node scripts/generate-omniroute-provider-catalog.mjs",
+    "dev:web": "npm run dev --workspace @npati/web",
+    "dev:api": "npm run dev --workspace @npati/agent-api",
+    "build": "npm run catalog:generate && npm run build --workspace @npati/agent-api && npm run build --workspace @npati/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "docker:config": "docker compose config --quiet"
+  },
+  "engines": { "node": ">=22.22.2 <23 || >=24.0.0 <27" },
+  "devDependencies": { "typescript": "^5.9.2", "vitest": "^3.2.4" }
+}

@@ -1,0 +1,9 @@
+.git
+.gitmodules
+node_modules
+**/node_modules
+**/dist
+coverage
+.env
+vendor/omniroute
+
