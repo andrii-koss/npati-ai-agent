@@ -582,6 +582,48 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return message;
   }
 
+  async listNeutralConversations(context: AuthContext) {
+    await this.ensure(context);
+    return [...this.conversations.values()].filter((item) => item.workspaceId === context.workspaceId && item.businessId === null && item.userId === context.userId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async createNeutralConversation(context: AuthContext, title: string) {
+    await this.ensure(context);
+    const timestamp = now();
+    const conversation: Conversation = { id: randomUUID(), workspaceId: context.workspaceId, businessId: null, userId: context.userId, title: title.trim().slice(0, 120) || "New conversation", createdAt: timestamp, updatedAt: timestamp };
+    this.conversations.set(conversation.id, conversation);
+    return conversation;
+  }
+
+  async getNeutralConversation(context: AuthContext, conversationId: string) {
+    await this.ensure(context);
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.workspaceId !== context.workspaceId || conversation.businessId !== null || conversation.userId !== context.userId) throw new WorkspaceAccessError("Conversation is not available to this user");
+    const messages = [...this.messages.values()].filter((item) => item.conversationId === conversationId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { conversation, messages };
+  }
+
+  async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) {
+    const { conversation } = await this.getNeutralConversation(context, conversationId);
+    const updated = { ...conversation, title: title.trim().slice(0, 120) || "New conversation", updatedAt: now() };
+    this.conversations.set(conversationId, updated);
+    return updated;
+  }
+
+  async deleteNeutralConversation(context: AuthContext, conversationId: string) {
+    await this.getNeutralConversation(context, conversationId);
+    for (const [messageId, message] of this.messages) if (message.conversationId === conversationId) this.messages.delete(messageId);
+    return this.conversations.delete(conversationId);
+  }
+
+  async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
+    const { conversation } = await this.getNeutralConversation(context, conversationId);
+    const message: ConversationMessage = { id: randomUUID(), conversationId, role, content, createdAt: now() };
+    this.messages.set(message.id, message);
+    this.conversations.set(conversationId, { ...conversation, updatedAt: message.createdAt });
+    return message;
+  }
+
   private hydrateOnboarding(row: Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">): BusinessOnboardingSession {
     const flow = ONBOARDING_FLOWS[row.scenario];
     const legacy = row.currentStep > 0 && !row.completedFields.some((field) => field === "businessSnapshot" || field === "businessGoal");

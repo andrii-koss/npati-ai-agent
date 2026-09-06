@@ -117,7 +117,7 @@ export interface MemoryItem {
 export type MemoryInput = Pick<MemoryItem, "type" | "title" | "content"> & Partial<Pick<MemoryItem, "source" | "confidence">>;
 
 export interface Conversation {
-  id: string; workspaceId: string; businessId: string; userId: string; title: string; createdAt: string; updatedAt: string;
+  id: string; workspaceId: string; businessId: string | null; userId: string; title: string; createdAt: string; updatedAt: string;
 }
 export interface ConversationMessage {
   id: string; conversationId: string; role: "user" | "assistant" | "system"; content: string; createdAt: string;
@@ -207,6 +207,12 @@ export interface WorkspaceStore {
   updateConversation(context: AuthContext, businessId: string, conversationId: string, title: string): Promise<Conversation>;
   deleteConversation(context: AuthContext, businessId: string, conversationId: string): Promise<boolean>;
   appendMessage(context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string): Promise<ConversationMessage>;
+  listNeutralConversations(context: AuthContext): Promise<Conversation[]>;
+  createNeutralConversation(context: AuthContext, title: string): Promise<Conversation>;
+  getNeutralConversation(context: AuthContext, conversationId: string): Promise<{ conversation: Conversation; messages: ConversationMessage[] }>;
+  updateNeutralConversation(context: AuthContext, conversationId: string, title: string): Promise<Conversation>;
+  deleteNeutralConversation(context: AuthContext, conversationId: string): Promise<boolean>;
+  appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string): Promise<ConversationMessage>;
   getOnboarding(context: AuthContext): Promise<BusinessOnboardingSession | null>;
   startOnboarding(context: AuthContext, scenario: OnboardingScenario): Promise<BusinessOnboardingSession>;
   advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }): Promise<BusinessOnboardingSession>;

@@ -107,6 +107,7 @@ export class AIPreferencesStore {
   private async update(scope: AuthContext, operation: (current: AIPreferences) => AIPreferences | Promise<AIPreferences>) {
     for (let attempt = 0; attempt < MAX_CONCURRENT_UPDATE_RETRIES; attempt += 1) {
       let stored = await this.workspace.getUserSetting(scope, SETTINGS_KEY);
+      let writeScope = scope;
       if (!stored && (scope.workspaceId !== 'dev-workspace' || scope.userId !== 'dev-user')) {
         const fallbackScope: AuthContext = {
           workspaceId: 'dev-workspace',
@@ -114,13 +115,18 @@ export class AIPreferencesStore {
           externalSubject: 'local:dev-user',
           permissions: ['workspace:read', 'workspace:write', 'business:manage', 'chat:use'],
         };
-        stored = await this.workspace.getUserSetting(fallbackScope, SETTINGS_KEY);
+        const fallbackStored = await this.workspace.getUserSetting(fallbackScope, SETTINGS_KEY);
+        // The fallback is a template for this user; its revision belongs to the dev scope.
+        if (fallbackStored) {
+          stored = fallbackStored;
+          writeScope = fallbackScope;
+        }
       }
       stored ??= await this.migrateLegacyLocalPreferences(scope);
       const current = normalize(stored?.value);
       const next = await operation(current);
       if (JSON.stringify(next) === JSON.stringify(current)) return current;
-      const written = await this.workspace.setUserSetting(scope, SETTINGS_KEY, next, stored?.revision ?? 0);
+      const written = await this.workspace.setUserSetting(writeScope, SETTINGS_KEY, next, stored?.revision ?? 0);
       if (written) return normalize(written.value);
     }
     throw new Error('AI preferences changed concurrently; retry the request');

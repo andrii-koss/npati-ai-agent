@@ -260,15 +260,16 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
   );
 }
 
-type ChatProps = { initialPrompt?: string; initialConversationId?: string };
+type ChatProps = { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean };
 export function ConversationalChat(props: ChatProps) {
   const { user } = useAuth();
-  return <ContextChat key={user?.id ?? "anonymous"} {...props} userId={user?.id} />;
+  const chatKey = `${user?.id ?? "anonymous"}:${props.initialConversationId ?? "root"}`;
+  return <ContextChat key={chatKey} {...props} userId={user?.id} />;
 }
-function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
+function ContextChat({ userId, neutralChat, ...props }: ChatProps & { userId?: string }) {
   const { overview, switchBusiness } = useWorkspace();
   const key = "npati_chat_context:" + (userId ?? "anonymous");
-  const [selection, setSelection] = useState(() => { try { return sessionStorage.getItem(key) ?? "business"; } catch { return "business"; } });
+  const [selection, setSelection] = useState(() => { if (neutralChat) return "none"; try { const stored = sessionStorage.getItem(key); return !stored || stored === "none" ? "business" : stored; } catch { return "business"; } });
   const [companies, setCompanies] = useState<Array<{id:string;name:string}>>([]);
   const [error,setError] = useState("");
   const [switching,setSwitching] = useState(false);
@@ -282,7 +283,7 @@ function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
     }catch(e){setError(e instanceof Error?e.message:"Could not switch context");}finally{setSwitching(false);}
   }
   const value=selection==="business"&&overview?.currentBusiness ? "business:"+overview.currentBusiness.id : selection;
-  const switcher = (
+  const switcher = neutralChat ? null : (
     <div className="composer-context-switcher" title="Active context">
       <select
         aria-label="Active context"
@@ -291,7 +292,6 @@ function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
         onChange={(e) => void choose(e.target.value)}
         className="composer-context-select"
       >
-        <option value="none">Neutral — no context</option>
         {!overview?.currentBusiness && <option value="business">Business setup</option>}
         {overview?.businesses.map((b) => (
           <option key={b.id} value={"business:" + b.id}>
@@ -307,13 +307,21 @@ function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
     </div>
   );
 
+  if (neutralChat) {
+    return (
+      <ChatContextSwitcherContext.Provider value={null}>
+        <BusinessChatPage {...props} neutralChat />
+      </ChatContextSwitcherContext.Provider>
+    );
+  }
+
   return (
     <ChatContextSwitcherContext.Provider value={switcher}>
       {error && <div role="alert" className="workspace-notice error">{error}</div>}
       {selection === "business" ? (
         <BusinessConversation {...props} />
       ) : (
-        <ScopedConversation key={key + selection} companyId={selection.startsWith("company:") ? selection.slice(8) : undefined} />
+        <ScopedConversation key={`${key}:${props.initialConversationId ?? "root"}:${selection}`} companyId={selection.startsWith("company:") ? selection.slice(8) : undefined} />
       )}
     </ChatContextSwitcherContext.Provider>
   );

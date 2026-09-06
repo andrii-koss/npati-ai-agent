@@ -331,6 +331,38 @@ export function buildApp(config: AppConfig = {}) {
     return { ...result, conversationId: conversation.id, researchJobId: researchJob?.id };
   }
 
+  async function runNeutralMessage(
+    auth: AuthContext,
+    message: string,
+    conversationId: string | undefined,
+    attachments: ChatAttachmentInput[] = [],
+    progress?: ResearchProgressListener,
+  ) {
+    const media = await prepareChatAttachments(aiEngine, message, attachments);
+    let conversation = conversationId
+      ? (await workspaceStore.getNeutralConversation(auth, conversationId)).conversation
+      : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
+    const existing = await workspaceStore.getNeutralConversation(auth, conversation.id);
+    if (existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
+      conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
+    }
+    await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
+    const ai = await getAIContext(auth);
+    progress?.({ type: "final_generation_started" });
+    const completion = await aiEngine.chat({
+      model: ai.model,
+      fallbackModel: ai.fallbackModel,
+      messages: [
+        { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
+        ...existing.messages.map((item) => ({ role: item.role, content: item.content })),
+        { role: "user", content: media.prompt },
+      ],
+    });
+    progress?.({ type: "final_generation_completed" });
+    await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", completion.content);
+    return { message: completion.content, suggestedActions: [], conversationId: conversation.id };
+  }
+
   app.register(cors, { origin: config.webOrigin ?? true });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AuthenticationError) {
@@ -542,21 +574,8 @@ export function buildApp(config: AppConfig = {}) {
         if (!prompt && !request.body.attachments?.length) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
-        const media = await prepareChatAttachments(aiEngine, prompt || "", request.body.attachments);
-        const ai = await getAIContext(auth);
-        const completion = await aiEngine.chat({
-          model: ai.model,
-          fallbackModel: ai.fallbackModel,
-          messages: [
-            { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
-            { role: "user", content: media.prompt },
-          ],
-        });
-        return {
-          message: completion.content,
-          suggestedActions: [],
-          activeContext: resolved.context,
-        };
+        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments);
+        return { ...result, activeContext: resolved.context };
       }
 
       // 2. COMPANY CONTEXT ('company')
@@ -739,19 +758,8 @@ export function buildApp(config: AppConfig = {}) {
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
         if (resolved.context.contextType === "none") {
-          progress({ type: "final_generation_started" });
-          const media = await prepareChatAttachments(aiEngine, message, request.body.attachments);
-          const ai = await getAIContext(auth);
-          const completion = await aiEngine.chat({
-            model: ai.model,
-            fallbackModel: ai.fallbackModel,
-            messages: [
-              { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
-              { role: "user", content: media.prompt },
-            ],
-          });
-          progress({ type: "final_generation_completed" });
-          send("result", { message: completion.content, suggestedActions: [], activeContext: resolved.context });
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress);
+          send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(

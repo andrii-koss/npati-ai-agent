@@ -2,8 +2,7 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web ./apps/web
-COPY packages/branding ./packages/branding
-COPY packages/shared ./packages/shared
+COPY packages ./packages
 RUN npm ci
 RUN npm run build --workspace @npati/web
 

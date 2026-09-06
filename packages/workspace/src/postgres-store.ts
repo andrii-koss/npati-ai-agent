@@ -961,6 +961,43 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0]!;
   }
 
+  async listNeutralConversations(context: AuthContext) {
+    await this.ensureIdentity(context);
+    return (await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id IS NULL AND user_id=$2 ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+  }
+
+  async createNeutralConversation(context: AuthContext, title: string) {
+    await this.ensureIdentity(context);
+    const result = await this.pool.query<Conversation>(`INSERT INTO conversations(id,workspace_id,business_id,user_id,title) VALUES ($1,$2,NULL,$3,$4) RETURNING ${conversationColumns}`, [randomUUID(), context.workspaceId, context.userId, title.trim().slice(0, 120) || "New conversation"]);
+    return result.rows[0]!;
+  }
+
+  async getNeutralConversation(context: AuthContext, conversationId: string) {
+    await this.ensureIdentity(context);
+    const result = await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id IS NULL AND user_id=$3`, [conversationId, context.workspaceId, context.userId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available to this user");
+    const messages = (await this.pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
+    return { conversation: result.rows[0]!, messages };
+  }
+
+  async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) {
+    await this.getNeutralConversation(context, conversationId);
+    const result = await this.pool.query<Conversation>(`UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`, [title.trim().slice(0, 120) || "New conversation", conversationId]);
+    return result.rows[0]!;
+  }
+
+  async deleteNeutralConversation(context: AuthContext, conversationId: string) {
+    await this.getNeutralConversation(context, conversationId);
+    return Boolean((await this.pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
+  }
+
+  async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
+    await this.getNeutralConversation(context, conversationId);
+    const result = await this.pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
+    await this.pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
+    return result.rows[0]!;
+  }
+
   private async hydrateOnboarding(context: AuthContext, row: Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">): Promise<BusinessOnboardingSession> {
     const flow = ONBOARDING_FLOWS[row.scenario];
     const legacy = row.currentStep > 0 && !row.completedFields.some((field) => field === "businessSnapshot" || field === "businessGoal");
