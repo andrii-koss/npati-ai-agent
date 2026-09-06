@@ -169,9 +169,11 @@ function Home() {
         )}
       </header>
       <section className="hero">
-        <p className="eyebrow">Your AI Business Agent</p>
-        <h1>What would you like<br />to do?</h1>
-        <p className="hero-copy">Choose a starting point. We’ll use your active business, goals, and confirmed memory to build a practical next step.</p>
+        <div className="hero-header-block">
+          <p className="eyebrow">Your AI Business Agent</p>
+          <h1>What would you like<br />to do?</h1>
+          <p className="hero-copy">Choose a starting point. We’ll use your active business, goals, and confirmed memory to build a practical next step.</p>
+        </div>
 
         <div className="action-grid">
           {actions.map(([title, description], index) => (
