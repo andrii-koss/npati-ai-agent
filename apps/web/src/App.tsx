@@ -180,7 +180,7 @@ function Home() {
             <button key={title} className="action-card" onClick={() => void startChat(title)}>
               <span className="action-number">0{index + 1}</span>
               <span><strong>{title}</strong><small>{description}</small></span>
-              <span className="action-arrow">→</span>
+              <span className="action-arrow"><span className="action-arrow-glyph">→</span></span>
             </button>
           ))}
         </div>
