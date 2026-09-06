@@ -211,7 +211,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
         </div>
         <div><i style={{ width: Math.round((session.currentStep / session.totalFields) * 100) + "%" }} /></div>
       </div>
-      <div className="onboarding-live-chat">
+      <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream">
           {messages.length === 0 && (
             <article className="assistant" aria-label="NPATI Agent message">
