@@ -149,7 +149,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
     }
   }
 
-  if (business) return <BusinessChatPage initialPrompt={initialPrompt} initialConversationId={handoffConversationId || initialConversationId} />;
+  if (business || !session) return <BusinessChatPage initialPrompt={initialPrompt} initialConversationId={handoffConversationId || initialConversationId} />;
 
   if (!session) return (
     <>

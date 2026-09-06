@@ -404,7 +404,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
   const pageStartPendingRef = useRef(false);
   const progressTimerRef = useRef<number | null>(null);
   const nextProgressRevealRef = useRef(0);
-  const suggestions = useMemo(() => ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"], [business?.id]);
+  const suggestions = useMemo(
+    () => business
+      ? ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"]
+      : ["Help me brainstorm business ideas", "How do I research market demand?", "Explain how NPATI Agent works"],
+    [business?.id]
+  );
   async function loadConversations(preferred?: string) {
     if (!business) return [] as Message[];
     const rows = await api<Conversation[]>(`/businesses/${business.id}/conversations`); setConversations(rows);
@@ -522,7 +527,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
     setProgressComplete(false);
     setProgressFailed(false);
   }
-  if (!business) return <><PageIntro eyebrow="Conversation" title="Chat" copy="Your AI Business Agent uses the active business as context." /><EmptyBusiness feature="Conversations" /></>;
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
     const optimisticId = `pending-${Date.now()}`;
@@ -533,11 +537,21 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
     resetProgress();
     setSending(true); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     try {
-      const result = await streamChat<AgentReply>({ message, conversationId: selected ?? undefined, attachments: sentAttachments }, enqueueProgress);
-      setReplyMeta(result); await loadConversations(result.conversationId);
+      const result = await streamChat<AgentReply>({
+        message,
+        conversationId: selected ?? undefined,
+        attachments: sentAttachments,
+        contextType: business ? "business" : "none",
+      }, enqueueProgress);
+      setReplyMeta(result);
+      if (business) {
+        await loadConversations(result.conversationId);
+        navigate(`/c/${result.conversationId}`, { replace: !selected });
+        window.dispatchEvent(new Event("npati:conversations-changed"));
+      } else {
+        setMessages((current) => [...current, { id: `assistant-${Date.now()}`, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
+      }
       setProgressComplete(true);
-      navigate(`/c/${result.conversationId}`, { replace: !selected });
-      window.dispatchEvent(new Event("npati:conversations-changed"));
     } catch (reason) {
       const typed = reason as Error & { code?: string };
       setProgressFailed(true);
@@ -575,7 +589,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
       {notice && <Notice tone={notice.startsWith("Saved") ? "success" : "error"}>{notice}{/provider/i.test(notice) && <Link to="/settings/ai">Open AI Marketplace →</Link>}</Notice>}
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream">
-          {messages.length === 0 && <div className="chat-welcome"><span>N</span><h2>What should we work on?</h2><p>I’ll use the context for {business.name} and won’t invent missing facts.</p><div>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div></div>}
+          {messages.length === 0 && <div className="chat-welcome"><span>N</span><h2>What should we work on?</h2><p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p><div>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div></div>}
           {messages.map((message, index) => <Fragment key={message.id}>
             {progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && message.role === "assistant" && index === messages.length - 1 && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed failed={progressFailed} />}
             <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><PendingMessageAttachments value={message.attachments ?? []} /><ChatMessageContent content={message.content} /></article>
@@ -589,7 +603,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
           {contextSwitcher}
           <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
-          <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder="Ask about your business, goals, audience, or next move…" />
+          <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
           <div><button disabled={sending || (!input.trim() && attachments.length === 0)}>Send →</button></div>
         </form>
       </div>
