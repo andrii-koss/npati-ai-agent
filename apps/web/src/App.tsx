@@ -206,8 +206,8 @@ function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { overview, refresh, switchBusiness } = useWorkspace();
-  const [chatOpen, setChatOpen] = useState(location.pathname === "/chat" || location.pathname.startsWith("/c/"));
-  const [businessOpen, setBusinessOpen] = useState(location.pathname === "/business");
+  const [chatOpen, setChatOpen] = useState(true);
+  const [businessOpen, setBusinessOpen] = useState(true);
   const [conversations, setConversations] = useState<SidebarConversation[]>([]);
   const currentBusiness = overview?.currentBusiness;
 
@@ -305,7 +305,7 @@ function Sidebar() {
         <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
             <button className="sidebar-main-action" onClick={() => void openNewChat()}>+ New Chat</button>
-            <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => !open)}>⌄</button>
+            <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => !open)}></button>
           </div>
           {chatOpen && (
             <div className="sidebar-dropdown">
@@ -320,10 +320,10 @@ function Sidebar() {
             </div>
           )}
         </div>
-        <div className={`sidebar-group ${location.pathname === "/business" ? "active" : ""}`}>
+        <div className={`sidebar-group sidebar-business-group ${location.pathname === "/business" ? "active" : ""}`}>
           <div className="sidebar-group-head">
             <button className="sidebar-main-action" onClick={() => navigate("/business")}>Business</button>
-            <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => !open)}>⌄</button>
+            <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => !open)}></button>
           </div>
           {businessOpen && (
             <div className="sidebar-dropdown">
@@ -339,7 +339,7 @@ function Sidebar() {
             </div>
           )}
         </div>
-        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""} to={href}>{item}</Link>; })}
+        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href}>{item}</Link>; })}
       </nav>
     </aside>
   );
