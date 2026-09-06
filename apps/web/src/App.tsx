@@ -52,6 +52,79 @@ function NpatiAgentLogo() {
   );
 }
 
+function ChatUserMenu() {
+  const location = useLocation();
+  const { overview } = useWorkspace();
+  const { user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const displayName = overview?.user.displayName?.trim() || user?.displayName || "User";
+  const initials = displayName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toUpperCase() || "U";
+
+  useEffect(() => setOpen(false), [location.pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const closeMenu = () => setOpen(false);
+  return (
+    <div className="chat-user-menu" ref={menuRef}>
+      <button
+        type="button"
+        className="chat-user-avatar"
+        aria-label={`Open ${displayName} user menu`}
+        aria-expanded={open}
+        aria-controls="chat-user-popover"
+        onClick={() => setOpen((current) => !current)}
+      >
+        {initials}
+      </button>
+      {open && (
+        <aside className="chat-user-popover" id="chat-user-popover" aria-label="User links">
+          <div className="chat-user-summary">
+            <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">{initials}</span>
+            <span><strong>{displayName}</strong><small>{overview?.workspace.name || "Workspace"}</small></span>
+          </div>
+          <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
+          <nav aria-label="Registered user links">
+            <Link to="/business" onClick={closeMenu}>Business profile <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/goals" onClick={closeMenu}>Goals <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
+            <button
+              type="button"
+              className="chat-user-signout"
+              onClick={() => {
+                closeMenu();
+                void logout();
+              }}
+            >
+              Sign out&rarr;
+            </button>
+          </nav>
+        </aside>
+      )}
+    </div>
+  );
+}
+
 function Home() {
   const navigate = useNavigate();
   const { overview } = useWorkspace();
@@ -80,16 +153,13 @@ function Home() {
     navigate(`/c/${conversation.id}`, { state: { prompt } });
   }
 
-  const displayName = user?.displayName || overview?.user.displayName || "User";
-
   return (
     <main className="home-shell">
       <header className="home-header">
         <Link className="brand" to="/"><NpatiAgentLogo /></Link>
         {isAuthenticated ? (
           <div className="home-auth-nav">
-            <span className="foundation-pill">{displayName}</span>
-            <button className="button-secondary home-auth-btn" onClick={() => void logout()}>Sign out</button>
+            <ChatUserMenu />
           </div>
         ) : (
           <div className="home-auth-nav">
@@ -259,78 +329,7 @@ function Sidebar() {
   );
 }
 
-function ChatUserMenu() {
-  const location = useLocation();
-  const { overview } = useWorkspace();
-  const { logout } = useAuth();
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const displayName = overview?.user.displayName?.trim() || "User";
-  const initials = displayName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0))
-    .join("")
-    .toUpperCase() || "U";
 
-  useEffect(() => setOpen(false), [location.pathname]);
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  const closeMenu = () => setOpen(false);
-  return (
-    <div className="chat-user-menu" ref={menuRef}>
-      <button
-        type="button"
-        className="chat-user-avatar"
-        aria-label={`Open ${displayName} user menu`}
-        aria-expanded={open}
-        aria-controls="chat-user-popover"
-        onClick={() => setOpen((current) => !current)}
-      >
-        {initials}
-      </button>
-      {open && (
-        <aside className="chat-user-popover" id="chat-user-popover" aria-label="User links">
-          <div className="chat-user-summary">
-            <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">{initials}</span>
-            <span><strong>{displayName}</strong><small>{overview?.workspace.name || "Workspace"}</small></span>
-          </div>
-          <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
-          <nav aria-label="Registered user links">
-            <Link to="/business" onClick={closeMenu}>Business profile <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/goals" onClick={closeMenu}>Goals <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
-            <button
-              type="button"
-              className="chat-user-signout"
-              onClick={() => {
-                closeMenu();
-                void logout();
-              }}
-            >
-              Sign out <span aria-hidden="true">&rarr;</span>
-            </button>
-          </nav>
-        </aside>
-      )}
-    </div>
-  );
-}
 
 function Workspace({ children }: { children: ReactNode }) {
   const location = useLocation();
