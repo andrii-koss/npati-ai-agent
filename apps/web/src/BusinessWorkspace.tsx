@@ -175,7 +175,7 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
 }
 
 export function BusinessPage() {
-  const { overview, loading, error, refresh } = useWorkspace();
+  const { overview, loading, error, refresh, switchBusiness } = useWorkspace();
   const [onboarding, setOnboarding] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const current = overview?.currentBusiness;
@@ -221,6 +221,83 @@ export function BusinessPage() {
         <section><span>Products & services</span><strong>Business profile ready</strong><p>A dedicated product catalog is coming in a future milestone.</p></section>
         <section><span>Current goals</span><strong>Turn context into outcomes</strong><p><Link to="/goals">View and manage this business’s goals →</Link></p></section>
       </div>}
+      {!onboarding && ((overview?.businesses && overview.businesses.length > 0) || overview?.onboarding) && (
+        <div style={{ marginTop: 36 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 750, color: "#0f172a", margin: 0 }}>
+              All business ideas ({overview?.businesses?.length ?? 0})
+            </h3>
+            <button
+              type="button"
+              className="button-primary"
+              style={{ fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+              onClick={() => setOnboarding("starting")}
+            >
+              + Add business idea
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+            {overview?.onboarding && (
+              <div
+                onClick={() => setOnboarding(overview.onboarding!.scenario)}
+                style={{
+                  padding: "16px 18px",
+                  background: "#fffbeb",
+                  border: "1px dashed #f59e0b",
+                  borderRadius: 14,
+                  cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <strong style={{ fontSize: 15, color: "#92400e" }}>{overview.onboarding.business.name || "Draft idea"}</strong>
+                  <span style={{ fontSize: 11, fontWeight: 750, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 999 }}>
+                    Setup draft
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "#b45309", lineHeight: 1.4 }}>
+                  Setup in progress · click to resume
+                </p>
+              </div>
+            )}
+            {overview?.businesses?.map((business) => {
+              const isCurrent = business.id === current?.id;
+              return (
+                <div
+                  key={business.id}
+                  onClick={() => void switchBusiness(business.id)}
+                  style={{
+                    padding: "16px 18px",
+                    background: isCurrent ? "#fff1f2" : "#ffffff",
+                    border: isCurrent ? "2px solid #e11d2e" : "1px solid #e2e8f0",
+                    borderRadius: 14,
+                    cursor: "pointer",
+                    boxShadow: isCurrent ? "0 4px 14px rgba(225, 29, 46, 0.08)" : "0 2px 8px rgba(0,0,0,0.03)",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <strong style={{ fontSize: 15, color: "#0f172a" }}>{business.name}</strong>
+                    {isCurrent ? (
+                      <span style={{ fontSize: 11, fontWeight: 750, color: "#e11d2e", background: "#fee2e2", padding: "2px 8px", borderRadius: 999 }}>
+                        Active
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b" }}>
+                        Switch →
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 13, color: "#64748b", lineHeight: 1.4 }}>
+                    {business.industry || business.description || business.businessStage || "Business workspace"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 }

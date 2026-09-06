@@ -233,6 +233,11 @@ function Sidebar() {
     return () => window.removeEventListener("npati:conversations-changed", reload);
   }, [overview?.businesses.map((business) => business.id).join(","), location.search]);
 
+  useEffect(() => {
+    if (location.pathname === "/business") setBusinessOpen(true);
+    if (location.pathname === "/chat" || location.pathname.startsWith("/c/")) setChatOpen(true);
+  }, [location.pathname]);
+
   async function openNewChat() {
     setChatOpen(true);
     if (!currentBusiness) {
@@ -289,6 +294,10 @@ function Sidebar() {
     const response = await authFetch(`/api/businesses/${id}`, { method: "DELETE" });
     if (response.ok) { await refresh(); navigate("/business"); }
   }
+  const chatConversations = conversations.filter(
+    (c) => c.title !== "Business setup" && c.id !== overview?.onboarding?.conversationId
+  );
+
   return (
     <aside className="sidebar">
       <Link className="brand sidebar-brand" to="/"><NpatiAgentLogo /></Link>
@@ -300,9 +309,8 @@ function Sidebar() {
           </div>
           {chatOpen && (
             <div className="sidebar-dropdown">
-              {!currentBusiness && overview?.onboarding && <button className="sidebar-history-link" onClick={() => navigate("/chat")}><span>Business setup</span><small>Draft</small></button>}
-              {overview?.businesses.length !== 0 && conversations.length === 0 && <small className="sidebar-empty">No saved chats yet</small>}
-              {conversations.map((conversation) => (
+              {chatConversations.length === 0 && <small className="sidebar-empty">No saved chats yet</small>}
+              {chatConversations.map((conversation) => (
                 <div className="sidebar-history-row" key={conversation.id}>
                   <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}><span>{conversation.title}</span><small>{conversation.businessName} · {new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
                   <button className="sidebar-icon-action" aria-label={`Rename ${conversation.title}`} onClick={() => void renameConversation(conversation)}>✎</button>
