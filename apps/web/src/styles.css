@@ -69,7 +69,8 @@ a {
 
 .npati-agent-logo {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 8px;
   color: rgb(0, 0, 0);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 24px;
@@ -85,16 +86,19 @@ a {
   transform: scale(1.05);
 }
 
-.npati-agent-logo-dot {
-  display: inline-block;
-  color: #ef4444;
-  animation: npati-logo-bounce 1s infinite;
-  transition: all .3s ease;
+.npati-agent-logo-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--npati-red, #e11d2e);
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.2);
+  flex-shrink: 0;
+  transform: translateY(-1px);
+  animation: npati-pulse-dot 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-.npati-agent-logo-dot:hover {
-  transform: rotate(12deg) scale(1.25);
-  animation-play-state: paused;
+.npati-agent-logo-dot {
+  display: none !important;
 }
 
 @keyframes npati-logo-bounce {

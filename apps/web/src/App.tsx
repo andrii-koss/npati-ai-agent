@@ -47,7 +47,8 @@ function BrandMark() { return <span className="brand-mark" aria-hidden="true">N<
 function NpatiAgentLogo() {
   return (
     <span className="npati-agent-logo" aria-label="Npati">
-      <span>Npati</span><span className="npati-agent-logo-dot" aria-hidden="true">.</span>
+      <span className="npati-agent-logo-pulse" aria-hidden="true" />
+      <span>Npati</span>
     </span>
   );
 }
