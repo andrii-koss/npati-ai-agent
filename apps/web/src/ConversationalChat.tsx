@@ -1,8 +1,8 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BusinessChatPage, useWorkspace } from "./BusinessWorkspace";
+import { BusinessChatPage, ChatContextSwitcherContext, useWorkspace } from "./BusinessWorkspace";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 
@@ -39,6 +39,7 @@ function isResearchRequest(message?: string) {
 
 function BusinessConversation({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
   const { overview, refresh } = useWorkspace();
+  const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const business = overview?.currentBusiness;
   const session = overview?.onboarding;
@@ -181,6 +182,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
           <div className="chat-scroll-spacer" aria-hidden="true" />
         </div>
         <form className="onboarding-live-composer" onSubmit={submit}>
+          {contextSwitcher}
           <AutoResizeChatTextarea aria-label="Chat message" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} disabled={sending || providerConnected === false} placeholder="Describe what you want to work on…" autoFocus />
           <div><button disabled={sending || providerConnected === false || !input.trim()}>Send →</button></div>
         </form>
@@ -241,6 +243,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
         {session.status === "active" && (
           <>
             <form className="onboarding-live-composer" onSubmit={submit}>
+              {contextSwitcher}
               <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder="Type your answer…" autoFocus />
               <div><button disabled={sending || !input.trim()}>Send →</button></div>
             </form>
@@ -279,18 +282,44 @@ function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
     }catch(e){setError(e instanceof Error?e.message:"Could not switch context");}finally{setSwitching(false);}
   }
   const value=selection==="business"&&overview?.currentBusiness ? "business:"+overview.currentBusiness.id : selection;
-  return <>
-    <label className="business-switcher"><span>Active context</span><select aria-label="Active context" value={value} disabled={switching} onChange={e=>void choose(e.target.value)}>
-      <option value="none">Neutral — no context</option>
-      {!overview?.currentBusiness&&<option value="business">Business setup</option>}
-      {overview?.businesses.map(b=><option key={b.id} value={"business:"+b.id}>Business: {b.name}</option>)}
-      {companies.map(c=><option key={c.id} value={"company:"+c.id}>Company: {c.name}</option>)}
-    </select></label>
-    {error&&<div role="alert" className="workspace-notice error">{error}</div>}
-    {selection==="business" ? <BusinessConversation {...props}/> : <ScopedConversation key={key+selection} companyId={selection.startsWith("company:")?selection.slice(8):undefined}/>} 
-  </>;
+  const switcher = (
+    <div className="composer-context-switcher" title="Active context">
+      <select
+        aria-label="Active context"
+        value={value}
+        disabled={switching}
+        onChange={(e) => void choose(e.target.value)}
+        className="composer-context-select"
+      >
+        <option value="none">Neutral — no context</option>
+        {!overview?.currentBusiness && <option value="business">Business setup</option>}
+        {overview?.businesses.map((b) => (
+          <option key={b.id} value={"business:" + b.id}>
+            {b.name}
+          </option>
+        ))}
+        {companies.map((c) => (
+          <option key={c.id} value={"company:" + c.id}>
+            Company: {c.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  return (
+    <ChatContextSwitcherContext.Provider value={switcher}>
+      {error && <div role="alert" className="workspace-notice error">{error}</div>}
+      {selection === "business" ? (
+        <BusinessConversation {...props} />
+      ) : (
+        <ScopedConversation key={key + selection} companyId={selection.startsWith("company:") ? selection.slice(8) : undefined} />
+      )}
+    </ChatContextSwitcherContext.Provider>
+  );
 }
 function ScopedConversation({companyId}:{companyId?:string}) {
+  const contextSwitcher = useContext(ChatContextSwitcherContext);
   const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[sending,setSending]=useState(false),[error,setError]=useState("");
   async function submit(event:FormEvent) {
     event.preventDefault();if(!input.trim()||sending)return;
@@ -303,6 +332,10 @@ function ScopedConversation({companyId}:{companyId?:string}) {
   return <div className="onboarding-live-chat standard-live-chat">
     {error&&<div role="alert" className="workspace-notice error">{error}</div>}
     <div className="message-stream">{messages.map(m=><article key={m.id} className={m.role} aria-label={m.role==="user"?"Your message":"NPATI Agent message"}><ChatMessageContent content={m.content}/></article>)}{sending&&<p role="status">Working…</p>}</div>
-    <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}><AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/><button disabled={sending||!input.trim()}>Send</button></form>
+    <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}>
+      {contextSwitcher}
+      <AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/>
+      <div><button disabled={sending||!input.trim()}>Send →</button></div>
+    </form>
   </div>;
 }
