@@ -185,7 +185,12 @@ function Home() {
           ))}
         </div>
       </section>
-      <footer className="home-footer">Independent NPATI interface · OmniRoute runs as the internal AI engine</footer>
+      <footer className="home-footer">
+        Independent NPATI interface · Developed by the agent creators at{" "}
+        <a href="https://www.npati.com/" target="_blank" rel="noreferrer">
+          npati.com
+        </a>
+      </footer>
       <AuthModal
         isOpen={authModal.open}
         initialMode={authModal.mode}

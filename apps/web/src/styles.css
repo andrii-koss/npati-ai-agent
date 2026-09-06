@@ -317,6 +317,18 @@ a {
   border-top: 1px solid var(--npati-gray-100);
 }
 
+.home-footer a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 150ms ease;
+}
+
+.home-footer a:hover {
+  color: var(--npati-red);
+}
+
 .workspace {
   min-height: 100vh;
   display: grid;
