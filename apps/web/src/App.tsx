@@ -241,7 +241,7 @@ function Sidebar() {
   async function openNewChat() {
     setChatOpen(true);
     if (!currentBusiness) {
-      navigate("/chat");
+      navigate("/chat", { state: { newChat: Date.now() } });
       return;
     }
     const response = await authFetch(`/api/businesses/${currentBusiness.id}/conversations`, {
@@ -300,7 +300,7 @@ function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <Link className="brand sidebar-brand" to="/"><NpatiAgentLogo /></Link>
+      <Link className="brand sidebar-brand" to="/chat"><NpatiAgentLogo /></Link>
       <nav>
         <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
@@ -364,7 +364,8 @@ function Workspace({ children }: { children: ReactNode }) {
 
 function ChatRoute() {
   const location = useLocation();
-  return <Workspace><ConversationalChat initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} /></Workspace>;
+  const newChatKey = (location.state as { newChat?: number } | null)?.newChat;
+  return <Workspace><ConversationalChat key={newChatKey ? `chat-${newChatKey}` : "chat"} initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} /></Workspace>;
 }
 
 function LegacyChatRoute() {
