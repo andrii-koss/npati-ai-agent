@@ -8,8 +8,7 @@ apps/web/.vite/
 data/
 
 # Generated runtime directories & test evidence
-artifacts/*
-!artifacts/.gitkeep
+artifacts/
 test-results/
 playwright-report/
 screenshots/
