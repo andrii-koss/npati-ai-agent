@@ -116,7 +116,7 @@ function ChatUserMenu() {
                 void logout();
               }}
             >
-              Sign out&rarr;
+              Sign out <span aria-hidden="true">&rarr;</span>
             </button>
           </nav>
         </aside>

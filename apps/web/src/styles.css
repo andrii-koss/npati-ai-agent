@@ -912,7 +912,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .chat-user-signout {
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
   width: 100%;
   border: none;
   background: none;
