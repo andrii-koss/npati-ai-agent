@@ -21,6 +21,7 @@ export interface AuthState {
 
 const STORAGE_TOKEN_KEY = "npati_agent_access_token";
 const STORAGE_REFRESH_KEY = "npati_agent_refresh_token";
+const STORAGE_USER_KEY = "npati_agent_user";
 
 export function getStoredAuthToken(): string | null {
   try {
@@ -62,12 +63,33 @@ export function setStoredRefreshToken(token: string | null) {
   }
 }
 
+export function getStoredAuthUser(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAuthUser(user: AuthUser | null) {
+  try {
+    if (user) {
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORAGE_USER_KEY);
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(getStoredAuthToken());
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<AuthUser | null>(getStoredAuthUser());
+  const [isLoading, setIsLoading] = useState<boolean>(!getStoredAuthToken());
   const [error, setError] = useState<string | null>(null);
 
   const logout = useCallback(async () => {
@@ -83,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setStoredAuthToken(null);
       setStoredRefreshToken(null);
+      setStoredAuthUser(null);
       setToken(null);
       setUser(null);
       setError(null);
@@ -95,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!currentToken) {
       setUser(null);
       setToken(null);
+      setStoredAuthUser(null);
       setIsLoading(false);
       return;
     }
@@ -109,7 +133,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const payload = await response.json();
         if (payload.success && payload.data?.user) {
-          setUser(payload.data.user);
+          const verifiedUser: AuthUser = {
+            id: payload.data.user.id || "dev-user",
+            displayName: payload.data.user.displayName || "User",
+            email: payload.data.user.email || getStoredAuthUser()?.email || "webuser1@example.com",
+            username: payload.data.user.username || "webuser1",
+            role: payload.data.user.role || "user",
+          };
+          setUser(verifiedUser);
+          setStoredAuthUser(verifiedUser);
           setToken(currentToken);
         } else {
           await logout();
@@ -125,19 +157,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           if (refreshRes.ok) {
             const refreshData = await refreshRes.json();
-            const newAccess = refreshData.data?.tokens?.accessToken;
+            const newAccess = refreshData.data?.tokens?.accessToken || refreshData.tokens?.accessToken;
             if (newAccess) {
               setStoredAuthToken(newAccess);
               setToken(newAccess);
-              if (refreshData.data?.tokens?.refreshToken) {
-                setStoredRefreshToken(refreshData.data.tokens.refreshToken);
+              if (refreshData.data?.tokens?.refreshToken || refreshData.tokens?.refreshToken) {
+                setStoredRefreshToken(refreshData.data?.tokens?.refreshToken || refreshData.tokens?.refreshToken);
               }
               const meRes = await fetch("/api/auth/me", {
                 headers: { authorization: `Bearer ${newAccess}` },
               });
               if (meRes.ok) {
                 const meData = await meRes.json();
-                setUser(meData.data?.user || null);
+                const refreshedUser: AuthUser = {
+                  id: meData.data?.user?.id || "dev-user",
+                  displayName: meData.data?.user?.displayName || "User",
+                  email: meData.data?.user?.email || getStoredAuthUser()?.email || "webuser1@example.com",
+                  username: meData.data?.user?.username || "webuser1",
+                  role: meData.data?.user?.role || "user",
+                };
+                setUser(refreshedUser);
+                setStoredAuthUser(refreshedUser);
                 setIsLoading(false);
                 return;
               }
@@ -146,10 +186,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         await logout();
       } else {
-        await logout();
+        // Server response other than 401: preserve session
       }
     } catch {
-      await logout();
+      // Network failure or temporary glitch: keep persistent session
     } finally {
       setIsLoading(false);
     }
@@ -160,7 +200,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [checkAuth]);
 
   useEffect(() => {
-    const handleUnauthorized = () => {
+    const handleUnauthorized = async () => {
+      const refreshToken = getStoredRefreshToken();
+      if (refreshToken) {
+        try {
+          const refreshRes = await fetch("/api/auth/refresh", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ refreshToken }),
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            const newAccess = refreshData.data?.tokens?.accessToken || refreshData.tokens?.accessToken;
+            if (newAccess) {
+              setStoredAuthToken(newAccess);
+              setToken(newAccess);
+              return;
+            }
+          }
+        } catch {
+          // ignore refresh error
+        }
+      }
       void logout();
     };
     window.addEventListener("npati:unauthorized", handleUnauthorized);
@@ -195,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (tokens.refreshToken) {
         setStoredRefreshToken(tokens.refreshToken);
       }
+      setStoredAuthUser(authedUser);
       setToken(tokens.accessToken);
       setUser(authedUser);
       window.dispatchEvent(new Event("npati:auth-changed"));

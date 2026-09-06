@@ -74,6 +74,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .chat-workspace-content .onboarding-progress + .onboarding-live-chat { height: calc(100vh - 86px); min-height: 0; }
 .chat-workspace-content .onboarding-live-chat .message-stream { max-height: none; min-height: 0; scroll-behavior: smooth; }
 .chat-user-menu { position: absolute; z-index: 60; top: 29px; right: calc(clamp(12px, 2vw, 28px) + 19px); }
+.home-auth-nav { display: flex; align-items: center; gap: 12px; position: relative; }
+.home-auth-nav .chat-user-menu { position: relative; top: auto; right: auto; z-index: 60; }
+.home-auth-nav .chat-user-popover { position: absolute; top: 56px; right: 0; z-index: 100; }
 .chat-user-avatar { width: 46px; height: 46px; padding: 0; display: grid; place-items: center; color: white; background: var(--npati-red); border: 2px solid white; border-radius: 50%; box-shadow: 0 5px 16px rgb(17 17 17 / 18%); cursor: pointer; font: 800 16px/1 Inter, "Segoe UI", sans-serif; transition: transform 140ms ease, box-shadow 140ms ease; }
 .chat-user-avatar:hover { transform: translateY(-1px); box-shadow: 0 7px 20px rgb(17 17 17 / 23%); }
 .chat-user-avatar:focus-visible { outline: 3px solid rgb(215 39 53 / 28%); outline-offset: 3px; }
@@ -908,19 +911,22 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .chat-user-signout {
   display: flex;
+  align-items: center;
+  gap: 2px;
   width: 100%;
   border: none;
   background: none;
-  color: #ef4444;
-  font-weight: 600;
-  font-size: 12px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  color: #e11d48;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 9px;
+  border-radius: 10px;
   cursor: pointer;
   text-align: left;
+  transition: background 140ms ease;
 }
 .chat-user-signout:hover {
-  background: #fef2f2;
+  background: #fff3f4;
 }
 
 /* Capability Inspector */

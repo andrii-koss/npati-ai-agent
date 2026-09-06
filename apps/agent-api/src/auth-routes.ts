@@ -146,8 +146,8 @@ export function registerAuthRoutes(
         id: "dev-user",
         email: normalizedEmail,
         username: "webuser1",
-        displayName: "Web User 1",
-        name: "Web User 1",
+        displayName: "User",
+        name: "User",
         role: "user",
       };
       const authContext = {
