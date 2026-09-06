@@ -96,6 +96,8 @@ export function useWorkspace() {
   return value;
 }
 
+export const ChatContextSwitcherContext = createContext<ReactNode>(null);
+
 export function BusinessSwitcher() {
   const { overview, loading, switchBusiness } = useWorkspace();
   if (loading) return <span className="business-switcher muted">Loading workspace…</span>;
@@ -304,6 +306,7 @@ const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
   const { overview } = useWorkspace(); const business = overview?.currentBusiness;
+  const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
@@ -507,6 +510,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
+          {contextSwitcher}
           <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder="Ask about your business, goals, audience, or next move…" />
           <div><button disabled={sending || (!input.trim() && attachments.length === 0)}>Send →</button></div>

@@ -3169,7 +3169,7 @@ a {
   width: 100%;
   min-height: 56px;
   max-height: min(52vh, 520px);
-  padding: 0 5px 0 0;
+  padding: 0 160px 0 0;
   overflow-y: hidden;
   resize: none;
   color: var(--npati-black);
@@ -3180,6 +3180,60 @@ a {
   line-height: 1.5;
   scrollbar-width: thin;
   scrollbar-color: #b8b8b8 transparent;
+}
+
+.composer-context-switcher,
+.onboarding-live-composer > .composer-context-switcher,
+.onboarding-live-composer > div.composer-context-switcher {
+  position: absolute;
+  top: 16px;
+  bottom: auto;
+  right: 24px;
+  z-index: 4;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-context-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 2px 18px 2px 4px;
+  margin: 0;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 750;
+  color: #0f172a;
+  cursor: pointer;
+  line-height: 1.3;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: 9px 5px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.composer-context-select:hover {
+  color: var(--npati-red, #e11d2e);
+  background-color: rgba(225, 29, 46, 0.04);
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23e11d2e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.composer-context-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(225, 29, 46, 0.2);
+}
+
+.composer-context-select option {
+  font-weight: 600;
+  color: #0f172a;
+  background: #ffffff;
+  padding: 6px 10px;
 }
 
 .onboarding-live-composer textarea::-webkit-scrollbar {
@@ -4208,6 +4262,17 @@ a {
 
   .onboarding-live-composer textarea {
     min-height: 50px;
+    padding-right: 130px;
+  }
+
+  .composer-context-switcher {
+    top: 11px;
+    right: 14px;
+  }
+
+  .composer-context-select {
+    font-size: 12.5px;
+    padding-right: 14px;
   }
 
   .onboarding-live-actions {
