@@ -176,8 +176,23 @@ a {
   height: 6px;
   border-radius: 50%;
   background: var(--npati-red);
-  box-shadow: 0 0 0 3px rgb(225 29 46 / 18%);
   flex-shrink: 0;
+  animation: npati-pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes npati-pulse-dot {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgb(225 29 46 / 70%);
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 7px rgb(225 29 46 / 0%);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgb(225 29 46 / 0%);
+  }
 }
 
 .hero h1 {
@@ -187,9 +202,9 @@ a {
   margin: 0 auto;
   padding: 14px 28px;
   background: white;
-  border: 1px solid #f2b6bd;
+  border: 1.5px solid var(--npati-red);
   border-radius: var(--npati-radius);
-  box-shadow: var(--npati-shadow);
+  box-shadow: 0 22px 48px rgb(17 17 17 / 13%), 0 6px 16px rgb(225 29 46 / 10%);
   font-family: Inter, "Segoe UI", sans-serif;
   font-size: clamp(30px, 3.6vw, 42px);
   line-height: 1.18;
