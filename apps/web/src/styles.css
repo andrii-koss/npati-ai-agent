@@ -788,6 +788,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .auth-modal-header {
   margin-bottom: 20px;
+  text-align: center;
 }
 .auth-modal-brand {
   display: inline-flex;
@@ -805,12 +806,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
   font-weight: 700;
   color: #0f172a;
   margin: 0 0 6px;
+  text-align: center;
 }
 .auth-modal-header p {
   font-size: 13px;
   color: #64748b;
   margin: 0;
   line-height: 1.4;
+  text-align: center;
 }
 .auth-tab-group {
   display: grid;

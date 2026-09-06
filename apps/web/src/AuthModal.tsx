@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 
 export interface AuthModalProps {
@@ -14,6 +15,7 @@ export function AuthModal({
   onClose,
   onSuccess,
 }: AuthModalProps) {
+  const navigate = useNavigate();
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [email, setEmail] = useState("");
@@ -28,6 +30,8 @@ export function AuthModal({
       setMode(initialMode);
       setError(null);
       setPassword("");
+      setUsername("");
+      setDisplayName("");
     }
   }, [isOpen, initialMode]);
 
@@ -49,7 +53,11 @@ export function AuthModal({
           displayName: displayName.trim() || undefined,
         });
       }
-      onSuccess?.();
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        navigate("/chat");
+      }
       onClose();
     } catch (err: any) {
       setError(err.message || "Authentication failed. Please check your credentials.");
@@ -70,10 +78,6 @@ export function AuthModal({
         </button>
 
         <div className="auth-modal-header">
-          <div className="auth-modal-brand">
-            <span className="brand-mark" aria-hidden="true">N</span>
-            <span>NPATI Account</span>
-          </div>
           <h2>{mode === "login" ? "Sign in to NPATI" : "Create NPATI Account"}</h2>
           <p>
             {mode === "login"

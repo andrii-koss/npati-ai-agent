@@ -118,6 +118,7 @@ function Home() {
         isOpen={authModal.open}
         initialMode={authModal.mode}
         onClose={() => setAuthModal((prev) => ({ ...prev, open: false }))}
+        onSuccess={() => navigate("/chat")}
       />
     </main>
   );
