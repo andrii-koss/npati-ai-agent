@@ -191,6 +191,22 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     try { await store.deleteMemory(await auth.authenticate(request), request.params.businessId, request.params.memoryId); return reply.code(204).send(); } catch (error) { return errorReply(reply, error); }
   });
 
+  app.get("/conversations", async (request, reply) => {
+    try { return await store.listNeutralConversations(await auth.authenticate(request)); } catch (error) { return errorReply(reply, error); }
+  });
+  app.post<{ Body: { title?: string } }>("/conversations", async (request, reply) => {
+    try { return reply.code(201).send(await store.createNeutralConversation(await auth.authenticate(request), request.body?.title ?? "New conversation")); } catch (error) { return errorReply(reply, error); }
+  });
+  app.get<{ Params: { conversationId: string } }>("/conversations/:conversationId", async (request, reply) => {
+    try { return await store.getNeutralConversation(await auth.authenticate(request), request.params.conversationId); } catch (error) { return errorReply(reply, error); }
+  });
+  app.patch<{ Params: { conversationId: string }; Body: { title?: string } }>("/conversations/:conversationId", async (request, reply) => {
+    try { return await store.updateNeutralConversation(await auth.authenticate(request), request.params.conversationId, request.body.title ?? "New conversation"); } catch (error) { return errorReply(reply, error); }
+  });
+  app.delete<{ Params: { conversationId: string } }>("/conversations/:conversationId", async (request, reply) => {
+    try { await store.deleteNeutralConversation(await auth.authenticate(request), request.params.conversationId); return reply.code(204).send(); } catch (error) { return errorReply(reply, error); }
+  });
+
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/conversations", async (request, reply) => {
     try { return await store.listConversations(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }
   });

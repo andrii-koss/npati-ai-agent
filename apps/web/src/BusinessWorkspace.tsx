@@ -32,7 +32,6 @@ type MemoryItem = { id: string; type: string; title: string; content: string; so
 type Skill = { id: string; name: string; description: string; capabilities: string[] };
 type Conversation = { id: string; title: string; updatedAt: string };
 type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[] };
-
 function messageHasImage(message: Message) {
   return message.attachments?.some((attachment) => attachment.kind === "image")
     || message.content.includes("[[npati-attachment:image:");
@@ -381,8 +380,8 @@ const businessThinkingSteps = [
 
 const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
-export function BusinessChatPage({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
-  const { overview } = useWorkspace(); const business = overview?.currentBusiness;
+export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean }) {
+  const { overview } = useWorkspace(); const business = neutralChat ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
@@ -411,11 +410,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
     [business?.id]
   );
   async function loadConversations(preferred?: string) {
-    if (!business) return [] as Message[];
-    const rows = await api<Conversation[]>(`/businesses/${business.id}/conversations`); setConversations(rows);
+    const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
+    const rows = await api<Conversation[]>(base); setConversations(rows);
     const next = preferred ?? selected ?? rows[0]?.id ?? null; setSelected(next);
     if (next) {
-      const loaded = (await api<{ messages: Message[] }>(`/businesses/${business.id}/conversations/${next}`)).messages;
+      const loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
       setMessages(loaded);
       return loaded;
     }
@@ -533,7 +532,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
     const sentAttachments = attachments;
     const optimisticContent = message;
     setActiveTurn(optimisticContent);
-    setMessages((current) => [...current, { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments }]);
+    const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
+    setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
     setSending(true); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     try {
@@ -544,13 +544,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
         contextType: business ? "business" : "none",
       }, enqueueProgress);
       setReplyMeta(result);
-      if (business) {
-        await loadConversations(result.conversationId);
-        navigate(`/c/${result.conversationId}`, { replace: !selected });
-        window.dispatchEvent(new Event("npati:conversations-changed"));
-      } else {
-        setMessages((current) => [...current, { id: `assistant-${Date.now()}`, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
-      }
+      await loadConversations(result.conversationId);
+      navigate(`/c/${result.conversationId}`, { replace: !selected, state: business ? { businessId: business.id } : { neutralChat: true } });
+      window.dispatchEvent(new Event("npati:conversations-changed"));
       setProgressComplete(true);
     } catch (reason) {
       const typed = reason as Error & { code?: string };

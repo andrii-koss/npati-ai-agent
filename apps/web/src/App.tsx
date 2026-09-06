@@ -40,7 +40,18 @@ const actions = [
 ] as const;
 
 const navigation = ["Settings"];
-type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string; businessName: string };
+type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
+const legacyChatStorageResetMarker = "npati_legacy_chat_storage_removed_2026_09_06_v1";
+function clearLegacyLocalChatsOnce() {
+  try {
+    if (localStorage.getItem(legacyChatStorageResetMarker) === "done") return;
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key === "npati_saved_chats" || key === "npati_free_chats" || key?.startsWith("npati_chat_messages:")) localStorage.removeItem(key);
+    }
+    localStorage.setItem(legacyChatStorageResetMarker, "done");
+  } catch { /* storage can be unavailable in restricted browser contexts */ }
+}
 
 function BrandMark() { return <span className="brand-mark" aria-hidden="true">N</span>; }
 
@@ -213,24 +224,36 @@ function Sidebar() {
 
   async function loadConversations() {
     const businesses = overview?.businesses ?? [];
-    if (businesses.length === 0) { setConversations([]); return; }
     try {
-      const rows = await Promise.all(businesses.map(async (business) => {
+      const neutralRequest = authFetch("/api/conversations");
+      const businessRequests = businesses.map(async (business) => {
         const response = await authFetch(`/api/businesses/${business.id}/conversations`);
-        if (!response.ok) return [];
+        if (!response.ok) return [] as SidebarConversation[];
         return (await response.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
           .map((conversation) => ({ ...conversation, businessId: business.id, businessName: business.name }));
-      }));
-      setConversations(rows.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+      });
+      const [neutralResponse, ...businessRows] = await Promise.all([neutralRequest, ...businessRequests]);
+      const neutralRows = neutralResponse.ok
+        ? (await neutralResponse.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
+            .map((conversation) => ({ ...conversation, businessId: null, businessName: "" }))
+        : [];
+      setConversations([...neutralRows, ...businessRows.flat()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
     } catch {
       setConversations([]);
     }
   }
   useEffect(() => {
+    clearLegacyLocalChatsOnce();
     void loadConversations();
-    const reload = () => void loadConversations();
+    const reload = () => {
+      void loadConversations();
+    };
     window.addEventListener("npati:conversations-changed", reload);
-    return () => window.removeEventListener("npati:conversations-changed", reload);
+    window.addEventListener("npati:saved-chats-changed", reload);
+    return () => {
+      window.removeEventListener("npati:conversations-changed", reload);
+      window.removeEventListener("npati:saved-chats-changed", reload);
+    };
   }, [overview?.businesses.map((business) => business.id).join(","), location.search]);
 
   useEffect(() => {
@@ -240,8 +263,14 @@ function Sidebar() {
 
   async function openNewChat() {
     setChatOpen(true);
-    if (!currentBusiness) {
-      navigate("/chat", { state: { newChat: Date.now() } });
+    if (!currentBusiness || overview?.onboarding) {
+      const response = await authFetch("/api/conversations", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New conversation" }),
+      });
+      if (!response.ok) return;
+      const conversation = await response.json() as { id: string };
+      window.dispatchEvent(new Event("npati:conversations-changed"));
+      navigate(`/c/${conversation.id}`, { state: { neutralChat: true } });
       return;
     }
     const response = await authFetch(`/api/businesses/${currentBusiness.id}/conversations`, {
@@ -250,27 +279,33 @@ function Sidebar() {
     if (!response.ok) return;
     const conversation = await response.json() as { id: string };
     window.dispatchEvent(new Event("npati:conversations-changed"));
-    navigate(`/c/${conversation.id}`);
+    navigate(`/c/${conversation.id}`, { state: { businessId: currentBusiness.id } });
   }
   async function openBusiness(id: string) {
     await switchBusiness(id);
     navigate("/business");
   }
   async function openConversation(conversation: SidebarConversation) {
-    if (conversation.businessId !== currentBusiness?.id) await switchBusiness(conversation.businessId);
-    navigate(`/c/${conversation.id}`);
+    if (conversation.businessId && conversation.businessId !== currentBusiness?.id) await switchBusiness(conversation.businessId);
+    navigate(`/c/${conversation.id}`, { state: conversation.businessId ? { businessId: conversation.businessId } : { neutralChat: true } });
   }
   async function renameConversation(conversation: SidebarConversation) {
     const title = window.prompt("Rename chat", conversation.title)?.trim();
     if (!title || title === conversation.title) return;
-    const response = await authFetch(`/api/businesses/${conversation.businessId}/conversations/${conversation.id}`, {
+    const endpoint = conversation.businessId
+      ? `/api/businesses/${conversation.businessId}/conversations/${conversation.id}`
+      : `/api/conversations/${conversation.id}`;
+    const response = await authFetch(endpoint, {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
     });
     if (response.ok) await loadConversations();
   }
   async function deleteConversation(conversation: SidebarConversation) {
     if (!window.confirm(`Delete chat “${conversation.title}”? This cannot be undone.`)) return;
-    const response = await authFetch(`/api/businesses/${conversation.businessId}/conversations/${conversation.id}`, { method: "DELETE" });
+    const endpoint = conversation.businessId
+      ? `/api/businesses/${conversation.businessId}/conversations/${conversation.id}`
+      : `/api/conversations/${conversation.id}`;
+    const response = await authFetch(endpoint, { method: "DELETE" });
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       window.alert(payload?.error?.message ?? "Could not delete this chat.");
@@ -284,7 +319,7 @@ function Sidebar() {
       if (!next) {
         navigate("/chat", { replace: true });
       } else {
-        if (next.businessId !== currentBusiness?.id) await switchBusiness(next.businessId);
+        if (next.businessId && next.businessId !== currentBusiness?.id) await switchBusiness(next.businessId);
         navigate(`/c/${next.id}`, { replace: true });
       }
     }
@@ -297,6 +332,7 @@ function Sidebar() {
   const chatConversations = conversations.filter(
     (c) => c.title !== "Business setup" && c.id !== overview?.onboarding?.conversationId
   );
+  const hasSavedChats = chatConversations.length > 0;
 
   return (
     <aside className="sidebar">
@@ -309,10 +345,10 @@ function Sidebar() {
           </div>
           {chatOpen && (
             <div className="sidebar-dropdown">
-              {chatConversations.length === 0 && <small className="sidebar-empty">No saved chats yet</small>}
+              {!hasSavedChats && <small className="sidebar-empty">No saved chats yet</small>}
               {chatConversations.map((conversation) => (
                 <div className="sidebar-history-row" key={conversation.id}>
-                  <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}><span>{conversation.title}</span><small>{conversation.businessName} · {new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
+                  <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}><span>{conversation.title}</span><small>{conversation.businessName ? `${conversation.businessName} · ` : ""}{new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
                   <button className="sidebar-icon-action" aria-label={`Rename ${conversation.title}`} onClick={() => void renameConversation(conversation)}>✎</button>
                   <button className="sidebar-icon-action danger" aria-label={`Delete ${conversation.title}`} onClick={() => void deleteConversation(conversation)}>×</button>
                 </div>
@@ -379,22 +415,36 @@ function CanonicalChatRoute() {
   const location = useLocation();
   const { overview, loading, switchBusiness } = useWorkspace();
   const [resolved, setResolved] = useState(false);
+  const [neutralChat, setNeutralChat] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const routeState = location.state as { businessId?: string; neutralChat?: boolean } | null;
 
   useEffect(() => {
     if (loading || !overview || !conversationId) return;
     let cancelled = false;
     async function resolveConversation() {
       setResolved(false);
+      setNeutralChat(false);
       setNotFound(false);
+
+      const neutralResponse = await authFetch(`/api/conversations/${conversationId}`);
+      if (neutralResponse.ok) {
+        if (!cancelled) {
+          setNeutralChat(true);
+          setResolved(true);
+        }
+        return;
+      }
+
       if (overview?.onboarding?.conversationId === conversationId) {
         if (!cancelled) setResolved(true);
         return;
       }
-      for (const business of overview?.businesses ?? []) {
-        const response = await authFetch(`/api/businesses/${business.id}/conversations/${conversationId}`);
+      const businessIds = [...new Set([routeState?.businessId, ...(overview?.businesses ?? []).map((business) => business.id)].filter((id): id is string => Boolean(id)))];
+      for (const businessId of businessIds) {
+        const response = await authFetch(`/api/businesses/${businessId}/conversations/${conversationId}`);
         if (!response.ok) continue;
-        if (business.id !== overview?.currentBusiness?.id) await switchBusiness(business.id);
+        if (businessId !== overview?.currentBusiness?.id) await switchBusiness(businessId);
         if (!cancelled) setResolved(true);
         return;
       }
@@ -402,13 +452,12 @@ function CanonicalChatRoute() {
     }
     void resolveConversation();
     return () => { cancelled = true; };
-  }, [conversationId, loading, overview?.currentBusiness?.id, overview?.onboarding?.conversationId, overview?.businesses.map((business) => business.id).join(",")]);
+  }, [conversationId, loading, routeState?.businessId, routeState?.neutralChat, overview?.currentBusiness?.id, overview?.onboarding?.conversationId, overview?.businesses.map((business) => business.id).join(",")]);
 
   if (notFound) return <Workspace><div className="workspace-notice error">This chat does not exist or is not available to your user.</div></Workspace>;
   if (!resolved) return <Workspace><div className="workspace-notice">Opening chat…</div></Workspace>;
-  return <Workspace><ConversationalChat initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} initialConversationId={conversationId} /></Workspace>;
+  return <Workspace><ConversationalChat initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} initialConversationId={conversationId} neutralChat={neutralChat} /></Workspace>;
 }
-
 import { AutomationsPage } from "./AutomationsPage";
 import { ActivityPage } from "./ActivityPage";
 import { CapabilityInspectorPage } from "./CapabilityInspectorPage";
