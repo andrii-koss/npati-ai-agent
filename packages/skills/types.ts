@@ -15,6 +15,12 @@ export interface AgentSkill {
   version: string;
   capabilities: string[];
   inputSchema: Record<string, unknown>;
+  purpose?: string;
+  triggers?: Array<string | RegExp>;
+  requiredTools?: string[];
+  optionalTools?: string[];
+  forbiddenTools?: string[];
+  examples?: Array<{ input: string; expectedTools: string[] }>;
   canHandle(context: SkillContext): boolean;
   run(context: SkillContext): Promise<SkillResult>;
 }

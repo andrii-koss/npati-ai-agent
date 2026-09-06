@@ -13,6 +13,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
+    "audit:capabilities": "node scripts/verify-capability-matrix.mjs",
+    "benchmark:scale": "node scripts/scale-benchmark.mjs",
+    "cert:scale": "node scripts/run-scale-certification.mjs",
+    "gate:upgrade": "node scripts/upgrade-gate.mjs",
+    "gate:agent": "tsx scripts/execute-agent-mediated-gate.mjs",
+    "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
     "docker:config": "docker compose config --quiet"
   },
   "engines": { "node": ">=22.22.2 <23 || >=24.0.0 <27" },

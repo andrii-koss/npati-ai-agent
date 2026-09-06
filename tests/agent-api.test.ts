@@ -1,13 +1,162 @@
 import { buildApp } from "../apps/agent-api/src/app";
 import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
-import { InMemoryWorkspaceStore } from "@npati/workspace";
+import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
+import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { WebResearchService } from "@npati/web-research";
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const apps: Array<ReturnType<typeof buildApp>> = [];
-afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
+const tempDirectories: string[] = [];
+afterEach(async () => {
+  await Promise.all(apps.splice(0).map((app) => app.close()));
+  await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 describe("Agent API", () => {
+  it("exposes OmniRoute resilience read-only with tenant permission enforcement", async () => {
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read"] };
+    const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
+    const aiEngine = {
+      chat: async () => ({ content: "ok" }), stream: async function* () { yield "ok"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"],
+      healthCheck: async () => ({ status: "ok" as const }),
+      resilienceStatus: async () => ({ source: "omniroute" as const, configuration: { waitForCooldown: { enabled: true, maxRetries: 2 } },
+        runtime: { status: "healthy", providerBreakers: [], lockouts: [], adaptiveAdmission: {}, chatAdmission: {} } }),
+    } satisfies AIEngine;
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider, marketplace, aiEngine });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/ai/resilience" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ source: "omniroute", runtime: { status: "healthy" } });
+    active = { ...active, permissions: [] };
+    expect((await app.inject({ method: "GET", url: "/ai/resilience" })).statusCode).toBe(403);
+  });
+
+  it("isolates AI routing preferences by authenticated tenant and enforces write permission", async () => {
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "workspace:write"] };
+    const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider, marketplace });
+    apps.push(app);
+
+    const changed = await app.inject({ method: "PUT", url: "/ai/routing", payload: { mode: "automatic", preferFree: false } });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({ automaticModel: "auto", preferFree: false });
+
+    active = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read"] };
+    const isolated = await app.inject({ method: "GET", url: "/ai/routing" });
+    expect(isolated.json()).toMatchObject({ automaticModel: "auto/chat:free", preferFree: true });
+    const denied = await app.inject({ method: "PUT", url: "/ai/routing", payload: { mode: "automatic", preferFree: false } });
+    expect(denied.statusCode).toBe(403);
+  });
+  it("creates companies idempotently, paginates them, and enforces tenant permissions", async () => {
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] };
+    const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider, marketplace });
+    apps.push(app);
+
+    const request = { method: "POST" as const, url: "/companies", headers: { "idempotency-key": "company-api-request-001" }, payload: { name: "Acme" } };
+    const copies = await Promise.all(Array.from({ length: 12 }, () => app.inject(request)));
+    expect(copies.every((response) => response.statusCode === 201)).toBe(true);
+    expect(new Set(copies.map((response) => response.json().id)).size).toBe(1);
+    const companyId = copies[0]!.json().id as string;
+
+    await app.inject({ method: "POST", url: "/companies", headers: { "idempotency-key": "company-api-request-002" }, payload: { name: "Second" } });
+    const firstPage = await app.inject({ method: "GET", url: "/companies?limit=1" });
+    expect(firstPage.json()).toMatchObject({ companies: [{ id: expect.any(String) }], pagination: { limit: 1, nextCursor: expect.any(String) } });
+    const nextCursor = encodeURIComponent(firstPage.json().pagination.nextCursor);
+    const secondPage = await app.inject({ method: "GET", url: `/companies?limit=1&cursor=${nextCursor}` });
+    expect(secondPage.json().companies).toHaveLength(1);
+    expect(secondPage.json().companies[0].id).not.toBe(firstPage.json().companies[0].id);
+
+    active = { ...active, permissions: ["workspace:read"] };
+    expect((await app.inject({ method: "POST", url: "/companies", headers: { "idempotency-key": "company-api-request-003" }, payload: { name: "Denied" } })).statusCode).toBe(403);
+    active = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read", "business:manage"] };
+    expect((await app.inject({ method: "GET", url: "/companies" })).json().companies).toEqual([]);
+    expect((await app.inject({ method: "GET", url: `/companies/${companyId}` })).statusCode).toBe(403);
+  });
+
+  it("manages configurable company agents, hierarchy, revisions, and tenant isolation", async () => {
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] };
+    const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider, marketplace });
+    apps.push(app);
+
+    const business = await app.inject({ method: "POST", url: "/businesses", payload: { name: "Idea" } });
+    const company = await app.inject({ method: "POST", url: "/companies", headers: { "idempotency-key": "company-separated-001" },
+      payload: { name: "Operations", businessId: business.json().id } });
+    expect(company.statusCode).toBe(201);
+    expect(company.json().businessId).toBe(business.json().id);
+
+    const managerRequest = { method: "POST" as const, url: `/companies/${company.json().id}/agents`,
+      headers: { "idempotency-key": "agent-manager-001" }, payload: { name: "Manager", role: "Coordinator", tools: ["MCP"] } };
+    const invalidModel = await app.inject({ method: "POST", url: `/companies/${company.json().id}/agents`, headers: { "idempotency-key": "agent-invalid-model-001" }, payload: { name: "Invalid", role: "Test", modelId: "hardcoded/not-configured" } });
+    expect(invalidModel.statusCode).toBe(400);
+    const managerCopies = await Promise.all(Array.from({ length: 10 }, () => app.inject(managerRequest)));
+    expect(new Set(managerCopies.map((response) => response.json().id)).size).toBe(1);
+    const managerId = managerCopies[0]!.json().id;
+    const writer = await app.inject({ method: "POST", url: `/companies/${company.json().id}/agents`,
+      headers: { "idempotency-key": "agent-writer-001" }, payload: { name: "Writer", role: "Custom Writer" } });
+    const writerId = writer.json().id;
+
+    expect((await app.inject({ method: "PUT", url: `/companies/${company.json().id}/agents/${writerId}/parent`, payload: { parentAgentId: writerId } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: `/companies/${company.json().id}/agents/${writerId}/parent`, payload: { parentAgentId: managerId } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PUT", url: `/companies/${company.json().id}/agents/${managerId}/parent`, payload: { parentAgentId: writerId } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: `/companies/${company.json().id}/main-agent`, payload: { agentId: managerId, expectedRevision: 1 } })).json().mainAgentId).toBe(managerId);
+    expect((await app.inject({ method: "PATCH", url: `/companies/${company.json().id}`, payload: { name: "Stale", expectedRevision: 1 } })).statusCode).toBe(409);
+
+    active = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read", "business:manage"] };
+    expect((await app.inject({ method: "GET", url: `/companies/${company.json().id}/agents` })).statusCode).toBe(403);
+  });
+
+
+  it("deletes a Main Agent with both parent and children atomically, idempotently, and with tenant isolation", async () => {
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] };
+    const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider, marketplace });
+    apps.push(app);
+
+    const company = await app.inject({ method: "POST", url: "/companies",
+      headers: { "idempotency-key": "delete-company-001" }, payload: { name: "Delete Test" } });
+    const companyId = company.json().id as string;
+    const root = await app.inject({ method: "POST", url: "/companies/" + companyId + "/agents",
+      headers: { "idempotency-key": "delete-root-001" }, payload: { name: "Owner", role: "Root" } });
+    const parent = await app.inject({ method: "POST", url: "/companies/" + companyId + "/agents",
+      headers: { "idempotency-key": "delete-parent-001" }, payload: { name: "Manager", role: "Main" } });
+    const child = await app.inject({ method: "POST", url: "/companies/" + companyId + "/agents",
+      headers: { "idempotency-key": "delete-child-001" }, payload: { name: "Writer", role: "Child" } });
+    const rootId = root.json().id as string;
+    const parentId = parent.json().id as string;
+    const childId = child.json().id as string;
+    await app.inject({ method: "PUT", url: "/companies/" + companyId + "/agents/" + parentId + "/parent", payload: { parentAgentId: rootId } });
+    await app.inject({ method: "PUT", url: "/companies/" + companyId + "/agents/" + childId + "/parent", payload: { parentAgentId: parentId } });
+    await app.inject({ method: "PUT", url: "/companies/" + companyId + "/main-agent", payload: { agentId: parentId, expectedRevision: 1 } });
+
+    expect((await app.inject({ method: "DELETE", url: "/companies/" + companyId + "/agents/" + parentId + "?expectedRevision=99" })).statusCode).toBe(409);
+    active = { ...active, permissions: ["workspace:read"] };
+    expect((await app.inject({ method: "DELETE", url: "/companies/" + companyId + "/agents/" + parentId + "?expectedRevision=1" })).statusCode).toBe(403);
+    active = { ...active, permissions: ["workspace:read", "business:manage"] };
+
+    const concurrentDeletes = await Promise.all(Array.from({ length: 8 }, () => app.inject({
+      method: "DELETE", url: "/companies/" + companyId + "/agents/" + parentId + "?expectedRevision=1",
+    })));
+    expect(concurrentDeletes.every((response) => response.statusCode === 204)).toBe(true);
+    expect((await app.inject({ method: "GET", url: "/companies/" + companyId + "/agents/" + parentId })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/companies/" + companyId + "/agents/" + rootId })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/companies/" + companyId + "/agents/" + childId })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/companies/" + companyId + "/agent-edges" })).json()).toEqual([]);
+    expect((await app.inject({ method: "GET", url: "/companies/" + companyId })).json().mainAgentId).toBeUndefined();
+  });
+
   it("streams real research progress events before the final result", async () => {
     const aiEngine: AIEngine = {
       chat: async () => ({ content: "Final researched answer." }),
@@ -58,6 +207,97 @@ describe("Agent API", () => {
     expect(response.body).toContain("Final researched answer.");
     const conversations = await app.inject({ method: "GET", url: "/businesses/" + business.json().id + "/conversations" });
     expect(conversations.json()[0].title).toBe("Analyze Hostkoss and its services");
+  });
+
+  it("accepts a photo and voice message, transcribes audio, and keeps binary data out of history", async () => {
+    let lastChat: ChatRequest | undefined;
+    let transcriptionMimeType = "";
+    const aiEngine: AIEngine = {
+      chat: async (request) => {
+        lastChat = request;
+        return { content: "The image shows a product suitable for a furniture listing." };
+      },
+      transcribeAudio: async (input) => {
+        transcriptionMimeType = input.mimeType;
+        return { text: "I sell furniture in Lviv." };
+      },
+      async *stream() { yield ""; }, listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "vision", "audio.transcription"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const dataDirectory = await mkdtemp(path.join(tmpdir(), "npati-attachments-"));
+    tempDirectories.push(dataDirectory);
+    const app = buildApp({
+      workspaceStore: new InMemoryWorkspaceStore(),
+      aiEngine,
+      marketplace,
+      dataDirectory,
+      omnirouteVisionModel: "openai/gpt-5.6-luna",
+    });
+    apps.push(app);
+    const business = await app.inject({ method: "POST", url: "/businesses", payload: { name: "Furniture Lab", businessStage: "operating" } });
+    const conversation = await app.inject({
+      method: "POST",
+      url: "/businesses/" + business.json().id + "/conversations",
+      payload: { title: "Attachments" },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: {
+        message: "Create a product listing.",
+        conversationId: conversation.json().id,
+        attachments: [
+          { kind: "image", name: "chair.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=" },
+          { kind: "audio", name: "voice.m4a", mimeType: "audio/x-m4a", dataBase64: "AQID" },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(lastChat?.model).toBe("openai/gpt-5.6-luna");
+    expect(lastChat?.fallbackModel).toBeUndefined();
+    expect(transcriptionMimeType).toBe("audio/mp4");
+    const userContent = lastChat?.messages.at(-1)?.content;
+    expect(Array.isArray(userContent)).toBe(true);
+    expect(JSON.stringify(userContent)).toContain("data:image/png;base64,iVBORw0KGgo=");
+    expect(JSON.stringify(userContent)).toContain("I sell furniture in Lviv.");
+    const history = await app.inject({
+      method: "GET",
+      url: "/businesses/" + business.json().id + "/conversations/" + conversation.json().id,
+    });
+    expect(history.body).toContain("Transcript: I sell furniture in Lviv.");
+    expect(history.body).not.toContain("iVBORw0KGgo=");
+    expect(history.body.indexOf("npati-attachment:image:")).toBeLessThan(history.body.indexOf("Create a product listing."));
+    const attachmentId = history.body.match(/npati-attachment:image:([0-9a-f-]{36})/)?.[1];
+    expect(attachmentId).toBeTruthy();
+    const storedImage = await app.inject({ method: "GET", url: "/attachments/" + attachmentId });
+    expect(storedImage.statusCode).toBe(200);
+    expect(storedImage.headers["content-type"]).toBe("image/png");
+    expect(storedImage.rawPayload.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect((await app.inject({ method: "DELETE", url: "/attachments/" + attachmentId })).statusCode).toBe(204);
+    expect((await app.inject({ method: "DELETE", url: "/attachments/" + attachmentId })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/attachments/" + attachmentId })).statusCode).toBe(404);
+
+    const documentUpload = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: {
+        message: "Keep this document.",
+        conversationId: conversation.json().id,
+        attachments: [{ kind: "document", name: "brief.pdf", mimeType: "application/pdf", dataBase64: Buffer.from("%PDF-1.7\nNPATI").toString("base64") }],
+      },
+    });
+    expect(documentUpload.statusCode).toBe(200);
+    const updatedHistory = await app.inject({
+      method: "GET",
+      url: "/businesses/" + business.json().id + "/conversations/" + conversation.json().id,
+    });
+    const documentId = updatedHistory.body.match(/npati-attachment:document:([0-9a-f-]{36})/)?.[1];
+    expect(documentId).toBeTruthy();
+    expect((await app.inject({ method: "DELETE", url: "/businesses/" + business.json().id })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/attachments/" + documentId })).statusCode).toBe(404);
   });
 
   it("starts and exposes aggregate health", async () => {

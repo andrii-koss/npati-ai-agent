@@ -1,5 +1,174 @@
 import type { ServiceHealth } from "@npati/shared";
 
+export interface NpatiUser {
+  id: string;
+  email: string;
+  username: string;
+  displayName?: string | null;
+  name?: string | null;
+  role?: string;
+  status?: string;
+  country?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface NpatiAuthTokens {
+  accessToken: string;
+  refreshToken?: string;
+}
+
+export interface NpatiAuthResponse {
+  user: NpatiUser;
+  tokens: NpatiAuthTokens;
+}
+
+export interface NpatiRegisterInput {
+  email: string;
+  password: string;
+  username: string;
+  displayName?: string;
+  country?: string;
+}
+
+export interface NpatiLoginInput {
+  email: string;
+  password: string;
+}
+
+export interface NpatiAuthClient {
+  register(input: NpatiRegisterInput): Promise<NpatiAuthResponse>;
+  login(input: NpatiLoginInput): Promise<NpatiAuthResponse>;
+  refresh(refreshToken: string): Promise<{ tokens: NpatiAuthTokens }>;
+  logout(refreshToken?: string): Promise<{ success: boolean; message?: string }>;
+  getCurrentUser(accessToken: string): Promise<NpatiUser>;
+}
+
+export class NpatiHttpAuthClient implements NpatiAuthClient {
+  constructor(private readonly baseUrl: string) {}
+
+  private normalizeUrl(path: string): string {
+    const base = this.baseUrl.replace(/\/+$/, "");
+    const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+    if (base.endsWith("/api/v1")) {
+      const stripped = cleanPath.replace(/^\/api\/v1/, "").replace(/^\/api/, "");
+      return `${base}${stripped.startsWith("/") ? stripped : `/${stripped}`}`;
+    }
+    if (base.endsWith("/api")) {
+      const stripped = cleanPath.replace(/^\/api/, "");
+      const v1Path = stripped.startsWith("/v1") ? stripped : `/v1${stripped}`;
+      return `${base}${v1Path}`;
+    }
+
+    if (cleanPath.startsWith("/api/v1")) {
+      return `${base}${cleanPath}`;
+    }
+    if (cleanPath.startsWith("/api/")) {
+      return `${base}/api/v1${cleanPath.substring(4)}`;
+    }
+    return `${base}/api/v1${cleanPath}`;
+  }
+
+  async register(input: NpatiRegisterInput): Promise<NpatiAuthResponse> {
+    const url = this.normalizeUrl("/api/v1/auth/register");
+    const body: Record<string, any> = {
+      email: input.email.trim().toLowerCase(),
+      password: input.password,
+      username: input.username,
+    };
+    if (input.displayName) {
+      body.displayName = input.displayName.slice(0, 50);
+    }
+    if (input.country && input.country.length === 2) {
+      body.country = input.country.toUpperCase();
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok || !payload?.success) {
+      const message = payload?.message || payload?.error?.issues?.[0]?.message || payload?.error || (payload?.errors ? JSON.stringify(payload.errors) : `Registration failed with HTTP ${response.status}`);
+      const err = new Error(typeof message === "string" ? message : JSON.stringify(message));
+      (err as any).status = response.status;
+      (err as any).code = payload?.code || (response.status === 409 ? "USER_EXISTS" : "REGISTRATION_FAILED");
+      throw err;
+    }
+    return payload.data;
+  }
+
+  async login(input: NpatiLoginInput): Promise<NpatiAuthResponse> {
+    const url = this.normalizeUrl("/api/v1/auth/login");
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok || !payload?.success) {
+      const message = payload?.message || payload?.error?.issues?.[0]?.message || payload?.error || `Login failed with HTTP ${response.status}`;
+      const err = new Error(typeof message === "string" ? message : JSON.stringify(message));
+      (err as any).status = response.status;
+      (err as any).code = payload?.code || (response.status === 401 ? "INVALID_CREDENTIALS" : "AUTH_FAILED");
+      throw err;
+    }
+    return payload.data;
+  }
+
+  async refresh(refreshToken: string): Promise<{ tokens: NpatiAuthTokens }> {
+    const url = this.normalizeUrl("/api/v1/auth/refresh");
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok || !payload?.success) {
+      const message = payload?.message || payload?.error || `Token refresh failed with HTTP ${response.status}`;
+      const err = new Error(typeof message === "string" ? message : JSON.stringify(message));
+      (err as any).status = response.status;
+      (err as any).code = "REFRESH_FAILED";
+      throw err;
+    }
+    return payload.data;
+  }
+
+  async logout(refreshToken?: string): Promise<{ success: boolean; message?: string }> {
+    const url = this.normalizeUrl("/api/v1/auth/logout");
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const payload = await response.json().catch(() => null) as any;
+    return {
+      success: response.ok && (payload?.success ?? true),
+      message: payload?.message,
+    };
+  }
+
+  async getCurrentUser(accessToken: string): Promise<NpatiUser> {
+    const url = this.normalizeUrl("/api/v1/users/me");
+    const response = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok || !payload?.success) {
+      const message = payload?.error || payload?.reason || payload?.message || `User fetch failed with HTTP ${response.status}`;
+      const err = new Error(typeof message === "string" ? message : JSON.stringify(message));
+      (err as any).status = response.status;
+      (err as any).code = "UNAUTHORIZED";
+      throw err;
+    }
+    return payload.data;
+  }
+}
+
 export interface HubClient {
   getConnections(): Promise<unknown[]>;
   getCapabilities(): Promise<string[]>;
@@ -9,10 +178,20 @@ export interface HubClient {
   createWordPressDraft(input: unknown): Promise<unknown>;
   publishWordPressPost(input: unknown): Promise<unknown>;
   healthCheck(): Promise<ServiceHealth>;
+  auth?: NpatiAuthClient;
 }
 
 export class FoundationHubClient implements HubClient {
-  constructor(private readonly configured: boolean) {}
+  readonly auth?: NpatiAuthClient;
+
+  constructor(
+    private readonly configured: boolean,
+    baseUrl?: string,
+  ) {
+    if (baseUrl) {
+      this.auth = new NpatiHttpAuthClient(baseUrl);
+    }
+  }
 
   getConnections(): Promise<unknown[]> {
     return Promise.resolve([]);
@@ -42,6 +221,11 @@ export class FoundationHubClient implements HubClient {
 }
 
 export function createHubClient(config: { baseUrl?: string; apiKey?: string } = {}): HubClient {
-  return new FoundationHubClient(Boolean(config.baseUrl && config.apiKey));
+  return new FoundationHubClient(Boolean(config.baseUrl && config.apiKey), config.baseUrl);
 }
+
+export function createNpatiAuthClient(baseUrl: string): NpatiAuthClient {
+  return new NpatiHttpAuthClient(baseUrl);
+}
+
 

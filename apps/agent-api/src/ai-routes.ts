@@ -1,19 +1,54 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
-import { OmniRouteError, type MarketplaceQuery, type OmniRouteMarketplace, type ProviderAuthType, type ProviderFreeStatus } from "@npati/omniroute-adapter";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuthContext } from "@npati/workspace";
+import { OmniRouteError, type AIEngine, type MarketplaceQuery, type OmniRouteMarketplace, type ProviderAuthType, type ProviderFreeStatus } from "@npati/omniroute-adapter";
 import { AIPreferencesStore, type AICompressionMode, type AIMode } from "./ai-preferences";
+import type { AuthProvider } from "./auth";
 
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof OmniRouteError) {
     return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   }
+  if (error instanceof AIAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Unexpected AI marketplace error";
   return reply.code(/must|required|not found/i.test(message) ? 400 : 500).send({ error: { code: "MARKETPLACE_ERROR", message } });
 }
 
-export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMarketplace, preferences: AIPreferencesStore) {
+class AIAccessError extends Error { readonly code = "AI_ACCESS_DENIED"; readonly statusCode = 403; }
+
+const FALLBACK_DEV_SCOPE: AuthContext = {
+  workspaceId: "dev-workspace",
+  userId: "dev-user",
+  externalSubject: "local:dev-user",
+  permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"],
+};
+
+async function optionalAuthorize(auth: AuthProvider, request: FastifyRequest): Promise<AuthContext | null> {
+  try {
+    return await auth.authenticate(request);
+  } catch {
+    return null;
+  }
+}
+
+async function authorize(auth: AuthProvider, request: FastifyRequest, permission: "workspace:read" | "workspace:write"): Promise<AuthContext> {
+  const scope = await auth.authenticate(request);
+  if (!scope.permissions.includes(permission)) throw new AIAccessError(`Missing permission: ${permission}`);
+  return scope;
+}
+
+export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMarketplace, preferences: AIPreferencesStore, auth: AuthProvider, ai: AIEngine) {
+  app.get("/ai/resilience", async (request, reply) => {
+    try {
+      await authorize(auth, request, "workspace:read");
+      if (!ai.resilienceStatus) return reply.code(503).send({ error: { code: "OMNIROUTE_RESILIENCE_UNAVAILABLE", message: "OmniRoute resilience API is unavailable" } });
+      return await ai.resilienceStatus();
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.get<{ Querystring: Record<string, string | undefined> }>("/ai/marketplace", async (request, reply) => {
     try {
-      const stored = await preferences.get();
+      const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+      const stored = await preferences.get(scope);
       const query: MarketplaceQuery = {
         tab: request.query.tab as MarketplaceQuery["tab"],
         search: request.query.search,
@@ -30,7 +65,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   });
 
   app.get("/ai/providers", async (_request, reply) => {
-    try { return (await marketplace.marketplace({ limit: 100 })).providers; }
+    try { return (await marketplace.marketplace({ limit: 400 })).providers; }
     catch (error) { return sendError(reply, error); }
   });
 
@@ -53,7 +88,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
     "/ai/providers/:providerId/models",
     async (request, reply) => {
       try {
-        const stored = await preferences.get();
+        const stored = await preferences.get(await authorize(auth, request, "workspace:read"));
         const models = await marketplace.models(request.params.providerId, stored.addedModels.map((model) => model.id), request.query.refresh === "true");
         const search = request.query.search?.trim().toLowerCase();
         const filtered = search ? models.filter((model) => `${model.id} ${model.name} ${model.capabilities.join(" ")}`.toLowerCase().includes(search)) : models;
@@ -109,7 +144,10 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
     catch (error) { return sendError(reply, error); }
   });
 
-  app.get("/ai/models/added", async () => (await preferences.get()).addedModels);
+  app.get("/ai/models/added", async (request) => {
+    const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+    return (await preferences.get(scope)).addedModels;
+  });
 
   app.post<{ Body: { providerId: string; modelId: string } }>("/ai/models/add", {
     schema: { body: { type: "object", required: ["providerId", "modelId"], additionalProperties: false, properties: {
@@ -117,29 +155,33 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
     } } },
   }, async (request, reply) => {
     try {
-      const stored = await preferences.get();
+      const scope = await authorize(auth, request, "workspace:write");
+      const stored = await preferences.get(scope);
       const models = await marketplace.models(request.body.providerId, stored.addedModels.map((model) => model.id));
       const model = models.find((item) => item.id === request.body.modelId);
       if (!model) return reply.code(404).send({ error: { code: "MODEL_NOT_FOUND", message: "Model not found in the current provider catalog" } });
-      return await preferences.add(model);
+      return await preferences.add(scope, model);
     } catch (error) { return sendError(reply, error); }
   });
 
   app.delete<{ Body: { modelId: string } }>("/ai/models", {
     schema: { body: { type: "object", required: ["modelId"], additionalProperties: false, properties: { modelId: { type: "string", minLength: 1, maxLength: 500 } } } },
   }, async (request, reply) => {
-    try { return await preferences.remove(request.body.modelId); }
+    try { return await preferences.remove(await authorize(auth, request, "workspace:write"), request.body.modelId); }
     catch (error) { return sendError(reply, error); }
   });
 
   app.put<{ Body: { modelId: string } }>("/ai/models/default", {
     schema: { body: { type: "object", required: ["modelId"], additionalProperties: false, properties: { modelId: { type: "string", minLength: 1, maxLength: 500 } } } },
   }, async (request, reply) => {
-    try { return await preferences.setDefault(request.body.modelId); }
+    try { return await preferences.setDefault(await authorize(auth, request, "workspace:write"), request.body.modelId); }
     catch (error) { return sendError(reply, error); }
   });
 
-  app.get("/ai/routing", async () => (await preferences.get()).routing);
+  app.get("/ai/routing", async (request) => {
+    const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+    return (await preferences.get(scope)).routing;
+  });
   app.put<{ Body: {
     mode: AIMode; defaultModelId?: string | null; preferFree?: boolean; fallbackOnFailure?: boolean;
     balanceQualityCost?: boolean; compression?: AICompressionMode; monthlyBudgetUsd?: number;
@@ -156,13 +198,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   }, async (request, reply) => {
     try {
       const { mode, defaultModelId, ...policy } = request.body;
-      const routing = (await preferences.setRouting(mode, defaultModelId, policy)).routing;
-      await marketplace.configureRuntimePolicy({
-        compression: routing.compression,
-        monthlyBudgetUsd: routing.monthlyBudgetUsd,
-        warningPercent: routing.warningPercent,
-        stopPaidWhenLimitReached: routing.stopPaidWhenLimitReached,
-      });
+      const routing = (await preferences.setRouting(await authorize(auth, request, "workspace:write"), mode, defaultModelId, policy)).routing;
       return routing;
     }
     catch (error) { return sendError(reply, error); }

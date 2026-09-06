@@ -30,6 +30,31 @@ describe("business workspace repository", () => {
     expect(await store.listBusinesses(owner)).toHaveLength(1);
   });
 
+  it("keeps Business and Company separate with idempotent company creation", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(owner, { name: "Business idea" });
+    const duplicate = await Promise.all(Array.from({ length: 20 }, () => store.createCompany(owner, {
+      name: "AI Company", businessId: business.id, languages: ["uk"],
+    }, "company-request-0001")));
+    expect(new Set(duplicate.map((company) => company.id)).size).toBe(1);
+    expect((await store.listCompanies(owner)).items).toHaveLength(1);
+    expect(await store.listBusinesses(owner)).toEqual([business]);
+    expect(duplicate[0]).toMatchObject({ businessId: business.id, revision: 1 });
+
+    const manager = await store.createCompanyAgent(owner, duplicate[0]!.id, {
+      name: "Manager", role: "Coordinator", modelId: "openai/test", fallbackModelId: "auto", tools: ["Web Search"],
+    }, "agent-request-0001");
+    const writer = await store.createCompanyAgent(owner, duplicate[0]!.id, { name: "Writer", role: "Writing" }, "agent-request-0002");
+    await store.setCompanyAgentParent(owner, duplicate[0]!.id, writer.id, manager.id);
+    await expect(store.setCompanyAgentParent(owner, duplicate[0]!.id, manager.id, writer.id)).rejects.toThrow("Circular");
+    await expect(store.setCompanyAgentParent(owner, duplicate[0]!.id, writer.id, writer.id)).rejects.toThrow("own parent");
+    const selected = await store.setCompanyMainAgent(owner, duplicate[0]!.id, manager.id, 1);
+    expect(selected.mainAgentId).toBe(manager.id);
+    expect(await store.listCompanyAgentEdges(owner, duplicate[0]!.id)).toHaveLength(1);
+    await expect(store.getCompany(outsider, duplicate[0]!.id)).rejects.toBeInstanceOf(WorkspaceAccessError);
+    await expect(store.updateCompany(owner, duplicate[0]!.id, { name: "Stale" }, 1)).rejects.toThrow("changed by another");
+  });
+
   it("isolates business data by workspace and conversations by user", async () => {
     const store = new InMemoryWorkspaceStore();
     const business = await store.createBusiness(owner, { name: "Private business" });
@@ -106,6 +131,21 @@ describe("business workspace repository", () => {
     expect(await store.getOnboarding(outsider)).toBeNull();
     await expect(store.advanceOnboarding(outsider, session.id, { value: "Foreign answer" })).rejects.toBeInstanceOf(WorkspaceAccessError);
   });
+  it("paginates large Company agent sets without duplicate records", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(owner, { name: "Large Company" }, "large-company-001");
+    await Promise.all(Array.from({ length: 75 }, (_, index) => store.createCompanyAgent(owner, company.id,
+      { name: `Agent ${index}`, role: "Worker", sortOrder: index }, `large-agent-${String(index).padStart(4, "0")}`)));
+    const ids = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await store.listCompanyAgentsPage(owner, company.id, 20, cursor);
+      page.items.forEach((agent) => ids.add(agent.id));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(ids.size).toBe(75);
+  });
+
 });
 
 describe("skill registry", () => {

@@ -1,18 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
-import { WorkspaceAccessError } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
+import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 
 const now = () => new Date().toISOString();
+type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly identities = new Map<string, { displayName: string; workspaceName: string; role: string }>();
   private readonly businesses = new Map<string, Business>();
+  private readonly companies = new Map<string, Company>();
+  private readonly companyAgents = new Map<string, CompanyAgent>();
+  private readonly companyEdges = new Map<string, CompanyAgentEdge>();
+  private readonly companyRuns = new Map<string, CompanyAgentRun>();
+  private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
+  private readonly companyToolAudit = new Map<string, CompanyAgentToolAudit>();
+  private readonly companyRunRequests = new Map<string, string>();
+  private readonly companyCreateRequests = new Map<string, string>();
+  private readonly companyAgentCreateRequests = new Map<string, string>();
   private readonly current = new Map<string, string>();
   private readonly goals = new Map<string, Goal>();
   private readonly memories = new Map<string, MemoryItem>();
   private readonly conversations = new Map<string, Conversation>();
   private readonly messages = new Map<string, ConversationMessage>();
+  private readonly userSettings = new Map<string, StoredUserSetting>();
+  private readonly businessCreateRequests = new Map<string, string>();
   private readonly onboardings = new Map<string, Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>();
 
   async initialize(context?: AuthContext) {
@@ -20,6 +33,21 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async health() { return "ok" as const; }
+
+  async getUserSetting(context: AuthContext, key: string) {
+    await this.ensure(context);
+    return structuredClone(this.userSettings.get(`${context.workspaceId}:${context.userId}:${key}`) ?? null);
+  }
+
+  async setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number) {
+    await this.ensure(context);
+    const storageKey = `${context.workspaceId}:${context.userId}:${key}`;
+    const current = this.userSettings.get(storageKey);
+    if ((current?.revision ?? 0) !== expectedRevision) return null;
+    const next: StoredUserSetting = { key, value: structuredClone(value), revision: expectedRevision + 1, updatedAt: now() };
+    this.userSettings.set(storageKey, next);
+    return structuredClone(next);
+  }
 
   private async ensure(context: AuthContext) {
     const key = `${context.workspaceId}:${context.userId}`;
@@ -57,13 +85,26 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async listBusinesses(context: AuthContext) {
-    return [...this.businesses.values()].filter((business) => business.workspaceId === context.workspaceId && business.activationStatus === "active").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...this.businesses.values()].filter((business) => business.workspaceId === context.workspaceId && business.activationStatus === "active").sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async listBusinessesPage(context: AuthContext, requestedLimit = 20, cursor?: string) {
+    const limit = companyPageLimit(requestedLimit);
+    const after = decodeBusinessCursor(cursor);
+    const businesses = (await this.listBusinesses(context)).filter((business) => !after || business.createdAt > after.createdAt || (business.createdAt === after.createdAt && business.id > after.id));
+    const items = businesses.slice(0, limit);
+    const last = items.at(-1);
+    return { items, nextCursor: businesses.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }
 
   async getBusiness(context: AuthContext, businessId: string) { return this.assertBusiness(context, businessId); }
 
-  async createBusiness(context: AuthContext, input: BusinessInput) {
+  async createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
     await this.ensure(context);
+    const requestKey = idempotencyKey ? `${context.workspaceId}:${context.userId}:${idempotencyKey}` : null;
+    const existingId = requestKey ? this.businessCreateRequests.get(requestKey) : undefined;
+    const existing = existingId ? this.businesses.get(existingId) : undefined;
+    if (existing) return existing;
     const timestamp = now();
     const business: Business = {
       id: randomUUID(), workspaceId: context.workspaceId, ownerUserId: context.userId,
@@ -72,6 +113,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     } as Business;
     if (!business.name) throw new Error("Business name is required");
     this.businesses.set(business.id, business);
+    if (requestKey) this.businessCreateRequests.set(requestKey, business.id);
     if ((await this.listBusinesses(context)).length === 1) this.current.set(`${context.workspaceId}:${context.userId}`, business.id);
     return business;
   }
@@ -92,6 +134,350 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     for (const [id, conversation] of this.conversations) if (conversation.businessId === businessId) this.conversations.delete(id);
     if (this.current.get(`${context.workspaceId}:${context.userId}`) === businessId) this.current.delete(`${context.workspaceId}:${context.userId}`);
     return true;
+  }
+
+
+  private assertCompany(context: AuthContext, companyId: string) {
+    const company = this.companies.get(companyId);
+    if (!company || company.workspaceId !== context.workspaceId || company.userId !== context.userId) {
+      throw new WorkspaceAccessError("Company is not available to this user");
+    }
+    return company;
+  }
+
+  async listCompanies(context: AuthContext, requestedLimit = 20, cursor?: string) {
+    await this.ensure(context);
+    const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
+    const rows = [...this.companies.values()]
+      .filter((company) => company.workspaceId === context.workspaceId && company.userId === context.userId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .filter((company) => !after || company.createdAt > after.createdAt || (company.createdAt === after.createdAt && company.id > after.id));
+    const items = rows.slice(0, limit), last = items.at(-1);
+    return { items, nextCursor: rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+  async getCompany(context: AuthContext, companyId: string) { return this.assertCompany(context, companyId); }
+
+  async createCompany(context: AuthContext, input: CompanyInput, idempotencyKey: string) {
+    await this.ensure(context);
+    const requestKey = `${context.workspaceId}:${context.userId}:${idempotencyKey}`;
+    const existingId = this.companyCreateRequests.get(requestKey);
+    if (existingId) return this.assertCompany(context, existingId);
+    if (!input.name?.trim()) throw new Error("Company name is required");
+    if (input.businessId) this.assertBusiness(context, input.businessId);
+    const timestamp = now();
+    const company: Company = {
+      id: randomUUID(), workspaceId: context.workspaceId, userId: context.userId, name: input.name.trim(),
+      businessId: input.businessId, website: input.website, industry: input.industry, description: input.description,
+      productsServices: input.productsServices, languages: input.languages ?? [], brandTone: input.brandTone,
+      companyInstructions: input.companyInstructions, knowledge: input.knowledge ?? [], memory: input.memory ?? {},
+      status: input.status ?? "active", revision: 1, createdAt: timestamp, updatedAt: timestamp,
+    };
+    this.companies.set(company.id, company);
+    this.companyCreateRequests.set(requestKey, company.id);
+    return company;
+  }
+
+  async convertBusinessToCompany(context: AuthContext, businessId: string, input: BusinessToCompanyInput, idempotencyKey: string): Promise<{ company: Company; created: boolean }> {
+    const business = await this.getBusiness(context, businessId);
+    const requestKey = `${context.workspaceId}:${context.userId}:${idempotencyKey}`;
+    const existingId = this.companyCreateRequests.get(requestKey);
+    if (existingId) {
+      return { company: structuredClone(this.assertCompany(context, existingId)), created: false };
+    }
+
+    const memory: Record<string, unknown> = {};
+    if (input.includeConfirmedMemory) {
+      const memories = await this.listMemory(context, businessId);
+      memory["confirmed_business_facts"] = memories.map((m) => m.content);
+    }
+    if (input.includeGoals) {
+      const goals = await this.listGoals(context, businessId);
+      memory["transferred_goals"] = goals.map((g) => ({ title: g.title, description: g.description, status: g.status }));
+    }
+
+    const instructionParts: string[] = [];
+    if (input.includeInstructions) {
+      if (business.description) instructionParts.push(`Business Description: ${business.description}`);
+      if (business.businessModel) instructionParts.push(`Business Model: ${business.businessModel}`);
+    }
+    if (input.includeResearchSummary) {
+      if (business.audienceSummary) instructionParts.push(`Target Audience: ${business.audienceSummary}`);
+      if (business.market) instructionParts.push(`Market & Niche: ${business.market} / ${business.niche ?? ""}`);
+    }
+
+    const companyInput: CompanyInput = {
+      name: input.companyName?.trim() || business.name,
+      businessId: business.id,
+      website: business.website,
+      industry: business.industry,
+      description: business.description,
+      productsServices: business.productsServicesSummary,
+      companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
+      memory,
+      languages: ["Ukrainian", "English"],
+      status: "active",
+    };
+
+    const company = await this.createCompany(context, companyInput, idempotencyKey);
+
+    const mainAgent = await this.createCompanyAgent(context, company.id, {
+      name: "Main Agent",
+      role: "Coordinator",
+      description: `Primary executive agent for ${company.name}`,
+      tools: ["web.search", "files", "knowledge"],
+      isActive: true,
+    }, `${idempotencyKey}:main-agent`);
+
+    await this.setCompanyMainAgent(context, company.id, mainAgent.id, company.revision);
+    const updatedCompany = this.assertCompany(context, company.id);
+
+    return { company: structuredClone(updatedCompany), created: true };
+  }
+
+  async updateCompany(context: AuthContext, companyId: string, input: Partial<CompanyInput>, expectedRevision: number) {
+    const current = this.assertCompany(context, companyId);
+    if (current.revision !== expectedRevision) throw new Error("Company was changed by another request. Reload and try again.");
+    if (input.businessId) this.assertBusiness(context, input.businessId);
+    const updated = { ...current, ...input, name: input.name?.trim() ?? current.name, revision: current.revision + 1, updatedAt: now() };
+    if (!updated.name) throw new Error("Company name is required");
+    this.companies.set(companyId, updated);
+    return updated;
+  }
+
+  async deleteCompany(context: AuthContext, companyId: string) {
+    this.assertCompany(context, companyId);
+    this.companies.delete(companyId);
+    for (const [id, agent] of this.companyAgents) if (agent.companyId === companyId) this.companyAgents.delete(id);
+    for (const [id, edge] of this.companyEdges) if (edge.companyId === companyId) this.companyEdges.delete(id);
+    return true;
+  }
+
+
+  async setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {
+    const company = this.assertCompany(context, companyId);
+    if (company.revision !== expectedRevision) throw new Error("Company was changed by another request. Reload and try again.");
+    if (agentId) this.assertCompanyAgent(context, companyId, agentId);
+    const updated = { ...company, mainAgentId: agentId ?? undefined, revision: company.revision + 1, updatedAt: now() };
+    this.companies.set(companyId, updated);
+    return updated;
+  }
+
+  private assertCompanyAgent(context: AuthContext, companyId: string, agentId: string) {
+    this.assertCompany(context, companyId);
+    const agent = this.companyAgents.get(agentId);
+    if (!agent || agent.workspaceId !== context.workspaceId || agent.companyId !== companyId) {
+      throw new WorkspaceNotFoundError("Agent was not found in this company");
+    }
+    return agent;
+  }
+
+  async listCompanyAgents(context: AuthContext, companyId: string) {
+    this.assertCompany(context, companyId);
+    return [...this.companyAgents.values()].filter((agent) => agent.workspaceId === context.workspaceId && agent.companyId === companyId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async listCompanyAgentsPage(context: AuthContext, companyId: string, requestedLimit = 50, cursor?: string) {
+    const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
+    const rows = (await this.listCompanyAgents(context, companyId))
+      .slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .filter((agent) => !after || agent.createdAt > after.createdAt || (agent.createdAt === after.createdAt && agent.id > after.id));
+    const items = rows.slice(0, limit), last = items.at(-1);
+    return { items, nextCursor: rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+  async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {
+    return this.assertCompanyAgent(context, companyId, agentId);
+  }
+
+  async createCompanyAgent(context: AuthContext, companyId: string, input: CompanyAgentInput, idempotencyKey: string) {
+    this.assertCompany(context, companyId);
+    const requestKey = `${context.workspaceId}:${companyId}:${idempotencyKey}`;
+    const existingId = this.companyAgentCreateRequests.get(requestKey);
+    if (existingId) return this.assertCompanyAgent(context, companyId, existingId);
+    if (!input.name?.trim() || !input.role?.trim()) throw new Error("Agent name and role are required");
+    const timestamp = now();
+    const agent: CompanyAgent = {
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, name: input.name.trim(), role: input.role.trim(),
+      description: input.description, systemInstruction: input.systemInstruction, promptGuidelines: input.promptGuidelines,
+      recommendedPrompts: input.recommendedPrompts ?? [], modelId: input.modelId, fallbackModelId: input.fallbackModelId,
+      tools: input.tools ?? [], isActive: input.isActive ?? true, positionX: input.positionX, positionY: input.positionY,
+      sortOrder: input.sortOrder ?? 0, revision: 1, createdAt: timestamp, updatedAt: timestamp,
+    };
+    this.companyAgents.set(agent.id, agent);
+    this.companyAgentCreateRequests.set(requestKey, agent.id);
+    return agent;
+  }
+
+  async updateCompanyAgent(context: AuthContext, companyId: string, agentId: string, input: Partial<CompanyAgentInput>, expectedRevision: number) {
+    const current = this.assertCompanyAgent(context, companyId, agentId);
+    if (current.revision !== expectedRevision) throw new Error("Agent was changed by another request. Reload and try again.");
+    const updated = { ...current, ...input, name: input.name?.trim() ?? current.name, role: input.role?.trim() ?? current.role,
+      revision: current.revision + 1, updatedAt: now() };
+    if (!updated.name || !updated.role) throw new Error("Agent name and role are required");
+    this.companyAgents.set(agentId, updated);
+    return updated;
+  }
+
+  async deleteCompanyAgent(context: AuthContext, companyId: string, agentId: string, expectedRevision: number) {
+    const company = this.assertCompany(context, companyId);
+    const agent = this.companyAgents.get(agentId);
+    if (!agent || agent.workspaceId !== context.workspaceId || agent.companyId !== companyId) return false;
+    if (agent.revision !== expectedRevision) throw new Error("Agent was changed by another request. Reload and try again.");
+    this.companyAgents.delete(agentId);
+    for (const [id, edge] of this.companyEdges) if (edge.parentAgentId === agentId || edge.childAgentId === agentId) this.companyEdges.delete(id);
+    if (company.mainAgentId === agentId) this.companies.set(companyId, { ...company, mainAgentId: undefined, revision: company.revision + 1, updatedAt: now() });
+    return true;
+  }
+
+
+  async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
+    this.assertCompany(context, companyId);
+    const filter = agentIds?.length ? new Set(agentIds) : null;
+    return [...this.companyEdges.values()].filter((edge) => edge.workspaceId === context.workspaceId && edge.companyId === companyId
+      && (!filter || (filter.has(edge.parentAgentId) && filter.has(edge.childAgentId))))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
+    this.assertCompanyAgent(context, companyId, childAgentId);
+    if (parentAgentId === childAgentId) throw new Error("An agent cannot be its own parent");
+    if (parentAgentId) this.assertCompanyAgent(context, companyId, parentAgentId);
+    const old = [...this.companyEdges.entries()].find(([, edge]) => edge.companyId === companyId && edge.childAgentId === childAgentId);
+    if (old) this.companyEdges.delete(old[0]);
+    if (!parentAgentId) return null;
+    const children = (id: string) => [...this.companyEdges.values()].filter((edge) => edge.companyId === companyId && edge.parentAgentId === id).map((edge) => edge.childAgentId);
+    const pending = [childAgentId], visited = new Set<string>();
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (id === parentAgentId) {
+        if (old) this.companyEdges.set(old[0], old[1]);
+        throw new Error("Circular agent relationships are not allowed");
+      }
+      if (!visited.has(id)) { visited.add(id); pending.push(...children(id)); }
+    }
+    const edge: CompanyAgentEdge = { id: randomUUID(), workspaceId: context.workspaceId, companyId,
+      parentAgentId, childAgentId, relationType: "reports_to", createdAt: now() };
+    this.companyEdges.set(edge.id, edge);
+    return edge;
+  }
+
+  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion" }, idempotencyKey: string) {
+    const company = this.assertCompany(context, companyId);
+    if (!company.mainAgentId) throw new Error("Select an active Main Agent before running the company");
+    const mainAgent = this.assertCompanyAgent(context, companyId, company.mainAgentId);
+    if (!mainAgent.isActive) throw new Error("The Main Agent is inactive");
+    const task = input.task?.trim();
+    if (!task) throw new Error("Company task is required");
+    const requestKey = `${context.workspaceId}:${companyId}:${context.userId}:${idempotencyKey}`;
+    const existingId = this.companyRunRequests.get(requestKey);
+    if (existingId) return { run: structuredClone(this.companyRuns.get(existingId)!), created: false };
+    const timestamp = now();
+    const run: CompanyAgentRun = {
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, userId: context.userId,
+      mainAgentId: mainAgent.id, idempotencyKey, task, requestedMode: input.requestedMode,
+      status: "queued", selectedAgentIds: [], cancelRequested: false, attemptCount: 0, maxAttempts: 3,
+      contextSnapshot: {
+        contextType: "company",
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+        companyId,
+        businessId: null,
+        agentId: mainAgent.id,
+        companyRevision: company.revision,
+        capturedAt: timestamp,
+      },
+      nextAttemptAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
+    };
+    this.companyRuns.set(run.id, run);
+    this.companyRunRequests.set(requestKey, run.id);
+    return { run: structuredClone(run), created: true };
+  }
+
+  async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {
+    this.assertCompany(context, companyId);
+    const run = this.companyRuns.get(runId);
+    if (!run || run.workspaceId !== context.workspaceId || run.companyId !== companyId || run.userId !== context.userId) {
+      throw new WorkspaceAccessError("Agent run is not available in this company");
+    }
+    return {
+      run: structuredClone(run),
+      steps: [...this.companyRunSteps.values()].filter((step) => step.runId === runId).sort((a, b) => a.stepOrder - b.stepOrder || a.lane - b.lane),
+      toolAudit: [...this.companyToolAudit.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    };
+  }
+
+  async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    const timestamp = now();
+    const terminal = patch.status === "completed" || patch.status === "failed" || patch.status === "cancelled";
+    const started = patch.status === "planning" || patch.status === "running";
+    const updated: CompanyAgentRun = {
+      ...run, ...patch,
+      startedAt: started ? run.startedAt ?? timestamp : run.startedAt,
+      completedAt: terminal ? timestamp : run.completedAt,
+      updatedAt: timestamp,
+    };
+    this.companyRuns.set(runId, updated);
+    return structuredClone(updated);
+  }
+
+  async replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    const unique = new Set(steps.map((step) => step.agentId));
+    if (unique.size !== steps.length) throw new Error("A run cannot contain the same agent twice");
+    for (const agentId of unique) this.assertCompanyAgent(context, companyId, agentId);
+    for (const [id, step] of this.companyRunSteps) if (step.runId === runId) this.companyRunSteps.delete(id);
+    const timestamp = now();
+    return steps.map((step) => {
+      const row: CompanyAgentRunStep = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+        ...step, createdAt: timestamp, updatedAt: timestamp };
+      this.companyRunSteps.set(row.id, row);
+      return structuredClone(row);
+    });
+  }
+
+  async appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    this.assertCompanyAgent(context, companyId, entry.agentId);
+    const terminal = entry.status === "succeeded" || entry.status === "failed" || entry.status === "blocked";
+    const timestamp = now();
+    const row: CompanyAgentToolAudit = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+      ...entry, createdAt: timestamp, completedAt: terminal ? timestamp : undefined };
+    this.companyToolAudit.set(row.id, row);
+    return structuredClone(row);
+  }
+
+
+  async claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    const stale = run.leaseExpiresAt != null && Date.parse(run.leaseExpiresAt) < Date.now();
+    if (run.cancelRequested || run.attemptCount >= run.maxAttempts || Date.parse(run.nextAttemptAt) > Date.now()
+      || (run.status !== "queued" && !(["planning","running"].includes(run.status) && stale))) return false;
+    await this.updateCompanyAgentRun(context, companyId, runId, { status: "planning", workerId,
+      attemptCount: run.attemptCount + 1, lastHeartbeatAt: now(), leaseExpiresAt: new Date(Date.now()+leaseMs).toISOString() });
+    return true;
+  }
+  async heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    if (run.workerId !== workerId || run.cancelRequested || !["planning","running"].includes(run.status)) return false;
+    await this.updateCompanyAgentRun(context, companyId, runId, { lastHeartbeatAt: now(), leaseExpiresAt: new Date(Date.now()+leaseMs).toISOString() });
+    return true;
+  }
+  async requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    if (run.workerId !== workerId || run.cancelRequested || run.attemptCount >= run.maxAttempts) return false;
+    await this.updateCompanyAgentRun(context, companyId, runId, { status: "queued", workerId: undefined,
+      leaseExpiresAt: undefined, nextAttemptAt: new Date(Date.now()+delayMs).toISOString() });
+    return true;
+  }
+  async listRecoverableCompanyAgentRuns(limit = 200) {
+    return [...this.companyRuns.values()].filter((run) => !run.cancelRequested && run.attemptCount < run.maxAttempts
+      && Date.parse(run.nextAttemptAt) <= Date.now() && (run.status === "queued"
+        || (["planning","running"].includes(run.status) && run.leaseExpiresAt != null && Date.parse(run.leaseExpiresAt) < Date.now())))
+      .slice(0,limit).map((run) => ({ context: { workspaceId: run.workspaceId,userId: run.userId,
+        permissions: ["workspace:read","business:manage"] }, companyId: run.companyId, runId: run.id }));
   }
 
   async listGoals(context: AuthContext, businessId: string) {
