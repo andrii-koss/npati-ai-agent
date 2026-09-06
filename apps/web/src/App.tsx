@@ -170,7 +170,8 @@ function Home() {
       </header>
       <section className="hero">
         <div className="hero-header-block">
-          <p className="eyebrow">Your AI Business Agent</p>
+          <div className="hero-spotlight" aria-hidden="true" />
+          <p className="eyebrow"><span className="eyebrow-dot" aria-hidden="true" />Your AI Business Agent</p>
           <h1>What would you like<br />to do?</h1>
           <p className="hero-copy">Choose a starting point. We’ll use your active business, goals, and confirmed memory to build a practical next step.</p>
         </div>
