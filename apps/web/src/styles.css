@@ -567,7 +567,8 @@ a {
   overflow: hidden;
 }
 
-.chat-workspace-content .standard-live-chat {
+.chat-workspace-content .standard-live-chat,
+.chat-workspace-content .onboarding-live-chat {
   height: calc(100vh - 20px);
   min-height: 0;
   margin-right: 168px;
@@ -576,11 +577,13 @@ a {
 .chat-workspace-content .onboarding-progress {
   margin-bottom: 8px;
   padding-block: 11px;
+  margin-right: 168px;
 }
 
 .chat-workspace-content .onboarding-progress+.onboarding-live-chat {
   height: calc(100vh - 86px);
   min-height: 0;
+  margin-right: 168px;
 }
 
 .chat-workspace-content .onboarding-live-chat .message-stream {
