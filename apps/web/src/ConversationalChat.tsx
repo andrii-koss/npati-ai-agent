@@ -1,3 +1,4 @@
+import { getStoredAuthToken, useAuth } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -11,7 +12,7 @@ type Scenario = "existing" | "starting" | "seller";
 async function request<T>(url: string, body?: object): Promise<T> {
   const response = await fetch("/api" + url, {
     method: body ? "POST" : "GET",
-    headers: body ? { "content-type": "application/json" } : undefined,
+    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(getStoredAuthToken() ? { authorization: "Bearer " + getStoredAuthToken() } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
@@ -36,7 +37,7 @@ function isResearchRequest(message?: string) {
   return Boolean(message && (/https?:\/\//i.test(message) || /competitor|competition|web research|search the web|конкурент|досліди|аналізуй/iu.test(message)));
 }
 
-export function ConversationalChat({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
+function BusinessConversation({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
   const { overview, refresh } = useWorkspace();
   const navigate = useNavigate();
   const business = overview?.currentBusiness;
@@ -254,4 +255,54 @@ export function ConversationalChat({ initialPrompt = "", initialConversationId }
       </div>
     </>
   );
+}
+
+type ChatProps = { initialPrompt?: string; initialConversationId?: string };
+export function ConversationalChat(props: ChatProps) {
+  const { user } = useAuth();
+  return <ContextChat key={user?.id ?? "anonymous"} {...props} userId={user?.id} />;
+}
+function ContextChat({ userId, ...props }: ChatProps & { userId?: string }) {
+  const { overview, switchBusiness } = useWorkspace();
+  const key = "npati_chat_context:" + (userId ?? "anonymous");
+  const [selection, setSelection] = useState(() => { try { return sessionStorage.getItem(key) ?? "business"; } catch { return "business"; } });
+  const [companies, setCompanies] = useState<Array<{id:string;name:string}>>([]);
+  const [error,setError] = useState("");
+  const [switching,setSwitching] = useState(false);
+  useEffect(() => { let active=true; if(userId) void request<{companies:Array<{id:string;name:string}>}>("/companies?limit=100").then(v=>{if(active)setCompanies(v.companies);}).catch(e=>{if(active)setError(e.message);}); return()=>{active=false;}; },[userId]);
+  async function choose(value:string) {
+    setSwitching(true);setError("");
+    try {
+      if(value.startsWith("business:")) await switchBusiness(value.slice(9));
+      const next=value.startsWith("business:")?"business":value;
+      setSelection(next);try{sessionStorage.setItem(key,next);}catch{}
+    }catch(e){setError(e instanceof Error?e.message:"Could not switch context");}finally{setSwitching(false);}
+  }
+  const value=selection==="business"&&overview?.currentBusiness ? "business:"+overview.currentBusiness.id : selection;
+  return <>
+    <label className="business-switcher"><span>Active context</span><select aria-label="Active context" value={value} disabled={switching} onChange={e=>void choose(e.target.value)}>
+      <option value="none">Neutral — no context</option>
+      {!overview?.currentBusiness&&<option value="business">Business setup</option>}
+      {overview?.businesses.map(b=><option key={b.id} value={"business:"+b.id}>Business: {b.name}</option>)}
+      {companies.map(c=><option key={c.id} value={"company:"+c.id}>Company: {c.name}</option>)}
+    </select></label>
+    {error&&<div role="alert" className="workspace-notice error">{error}</div>}
+    {selection==="business" ? <BusinessConversation {...props}/> : <ScopedConversation key={key+selection} companyId={selection.startsWith("company:")?selection.slice(8):undefined}/>} 
+  </>;
+}
+function ScopedConversation({companyId}:{companyId?:string}) {
+  const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[sending,setSending]=useState(false),[error,setError]=useState("");
+  async function submit(event:FormEvent) {
+    event.preventDefault();if(!input.trim()||sending)return;
+    const prompt=input.trim();setInput("");setSending(true);setError("");
+    setMessages(v=>[...v,{id:crypto.randomUUID(),role:"user",content:prompt}]);
+    try {const reply=await request<AgentReply>("/chat",{message:prompt,contextType:companyId?"company":"none",...(companyId?{companyId}:{})});
+      setMessages(v=>[...v,{id:crypto.randomUUID(),role:"assistant",content:reply.message}]);
+    }catch(e){setError(e instanceof Error?e.message:"Chat failed");}finally{setSending(false);}
+  }
+  return <div className="onboarding-live-chat standard-live-chat">
+    {error&&<div role="alert" className="workspace-notice error">{error}</div>}
+    <div className="message-stream">{messages.map(m=><article key={m.id} className={m.role} aria-label={m.role==="user"?"Your message":"NPATI Agent message"}><ChatMessageContent content={m.content}/></article>)}{sending&&<p role="status">Working…</p>}</div>
+    <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}><AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/><button disabled={sending||!input.trim()}>Send</button></form>
+  </div>;
 }

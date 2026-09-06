@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-09-06T07:37:51.391Z",
+  "targetMetrics": {},
+  "results": {
+    "companies": {
+      "total": 100000,
+      "indexTimeMs": 200.1736,
+      "p50Microseconds": 1.2000000000398359,
+      "p95Microseconds": 2.200000000016189,
+      "p99Microseconds": 3.6000000000058208,
+      "sloPassed": true
+    },
+    "agents": {
+      "total": 500000,
+      "populateTimeMs": 1226.3344,
+      "batchLoadTimeMs": 0.11580000000003565,
+      "sloPassed": true
+    },
+    "sessions": {
+      "total": 10000,
+      "creationTimeMs": 5.242600000000039,
+      "memoryDeltaMB": 2.2704620361328125,
+      "sloPassed": true
+    },
+    "streaming": {
+      "total": 10000,
+      "durationMs": 0.439600000000155,
+      "droppedFrames": 0,
+      "sloPassed": true
+    }
+  },
+  "passed": true
+}

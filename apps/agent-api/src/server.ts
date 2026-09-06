@@ -1,4 +1,20 @@
 import { buildApp } from "./app";
+import { MinioObjectStorage } from "./object-storage";
+
+const minioEndpoint = process.env.MINIO_ENDPOINT;
+const minioAccessKey = process.env.MINIO_ACCESS_KEY;
+const minioSecretKey = process.env.MINIO_SECRET_KEY;
+const objectStorage = minioEndpoint && minioAccessKey && minioSecretKey ? new MinioObjectStorage({
+  endPoint: minioEndpoint,
+  port: Number.parseInt(process.env.MINIO_PORT ?? "9000", 10),
+  useSSL: process.env.MINIO_USE_SSL === "true",
+  accessKey: minioAccessKey,
+  secretKey: minioSecretKey,
+  region: process.env.MINIO_REGION ?? "us-east-1",
+  operationTimeoutMs: Number.parseInt(process.env.MINIO_OPERATION_TIMEOUT_MS ?? "15000",10),
+  streamIdleTimeoutMs: Number.parseInt(process.env.MINIO_STREAM_IDLE_TIMEOUT_MS ?? "30000",10),
+  streamTotalTimeoutMs: Number.parseInt(process.env.MINIO_STREAM_TOTAL_TIMEOUT_MS ?? "300000",10),
+}) : undefined;
 
 const port = Number.parseInt(process.env.NPATI_AGENT_API_PORT ?? "3001", 10);
 const app = buildApp({
@@ -7,11 +23,26 @@ const app = buildApp({
   omnirouteApiKey: process.env.OMNIROUTE_API_KEY,
   omnirouteManagementPassword: process.env.OMNIROUTE_MANAGEMENT_PASSWORD,
   omnirouteTranscriptionModel: process.env.OMNIROUTE_TRANSCRIPTION_MODEL,
+  omnirouteEmbeddingModel: process.env.OMNIROUTE_EMBEDDING_MODEL,
+  omnirouteRerankModel: process.env.OMNIROUTE_RERANK_MODEL,
+  omnirouteVisionModel: process.env.OMNIROUTE_VISION_MODEL,
   dataDirectory: process.env.NPATI_DATA_DIR,
   hubBaseUrl: process.env.NPATI_HUB_BASE_URL,
   hubApiKey: process.env.NPATI_HUB_API_KEY,
+  npatiBackendUrl: process.env.NPATI_BACKEND_URL ?? process.env.NPATI_HUB_BASE_URL,
+  npatiJwtSecret: process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET,
+  strictAuth: process.env.NPATI_AUTH_STRICT !== "false",
   databaseUrl: process.env.DATABASE_URL,
   crawlerBaseUrl: process.env.CRAWL4AI_BASE_URL,
+  companyRunTimeoutMs: Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS ?? '120000', 10),
+  redisUrl: process.env.REDIS_URL,
+  objectStorage,
+  storageReconcilerOptions: {
+    intervalMs: Number.parseInt(process.env.NPATI_STORAGE_RECONCILE_INTERVAL_MS ?? "21600000",10),
+    orphanGraceMs: Number.parseInt(process.env.NPATI_STORAGE_ORPHAN_GRACE_MS ?? "86400000",10),
+    leaseMs: Number.parseInt(process.env.NPATI_STORAGE_RECONCILE_LEASE_MS ?? "1800000",10),
+    pageSize: Number.parseInt(process.env.NPATI_STORAGE_RECONCILE_PAGE_SIZE ?? "250",10),
+  },
 });
 
 try {

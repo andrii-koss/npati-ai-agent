@@ -1,8 +1,10 @@
+import { getStoredAuthToken } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
+import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { streamChat } from "./chat-stream";
 
@@ -29,7 +31,13 @@ type Goal = { id: string; title: string; description?: string; status: string; p
 type MemoryItem = { id: string; type: string; title: string; content: string; source: string; updatedAt: string };
 type Skill = { id: string; name: string; description: string; capabilities: string[] };
 type Conversation = { id: string; title: string; updatedAt: string };
-type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string };
+type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[] };
+
+function messageHasImage(message: Message) {
+  return message.attachments?.some((attachment) => attachment.kind === "image")
+    || message.content.includes("[[npati-attachment:image:");
+}
+
 
 type WorkspaceValue = {
   overview: WorkspaceOverview | null;
@@ -42,10 +50,19 @@ type WorkspaceValue = {
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = {
+    ...(init?.body ? { "content-type": "application/json" } : {}),
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
   const response = await fetch(`/api${url}`, {
     ...init,
-    headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...init?.headers },
+    headers,
   });
+  if (response.status === 401) {
+    window.dispatchEvent(new Event("npati:unauthorized"));
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
     const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
@@ -290,6 +307,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
+  const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
@@ -308,10 +326,16 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
   const nextProgressRevealRef = useRef(0);
   const suggestions = useMemo(() => ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"], [business?.id]);
   async function loadConversations(preferred?: string) {
-    if (!business) return;
+    if (!business) return [] as Message[];
     const rows = await api<Conversation[]>(`/businesses/${business.id}/conversations`); setConversations(rows);
     const next = preferred ?? selected ?? rows[0]?.id ?? null; setSelected(next);
-    if (next) setMessages((await api<{ messages: Message[] }>(`/businesses/${business.id}/conversations/${next}`)).messages); else setMessages([]);
+    if (next) {
+      const loaded = (await api<{ messages: Message[] }>(`/businesses/${business.id}/conversations/${next}`)).messages;
+      setMessages(loaded);
+      return loaded;
+    }
+    setMessages([]);
+    return [] as Message[];
   }
   useEffect(() => {
     setSelected(null); setMessages([]); setReplyMeta(null); setNotice(""); setActiveTurn(""); resetProgress();
@@ -420,14 +444,16 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
   }
   if (!business) return <><PageIntro eyebrow="Conversation" title="Chat" copy="Your AI Business Agent uses the active business as context." /><EmptyBusiness feature="Conversations" /></>;
   async function submit(event: FormEvent) {
-    event.preventDefault(); const message = input.trim(); if (!message || sending) return;
+    event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
     const optimisticId = `pending-${Date.now()}`;
-    setActiveTurn(message);
-    setMessages((current) => [...current, { id: optimisticId, role: "user", content: message, createdAt: new Date().toISOString() }]);
+    const sentAttachments = attachments;
+    const optimisticContent = message;
+    setActiveTurn(optimisticContent);
+    setMessages((current) => [...current, { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments }]);
     resetProgress();
-    setSending(true); setNotice(""); setInput(""); setReplyMeta(null);
+    setSending(true); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     try {
-      const result = await streamChat<AgentReply>({ message, conversationId: selected ?? undefined }, enqueueProgress);
+      const result = await streamChat<AgentReply>({ message, conversationId: selected ?? undefined, attachments: sentAttachments }, enqueueProgress);
       setReplyMeta(result); await loadConversations(result.conversationId);
       setProgressComplete(true);
       navigate(`/c/${result.conversationId}`, { replace: !selected });
@@ -435,8 +461,22 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
     } catch (reason) {
       const typed = reason as Error & { code?: string };
       setProgressFailed(true);
-      setMessages((current) => current.filter((item) => item.id !== optimisticId));
-      setNotice(typed.message); setInput(message);
+      setNotice(typed.message);
+      try {
+        const loaded = await loadConversations(selected ?? undefined);
+        const latestUser = [...loaded].reverse().find((item) => item.role === "user");
+        const persisted = Boolean(latestUser)
+          && (!message || latestUser!.content.includes(message))
+          && sentAttachments.every((item) => latestUser!.content.includes(encodeURIComponent(item.name)));
+        if (!persisted) {
+          setInput(message);
+          setAttachments(sentAttachments);
+        }
+        window.dispatchEvent(new Event("npati:conversations-changed"));
+      } catch {
+        setMessages((current) => current.filter((item) => item.id !== optimisticId));
+        setInput(message); setAttachments(sentAttachments);
+      }
     } finally { setSending(false); }
   }
   async function remember() {
@@ -458,7 +498,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
           {messages.length === 0 && <div className="chat-welcome"><span>N</span><h2>What should we work on?</h2><p>I’ll use the context for {business.name} and won’t invent missing facts.</p><div>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div></div>}
           {messages.map((message, index) => <Fragment key={message.id}>
             {progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && message.role === "assistant" && index === messages.length - 1 && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed failed={progressFailed} />}
-            <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><ChatMessageContent content={message.content} /></article>
+            <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><PendingMessageAttachments value={message.attachments ?? []} /><ChatMessageContent content={message.content} /></article>
           </Fragment>)}
           {!progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed={false} failed={progressFailed} />}
           {sending && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
@@ -467,8 +507,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId }: 
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
+          <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder="Ask about your business, goals, audience, or next move…" />
-          <div><button disabled={sending || !input.trim()}>Send →</button></div>
+          <div><button disabled={sending || (!input.trim() && attachments.length === 0)}>Send →</button></div>
         </form>
       </div>
     </>

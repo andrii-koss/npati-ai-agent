@@ -1,0 +1,187 @@
+import { buildApp } from "../apps/agent-api/src/app";
+import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
+import type { AuthProvider } from "../apps/agent-api/src/auth";
+import type { AIEngine, OmniRouteComboInput } from "@npati/omniroute-adapter";
+import type { AuthContext } from "@npati/workspace";
+import { InMemoryWorkspaceStore } from "@npati/workspace";
+import type { OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const apps: Array<ReturnType<typeof buildApp>> = [];
+afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
+
+function engine(overrides: Partial<AIEngine> = {}): AIEngine {
+  return {
+    chat: async () => ({ content: "Manager final answer", model: "auto" }),
+    async *stream() { yield ""; },
+    listModels: async () => [], getModel: async () => undefined,
+    executeTool: async () => ({ results: [{ title: "Evidence" }] }),
+    searchMemory: async () => [], saveMemory: async () => undefined,
+    getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    ensureA2AEnabled: async () => undefined,
+    a2aSend: async () => ({ taskId: "a2a-task", content: '{"mode":"single","agentIds":[],"toolRequests":[]}', metadata: {} }),
+    cancelA2ATask: async () => undefined,
+    ensureCombo: async (input) => ({ name: input.name }),
+    ...overrides,
+  };
+}
+const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+
+async function setup(ai: AIEngine, active: { value: AuthContext }, companyRunTimeoutMs = 5_000) {
+  const store = new InMemoryWorkspaceStore();
+  const auth: AuthProvider = { authenticate: async () => ({ ...active.value, permissions: [...active.value.permissions] }) };
+  const app = buildApp({ workspaceStore: store, authProvider: auth, aiEngine: ai, marketplace, companyRunTimeoutMs });
+  apps.push(app);
+  const company = await app.inject({ method: "POST", url: "/companies", headers: { "idempotency-key": "company-runtime-001" }, payload: { name: "Runtime Co" } });
+  return { app, companyId: company.json().id as string };
+}
+async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key: string, input: Record<string, unknown>) {
+  const response = await app.inject({ method: "POST", url: `/companies/${companyId}/agents`, headers: { "idempotency-key": key }, payload: input });
+  expect(response.statusCode).toBe(201);
+  return response.json() as { id: string };
+}
+
+describe("Company delegation runtime", () => {
+  it("uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency", async () => {
+    const combos: OmniRouteComboInput[] = [];
+    const chat = vi.fn(async () => ({ content: "Reviewed final answer", model: "pipeline" }));
+    const executeTool = vi.fn(async () => ({ results: [{ title: "Verified source" }] }));
+    let plan = '{"mode":"pipeline","agentIds":[],"toolRequests":[]}';
+    let releasePlan!: () => void;
+    const gate = new Promise<void>((resolve) => { releasePlan = resolve; });
+    let planningStarted!: () => void;
+    const started = new Promise<void>((resolve) => { planningStarted = resolve; });
+    const a2aSend = vi.fn(async () => { planningStarted(); await gate; return { taskId: "a2a-101", content: plan, metadata: {} }; });
+    const ai = engine({ chat, executeTool, a2aSend, ensureCombo: async (input) => { combos.push(input); return { name: input.name }; } });
+    const active = { value: { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] } };
+    const { app, companyId } = await setup(ai, active);
+    const manager = await addAgent(app, companyId, "runtime-manager-001", { name: "Manager", role: "Coordinator" });
+    const writer = await addAgent(app, companyId, "runtime-writer-001", { name: "Writer", role: "Writer", modelId: undefined, tools: ["Web Search", "Knowledge"] });
+    const reviewer = await addAgent(app, companyId, "runtime-reviewer-001", { name: "Reviewer", role: "Reviewer" });
+    await app.inject({ method: "PUT", url: `/companies/${companyId}/main-agent`, payload: { agentId: manager.id, expectedRevision: 1 } });
+    plan = JSON.stringify({ mode: "pipeline", agentIds: [writer.id], reviewerAgentId: reviewer.id,
+      toolRequests: [{ agentId: writer.id, tool: "web.search", input: { query: "NPATI evidence" } }, { agentId: writer.id, tool: "knowledge", input: { query: "NPATI policy" } }] });
+    const request = { method: "POST" as const, url: `/companies/${companyId}/runs`,
+      headers: { "idempotency-key": "runtime-run-001" }, payload: { task: "Research and write an article", mode: "auto" } };
+    const first = app.inject(request);
+    await started;
+    const duplicates = await Promise.all(Array.from({ length: 8 }, () => app.inject(request)));
+    releasePlan();
+    const completed = await first;
+    const runId = completed.json().run.id as string;
+    expect(new Set([completed, ...duplicates].map((response) => response.json().run.id))).toEqual(new Set([runId]));
+    expect(a2aSend).toHaveBeenCalledTimes(1);
+    const planningPrompt = JSON.stringify(a2aSend.mock.calls);
+    expect(planningPrompt).toContain("non-empty specific search query");
+    expect(planningPrompt).toContain("Populate required input fields");
+    expect(executeTool).toHaveBeenCalledWith("web.search", { query: "NPATI evidence" });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(combos.some((combo) => combo.strategy === "pipeline")).toBe(true);
+    expect(combos.filter((combo) => combo.strategy === "priority").every((combo) => combo.models.includes("auto/smart"))).toBe(true);
+    expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
+      combo.config?.maxRetries === 2 && combo.config?.failoverBeforeRetry === true)).toBe(true);
+    expect(chat).toHaveBeenCalledWith(expect.objectContaining({ model: expect.stringMatching(/^npati\/p\//) }));
+    const details = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` });
+    expect(details.json().run).toMatchObject({ status: "completed", executionMode: "pipeline", result: "Reviewed final answer" });
+    expect(details.json().steps).toHaveLength(3);
+    expect(details.json().toolAudit.map((entry: { status: string }) => entry.status)).toEqual(["requested", "succeeded", "requested", "succeeded"]);
+    active.value = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read", "business:manage"] };
+    expect((await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` })).statusCode).toBe(403);
+  });
+
+  it("uses OmniRoute Fusion for parallel workers and blocks forbidden tools in backend audit", async () => {
+    const combos: OmniRouteComboInput[] = [];
+    let plan = "";
+    const ai = engine({
+      a2aSend: async () => ({ taskId: "a2a-fusion", content: plan, metadata: {} }),
+      ensureCombo: async (input) => { combos.push(input); return { name: input.name }; },
+    });
+    const active = { value: { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] } };
+    const { app, companyId } = await setup(ai, active);
+    const manager = await addAgent(app, companyId, "fusion-manager-001", { name: "Manager", role: "Coordinator" });
+    const research = await addAgent(app, companyId, "fusion-research-001", { name: "Research", role: "Research", tools: ["Web Search"] });
+    const seo = await addAgent(app, companyId, "fusion-seo-0000001", { name: "SEO", role: "SEO" });
+    await app.inject({ method: "PUT", url: `/companies/${companyId}/main-agent`, payload: { agentId: manager.id, expectedRevision: 1 } });
+    plan = JSON.stringify({ mode: "fusion", agentIds: [research.id, seo.id], toolRequests: [] });
+    const fusion = await app.inject({ method: "POST", url: `/companies/${companyId}/runs`,
+      headers: { "idempotency-key": "fusion-run-0001" }, payload: { task: "Compare two approaches", mode: "fusion" } });
+    expect(fusion.json().run).toMatchObject({ status: "completed", executionMode: "fusion" });
+    expect(combos.some((combo) => combo.strategy === "fusion" && combo.models.length === 2)).toBe(true);
+    plan = JSON.stringify({ mode: "single", agentIds: [seo.id],
+      toolRequests: [{ agentId: seo.id, tool: "knowledge", input: { query: "private company facts" } }] });
+    const denied = await app.inject({ method: "POST", url: `/companies/${companyId}/runs`,
+      headers: { "idempotency-key": "denied-run-0001" }, payload: { task: "Read private Company Knowledge" } });
+    expect(denied.statusCode).toBe(403);
+    const audit = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${denied.json().run.id}` });
+    expect(audit.json().run).toMatchObject({ status: "failed", errorCode: "TOOL_FORBIDDEN" });
+    expect(audit.json().toolAudit).toEqual([expect.objectContaining({ agentId: seo.id, toolName: "knowledge", decision: "denied", status: "blocked" })]);
+  });
+
+  it("cancels a queued run immediately instead of leaving it stuck in cancelling", async () => {
+    const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
+    const company=await store.createCompany(ctx,{name:"Queued Cancel Co"},"queued-cancel-company");const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager"},"queued-cancel-agent");await store.setCompanyMainAgent(ctx,company.id,manager.id,company.revision);
+    const runtime=new CompanyDelegationRuntime(store,engine());const created=await runtime.create(ctx,company.id,{task:"Do not execute",mode:"single"},"queued-cancel-run");
+    const cancelled=await runtime.cancel(ctx,company.id,created.run.id);expect(cancelled.run).toMatchObject({status:"cancelled",cancelRequested:true,errorCode:"RUN_CANCELLED"});
+  });
+
+  it("does not retrieve Company Knowledge when any workflow participant lacks permission", async () => {
+    const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
+    const company=await store.createCompany(ctx,{name:"Knowledge Policy Co"},"knowledge-policy-company");
+    const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager",tools:["Knowledge"]},"knowledge-policy-manager");
+    const external=await store.createCompanyAgent(ctx,company.id,{name:"External",role:"External",tools:[]},"knowledge-policy-external");
+    await store.setCompanyMainAgent(ctx,company.id,manager.id,company.revision);
+    const retrieve=vi.fn(async()=>({chunks:[{content:"private"}],memories:[]}));
+    const runtime=new CompanyDelegationRuntime(store,engine({a2aSend:async()=>({taskId:"policy-plan",content:JSON.stringify({mode:"single",agentIds:[external.id],toolRequests:[]}),metadata:{}})}),5_000,undefined,retrieve);
+    const result=await runtime.execute(ctx,company.id,{task:"Use private knowledge",mode:"single"},"knowledge-policy-run");
+    expect(result.run.status).toBe("completed");
+    expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it("cancels an active A2A planning request and does not execute a duplicate run", async () => {
+    let started!: () => void;
+    const planning = new Promise<void>((resolve) => { started = resolve; });
+    const a2aSend = vi.fn(({ signal }: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+      started();
+      signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+    const chat = vi.fn(async () => ({ content: "should not run" }));
+    const ai = engine({ a2aSend: a2aSend as AIEngine["a2aSend"], chat });
+    const active = { value: { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] } };
+    const { app, companyId } = await setup(ai, active);
+    const manager = await addAgent(app, companyId, "cancel-manager-001", { name: "Manager", role: "Coordinator" });
+    await app.inject({ method: "PUT", url: `/companies/${companyId}/main-agent`, payload: { agentId: manager.id, expectedRevision: 1 } });
+    const request = { method: "POST" as const, url: `/companies/${companyId}/runs`,
+      headers: { "idempotency-key": "cancel-run-0001" }, payload: { task: "Long planning task" } };
+    const running = app.inject(request);
+    await planning;
+    const duplicate = await app.inject(request);
+    const runId = duplicate.json().run.id as string;
+    expect(duplicate.json().run.status).toBe("planning");
+    await app.inject({ method: "POST", url: `/companies/${companyId}/runs/${runId}/cancel` });
+    const cancelled = await running;
+    expect(cancelled.json().run).toMatchObject({ id: runId, status: "cancelled", errorCode: "RUN_CANCELLED" });
+    expect(a2aSend).toHaveBeenCalledTimes(1);
+    expect(chat).not.toHaveBeenCalled();
+  });
+  it("persists provider failures and enforces the overall run timeout", async () => {
+    const active = { value: { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] } };
+    const failedSetup = await setup(engine({ chat: async () => { throw new Error("Provider unavailable"); } }), active);
+    const manager = await addAgent(failedSetup.app, failedSetup.companyId, "failed-manager-001", { name: "Manager", role: "Coordinator" });
+    await failedSetup.app.inject({ method: "PUT", url: `/companies/${failedSetup.companyId}/main-agent`, payload: { agentId: manager.id, expectedRevision: 1 } });
+    const failed = await failedSetup.app.inject({ method: "POST", url: `/companies/${failedSetup.companyId}/runs`,
+      headers: { "idempotency-key": "provider-failure-001" }, payload: { task: "Provider failure" } });
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json().run).toMatchObject({ status: "failed", errorCode: "RUN_FAILED", errorMessage: "Provider unavailable" });
+
+    const timeoutA2A = ({ signal }: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) =>
+      signal?.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")), { once: true }));
+    const timeoutSetup = await setup(engine({ a2aSend: timeoutA2A as AIEngine["a2aSend"] }), active, 25);
+    const timeoutManager = await addAgent(timeoutSetup.app, timeoutSetup.companyId, "timeout-manager-001", { name: "Manager", role: "Coordinator" });
+    await timeoutSetup.app.inject({ method: "PUT", url: `/companies/${timeoutSetup.companyId}/main-agent`, payload: { agentId: timeoutManager.id, expectedRevision: 1 } });
+    const timedOut = await timeoutSetup.app.inject({ method: "POST", url: `/companies/${timeoutSetup.companyId}/runs`,
+      headers: { "idempotency-key": "timeout-run-0001" }, payload: { task: "Timeout task" } });
+    expect(timedOut.statusCode).toBe(504);
+    expect(timedOut.json().run).toMatchObject({ status: "failed", errorCode: "RUN_TIMEOUT" });
+  });
+
+});

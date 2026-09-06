@@ -4,8 +4,8 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
-import { WorkspaceAccessError } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
@@ -22,6 +22,49 @@ const memoryColumns = `id, workspace_id AS "workspaceId", business_id AS "busine
 const conversationColumns = `id, workspace_id AS "workspaceId", business_id AS "businessId", user_id AS "userId",
   title, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const onboardingColumns = 'id, workspace_id AS "workspaceId", user_id AS "userId", business_id AS "businessId", conversation_id AS "conversationId", scenario, status, current_step AS "currentStep", completed_fields AS "completedFields", skipped_fields AS "skippedFields", created_at AS "createdAt", updated_at AS "updatedAt"';
+const companyColumns = `id, workspace_id AS "workspaceId", user_id AS "userId", business_id AS "businessId",
+  name, website, industry, description, products_services AS "productsServices", languages, brand_tone AS "brandTone",
+  company_instructions AS "companyInstructions", knowledge, memory, main_agent_id AS "mainAgentId", status, revision,
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", name, role, description,
+  system_instruction AS "systemInstruction", prompt_guidelines AS "promptGuidelines",
+  recommended_prompts AS "recommendedPrompts", model_id AS "modelId", fallback_model_id AS "fallbackModelId",
+  tools_json AS tools, is_active AS "isActive", position_x AS "positionX", position_y AS "positionY",
+  sort_order AS "sortOrder", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+const companyEdgeColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  parent_agent_id AS "parentAgentId", child_agent_id AS "childAgentId", relation_type AS "relationType", created_at AS "createdAt"`;
+const companyRunColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+  main_agent_id AS "mainAgentId", idempotency_key AS "idempotencyKey", task, requested_mode AS "requestedMode",
+  execution_mode AS "executionMode", status, selected_agent_ids AS "selectedAgentIds",
+  omniroute_task_id AS "omnirouteTaskId", omniroute_combo_name AS "omnirouteComboName",
+  result, error_code AS "errorCode", error_message AS "errorMessage", cancel_requested AS "cancelRequested",
+  worker_id AS "workerId", lease_expires_at AS "leaseExpiresAt", last_heartbeat_at AS "lastHeartbeatAt",
+  attempt_count AS "attemptCount", max_attempts AS "maxAttempts", next_attempt_at AS "nextAttemptAt",
+  context_snapshot AS "contextSnapshot",
+  created_at AS "createdAt", started_at AS "startedAt", completed_at AS "completedAt", updated_at AS "updatedAt"`;
+const companyRunStepColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
+  agent_id AS "agentId", step_order AS "stepOrder", lane, role, status, model_id AS "modelId",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const companyToolAuditColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
+  agent_id AS "agentId", tool_name AS "toolName", decision, status, input_summary AS "inputSummary",
+  error_message AS "errorMessage", created_at AS "createdAt", completed_at AS "completedAt"`;
+
+import migration004 from './migration-004';
+import migration005 from './migration-005';
+import migration006 from './migration-006';
+import migration007 from './migration-007';
+import migration008 from './migration-008';
+import migration009 from './migration-009';
+import migration010 from './migration-010';
+import migration011 from './migration-011';
+import migration012 from './migration-012';
+import migration013 from './migration-013';
+import migration014 from './migration-014';
+import migration015 from './migration-015';
+import migration016 from './migration-016';
+import migration017 from './migration-017';
+import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
+type StoredUserSetting = import('./types').UserSetting;
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private readonly pool: Pool;
@@ -41,12 +84,261 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const userSettingsMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='004_workspace_user_settings'`);
+    if (!userSettingsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration004);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('004_workspace_user_settings') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const companyMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='005_company_model'`);
+    if (!companyMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration005);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('005_company_model') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const separateCompanyMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='006_separate_companies_agents'`);
+    if (!separateCompanyMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration006);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('006_separate_companies_agents') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const companyRuntimeMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='007_company_agent_runtime'`);
+    if (!companyRuntimeMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration007);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('007_company_agent_runtime') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const runtimeHistoryMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='008_company_runtime_history'`);
+    if (!runtimeHistoryMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration008);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('008_company_runtime_history') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const backgroundRunsMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='009_company_background_runs'`);
+    if (!backgroundRunsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration009);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('009_company_background_runs') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    await this.pool.query("ALTER TABLE company_agent_runs ADD COLUMN IF NOT EXISTS context_snapshot jsonb").catch(() => undefined);
+    const fileStorageMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='010_central_file_metadata'`);
+    if (!fileStorageMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration010);
+        await client.query(`INSERT INTO schema_migrations(version) VALUES ('010_central_file_metadata') ON CONFLICT DO NOTHING`);
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const fileLifecycleMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='011_chat_file_lifecycle'");
+    if (!fileLifecycleMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration011);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('011_chat_file_lifecycle') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const fileBusinessLifecycleMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='012_file_business_lifecycle'");
+    if (!fileBusinessLifecycleMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration012);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('012_file_business_lifecycle') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const storageProtectionMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='013_storage_protection'");
+    if (!storageProtectionMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(migration013);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('013_storage_protection') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+    const companyKnowledgeMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='014_company_knowledge'");
+    if (!companyKnowledgeMigration.rowCount) {
+      const client = await this.pool.connect();
+      try { await client.query('BEGIN'); await client.query(migration014); await client.query("INSERT INTO schema_migrations(version) VALUES ('014_company_knowledge') ON CONFLICT DO NOTHING"); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const companyAutomationsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='015_company_automations'");
+    if (!companyAutomationsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try { await client.query('BEGIN'); await client.query(migration015); await client.query("INSERT INTO schema_migrations(version) VALUES ('015_company_automations') ON CONFLICT DO NOTHING"); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const companyApprovalsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='016_company_approvals'");
+    if (!companyApprovalsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try { await client.query('BEGIN'); await client.query(migration016); await client.query("INSERT INTO schema_migrations(version) VALUES ('016_company_approvals') ON CONFLICT DO NOTHING"); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const companyWebhooksMcpMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='017_webhooks_and_mcp'");
+    if (!companyWebhooksMcpMigration.rowCount) {
+      const client = await this.pool.connect();
+      try { await client.query('BEGIN'); await client.query(migration017); await client.query("INSERT INTO schema_migrations(version) VALUES ('017_webhooks_and_mcp') ON CONFLICT DO NOTHING"); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const auditUsageMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='018_audit_and_usage'");
+    if (!auditUsageMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration018 } = await import("./migration-018");
+        await runMigration018(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('018_audit_and_usage') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const apiKeysMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='019_api_keys_and_encryption'");
+    if (!apiKeysMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration019 } = await import("./migration-019");
+        await runMigration019(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('019_api_keys_and_encryption') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const groupSessionsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='020_group_sessions'");
+    if (!groupSessionsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration020 } = await import("./migration-020");
+        await runMigration020(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('020_group_sessions') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const oauthTokensMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='021_oauth_refresh_tokens'");
+    if (!oauthTokensMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration021 } = await import("./migration-021");
+        await runMigration021(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('021_oauth_refresh_tokens') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const channelPairingsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='022_channel_pairings'");
+    if (!channelPairingsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration022 } = await import("./migration-022");
+        await runMigration022(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('022_channel_pairings') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const scopedMemoriesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='023_scoped_memories'");
+    if (!scopedMemoriesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration023 } = await import("./migration-023");
+        await runMigration023(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('023_scoped_memories') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const webhooksMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='024_webhook_subscriptions'");
+    if (!webhooksMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration024 } = await import("./migration-024");
+        await runMigration024(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('024_webhook_subscriptions') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
   async health() {
     try { await this.pool.query("SELECT 1"); return "ok" as const; }
     catch { return "unavailable" as const; }
+  }
+
+  async getUserSetting(context: AuthContext, key: string): Promise<StoredUserSetting | null> {
+    await this.ensureMemberIdentity(context);
+    const result = await this.pool.query<StoredUserSetting & { updated_at: string }>(`SELECT setting_key AS key, value, revision,
+      updated_at::text AS updated_at FROM workspace_user_settings
+      WHERE workspace_id=$1 AND user_id=$2 AND setting_key=$3`, [context.workspaceId, context.userId, key]);
+    const row = result.rows[0];
+    return row ? { key: row.key, value: row.value, revision: row.revision, updatedAt: row.updated_at } : null;
+  }
+
+  async setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number): Promise<StoredUserSetting | null> {
+    await this.ensureMemberIdentity(context);
+    const parameters = [context.workspaceId, context.userId, key, JSON.stringify(value), expectedRevision];
+    const sql = expectedRevision === 0
+      ? `INSERT INTO workspace_user_settings(workspace_id,user_id,setting_key,value,revision)
+          VALUES ($1,$2,$3,$4::jsonb,1) ON CONFLICT DO NOTHING
+          RETURNING setting_key AS key,value,revision,updated_at::text AS updated_at`
+      : `UPDATE workspace_user_settings SET value=$4::jsonb,revision=revision+1,updated_at=now()
+          WHERE workspace_id=$1 AND user_id=$2 AND setting_key=$3 AND revision=$5
+          RETURNING setting_key AS key,value,revision,updated_at::text AS updated_at`;
+    const queryParameters = expectedRevision === 0 ? parameters.slice(0, 4) : parameters;
+    const result = await this.pool.query<StoredUserSetting & { updated_at: string }>(sql, queryParameters);
+    const row = result.rows[0];
+    return row ? { key: row.key, value: row.value, revision: row.revision, updatedAt: row.updated_at } : null;
+  }
+
+  private async ensureMemberIdentity(context: AuthContext) {
+    const member = await this.pool.query('SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2', [context.workspaceId, context.userId]);
+    if (!member.rowCount) await this.ensureIdentity(context);
   }
 
   private async ensureIdentity(context: AuthContext) {
@@ -80,6 +372,20 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND activation_status='active' ORDER BY created_at`, [context.workspaceId])).rows;
   }
 
+  async listBusinessesPage(context: AuthContext, requestedLimit = 20, cursor?: string) {
+    await this.assertMember(context);
+    const limit = companyPageLimit(requestedLimit);
+    const after = decodeBusinessCursor(cursor);
+    const result = await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses
+      WHERE workspace_id=$1 AND activation_status='active'
+        AND ($2::timestamptz IS NULL OR (created_at,id) > ($2::timestamptz,$3::text))
+      ORDER BY created_at,id LIMIT $4`, [context.workspaceId, after?.createdAt ?? null, after?.id ?? '', limit + 1]);
+    const hasMore = result.rows.length > limit;
+    const items = result.rows.slice(0, limit);
+    const last = items.at(-1);
+    return { items, nextCursor: hasMore && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
   async overview(context: AuthContext): Promise<WorkspaceOverview> {
     await this.ensureIdentity(context);
     const role = await this.assertMember(context);
@@ -108,16 +414,20 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return business;
   }
 
-  async createBusiness(context: AuthContext, input: BusinessInput) {
+  async createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
     await this.assertMember(context);
     const id = randomUUID();
-    const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null];
+    const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null, idempotencyKey ?? null];
     if (!values[3]) throw new Error("Business name is required");
-    const result = await this.pool.query<Business>(`INSERT INTO businesses(id,workspace_id,owner_user_id,name,business_type,industry,niche,country,market,website,business_stage,team_type,business_model,presence_type,description,audience_summary,products_services_summary)
-      VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${businessColumns}`, values);
+    const result = await this.pool.query<Business>(`INSERT INTO businesses(id,workspace_id,owner_user_id,name,business_type,industry,niche,country,market,website,business_stage,team_type,business_model,presence_type,description,audience_summary,products_services_summary,create_request_key)
+      VALUES (${values.map((_, index) => `$${index + 1}`).join(",")})
+      ON CONFLICT (workspace_id,owner_user_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
+      RETURNING ${businessColumns}`, values);
+    const business = result.rows[0] ?? (idempotencyKey ? (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0] : undefined);
+    if (!business) throw new Error('Could not create company');
     const count = await this.pool.query("SELECT count(*)::int AS count FROM businesses WHERE workspace_id=$1 AND activation_status='active'", [context.workspaceId]);
-    if (count.rows[0].count === 1) await this.setCurrentBusiness(context, id);
-    return result.rows[0]!;
+    if (count.rows[0].count === 1) await this.setCurrentBusiness(context, business.id);
+    return business;
   }
 
   async updateBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
@@ -136,6 +446,426 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async deleteBusiness(context: AuthContext, businessId: string) {
     await this.getBusiness(context, businessId);
     return Boolean((await this.pool.query("DELETE FROM businesses WHERE id=$1 AND workspace_id=$2 RETURNING id", [businessId, context.workspaceId])).rowCount);
+  }
+
+
+  private async assertCompany(context: AuthContext, companyId: string) {
+    await this.assertMember(context);
+    const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3`, [companyId, context.workspaceId, context.userId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Company is not available to this user");
+    return result.rows[0]!;
+  }
+
+  async listCompanies(context: AuthContext, requestedLimit = 20, cursor?: string) {
+    await this.assertMember(context);
+    const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
+    const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
+      WHERE workspace_id=$1 AND user_id=$2 AND ($3::timestamptz IS NULL OR (created_at,id) > ($3::timestamptz,$4::text))
+      ORDER BY created_at,id LIMIT $5`, [context.workspaceId, context.userId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
+    const items = result.rows.slice(0, limit), last = items.at(-1);
+    return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+  async getCompany(context: AuthContext, companyId: string) { return this.assertCompany(context, companyId); }
+
+  async createCompany(context: AuthContext, input: CompanyInput, idempotencyKey: string) {
+    await this.assertMember(context);
+    const name = input.name?.trim();
+    if (!name) throw new Error("Company name is required");
+    if (input.businessId) await this.getBusiness(context, input.businessId);
+    const values = [randomUUID(), context.workspaceId, context.userId, input.businessId ?? null, name, input.website ?? null,
+      input.industry ?? null, input.description ?? null, input.productsServices ?? null, JSON.stringify(input.languages ?? []),
+      input.brandTone ?? null, input.companyInstructions ?? null, JSON.stringify(input.knowledge ?? []),
+      JSON.stringify(input.memory ?? {}), input.status ?? "active", idempotencyKey];
+    const result = await this.pool.query<Company>(`INSERT INTO companies(
+      id,workspace_id,user_id,business_id,name,website,industry,description,products_services,languages,
+      brand_tone,company_instructions,knowledge,memory,status,create_request_key)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb,$14::jsonb,$15,$16)
+      ON CONFLICT (workspace_id,user_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
+      RETURNING ${companyColumns}`, values);
+    const company = result.rows[0] ?? (await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
+      WHERE workspace_id=$1 AND user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0];
+    if (!company) throw new Error("Could not create company");
+    return company;
+  }
+
+  async convertBusinessToCompany(context: AuthContext, businessId: string, input: BusinessToCompanyInput, idempotencyKey: string): Promise<{ company: Company; created: boolean }> {
+    const business = await this.getBusiness(context, businessId);
+    const existing = (await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
+      WHERE workspace_id=$1 AND user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0];
+    if (existing) {
+      return { company: existing, created: false };
+    }
+
+    const memory: Record<string, unknown> = {};
+    if (input.includeConfirmedMemory) {
+      const memories = await this.listMemory(context, businessId);
+      memory["confirmed_business_facts"] = memories.map((m) => m.content);
+    }
+    if (input.includeGoals) {
+      const goals = await this.listGoals(context, businessId);
+      memory["transferred_goals"] = goals.map((g) => ({ title: g.title, description: g.description, status: g.status }));
+    }
+
+    const instructionParts: string[] = [];
+    if (input.includeInstructions) {
+      if (business.description) instructionParts.push(`Business Description: ${business.description}`);
+      if (business.businessModel) instructionParts.push(`Business Model: ${business.businessModel}`);
+    }
+    if (input.includeResearchSummary) {
+      if (business.audienceSummary) instructionParts.push(`Target Audience: ${business.audienceSummary}`);
+      if (business.market) instructionParts.push(`Market & Niche: ${business.market} / ${business.niche ?? ""}`);
+    }
+
+    const companyInput: CompanyInput = {
+      name: input.companyName?.trim() || business.name,
+      businessId: business.id,
+      website: business.website,
+      industry: business.industry,
+      description: business.description,
+      productsServices: business.productsServicesSummary,
+      companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
+      memory,
+      languages: ["Ukrainian", "English"],
+      status: "active",
+    };
+
+    const company = await this.createCompany(context, companyInput, idempotencyKey);
+
+    const mainAgent = await this.createCompanyAgent(context, company.id, {
+      name: "Main Agent",
+      role: "Coordinator",
+      description: `Primary executive agent for ${company.name}`,
+      tools: ["web.search", "files", "knowledge"],
+      isActive: true,
+    }, `${idempotencyKey}:main-agent`);
+
+    await this.setCompanyMainAgent(context, company.id, mainAgent.id, company.revision);
+    const updatedCompany = await this.getCompany(context, company.id);
+
+    return { company: updatedCompany, created: true };
+  }
+
+  async updateCompany(context: AuthContext, companyId: string, input: Partial<CompanyInput>, expectedRevision: number) {
+    await this.assertCompany(context, companyId);
+    if (input.businessId) await this.getBusiness(context, input.businessId);
+    if (input.name !== undefined && !input.name.trim()) throw new Error("Company name is required");
+    const patch = JSON.stringify(input);
+    const result = await this.pool.query<Company>(`UPDATE companies SET
+      business_id=CASE WHEN $4::jsonb ? 'businessId' THEN NULLIF($4::jsonb->>'businessId','') ELSE business_id END,
+      name=CASE WHEN $4::jsonb ? 'name' THEN trim($4::jsonb->>'name') ELSE name END,
+      website=CASE WHEN $4::jsonb ? 'website' THEN NULLIF($4::jsonb->>'website','') ELSE website END,
+      industry=CASE WHEN $4::jsonb ? 'industry' THEN NULLIF($4::jsonb->>'industry','') ELSE industry END,
+      description=CASE WHEN $4::jsonb ? 'description' THEN NULLIF($4::jsonb->>'description','') ELSE description END,
+      products_services=CASE WHEN $4::jsonb ? 'productsServices' THEN NULLIF($4::jsonb->>'productsServices','') ELSE products_services END,
+      languages=CASE WHEN $4::jsonb ? 'languages' THEN $4::jsonb->'languages' ELSE languages END,
+      brand_tone=CASE WHEN $4::jsonb ? 'brandTone' THEN NULLIF($4::jsonb->>'brandTone','') ELSE brand_tone END,
+      company_instructions=CASE WHEN $4::jsonb ? 'companyInstructions' THEN NULLIF($4::jsonb->>'companyInstructions','') ELSE company_instructions END,
+      status=CASE WHEN $4::jsonb ? 'status' THEN $4::jsonb->>'status' ELSE status END,
+      revision=revision+1,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND revision=$5 RETURNING ${companyColumns}`,
+      [companyId, context.workspaceId, context.userId, patch, expectedRevision]);
+    if (!result.rowCount) throw new Error("Company was changed by another request. Reload and try again.");
+    return result.rows[0]!;
+  }
+
+  async deleteCompany(context: AuthContext, companyId: string) {
+    await this.assertCompany(context, companyId);
+    return Boolean((await this.pool.query("DELETE FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3 RETURNING id", [companyId, context.workspaceId, context.userId])).rowCount);
+  }
+
+
+  async setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {
+    await this.assertCompany(context, companyId);
+    if (agentId) await this.getCompanyAgent(context, companyId, agentId);
+    const result = await this.pool.query<Company>(`UPDATE companies SET main_agent_id=$4,revision=revision+1,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND revision=$5 RETURNING ${companyColumns}`,
+      [companyId, context.workspaceId, context.userId, agentId, expectedRevision]);
+    if (!result.rowCount) throw new Error("Company was changed by another request. Reload and try again.");
+    return result.rows[0]!;
+  }
+
+  async listCompanyAgents(context: AuthContext, companyId: string) {
+    await this.assertCompany(context, companyId);
+    return (await this.pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
+      WHERE workspace_id=$1 AND company_id=$2 ORDER BY sort_order,created_at,id`, [context.workspaceId, companyId])).rows;
+  }
+
+  async listCompanyAgentsPage(context: AuthContext, companyId: string, requestedLimit = 50, cursor?: string) {
+    await this.assertCompany(context, companyId);
+    const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
+    const result = await this.pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::timestamptz IS NULL OR (created_at,id) > ($3::timestamptz,$4::text))
+      ORDER BY created_at,id LIMIT $5`, [context.workspaceId, companyId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
+    const items = result.rows.slice(0, limit), last = items.at(-1);
+    return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+  async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3`, [agentId, context.workspaceId, companyId]);
+    if (!result.rowCount) throw new WorkspaceNotFoundError("Agent was not found in this company");
+    return result.rows[0]!;
+  }
+
+  async createCompanyAgent(context: AuthContext, companyId: string, input: CompanyAgentInput, idempotencyKey: string) {
+    await this.assertCompany(context, companyId);
+    const name = input.name?.trim(), role = input.role?.trim();
+    if (!name || !role) throw new Error("Agent name and role are required");
+    const values = [randomUUID(), context.workspaceId, companyId, name, role, input.description ?? null,
+      input.systemInstruction ?? null, input.promptGuidelines ?? null, JSON.stringify(input.recommendedPrompts ?? []),
+      input.modelId ?? null, input.fallbackModelId ?? null, JSON.stringify(input.tools ?? []), input.isActive ?? true,
+      input.positionX ?? null, input.positionY ?? null, input.sortOrder ?? 0, idempotencyKey];
+    const result = await this.pool.query<CompanyAgent>(`INSERT INTO company_agents(
+      id,workspace_id,company_id,name,role,description,system_instruction,prompt_guidelines,recommended_prompts,
+      model_id,fallback_model_id,tools_json,is_active,position_x,position_y,sort_order,create_request_key)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::jsonb,$13,$14,$15,$16,$17)
+      ON CONFLICT (workspace_id,company_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
+      RETURNING ${companyAgentColumns}`, values);
+    const agent = result.rows[0] ?? (await this.pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
+      WHERE workspace_id=$1 AND company_id=$2 AND create_request_key=$3`, [context.workspaceId, companyId, idempotencyKey])).rows[0];
+    if (!agent) throw new Error("Could not create company agent");
+    return agent;
+  }
+
+
+  async updateCompanyAgent(context: AuthContext, companyId: string, agentId: string, input: Partial<CompanyAgentInput>, expectedRevision: number) {
+    await this.getCompanyAgent(context, companyId, agentId);
+    if (input.name !== undefined && !input.name.trim()) throw new Error("Agent name is required");
+    if (input.role !== undefined && !input.role.trim()) throw new Error("Agent role is required");
+    const patch = JSON.stringify(input);
+    const result = await this.pool.query<CompanyAgent>(`UPDATE company_agents SET
+      name=CASE WHEN $4::jsonb ? 'name' THEN trim($4::jsonb->>'name') ELSE name END,
+      role=CASE WHEN $4::jsonb ? 'role' THEN trim($4::jsonb->>'role') ELSE role END,
+      description=CASE WHEN $4::jsonb ? 'description' THEN NULLIF($4::jsonb->>'description','') ELSE description END,
+      system_instruction=CASE WHEN $4::jsonb ? 'systemInstruction' THEN NULLIF($4::jsonb->>'systemInstruction','') ELSE system_instruction END,
+      prompt_guidelines=CASE WHEN $4::jsonb ? 'promptGuidelines' THEN NULLIF($4::jsonb->>'promptGuidelines','') ELSE prompt_guidelines END,
+      recommended_prompts=CASE WHEN $4::jsonb ? 'recommendedPrompts' THEN $4::jsonb->'recommendedPrompts' ELSE recommended_prompts END,
+      model_id=CASE WHEN $4::jsonb ? 'modelId' THEN NULLIF($4::jsonb->>'modelId','') ELSE model_id END,
+      fallback_model_id=CASE WHEN $4::jsonb ? 'fallbackModelId' THEN NULLIF($4::jsonb->>'fallbackModelId','') ELSE fallback_model_id END,
+      tools_json=CASE WHEN $4::jsonb ? 'tools' THEN $4::jsonb->'tools' ELSE tools_json END,
+      is_active=CASE WHEN $4::jsonb ? 'isActive' THEN ($4::jsonb->>'isActive')::boolean ELSE is_active END,
+      position_x=CASE WHEN $4::jsonb ? 'positionX' THEN ($4::jsonb->>'positionX')::double precision ELSE position_x END,
+      position_y=CASE WHEN $4::jsonb ? 'positionY' THEN ($4::jsonb->>'positionY')::double precision ELSE position_y END,
+      sort_order=CASE WHEN $4::jsonb ? 'sortOrder' THEN ($4::jsonb->>'sortOrder')::integer ELSE sort_order END,
+      revision=revision+1,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND revision=$5 RETURNING ${companyAgentColumns}`,
+      [agentId, context.workspaceId, companyId, patch, expectedRevision]);
+    if (!result.rowCount) throw new Error("Agent was changed by another request. Reload and try again.");
+    return result.rows[0]!;
+  }
+
+  async deleteCompanyAgent(context: AuthContext, companyId: string, agentId: string, expectedRevision: number) {
+    await this.assertCompany(context, companyId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [companyId]);
+      const current = await client.query<{ revision: number }>(`SELECT revision FROM company_agents
+        WHERE id=$1 AND workspace_id=$2 AND company_id=$3 FOR UPDATE`, [agentId, context.workspaceId, companyId]);
+      if (!current.rowCount) { await client.query("COMMIT"); return false; }
+      if (current.rows[0]!.revision !== expectedRevision) throw new Error("Agent was changed by another request. Reload and try again.");
+      await client.query(`DELETE FROM company_agent_edges
+        WHERE workspace_id=$1 AND company_id=$2 AND (parent_agent_id=$3 OR child_agent_id=$3)`, [context.workspaceId, companyId, agentId]);
+      await client.query(`UPDATE companies SET main_agent_id=NULL,revision=revision+1,updated_at=now()
+        WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND main_agent_id=$4`, [companyId, context.workspaceId, context.userId, agentId]);
+      await client.query("DELETE FROM company_agents WHERE id=$1 AND workspace_id=$2 AND company_id=$3", [agentId, context.workspaceId, companyId]);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
+    await this.assertCompany(context, companyId);
+    const filter = agentIds?.length ? [...new Set(agentIds)] : null;
+    return (await this.pool.query<CompanyAgentEdge>(`SELECT ${companyEdgeColumns} FROM company_agent_edges
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::text[] IS NULL OR (parent_agent_id=ANY($3::text[]) AND child_agent_id=ANY($3::text[])))
+      ORDER BY created_at,id`, [context.workspaceId, companyId, filter])).rows;
+  }
+
+
+  async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
+    await this.assertCompany(context, companyId);
+    await this.getCompanyAgent(context, companyId, childAgentId);
+    if (parentAgentId === childAgentId) throw new Error("An agent cannot be its own parent");
+    if (parentAgentId) await this.getCompanyAgent(context, companyId, parentAgentId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [companyId]);
+      await client.query("DELETE FROM company_agent_edges WHERE workspace_id=$1 AND company_id=$2 AND child_agent_id=$3",
+        [context.workspaceId, companyId, childAgentId]);
+      if (!parentAgentId) { await client.query("COMMIT"); return null; }
+      const cycle = await client.query(`WITH RECURSIVE descendants(id) AS (
+        SELECT child_agent_id FROM company_agent_edges WHERE workspace_id=$1 AND company_id=$2 AND parent_agent_id=$3
+        UNION
+        SELECT edge.child_agent_id FROM company_agent_edges edge JOIN descendants d ON edge.parent_agent_id=d.id
+        WHERE edge.workspace_id=$1 AND edge.company_id=$2
+      ) SELECT 1 FROM descendants WHERE id=$4 LIMIT 1`, [context.workspaceId, companyId, childAgentId, parentAgentId]);
+      if (cycle.rowCount) throw new Error("Circular agent relationships are not allowed");
+      const result = await client.query<CompanyAgentEdge>(`INSERT INTO company_agent_edges(
+        id,workspace_id,company_id,parent_agent_id,child_agent_id,relation_type)
+        VALUES ($1,$2,$3,$4,$5,'reports_to') RETURNING ${companyEdgeColumns}`,
+        [randomUUID(), context.workspaceId, companyId, parentAgentId, childAgentId]);
+      await client.query("COMMIT");
+      return result.rows[0]!;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion" }, idempotencyKey: string) {
+    const company = await this.assertCompany(context, companyId);
+    if (!company.mainAgentId) throw new Error("Select an active Main Agent before running the company");
+    const mainAgent = await this.getCompanyAgent(context, companyId, company.mainAgentId);
+    if (!mainAgent.isActive) throw new Error("The Main Agent is inactive");
+    const task = input.task?.trim();
+    if (!task) throw new Error("Company task is required");
+    const timestamp = new Date().toISOString();
+    const snapshot = {
+      contextType: "company",
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      companyId,
+      businessId: null,
+      agentId: mainAgent.id,
+      companyRevision: company.revision,
+      capturedAt: timestamp,
+    };
+    const result = await this.pool.query<CompanyAgentRun>(`INSERT INTO company_agent_runs(
+      id,workspace_id,company_id,user_id,main_agent_id,idempotency_key,task,requested_mode,context_snapshot)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (workspace_id,company_id,user_id,idempotency_key) DO NOTHING
+      RETURNING ${companyRunColumns}`,
+      [randomUUID(), context.workspaceId, companyId, context.userId, mainAgent.id, idempotencyKey, task, input.requestedMode, JSON.stringify(snapshot)]);
+    if (result.rows[0]) return { run: result.rows[0], created: true };
+    const existing = await this.pool.query<CompanyAgentRun>(`SELECT ${companyRunColumns} FROM company_agent_runs
+      WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND idempotency_key=$4`,
+      [context.workspaceId, companyId, context.userId, idempotencyKey]);
+    if (!existing.rows[0]) throw new Error("Could not create company agent run");
+    return { run: existing.rows[0], created: false };
+  }
+
+  async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<CompanyAgentRun>(`SELECT ${companyRunColumns} FROM company_agent_runs
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4`, [runId, context.workspaceId, companyId, context.userId]);
+    if (!result.rows[0]) throw new WorkspaceAccessError("Agent run is not available in this company");
+    const [steps, toolAudit] = await Promise.all([
+      this.pool.query<CompanyAgentRunStep>(`SELECT ${companyRunStepColumns} FROM company_agent_run_steps
+        WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 ORDER BY step_order,lane,id`, [context.workspaceId, companyId, runId]),
+      this.pool.query<CompanyAgentToolAudit>(`SELECT ${companyToolAuditColumns} FROM company_agent_tool_audit
+        WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 ORDER BY created_at,id`, [context.workspaceId, companyId, runId]),
+    ]);
+    return { run: result.rows[0], steps: steps.rows, toolAudit: toolAudit.rows };
+  }
+
+  async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    const value = JSON.stringify(patch);
+    const result = await this.pool.query<CompanyAgentRun>(`UPDATE company_agent_runs SET
+      status=CASE WHEN $5::jsonb ? 'status' THEN $5::jsonb->>'status' ELSE status END,
+      execution_mode=CASE WHEN $5::jsonb ? 'executionMode' THEN NULLIF($5::jsonb->>'executionMode','') ELSE execution_mode END,
+      selected_agent_ids=CASE WHEN $5::jsonb ? 'selectedAgentIds' THEN $5::jsonb->'selectedAgentIds' ELSE selected_agent_ids END,
+      omniroute_task_id=CASE WHEN $5::jsonb ? 'omnirouteTaskId' THEN NULLIF($5::jsonb->>'omnirouteTaskId','') ELSE omniroute_task_id END,
+      omniroute_combo_name=CASE WHEN $5::jsonb ? 'omnirouteComboName' THEN NULLIF($5::jsonb->>'omnirouteComboName','') ELSE omniroute_combo_name END,
+      result=CASE WHEN $5::jsonb ? 'result' THEN $5::jsonb->>'result' ELSE result END,
+      error_code=CASE WHEN $5::jsonb ? 'errorCode' THEN $5::jsonb->>'errorCode' ELSE error_code END,
+      error_message=CASE WHEN $5::jsonb ? 'errorMessage' THEN $5::jsonb->>'errorMessage' ELSE error_message END,
+      cancel_requested=CASE WHEN $5::jsonb ? 'cancelRequested' THEN ($5::jsonb->>'cancelRequested')::boolean ELSE cancel_requested END,
+      started_at=CASE WHEN ($5::jsonb->>'status') IN ('planning','running') THEN COALESCE(started_at,now()) ELSE started_at END,
+      completed_at=CASE WHEN ($5::jsonb->>'status') IN ('completed','failed','cancelled') THEN now() ELSE completed_at END,
+      updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
+      RETURNING ${companyRunColumns}`, [runId, context.workspaceId, companyId, context.userId, value]);
+    if (!result.rows[0]) throw new WorkspaceAccessError("Agent run is not available in this company");
+    return result.rows[0];
+  }
+
+  async replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    const uniqueAgentIds = [...new Set(steps.map((step) => step.agentId))];
+    if (uniqueAgentIds.length !== steps.length) throw new Error("A run cannot contain the same agent twice");
+    for (const agentId of uniqueAgentIds) await this.getCompanyAgent(context, companyId, agentId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [runId]);
+      await client.query("DELETE FROM company_agent_run_steps WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3",
+        [context.workspaceId, companyId, runId]);
+      const rows: CompanyAgentRunStep[] = [];
+      for (const step of steps) {
+        const result = await client.query<CompanyAgentRunStep>(`INSERT INTO company_agent_run_steps(
+          id,workspace_id,company_id,run_id,agent_id,step_order,lane,role,status,model_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING ${companyRunStepColumns}`,
+          [randomUUID(), context.workspaceId, companyId, runId, step.agentId, step.stepOrder, step.lane, step.role, step.status, step.modelId]);
+        rows.push(result.rows[0]!);
+      }
+      await client.query("COMMIT");
+      return rows;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    await this.getCompanyAgent(context, companyId, entry.agentId);
+    const result = await this.pool.query<CompanyAgentToolAudit>(`INSERT INTO company_agent_tool_audit(
+      id,workspace_id,company_id,run_id,agent_id,tool_name,decision,status,input_summary,error_message,completed_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,CASE WHEN $8 IN ('succeeded','failed','blocked') THEN now() END)
+      RETURNING ${companyToolAuditColumns}`,
+      [randomUUID(), context.workspaceId, companyId, runId, entry.agentId, entry.toolName, entry.decision,
+        entry.status, JSON.stringify(entry.inputSummary ?? {}), entry.errorMessage ?? null]);
+    return result.rows[0]!;
+  }
+
+
+  async claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query(`UPDATE company_agent_runs SET worker_id=$5,
+      lease_expires_at=now()+($6::text||' milliseconds')::interval,last_heartbeat_at=now(),attempt_count=attempt_count+1,
+      status='planning',error_code=NULL,error_message=NULL,completed_at=NULL,started_at=COALESCE(started_at,now()),updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND cancel_requested=false
+        AND attempt_count < max_attempts AND next_attempt_at <= now()
+        AND (status='queued' OR (status IN ('planning','running') AND lease_expires_at < now()))`,
+      [runId, context.workspaceId, companyId, context.userId, workerId, leaseMs]);
+    return Boolean(result.rowCount);
+  }
+
+  async heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
+    const result = await this.pool.query(`UPDATE company_agent_runs SET
+      lease_expires_at=now()+($6::text||' milliseconds')::interval,last_heartbeat_at=now(),updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND worker_id=$5
+        AND status IN ('planning','running') AND cancel_requested=false`,
+      [runId, context.workspaceId, companyId, context.userId, workerId, leaseMs]);
+    return Boolean(result.rowCount);
+  }
+
+  async requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number) {
+    const result = await this.pool.query(`UPDATE company_agent_runs SET status='queued',worker_id=NULL,lease_expires_at=NULL,
+      next_attempt_at=now()+($6::text||' milliseconds')::interval,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND worker_id=$5
+        AND cancel_requested=false AND attempt_count < max_attempts`,
+      [runId, context.workspaceId, companyId, context.userId, workerId, delayMs]);
+    return Boolean(result.rowCount);
+  }
+
+  async listRecoverableCompanyAgentRuns(limit = 200) {
+    const safeLimit = Math.max(1, Math.min(1000, limit));
+    const result = await this.pool.query<{ workspaceId: string; userId: string; companyId: string; runId: string }>(`SELECT
+      workspace_id AS "workspaceId",user_id AS "userId",company_id AS "companyId",id AS "runId"
+      FROM company_agent_runs WHERE cancel_requested=false AND attempt_count < max_attempts AND next_attempt_at <= now()
+        AND (status='queued' OR (status IN ('planning','running') AND lease_expires_at < now()))
+      ORDER BY created_at LIMIT $1`, [safeLimit]);
+    return result.rows.map((row) => ({ context: { workspaceId: row.workspaceId, userId: row.userId,
+      permissions: ['workspace:read','business:manage'] }, companyId: row.companyId, runId: row.runId }));
   }
 
   async listGoals(context: AuthContext, businessId: string) {

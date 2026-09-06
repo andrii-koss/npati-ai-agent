@@ -9,6 +9,46 @@ export interface ChatRequest {
   model?: string;
   fallbackModel?: string;
   compression?: "off" | "default" | "engine:rtk";
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  idempotencyKey?: string;
+}
+
+export interface A2AMessageRequest {
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  model?: string;
+  combo?: string;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface A2AMessageResult {
+  taskId: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface MCPToolCallRequest {
+  name: string;
+  arguments?: Record<string, unknown>;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export type OmniRouteComboStep =
+  | string
+  | { kind?: "model"; model: string; prompt?: string; label?: string }
+  | { kind: "combo-ref"; comboName: string; label?: string };
+
+export interface OmniRouteComboInput {
+  name: string;
+  description?: string;
+  models: OmniRouteComboStep[];
+  strategy: "priority" | "pipeline" | "fusion";
+  config?: Record<string, unknown>;
+  system_message?: string;
+  tool_filter_regex?: string;
 }
 
 export interface AudioTranscriptionInput {
@@ -24,9 +64,35 @@ export interface AudioTranscriptionResult {
   model?: string;
 }
 
+export interface EmbeddingInput { input: string[]; model?: string; signal?: AbortSignal; timeoutMs?: number; }
+export interface EmbeddingResult { model: string; vectors: number[][]; usage?: Record<string, number>; }
+export interface RerankInput { query: string; documents: string[]; model?: string; topN?: number; signal?: AbortSignal; timeoutMs?: number; }
+export interface RerankResult { model: string; results: Array<{ index: number; relevanceScore: number }>; }
+
 export interface ChatResult {
   content: string;
   model?: string;
+}
+
+export interface OmniRouteResilienceSnapshot {
+  source: "omniroute";
+  configuration: {
+    requestQueue?: unknown;
+    connectionCooldown?: unknown;
+    providerBreaker?: unknown;
+    waitForCooldown?: unknown;
+    comboCooldownWait?: unknown;
+    quotaShareConcurrencyLimit?: unknown;
+    providerCooldown?: unknown;
+    providerQuotaOverrides?: unknown;
+  };
+  runtime: {
+    status: string;
+    providerBreakers: unknown[];
+    lockouts: unknown[];
+    adaptiveAdmission: unknown;
+    chatAdmission: unknown;
+  };
 }
 
 export interface ModelInfo {
@@ -86,11 +152,22 @@ export interface AIEngine {
   listModels(): Promise<ModelInfo[]>;
   getModel(id: string): Promise<ModelInfo | undefined>;
   executeTool(name: string, input: unknown): Promise<unknown>;
+  embed?(input: EmbeddingInput): Promise<EmbeddingResult>;
+  rerank?(input: RerankInput): Promise<RerankResult>;
   searchMemory(query: string): Promise<unknown[]>;
   saveMemory(value: unknown): Promise<void>;
   getCapabilities(): Promise<string[]>;
   healthCheck(): Promise<ServiceHealth>;
+  resilienceStatus?(): Promise<OmniRouteResilienceSnapshot>;
   transcribeAudio?(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult>;
+  a2aSend?(request: A2AMessageRequest): Promise<A2AMessageResult>;
+  cancelA2ATask?(taskId: string, signal?: AbortSignal): Promise<void>;
+  ensureA2AEnabled?(): Promise<void>;
+  ensureCombo?(input: OmniRouteComboInput, signal?: AbortSignal): Promise<{ name: string }>;
+  ensureMCPEnabled?(): Promise<void>;
+  mcpCall?(request: MCPToolCallRequest): Promise<unknown>;
+  webSearch?(input: WebSearchInput): Promise<WebSearchResponse>;
+  webFetch?(input: WebFetchInput): Promise<WebPageResult>;
 }
 
 export interface OmniRouteConfig {
@@ -100,6 +177,8 @@ export interface OmniRouteConfig {
   timeoutMs?: number;
   catalogTtlMs?: number;
   transcriptionModel?: string;
+  embeddingModel?: string;
+  rerankModel?: string;
 }
 
 export type ProviderAuthType = "api_key" | "oauth" | "none" | "local" | "web_session" | "other";

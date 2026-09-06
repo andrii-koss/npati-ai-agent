@@ -6,6 +6,7 @@ const genericSourceLabel = /^(?:джерело|джерела|source|sources|п�
 const sourceHeading = /^(?:джерела|sources)(?:\s*\(\d+\))?$/iu;
 const inlineSourcePrefix = /(?:^|[\s(])(?:джерело|source)\s*:/iu;
 
+const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document|file):([0-9a-f-]{36}):(.+)\\]\\]$", "i");
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
 
@@ -136,6 +137,19 @@ export function ChatMessageContent({ content }: { content: string }) {
     <div className="chat-message-content">
       {content.split("\n").map((line, index) => {
         const heading = line.match(/^(#{1,3})\s+(.+)$/);
+        const attachment = line.match(attachmentLine);
+        if (attachment) {
+          const kind = attachment[1]!;
+          const id = attachment[2]!;
+          let name = "attachment";
+          try { name = decodeURIComponent(attachment[3]!); } catch { /* keep safe fallback */ }
+          const src = "/api/attachments/" + id;
+          return kind === "image"
+            ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="lazy" /><figcaption>{name}</figcaption></figure>
+            : kind === "audio"
+              ? <figure className="chat-message-attachment audio" key={index}><audio controls preload="metadata" src={src} /><figcaption>{name}</figcaption></figure>
+              : <figure className="chat-message-attachment document" key={index}><a href={src} download={name}>Download {name}</a><figcaption>{name}</figcaption></figure>;
+        }
         if (heading) {
           inSourceSection = sourceHeading.test(cleanLabel(heading[2]!));
           return <h3 key={index}>{renderInlineMarkdown(heading[2]!, false, sourceTitles)}</h3>;

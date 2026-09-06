@@ -1,4 +1,5 @@
 import type { ChatProgressEvent } from "./ResearchProgress";
+import type { ChatAttachmentInput } from "./ChatAttachments";
 
 type StreamEnvelope<T> =
   | { event: "progress"; data: ChatProgressEvent }
@@ -17,14 +18,30 @@ function parseBlock<T>(block: string): StreamEnvelope<T> | null {
 }
 
 export async function streamChat<T>(
-  body: { message: string; conversationId?: string },
+  body: {
+    message: string;
+    conversationId?: string;
+    attachments?: ChatAttachmentInput[];
+    contextType?: "none" | "business" | "company";
+    businessId?: string;
+    companyId?: string;
+  },
   onProgress: (event: ChatProgressEvent) => void,
 ): Promise<T> {
+  const token = localStorage.getItem("npati_agent_access_token");
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "text/event-stream",
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+  };
   const response = await fetch("/api/chat/stream", {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "text/event-stream" },
+    headers,
     body: JSON.stringify(body),
   });
+  if (response.status === 401) {
+    window.dispatchEvent(new Event("npati:unauthorized"));
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
     const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);

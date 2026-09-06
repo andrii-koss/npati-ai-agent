@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { getStoredAuthToken } from "./AuthContext";
 import type { MarketplaceData, Model, Provider, Routing } from "./ai-marketplace-types";
 
 const tabs = ["all", "recommended", "free", "connected"] as const;
@@ -10,7 +11,13 @@ const labels: Record<string, string> = {
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...init?.headers } });
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = {
+    ...(init?.body ? { "content-type": "application/json" } : {}),
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  const response = await fetch(path, { ...init, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || payload?.error || `Request failed (${response.status})`);
   return payload as T;
