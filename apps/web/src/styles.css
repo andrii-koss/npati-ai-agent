@@ -1750,6 +1750,10 @@ a {
   gap: 5px;
 }
 
+.provider-card .capability-row {
+  margin-bottom: 4px;
+}
+
 .capability-row>span,
 .capability-row i {
   padding: 3px 6px;
