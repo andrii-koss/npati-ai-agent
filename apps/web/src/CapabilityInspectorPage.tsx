@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 
@@ -47,12 +47,44 @@ interface InspectorReport {
   items: CapabilityItem[];
 }
 
+type SortField = "id" | "name" | "capabilityId" | "domain" | "type" | "risk" | "status";
+
+function formatStatus(status: string): { label: string; className: string } {
+  const s = status.toLowerCase();
+  if (s.includes("verified")) return { label: "Verified", className: "verified" };
+  if (s.includes("blocked")) return { label: "Blocked", className: "blocked" };
+  if (s === "allowed") return { label: "Allowed", className: "allowed" };
+  if (s === "denied") return { label: "Denied", className: "denied" };
+  if (s === "unavailable") return { label: "Unavailable", className: "unavailable" };
+  if (s.includes("approval")) return { label: "Approval Req.", className: "requires-approval" };
+  return { label: status.replace(/_/g, " "), className: "default" };
+}
+
+function formatType(type: string): string {
+  switch (type.toLowerCase()) {
+    case "runtime": return "Runtime";
+    case "configuration": return "Config";
+    case "orchestration": return "Orchestr.";
+    case "tool": return "Tool";
+    case "article": return "Article";
+    case "security_ops": return "SecOps";
+    default: return type.charAt(0).toUpperCase() + type.slice(1);
+  }
+}
+
 export function CapabilityInspectorPage() {
   const [slice, setSlice] = useState<InspectorSlice>("all");
   const [search, setSearch] = useState("");
   const [report, setReport] = useState<InspectorReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Pagination & Sorting State
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [sortField, setSortField] = useState<SortField>("id");
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -86,16 +118,66 @@ export function CapabilityInspectorPage() {
     };
   }, [slice]);
 
-  const items = (report?.items ?? []).filter((item) => {
-    if (!search.trim()) return true;
+  // Reset page on filter or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [slice, search, pageSize]);
+
+  function copyCanonicalId(id: string) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(id).catch(() => undefined);
+    }
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  }
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+    setCurrentPage(1);
+  }
+
+  const filteredItems = useMemo(() => {
+    const raw = report?.items ?? [];
+    if (!search.trim()) return raw;
     const term = search.toLowerCase();
-    return (
-      item.name.toLowerCase().includes(term) ||
-      item.capabilityId.toLowerCase().includes(term) ||
-      item.domain.toLowerCase().includes(term) ||
-      String(item.id).includes(term)
+    return raw.filter(
+      (item) =>
+        item.name.toLowerCase().includes(term) ||
+        item.capabilityId.toLowerCase().includes(term) ||
+        item.domain.toLowerCase().includes(term) ||
+        String(item.id).includes(term) ||
+        item.type.toLowerCase().includes(term) ||
+        item.status.toLowerCase().includes(term)
     );
-  });
+  }, [report?.items, search]);
+
+  const sortedItems = useMemo(() => {
+    return [...filteredItems].sort((a, b) => {
+      let valA: any = a[sortField];
+      let valB: any = b[sortField];
+      if (typeof valA === "string") valA = valA.toLowerCase();
+      if (typeof valB === "string") valB = valB.toLowerCase();
+      if (valA < valB) return sortAsc ? -1 : 1;
+      if (valA > valB) return sortAsc ? 1 : -1;
+      return 0;
+    });
+  }, [filteredItems, sortField, sortAsc]);
+
+  const totalItems = sortedItems.length;
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(totalItems / pageSize));
+  const validPage = Math.min(currentPage, totalPages);
+  const pageItems =
+    pageSize === -1
+      ? sortedItems
+      : sortedItems.slice((validPage - 1) * pageSize, validPage * pageSize);
+
+  const startIdx = totalItems === 0 ? 0 : (validPage - 1) * pageSize + 1;
+  const endIdx = pageSize === -1 ? totalItems : Math.min(validPage * pageSize, totalItems);
 
   const slices: { label: string; value: InspectorSlice; count?: number }[] = [
     { label: "All", value: "all", count: report?.counts.all ?? 306 },
@@ -191,71 +273,191 @@ export function CapabilityInspectorPage() {
       </div>
 
       <div className="inspector-table-status">
-        <p className="showing-copy">
-          Showing <strong>{items.length}</strong> {items.length === 1 ? "capability" : "capabilities"}
-          {search ? ` matching "${search}"` : ""}
-        </p>
+        <div className="status-left">
+          <span>
+            Showing <strong>{startIdx}–{endIdx}</strong> of <strong>{totalItems}</strong> capabilities
+            {search ? ` matching "${search}"` : ""}
+          </span>
+          {copiedId && <span className="copy-notice">✓ Copied {copiedId}</span>}
+        </div>
+        <div className="status-right">
+          <label className="page-size-label">
+            <span>Per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="page-size-select"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={-1}>All ({totalItems})</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       {loading && <div className="workspace-notice">Inspecting capabilities runtime...</div>}
       {error && <div className="workspace-notice error">{error}</div>}
 
       {!loading && !error && (
-        <div className="inspector-table-container">
-          <table className="inspector-table">
-            <thead>
-              <tr>
-                <th style={{ width: "64px" }}>ID</th>
-                <th style={{ minWidth: "160px" }}>Name</th>
-                <th style={{ minWidth: "175px" }}>Canonical ID</th>
-                <th style={{ width: "95px" }}>Domain</th>
-                <th style={{ width: "110px" }}>Type</th>
-                <th style={{ width: "105px" }}>Callable</th>
-                <th style={{ width: "85px" }}>Risk</th>
-                <th style={{ width: "95px" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <span className="inventory-badge">#{item.id}</span>
-                  </td>
-                  <td>
-                    <strong>{item.name}</strong>
-                  </td>
-                  <td>
-                    <code>{item.capabilityId}</code>
-                  </td>
-                  <td>
-                    <span className="domain-badge">{item.domain}</span>
-                  </td>
-                  <td>
-                    <span className={`type-badge ${item.type}`}>{item.type}</span>
-                  </td>
-                  <td>
-                    <span className={`callable-badge ${item.agentCallable ? "yes" : "no"}`}>
-                      {item.agentCallable ? "Callable" : "Internal"}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`risk-badge ${item.risk}`}>{item.risk}</span>
-                  </td>
-                  <td>
-                    <span className={`status-pill ${item.status}`}>{item.status}</span>
-                  </td>
-                </tr>
-              ))}
-              {items.length === 0 && (
+        <>
+          <div className="inspector-table-container">
+            <table className="inspector-table">
+              <thead>
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
-                    No capabilities match the selected filter.
-                  </td>
+                  <th
+                    style={{ width: "46px", textAlign: "center", cursor: "pointer" }}
+                    onClick={() => handleSort("id")}
+                    title="Sort by ID"
+                  >
+                    ID {sortField === "id" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th
+                    style={{ minWidth: "140px", cursor: "pointer" }}
+                    onClick={() => handleSort("name")}
+                    title="Sort by Name"
+                  >
+                    Name {sortField === "name" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th
+                    style={{ width: "170px", cursor: "pointer" }}
+                    onClick={() => handleSort("capabilityId")}
+                    title="Sort by Canonical ID"
+                  >
+                    Canonical ID {sortField === "capabilityId" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th
+                    style={{ width: "85px", cursor: "pointer" }}
+                    onClick={() => handleSort("domain")}
+                    title="Sort by Domain"
+                  >
+                    Domain {sortField === "domain" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th
+                    style={{ width: "85px", cursor: "pointer" }}
+                    onClick={() => handleSort("type")}
+                    title="Sort by Type"
+                  >
+                    Type {sortField === "type" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th style={{ width: "90px" }}>Callable</th>
+                  <th
+                    style={{ width: "70px", cursor: "pointer" }}
+                    onClick={() => handleSort("risk")}
+                    title="Sort by Risk"
+                  >
+                    Risk {sortField === "risk" && (sortAsc ? "▲" : "▼")}
+                  </th>
+                  <th
+                    style={{ width: "88px", cursor: "pointer" }}
+                    onClick={() => handleSort("status")}
+                    title="Sort by Status"
+                  >
+                    Status {sortField === "status" && (sortAsc ? "▲" : "▼")}
+                  </th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageItems.map((item) => {
+                  const st = formatStatus(item.status);
+                  return (
+                    <tr key={item.id}>
+                      <td style={{ textAlign: "center" }}>
+                        <span className="inventory-badge">#{item.id}</span>
+                      </td>
+                      <td>
+                        <strong className="item-name">{item.name}</strong>
+                      </td>
+                      <td>
+                        <code
+                          className="canonical-code"
+                          onClick={() => copyCanonicalId(item.capabilityId)}
+                          title="Click to copy canonical ID"
+                        >
+                          {item.capabilityId}
+                        </code>
+                      </td>
+                      <td>
+                        <span className={`domain-badge domain-${item.domain}`}>{item.domain}</span>
+                      </td>
+                      <td>
+                        <span className={`type-badge ${item.type}`}>{formatType(item.type)}</span>
+                      </td>
+                      <td>
+                        <span className={`callable-badge ${item.agentCallable ? "yes" : "no"}`}>
+                          <span className="status-dot-sm" />
+                          {item.agentCallable ? "Callable" : "Internal"}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`risk-badge ${item.risk}`}>
+                          {item.risk.charAt(0).toUpperCase() + item.risk.slice(1)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`status-pill ${st.className}`}>
+                          {st.className === "verified" && "✓ "}
+                          {st.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {pageItems.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
+                      No capabilities match the selected filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="inspector-pagination">
+              <button
+                type="button"
+                className="pagination-btn"
+                disabled={validPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                ← Previous
+              </button>
+              <div className="pagination-pages">
+                {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+                  let pageNum = i + 1;
+                  if (totalPages > 7) {
+                    if (validPage > 4 && validPage < totalPages - 3) {
+                      pageNum = validPage - 3 + i;
+                    } else if (validPage >= totalPages - 3) {
+                      pageNum = totalPages - 6 + i;
+                    }
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      className={`page-number-btn ${validPage === pageNum ? "active" : ""}`}
+                      onClick={() => setCurrentPage(pageNum)}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="pagination-btn"
+                disabled={validPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </main>
   );
