@@ -260,6 +260,10 @@ export class CompanyDelegationRuntime {
     return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
   }
 
+  async list(ctx: AuthContext, companyId: string, limit = 50) {
+    return this.store.listCompanyAgentRuns(ctx, companyId, limit);
+  }
+
   async get(ctx: AuthContext, companyId: string, runId: string) {
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
   }

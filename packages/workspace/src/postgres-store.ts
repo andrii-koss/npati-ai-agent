@@ -754,6 +754,17 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return { run: existing.rows[0], created: false };
   }
 
+  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<CompanyAgentRun>(
+      `SELECT ${companyRunColumns} FROM company_agent_runs
+       WHERE workspace_id=$1 AND company_id=$2
+       ORDER BY created_at DESC LIMIT $3`,
+      [context.workspaceId, companyId, Math.max(1, Math.min(100, limit))]
+    );
+    return result.rows;
+  }
+
   async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {
     await this.assertCompany(context, companyId);
     const result = await this.pool.query<CompanyAgentRun>(`SELECT ${companyRunColumns} FROM company_agent_runs

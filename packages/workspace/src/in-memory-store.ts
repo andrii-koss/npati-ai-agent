@@ -396,6 +396,15 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return { run: structuredClone(run), created: true };
   }
 
+  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50) {
+    this.assertCompany(context, companyId);
+    return Array.from(this.companyRuns.values())
+      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, Math.max(1, Math.min(100, limit)))
+      .map((r) => structuredClone(r));
+  }
+
   async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {
     this.assertCompany(context, companyId);
     const run = this.companyRuns.get(runId);

@@ -48,6 +48,14 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
       return reply.code(runtimeStatus(result.run.errorCode)).send(result);
     } catch (error) { return failure(reply, error); }
   });
+  app.get<{ Params: { companyId: string }; Querystring: { limit?: string } }>("/companies/:companyId/runs", async (request, reply) => {
+    try {
+      const ctx = await context(auth, request, "workspace:read");
+      const limit = Number(request.query.limit) || 30;
+      const runs = await runtime.list(ctx, request.params.companyId, limit);
+      return { runs };
+    } catch (error) { return failure(reply, error); }
+  });
   app.get<{ Params: { companyId: string; runId: string } }>("/companies/:companyId/runs/:runId", async (request, reply) => {
     try {
       const ctx = await context(auth, request, "workspace:read");
