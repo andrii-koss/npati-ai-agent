@@ -421,7 +421,8 @@ function Workspace({ children }: { children: ReactNode }) {
   const isSettings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
   const isCompany = location.pathname === "/company";
   const isActivity = location.pathname === "/activity";
-  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
+  const isAutomations = location.pathname === "/automations" || location.pathname.startsWith("/automations");
+  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
 }
 
 function ChatRoute() {
