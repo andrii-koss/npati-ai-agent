@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 
 type InspectorSlice =
@@ -97,21 +98,28 @@ export function CapabilityInspectorPage() {
   });
 
   const slices: { label: string; value: InspectorSlice; count?: number }[] = [
-    { label: "All (306)", value: "all", count: report?.counts.all },
-    { label: "Agent-Callable", value: "agent-callable", count: report?.counts.agentCallable },
-    { label: "Runtime-Only", value: "runtime-only", count: report?.counts.runtimeOnly },
-    { label: "User-Visible", value: "user-visible", count: report?.counts.userVisible },
-    { label: "Automatic", value: "automatic", count: report?.counts.automatic },
-    { label: "Allowed", value: "allowed", count: report?.counts.allowed },
-    { label: "Requires Approval", value: "requires-approval", count: report?.counts.requiresApproval },
+    { label: "All", value: "all", count: report?.counts.all ?? 306 },
+    { label: "Agent-Callable", value: "agent-callable", count: report?.counts.agentCallable ?? 42 },
+    { label: "Runtime-Only", value: "runtime-only", count: report?.counts.runtimeOnly ?? 264 },
+    { label: "User-Visible", value: "user-visible", count: report?.counts.userVisible ?? 42 },
+    { label: "Automatic", value: "automatic", count: report?.counts.automatic ?? 234 },
+    { label: "Allowed", value: "allowed", count: report?.counts.allowed ?? 306 },
+    { label: "Requires Approval", value: "requires-approval", count: report?.counts.requiresApproval ?? 23 },
   ];
 
   return (
     <main className="inspector-page">
-      <header className="inspector-header">
+      <header className="marketplace-hero inspector-header">
         <div>
           <p className="eyebrow">Governance & Security</p>
-          <h1>Capability Inspector</h1>
+          <h1>
+            <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </Link>
+            <span>Capability Inspector</span>
+          </h1>
           <p className="hero-copy">
             Explore and audit the 306 canonical capabilities of NPATI Agent. Verify Effective Capability Resolver
             boundaries, tool visibility, and risk policies in actual runtime.
@@ -119,30 +127,53 @@ export function CapabilityInspectorPage() {
         </div>
       </header>
 
-      <section className="inspector-stats-grid">
-        <div className="inspector-stat-card">
-          <span>Total Capabilities</span>
+      <section className="overview-grid inspector-stats-grid">
+        <div>
           <strong>{report?.counts.all ?? 306}</strong>
+          <span>total capabilities</span>
           <small>Verified 1..306 canonical IDs</small>
         </div>
-        <div className="inspector-stat-card">
-          <span>Agent-Callable</span>
-          <strong>{report?.counts.agentCallable ?? 74}</strong>
+        <div>
+          <strong>{report?.counts.agentCallable ?? 42}</strong>
+          <span>agent-callable</span>
           <small>Exposed to models via Resolver</small>
         </div>
-        <div className="inspector-stat-card">
-          <span>Internal Runtime</span>
-          <strong>{report?.counts.runtimeOnly ?? 232}</strong>
+        <div>
+          <strong>{report?.counts.runtimeOnly ?? 264}</strong>
+          <span>internal runtime</span>
           <small>Isolated engine operations</small>
         </div>
-        <div className="inspector-stat-card">
-          <span>Requires Approval</span>
-          <strong>{report?.counts.requiresApproval ?? 18}</strong>
+        <div>
+          <strong>{report?.counts.requiresApproval ?? 23}</strong>
+          <span>requires approval</span>
           <small>Human-in-the-loop security gate</small>
         </div>
       </section>
 
       <div className="inspector-controls">
+        <div className="inspector-search-box">
+          <span className="search-icon" aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            placeholder="Filter capabilities by name, ID or domain..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="inspector-search-input"
+            aria-label="Filter capabilities"
+          />
+          {search && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
         <div className="inspector-tabs" role="tablist">
           {slices.map((tab) => (
             <button
@@ -152,19 +183,18 @@ export function CapabilityInspectorPage() {
               className={`inspector-tab ${slice === tab.value ? "active" : ""}`}
               onClick={() => setSlice(tab.value)}
             >
-              {tab.label}
-              {tab.count !== undefined && <span className="tab-count">{tab.count}</span>}
+              <span>{tab.label}</span>
+              {tab.count !== undefined && <small className="tab-count">{tab.count}</small>}
             </button>
           ))}
         </div>
-        <input
-          type="search"
-          placeholder="Filter capabilities by name, ID or domain..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="inspector-search-input"
-          aria-label="Filter capabilities"
-        />
+      </div>
+
+      <div className="inspector-table-status">
+        <p className="showing-copy">
+          Showing <strong>{items.length}</strong> {items.length === 1 ? "capability" : "capabilities"}
+          {search ? ` matching "${search}"` : ""}
+        </p>
       </div>
 
       {loading && <div className="workspace-notice">Inspecting capabilities runtime...</div>}
@@ -175,14 +205,14 @@ export function CapabilityInspectorPage() {
           <table className="inspector-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Canonical ID</th>
-                <th>Domain</th>
-                <th>Type</th>
-                <th>Agent Callable</th>
-                <th>Risk</th>
-                <th>Status</th>
+                <th style={{ width: "64px" }}>ID</th>
+                <th style={{ minWidth: "160px" }}>Name</th>
+                <th style={{ minWidth: "175px" }}>Canonical ID</th>
+                <th style={{ width: "95px" }}>Domain</th>
+                <th style={{ width: "110px" }}>Type</th>
+                <th style={{ width: "105px" }}>Callable</th>
+                <th style={{ width: "85px" }}>Risk</th>
+                <th style={{ width: "95px" }}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -218,7 +248,7 @@ export function CapabilityInspectorPage() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: "2rem" }}>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
                     No capabilities match the selected filter.
                   </td>
                 </tr>
