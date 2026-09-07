@@ -74,7 +74,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       workspace: { id: context.workspaceId, name: identity.workspaceName, role: identity.role },
       businesses,
       currentBusiness: businesses.find((business) => business.id === currentId) ?? null,
-      onboarding: await this.getOnboarding(context),
+      onboarding: (await this.listOnboardings(context))[0] ?? null,
+      onboardings: await this.listOnboardings(context),
     };
   }
 
@@ -632,16 +633,26 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return { ...row, currentStep, completedFields, business: this.businesses.get(row.businessId)!, totalFields: flow.length, currentField: flow[currentStep]?.field };
   }
 
-  async getOnboarding(context: AuthContext) {
+  async listOnboardings(context: AuthContext) {
     await this.ensure(context);
-    const row = [...this.onboardings.values()]
+    return [...this.onboardings.values()]
       .filter((item) => item.workspaceId === context.workspaceId && item.userId === context.userId && item.status !== "completed")
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-    return row ? this.hydrateOnboarding(row) : null;
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((row) => this.hydrateOnboarding(row));
   }
 
-  async startOnboarding(context: AuthContext, scenario: OnboardingScenario) {
-    const existing = await this.getOnboarding(context);
+  async getOnboarding(context: AuthContext, businessId?: string) {
+    const rows = await this.listOnboardings(context);
+    return rows.find((row) => !businessId || row.businessId === businessId) ?? null;
+  }
+
+  private async getOnboardingSession(context: AuthContext, sessionId: string) {
+    const rows = await this.listOnboardings(context);
+    return rows.find((row) => row.id === sessionId) ?? null;
+  }
+
+  async startOnboarding(context: AuthContext, scenario: OnboardingScenario, options?: { forceNew?: boolean }) {
+    const existing = options?.forceNew ? null : await this.getOnboarding(context);
     if (existing) return this.setOnboardingStatus(context, existing.id, "active");
     const timestamp = now();
     const placeholder = onboardingPlaceholder(scenario);
@@ -665,7 +676,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }) {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     const step = ONBOARDING_FLOWS[current.scenario][current.currentStep];
     if (!step) return current;
@@ -690,7 +701,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async setOnboardingStatus(context: AuthContext, sessionId: string, status: "active" | "paused") {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     const row = { ...this.onboardings.get(sessionId)!, status, updatedAt: now() };
     this.onboardings.set(sessionId, row);
@@ -698,7 +709,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async completeOnboarding(context: AuthContext, sessionId: string) {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     const business = { ...current.business, activationStatus: "active" as const, updatedAt: now() };
     this.businesses.set(business.id, business);

@@ -403,7 +403,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       workspace: { id: context.workspaceId, name: String(identity.rows[0]?.name ?? "My Workspace"), role },
       businesses,
       currentBusiness: businesses.find((business) => business.id === currentId) ?? null,
-      onboarding: await this.getOnboarding(context),
+      onboarding: (await this.listOnboardings(context))[0] ?? null,
+      onboardings: await this.listOnboardings(context),
     };
   }
 
@@ -1006,17 +1007,31 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return { ...row, currentStep, completedFields, business: await this.getBusiness(context, row.businessId), totalFields: flow.length, currentField: flow[currentStep]?.field };
   }
 
-  async getOnboarding(context: AuthContext) {
+  async listOnboardings(context: AuthContext) {
     await this.ensureIdentity(context);
     const result = await this.pool.query<Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>(
-      "SELECT " + onboardingColumns + " FROM business_onboarding_sessions WHERE workspace_id=$1 AND user_id=$2 AND status<>$3 ORDER BY updated_at DESC LIMIT 1",
+      "SELECT " + onboardingColumns + " FROM business_onboarding_sessions WHERE workspace_id=$1 AND user_id=$2 AND status<>$3 ORDER BY updated_at DESC,id DESC",
       [context.workspaceId, context.userId, "completed"],
+    );
+    return Promise.all(result.rows.map((row) => this.hydrateOnboarding(context, row)));
+  }
+
+  async getOnboarding(context: AuthContext, businessId?: string) {
+    const rows = await this.listOnboardings(context);
+    return rows.find((row) => !businessId || row.businessId === businessId) ?? null;
+  }
+
+  private async getOnboardingSession(context: AuthContext, sessionId: string) {
+    await this.ensureIdentity(context);
+    const result = await this.pool.query<Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>(
+      "SELECT " + onboardingColumns + " FROM business_onboarding_sessions WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND status<>$4",
+      [sessionId, context.workspaceId, context.userId, "completed"],
     );
     return result.rowCount ? this.hydrateOnboarding(context, result.rows[0]!) : null;
   }
 
-  async startOnboarding(context: AuthContext, scenario: OnboardingScenario) {
-    const existing = await this.getOnboarding(context);
+  async startOnboarding(context: AuthContext, scenario: OnboardingScenario, options?: { forceNew?: boolean }) {
+    const existing = options?.forceNew ? null : await this.getOnboarding(context);
     if (existing) return this.setOnboardingStatus(context, existing.id, "active");
     const placeholder = onboardingPlaceholder(scenario);
     const businessId = randomUUID();
@@ -1034,11 +1049,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "INSERT INTO business_onboarding_sessions(id,workspace_id,user_id,business_id,conversation_id,scenario) VALUES ($1,$2,$3,$4,$5,$6)",
       [sessionId, context.workspaceId, context.userId, businessId, conversationId, scenario],
     );
-    return (await this.getOnboarding(context))!;
+    return (await this.getOnboarding(context, businessId))!;
   }
 
   async advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }) {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     const step = ONBOARDING_FLOWS[current.scenario][current.currentStep];
     if (!step) return current;
@@ -1056,21 +1071,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "UPDATE business_onboarding_sessions SET current_step=$4,completed_fields=$5::jsonb,skipped_fields=$6::jsonb,status=$7,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND user_id=$3",
       [sessionId, context.workspaceId, context.userId, nextStep, JSON.stringify(completedFields), JSON.stringify(skippedFields), status],
     );
-    return (await this.getOnboarding(context))!;
+    return (await this.getOnboarding(context, current.businessId))!;
   }
 
   async setOnboardingStatus(context: AuthContext, sessionId: string, status: "active" | "paused") {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     await this.pool.query(
       "UPDATE business_onboarding_sessions SET status=$4,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND user_id=$3",
       [sessionId, context.workspaceId, context.userId, status],
     );
-    return (await this.getOnboarding(context))!;
+    return (await this.getOnboarding(context, current.businessId))!;
   }
 
   async completeOnboarding(context: AuthContext, sessionId: string): Promise<BusinessOnboardingSession> {
-    const current = await this.getOnboarding(context);
+    const current = await this.getOnboardingSession(context, sessionId);
     if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
     const client = await this.pool.connect();
     try {

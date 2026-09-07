@@ -33,7 +33,8 @@ function normalizeTrackedLinks(content: string) {
 }
 
 function normalizeChatStyle(content: string, fallback: string) {
-  return normalizeTrackedLinks((content.trim() || fallback).replace(/\s*[—–]\s*/g, ": "));
+  const cleaned = content.replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "").trim();
+  return normalizeTrackedLinks((cleaned || fallback).replace(/\s*[—–]\s*/g, ": "));
 }
 
 function extractExplicitGoal(answer: string) {

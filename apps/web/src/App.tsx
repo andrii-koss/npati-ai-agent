@@ -116,7 +116,7 @@ function ChatUserMenu() {
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
-            <Link to="/business" onClick={closeMenu}>Business profile <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/business" onClick={closeMenu}>Business profile <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/goals" onClick={closeMenu}>Goals <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
@@ -257,13 +257,28 @@ function Sidebar() {
   }, [overview?.businesses.map((business) => business.id).join(","), location.search]);
 
   useEffect(() => {
-    if (location.pathname === "/business") setBusinessOpen(true);
+    if (location.pathname === "/business" || location.pathname.startsWith("/b/")) setBusinessOpen(true);
     if (location.pathname === "/chat" || location.pathname.startsWith("/c/")) setChatOpen(true);
   }, [location.pathname]);
 
+  async function createBusinessIdea() {
+    const response = await authFetch("/api/business-onboarding", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scenario: "starting" }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      window.alert(payload?.error?.message ?? "Could not create a business idea.");
+      return;
+    }
+    const session = await response.json() as { businessId: string };
+    await refresh();
+    navigate(`/b/${session.businessId}`);
+  }
   async function openNewChat() {
     setChatOpen(true);
-    if (!currentBusiness || overview?.onboarding) {
+    if (!currentBusiness) {
       const response = await authFetch("/api/conversations", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New conversation" }),
       });
@@ -283,7 +298,10 @@ function Sidebar() {
   }
   async function openBusiness(id: string) {
     await switchBusiness(id);
-    navigate("/business");
+    navigate(`/b/${id}`);
+  }
+  function editBusiness(id: string) {
+    navigate(`/settings/business/${id}`);
   }
   async function openConversation(conversation: SidebarConversation) {
     if (conversation.businessId && conversation.businessId !== currentBusiness?.id) await switchBusiness(conversation.businessId);
@@ -327,10 +345,11 @@ function Sidebar() {
   async function deleteBusiness(id: string, name: string) {
     if (!window.confirm(`Delete business “${name}” and its chats, goals, and memory? This cannot be undone.`)) return;
     const response = await authFetch(`/api/businesses/${id}`, { method: "DELETE" });
-    if (response.ok) { await refresh(); navigate("/business"); }
+    if (response.ok) { await refresh(); navigate("/chat"); }
   }
+  const onboardingConversationIds = new Set(overview?.onboardings.map((session) => session.conversationId) ?? []);
   const chatConversations = conversations.filter(
-    (c) => c.title !== "Business setup" && c.id !== overview?.onboarding?.conversationId
+    (c) => c.title !== "Business setup" && !onboardingConversationIds.has(c.id)
   );
   const hasSavedChats = chatConversations.length > 0;
 
@@ -356,19 +375,25 @@ function Sidebar() {
             </div>
           )}
         </div>
-        <div className={`sidebar-group sidebar-business-group ${location.pathname === "/business" ? "active" : ""}`}>
+        <div className={`sidebar-group sidebar-business-group ${location.pathname === "/business" || location.pathname.startsWith("/b/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
-            <button className="sidebar-main-action" onClick={() => navigate("/business")}>Business</button>
+            <button className="sidebar-main-action" onClick={() => void createBusinessIdea()}>+ Business</button>
             <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => !open)}></button>
           </div>
           {businessOpen && (
             <div className="sidebar-dropdown">
-              {overview?.businesses.length === 0 && !overview.onboarding && <small className="sidebar-empty">No businesses yet</small>}
-              {overview?.onboarding && <button className="sidebar-history-link" onClick={() => navigate("/business")}><span>{overview.onboarding.business.name}</span><small>Setup draft</small></button>}
+              {overview?.businesses.length === 0 && overview.onboardings.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
+              {overview?.onboardings.map((draft) => (
+                <div className="sidebar-history-row" key={draft.businessId}>
+                  <button className="sidebar-history-link" onClick={() => navigate(`/b/${draft.businessId}`)}><span>{draft.business.name}</span><small>Setup draft</small></button>
+                  <button className="sidebar-icon-action" aria-label={`Edit ${draft.business.name}`} onClick={() => editBusiness(draft.businessId)}>✎</button>
+                  <button className="sidebar-icon-action danger" aria-label={`Delete ${draft.business.name}`} onClick={() => void deleteBusiness(draft.businessId, draft.business.name)}>×</button>
+                </div>
+              ))}
               {overview?.businesses.map((business) => (
                 <div className="sidebar-history-row" key={business.id}>
-                  <button className="sidebar-history-link" onClick={() => void openBusiness(business.id)}><span>{business.name}</span><small>{business.id === currentBusiness?.id ? "Current" : "Open & edit"}</small></button>
-                  <button className="sidebar-icon-action" aria-label={`Edit ${business.name}`} onClick={() => void openBusiness(business.id)}>✎</button>
+                  <button className="sidebar-history-link" onClick={() => void openBusiness(business.id)}><span>{business.name}</span><small>{business.id === currentBusiness?.id ? "Current" : "Use in chat"}</small></button>
+                  <button className="sidebar-icon-action" aria-label={`Edit ${business.name}`} onClick={() => editBusiness(business.id)}>✎</button>
                   <button className="sidebar-icon-action danger" aria-label={`Delete ${business.name}`} onClick={() => void deleteBusiness(business.id, business.name)}>×</button>
                 </div>
               ))}
@@ -392,7 +417,7 @@ function Workspace({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     return <Navigate to="/" replace state={{ from: location.pathname }} />;
   }
-  const isChat = location.pathname === "/chat" || location.pathname.startsWith("/c/");
+  const isChat = location.pathname === "/chat" || location.pathname.startsWith("/b/") || location.pathname.startsWith("/c/");
   const isSettings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
   const isCompany = location.pathname === "/company";
   return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
@@ -404,6 +429,23 @@ function ChatRoute() {
   return <Workspace><ConversationalChat key={newChatKey ? `chat-${newChatKey}` : "chat"} initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} /></Workspace>;
 }
 
+function BusinessRoute() {
+  const { businessId = "" } = useParams();
+  const { overview, loading, switchBusiness } = useWorkspace();
+  const [error, setError] = useState("");
+  const draft = overview?.onboardings.find((session) => session.businessId === businessId);
+  const business = overview?.businesses.find((item) => item.id === businessId);
+
+  useEffect(() => {
+    if (loading || !business || overview?.currentBusiness?.id === businessId) return;
+    void switchBusiness(businessId).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not open this business."));
+  }, [businessId, business?.id, loading, overview?.currentBusiness?.id]);
+
+  if (loading || (business && overview?.currentBusiness?.id !== businessId)) return <Workspace><div className="workspace-notice">Opening business…</div></Workspace>;
+  if (!draft && !business) return <Workspace><div className="workspace-notice error">This business does not exist or is not available to your user.</div></Workspace>;
+  if (error) return <Workspace><div className="workspace-notice error">{error}</div></Workspace>;
+  return <Workspace><ConversationalChat key={businessId} businessId={businessId} businessRoute businessSetup={Boolean(draft)} /></Workspace>;
+}
 function LegacyChatRoute() {
   const location = useLocation();
   const conversationId = new URLSearchParams(location.search).get("conversation");
@@ -475,7 +517,7 @@ function SettingsPage() {
     { to: "/connections", icon: "CN", title: "Connections", description: "Monitor service health and integrations." },
     { to: "/memory", icon: "M", title: "Memory", description: "Review and edit confirmed business context." },
     { to: "/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
-    { to: "/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
+    { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
     { to: "/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
     { to: "/settings/ai", icon: "MO", title: "Models", description: "Browse OmniRoute models and manage the NPATI model library." },
   ];
@@ -518,6 +560,9 @@ export function App() {
           <Route path="/chat" element={<LegacyChatRoute />} />
           <Route path="/c/:conversationId" element={<CanonicalChatRoute />} />
           <Route path="/business" element={<Workspace><BusinessPage /></Workspace>} />
+          <Route path="/b/:businessId" element={<BusinessRoute />} />
+          <Route path="/settings/business" element={<Workspace><BusinessPage /></Workspace>} />
+          <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
           <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
           <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
           <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />

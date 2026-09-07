@@ -128,6 +128,7 @@ export interface WorkspaceOverview {
   businesses: Business[];
   currentBusiness: Business | null;
   onboarding: BusinessOnboardingSession | null;
+  onboardings: BusinessOnboardingSession[];
 }
 
 export interface UserSetting {
@@ -213,8 +214,9 @@ export interface WorkspaceStore {
   updateNeutralConversation(context: AuthContext, conversationId: string, title: string): Promise<Conversation>;
   deleteNeutralConversation(context: AuthContext, conversationId: string): Promise<boolean>;
   appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string): Promise<ConversationMessage>;
-  getOnboarding(context: AuthContext): Promise<BusinessOnboardingSession | null>;
-  startOnboarding(context: AuthContext, scenario: OnboardingScenario): Promise<BusinessOnboardingSession>;
+  getOnboarding(context: AuthContext, businessId?: string): Promise<BusinessOnboardingSession | null>;
+  listOnboardings(context: AuthContext): Promise<BusinessOnboardingSession[]>;
+  startOnboarding(context: AuthContext, scenario: OnboardingScenario, options?: { forceNew?: boolean }): Promise<BusinessOnboardingSession>;
   advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }): Promise<BusinessOnboardingSession>;
   setOnboardingStatus(context: AuthContext, sessionId: string, status: "active" | "paused"): Promise<BusinessOnboardingSession>;
   completeOnboarding(context: AuthContext, sessionId: string): Promise<BusinessOnboardingSession>;

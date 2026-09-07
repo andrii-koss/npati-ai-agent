@@ -1,4 +1,4 @@
-import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, WorkspaceStore } from "@npati/workspace";
+import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthenticationError, type AuthProvider } from "./auth";
@@ -48,6 +48,14 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   });
   app.put<{ Body: { businessId: string } }>("/workspace/current-business", async (request, reply) => {
     try { return await store.setCurrentBusiness(await authorize(auth, request, 'business:manage'), request.body.businessId); } catch (error) { return errorReply(reply, error); }
+  });
+
+  app.post<{ Body: { scenario?: OnboardingScenario } }>("/business-onboarding", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "business:manage");
+      const session = await store.startOnboarding(context, request.body?.scenario ?? "starting", { forceNew: true });
+      return reply.code(201).send(session);
+    } catch (error) { return errorReply(reply, error); }
   });
 
   app.get("/businesses", async (request, reply) => {

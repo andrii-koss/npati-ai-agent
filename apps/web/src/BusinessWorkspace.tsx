@@ -1,7 +1,7 @@
 import { getStoredAuthToken } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
@@ -26,6 +26,7 @@ type WorkspaceOverview = {
   businesses: Business[];
   currentBusiness: Business | null;
   onboarding: OnboardingSession | null;
+  onboardings: OnboardingSession[];
 };
 type Goal = { id: string; title: string; description?: string; status: string; priority: number; targetDate?: string };
 type MemoryItem = { id: string; type: string; title: string; content: string; source: string; updatedAt: string };
@@ -175,132 +176,82 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
 
 export function BusinessPage() {
   const { overview, loading, error, refresh, switchBusiness } = useWorkspace();
-  const [onboarding, setOnboarding] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const { businessId: editBusinessId } = useParams();
+  const navigate = useNavigate();
   const current = overview?.currentBusiness;
-  async function removeCurrent() {
-    if (!current || !window.confirm(`Delete ${current.name} and its goals, memory, and conversations? This cannot be undone.`)) return;
-    await api(`/businesses/${current.id}`, { method: "DELETE" });
+  const editDraft = editBusinessId ? overview?.onboardings.find((session) => session.businessId === editBusinessId) ?? null : null;
+  const editTarget = editBusinessId ? overview?.businesses.find((business) => business.id === editBusinessId) : undefined;
+
+  useEffect(() => {
+    if (!editTarget || current?.id === editTarget.id) return;
+    void switchBusiness(editTarget.id);
+  }, [editTarget?.id, current?.id]);
+
+  async function createBusinessIdea() {
+    const session = await api<OnboardingSession>("/business-onboarding", {
+      method: "POST",
+      body: JSON.stringify({ scenario: "starting" }),
+    });
+    await refresh();
+    navigate(`/b/${session.businessId}`);
+  }
+
+  async function removeBusiness(id: string, name: string) {
+    if (!window.confirm(`Delete ${name} and its goals, memory, and conversations? This cannot be undone.`)) return;
+    await api(`/businesses/${id}`, { method: "DELETE" });
     await refresh();
   }
+
   if (loading) return <div className="workspace-loading">Loading business workspace…</div>;
   if (error) return <Notice tone="error">{error}</Notice>;
-  if (!current && overview?.onboarding && !onboarding) return (
-    <>
-      <PageIntro eyebrow="Business setup in progress" title={overview.onboarding.business.name} copy="Chat onboarding and manual editing use the same structured Business Profile." action={<Link className="button-primary" to="/chat">Resume in Chat</Link>} />
-      <Notice><strong>{overview.onboarding.completedFields.length} of {overview.onboarding.totalFields} details added</strong><span>Your progress is saved. You can edit collected details here or continue the recommended conversational setup.</span></Notice>
-      <BusinessForm initial={overview.onboarding.business} mode={overview.onboarding.scenario} onSaved={refresh} />
-    </>
-  );
-  if (!current && !onboarding) return (
-    <>
-      <PageIntro eyebrow="Business workspace" title="Set up your business" copy="NPATI uses this profile as grounded context for goals, memory, and every business conversation." />
-      <Link className="chat-onboarding-recommendation" to="/chat"><span>Recommended</span><strong>Set up your business in Chat</strong><small>NPATI asks one natural question at a time and saves your progress.</small><b>Start conversational setup →</b></Link>
-      <div className="manual-setup-heading"><strong>Set up manually</strong><span>Or create the structured profile directly.</span></div>
-      <div className="onboarding-grid">
-        {([
-          ["existing", "I already have a business", "Add an operating business and its current market context."],
-          ["starting", "I want to start a business", "Turn an early idea into a structured workspace."],
-          ["seller", "I want to sell something", "Start from a product, service, or offer you want to sell."],
-        ] as const).map(([id, title, copy]) => <button key={id} onClick={() => setOnboarding(id)}><span>→</span><strong>{title}</strong><small>{copy}</small></button>)}
-      </div>
-    </>
-  );
-  if (!current && onboarding) return <><PageIntro eyebrow="Business onboarding" title="Tell NPATI what you’re building" copy="Skip anything you do not know yet." /><BusinessForm mode={onboarding} onCancel={() => setOnboarding(null)} onSaved={async () => { setOnboarding(null); await refresh(); }} /></>;
-  if (editing && current) return <><PageIntro eyebrow="Business profile" title={current.name} copy="Keep the facts NPATI relies on accurate." /><BusinessForm initial={current} mode={current.businessType ?? "existing"} onCancel={() => setEditing(false)} onSaved={async () => { setEditing(false); await refresh(); }} /></>;
+
+  if (editDraft) {
+    return <><PageIntro eyebrow="Business draft" title={editDraft.business.name} copy="Edit the saved details for this business idea." /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></>;
+  }
+  if (editTarget && current?.id !== editTarget.id) return <div className="workspace-loading">Opening business profile…</div>;
+  if (editTarget) {
+    return <><PageIntro eyebrow="Business profile" title={editTarget.name} copy="Keep the facts NPATI relies on accurate." /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></>;
+  }
+  if (editBusinessId) return <Notice tone="error">This business does not exist or is not available to your user.</Notice>;
+
+  const businesses = overview?.businesses ?? [];
+  const drafts = overview?.onboardings ?? [];
+  const ideaCount = businesses.length + drafts.length;
   return (
     <>
-      <PageIntro eyebrow="Current business" title={current!.name} copy={current!.description || "Your business workspace is ready."} action={<div className="head-actions"><button className="button-secondary" onClick={() => setEditing(true)}>Edit profile</button><button className="button-primary" onClick={() => setOnboarding("existing")}>Add business</button><button className="button-danger" onClick={() => void removeCurrent()}>Delete</button></div>} />
-      {onboarding && <BusinessForm mode={onboarding} onCancel={() => setOnboarding(null)} onSaved={async () => { setOnboarding(null); await refresh(); }} />}
-      {!onboarding && <div className="profile-grid">
-        <section><span>Stage</span><strong>{current!.businessStage}</strong><p>{current!.industry || "Industry not added"}{current!.niche ? ` · ${current!.niche}` : ""}</p></section>
-        <section><span>Audience</span><strong>{current!.audienceSummary || "Not defined yet"}</strong><p>Used to ground positioning and content advice.</p></section>
-        <section><span>Market & presence</span><strong>{current!.market || current!.country || "Not defined yet"}</strong><p>{current!.presenceType || "Presence not added"}{current!.website ? ` · ${current!.website}` : ""}</p></section>
-        <section><span>Operating model</span><strong>{current!.businessModel || "Not defined yet"}</strong><p>{current!.teamType === "team" ? "Team business" : "Solo business"}</p></section>
-        <section><span>Products & services</span><strong>Business profile ready</strong><p>A dedicated product catalog is coming in a future milestone.</p></section>
-        <section><span>Current goals</span><strong>Turn context into outcomes</strong><p><Link to="/goals">View and manage this business’s goals →</Link></p></section>
-      </div>}
-      {!onboarding && ((overview?.businesses && overview.businesses.length > 0) || overview?.onboarding) && (
-        <div style={{ marginTop: 36 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <h3 style={{ fontSize: 18, fontWeight: 750, color: "#0f172a", margin: 0 }}>
-              All business ideas ({overview?.businesses?.length ?? 0})
-            </h3>
-            <button
-              type="button"
-              className="button-primary"
-              style={{ fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
-              onClick={() => setOnboarding("starting")}
-            >
-              + Add business idea
-            </button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
-            {overview?.onboarding && (
-              <div
-                onClick={() => setOnboarding(overview.onboarding!.scenario)}
-                style={{
-                  padding: "16px 18px",
-                  background: "#fffbeb",
-                  border: "1px dashed #f59e0b",
-                  borderRadius: 14,
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <strong style={{ fontSize: 15, color: "#92400e" }}>{overview.onboarding.business.name || "Draft idea"}</strong>
-                  <span style={{ fontSize: 11, fontWeight: 750, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 999 }}>
-                    Setup draft
-                  </span>
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: "#b45309", lineHeight: 1.4 }}>
-                  Setup in progress · click to resume
-                </p>
+      <PageIntro
+        eyebrow="Business workspace"
+        title="Business ideas"
+        copy="Open any business idea in its own chat, or use the edit button to update its profile."
+        action={<button className="button-primary" onClick={() => void createBusinessIdea()}>+ Add business idea</button>}
+      />
+      {ideaCount === 0 ? (
+        <Notice><strong>No business ideas yet.</strong><span>Create the first idea to start its two-step setup chat.</span></Notice>
+      ) : (
+        <div className="record-list">
+          {drafts.map((draft) => (
+            <article className="record-card" key={draft.businessId} onClick={() => navigate(`/b/${draft.businessId}`)} style={{ cursor: "pointer" }}>
+              <div><span className="record-status">Setup draft</span><h3>{draft.business.name}</h3><p>{draft.completedFields.length} of {draft.totalFields} setup steps completed</p></div>
+              <div className="record-actions">
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${draft.businessId}`); }}>Edit</button>
+                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(draft.businessId, draft.business.name); }}>Delete</button>
               </div>
-            )}
-            {overview?.businesses?.map((business) => {
-              const isCurrent = business.id === current?.id;
-              return (
-                <div
-                  key={business.id}
-                  onClick={() => void switchBusiness(business.id)}
-                  style={{
-                    padding: "16px 18px",
-                    background: isCurrent ? "#fff1f2" : "#ffffff",
-                    border: isCurrent ? "2px solid #e11d2e" : "1px solid #e2e8f0",
-                    borderRadius: 14,
-                    cursor: "pointer",
-                    boxShadow: isCurrent ? "0 4px 14px rgba(225, 29, 46, 0.08)" : "0 2px 8px rgba(0,0,0,0.03)",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <strong style={{ fontSize: 15, color: "#0f172a" }}>{business.name}</strong>
-                    {isCurrent ? (
-                      <span style={{ fontSize: 11, fontWeight: 750, color: "#e11d2e", background: "#fee2e2", padding: "2px 8px", borderRadius: 999 }}>
-                        Active
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b" }}>
-                        Switch →
-                      </span>
-                    )}
-                  </div>
-                  <p style={{ margin: 0, fontSize: 13, color: "#64748b", lineHeight: 1.4 }}>
-                    {business.industry || business.description || business.businessStage || "Business workspace"}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+            </article>
+          ))}
+          {businesses.map((business) => (
+            <article className="record-card" key={business.id} onClick={() => navigate(`/b/${business.id}`)} style={{ cursor: "pointer" }}>
+              <div><span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? "Current" : "Business"}</span><h3>{business.name}</h3><p>{business.description || business.industry || business.businessStage || "Business idea"}</p></div>
+              <div className="record-actions">
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>Edit</button>
+                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>Delete</button>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </>
   );
 }
-
 function EmptyBusiness({ feature }: { feature: string }) {
   return <Notice><strong>Set up a business first.</strong><span>{feature} are isolated per business, so NPATI needs an active business workspace.</span><Link to="/business">Set up business →</Link></Notice>;
 }
