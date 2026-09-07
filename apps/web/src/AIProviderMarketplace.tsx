@@ -214,7 +214,7 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
 
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="provider-drawer" aria-label="Provider details">
-      <button className="drawer-close" onClick={onClose}>×</button>
+      <button className="drawer-close" onClick={onClose} aria-label="Close"><span>×</span></button>
       <header className="drawer-header"><ProviderIcon providerId={provider.id} name={provider.name} size="large" /><div><p className="section-kicker">Provider details</p><h2>{provider.name}</h2></div></header>
       <ProviderBadges provider={provider} />
       <div className="drawer-tabs"><button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>Overview</button><button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>Available Models</button><button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? "Settings" : "Connect"}</button></div>
