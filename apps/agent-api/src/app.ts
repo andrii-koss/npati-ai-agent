@@ -78,6 +78,42 @@ function inferOnboardingScenario(message: string): OnboardingScenario {
   return "starting";
 }
 
+function isSimpleGreeting(message: string) {
+  const normalized = message.toLocaleLowerCase().replace(/[^\p{L}]+/gu, " ").trim();
+  return /^(привіт|вітаю|добрий день|добрий вечір|доброго дня|доброго вечора|hello|hi|hey|greetings)$/.test(normalized);
+}
+
+function quickOnboardingReply(message: string) {
+  const normalized = message.toLocaleLowerCase().replace(/[’']/g, "'").replace(/\s+/g, " ").trim();
+  if (/(поясн(?:и|іть).*npati|як працює.*npati|how does.*npati.*work|explain how.*npati)/iu.test(normalized)) {
+    return /[іїєґ]/iu.test(normalized)
+      ? "NPATI Agent: це AI-асистент для роботи з бізнесом. Він відповідає на запитання, допомагає досліджувати ринок, формувати цілі й планувати наступні дії, використовуючи контекст вибраної Business Idea."
+      : "NPATI Agent is an AI assistant for business work. It answers questions, helps research markets, define goals, and plan next actions using the selected Business Idea as context.";
+  }
+  if (/(дослід.*попит|попит.*ринк|research market demand)/iu.test(normalized)) {
+    return /[іїєґ]/iu.test(normalized)
+      ? "Щоб перевірити попит, визначте цільового покупця, зберіть пошукові запити й відгуки конкурентів, поговоріть із 10-15 потенційними клієнтами та протестуйте просту пропозицію або передзамовлення. Реальні заявки важливіші за загальні позитивні відповіді."
+      : "To test demand, define the target buyer, review search behavior and competitor feedback, interview 10-15 potential customers, and test a simple offer or preorder. Real signups matter more than general positive comments.";
+  }
+  if (/(business ideas|бізнес.?іде|іде.*бізнес)/iu.test(normalized) && /(brainstorm|придум|згенер|допомож)/iu.test(normalized)) {
+    return /[іїєґ]/iu.test(normalized)
+      ? "Почніть із трьох речей: ваші сильні навички, проблема конкретної аудиторії та спосіб швидко перевірити готовність платити. Я можу запропонувати ідеї, якщо ви напишете країну, досвід і приблизний бюджет."
+      : "Start with three things: your strongest skills, a specific audience problem, and a quick way to test willingness to pay. I can suggest ideas if you share your country, experience, and approximate budget.";
+  }
+  return undefined;
+}
+
+function isLikelyOnboardingAside(message: string) {
+  const normalized = message.toLocaleLowerCase().trim();
+  return /\?$/.test(normalized) || /^(як|що|чому|навіщо|де|коли|хто|поясн(?:и|іть)|розкаж(?:и|іть)|можеш|how|what|why|where|when|who|explain|tell me|can you|could you)\b/iu.test(normalized);
+}
+
+function onboardingGoalQuestion(message: string) {
+  return /[іїєґ]/iu.test(message)
+    ? "Добре, контекст бізнесу збережено. Якої першої конкретної цілі ви хочете досягти? Наприклад: отримати перших 1 000 клієнтів."
+    : "Good, the business context is saved. What is the first concrete goal you want to achieve? For example: get your first 1,000 customers.";
+}
+
 function conversationTitle(message: string) {
   const normalized = message
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, "$1 $2")
@@ -516,6 +552,7 @@ export function buildApp(config: AppConfig = {}) {
     conversationId?: string;
     attachments?: ChatAttachmentInput[];
     onboardingAction?: "start" | "skip" | "pause" | "resume" | "confirm";
+    businessSetup?: boolean;
     scenario?: OnboardingScenario;
     contextType?: "none" | "business" | "company";
     businessId?: string;
@@ -542,6 +579,7 @@ export function buildApp(config: AppConfig = {}) {
             },
           },
           onboardingAction: { type: "string", enum: ["start", "skip", "pause", "resume", "confirm"] },
+          businessSetup: { type: "boolean" },
           scenario: { type: "string", enum: ["existing", "starting", "seller"] },
           contextType: { type: "string", enum: ["none", "business", "company"] },
           businessId: { type: "string", minLength: 1, maxLength: 100 },
@@ -562,7 +600,9 @@ export function buildApp(config: AppConfig = {}) {
       // Resolve Active Context safely and fail-closed
       const requestedContext = {
         contextType: request.body.contextType ?? (request.body.companyId ? "company" : "business"),
-        businessId: request.body.businessId ?? ((request.body.contextType === "none" || request.body.contextType === "company" || request.body.companyId) ? null : overview.currentBusiness?.id ?? null),
+        businessId: request.body.businessSetup
+          ? null
+          : request.body.businessId ?? ((request.body.contextType === "none" || request.body.contextType === "company" || request.body.companyId) ? null : overview.currentBusiness?.id ?? null),
         companyId: request.body.companyId ?? null,
       };
 
@@ -602,7 +642,7 @@ export function buildApp(config: AppConfig = {}) {
       // 3. BUSINESS CONTEXT ('business')
       if (!resolved.business) {
         const action = request.body.onboardingAction;
-        let session = overview.onboarding;
+        let session = request.body.businessId ? await workspaceStore.getOnboarding(auth, request.body.businessId) : overview.onboarding;
         if (action === "start") {
           if (!request.body.scenario) return reply.code(400).send({ error: { code: "ONBOARDING_SCENARIO_REQUIRED", message: "Choose an onboarding path." } });
           session = await workspaceStore.startOnboarding(auth, request.body.scenario);
@@ -628,7 +668,24 @@ export function buildApp(config: AppConfig = {}) {
         if (request.body.message?.trim()) {
           const answer = request.body.message.trim();
           await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "user", answer);
+          const quickReply = session.currentField === "businessSnapshot" ? quickOnboardingReply(answer) : undefined;
+          if (quickReply) {
+            await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", quickReply);
+            return { message: quickReply, suggestedActions: [], conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
+          }
+          if (session.currentField === "businessSnapshot" && isSimpleGreeting(answer)) {
+            const greeting = /[іїєґ]/iu.test(answer)
+              ? "Привіт! Розкажіть коротко, який бізнес, товар або послугу ви хочете створити."
+              : "Hi! Tell me briefly what business, product, or service you want to create.";
+            await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", greeting);
+            return { message: greeting, suggestedActions: [], conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
+          }
           const ai = await getAIContext(auth);
+          if (session.currentField === "businessSnapshot" && isLikelyOnboardingAside(answer)) {
+            const aside = await agent.generateOnboardingRecovery({ session, answer, validationFeedback: "The user asked a general question instead of providing business context.", ai });
+            await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", aside.message);
+            return { ...aside, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
+          }
           const validation = await agent.validateOnboardingAnswer({ session, answer, ai });
           if (!validation.valid) {
             if (session.currentField === "businessGoal") {
@@ -639,9 +696,8 @@ export function buildApp(config: AppConfig = {}) {
               session = await workspaceStore.completeOnboarding(auth, session.id);
               return { ...traffic, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
             }
-            const recovery = await agent.generateOnboardingRecovery({ session, answer, validationFeedback: validation.feedback, ai });
-            await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", recovery.message);
-            return { ...recovery, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
+            await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", validation.feedback);
+            return { message: validation.feedback, suggestedActions: [], model: validation.model, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
           }
           if (session.currentField === "businessGoal") {
             await workspaceStore.createGoal(auth, session.businessId, { title: validation.goalTitle ?? answer.slice(0, 240), status: "active", priority: 1 });
@@ -673,6 +729,9 @@ export function buildApp(config: AppConfig = {}) {
             session = await workspaceStore.completeOnboarding(auth, session.id);
             return { ...traffic, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
           }
+          const goalQuestion = onboardingGoalQuestion(answer);
+          await workspaceStore.appendMessage(auth, session.businessId, session.conversationId, "assistant", goalQuestion);
+          return { message: goalQuestion, suggestedActions: [], model: validation.model, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
         } else if (action === "skip") {
           session = await workspaceStore.advanceOnboarding(auth, session.id, { skip: true });
         }

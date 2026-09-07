@@ -391,7 +391,7 @@ describe("Agent API", () => {
 
     const invalid = await app.inject({ method: "POST", url: "/chat", payload: { message: "asdf qwer zzzz" } });
     expect(invalid.statusCode).toBe(200);
-    expect(invalid.json().message).toContain("почали не з того");
+    expect(invalid.json().message).toContain("назву бізнесу");
     expect(invalid.json().onboarding).toMatchObject({ currentField: "businessSnapshot", business: { name: "Business setup" } });
     expect(invalid.json().onboarding.completedFields).not.toContain("businessSnapshot");
 
@@ -400,6 +400,13 @@ describe("Agent API", () => {
     expect(greeting.json().message).toMatch(/^Привіт!/);
     expect(greeting.json().message).not.toMatch(/[—–]/);
     expect(greeting.json().onboarding.currentField).toBe("businessSnapshot");
+
+    const callsBeforeQuickHelp = calls.length;
+    const quickHelp = await app.inject({ method: "POST", url: "/chat", payload: { message: "Поясніть, як працює агент NPATI" } });
+    expect(quickHelp.statusCode).toBe(200);
+    expect(quickHelp.json().message).toContain("AI-асистент");
+    expect(quickHelp.json().onboarding.currentField).toBe("businessSnapshot");
+    expect(calls).toHaveLength(callsBeforeQuickHelp);
 
     const named = await app.inject({ method: "POST", url: "/chat", payload: { message: "Happy Candle sells handmade soy candles online in the United States to home decor and gift buyers. It is a solo B2C operating business." } });
     expect(named.statusCode).toBe(200);
@@ -423,6 +430,40 @@ describe("Agent API", () => {
     expect(context.json()).toMatchObject({ currentBusiness: { name: "Happy Candle", activationStatus: "active" }, onboarding: null });
     const conversations = await app.inject({ method: "GET", url: `/businesses/${localized.json().onboarding.businessId}/conversations` });
     expect(conversations.json()).toHaveLength(1);
+
+    const createdDraft = await app.inject({
+      method: "POST",
+      url: "/business-onboarding",
+      payload: { scenario: "starting" },
+    });
+    expect(createdDraft.statusCode).toBe(201);
+    expect(createdDraft.json().business.id).not.toBe(localized.json().onboarding.businessId);
+
+    const secondBusiness = await app.inject({
+      method: "POST",
+      url: "/chat",
+      payload: { onboardingAction: "start", scenario: "starting", businessSetup: true },
+    });
+    expect(secondBusiness.statusCode).toBe(200);
+    expect(secondBusiness.json().onboarding.business.id).toBe(createdDraft.json().business.id);
+    const contextWithDraft = await app.inject({ method: "GET", url: "/workspace/context" });
+    expect(contextWithDraft.json()).toMatchObject({
+      currentBusiness: { id: localized.json().onboarding.businessId },
+      onboarding: { business: { id: secondBusiness.json().onboarding.business.id }, status: "active" },
+      onboardings: [{ businessId: createdDraft.json().business.id }],
+    });
+
+    const anotherDraft = await app.inject({
+      method: "POST",
+      url: "/business-onboarding",
+      payload: { scenario: "starting" },
+    });
+    expect(anotherDraft.statusCode).toBe(201);
+    expect(anotherDraft.json().businessId).not.toBe(createdDraft.json().businessId);
+    const contextWithTwoDrafts = await app.inject({ method: "GET", url: "/workspace/context" });
+    expect(contextWithTwoDrafts.json().onboardings.map((session: { businessId: string }) => session.businessId)).toEqual(
+      expect.arrayContaining([createdDraft.json().businessId, anotherDraft.json().businessId]),
+    );
   });
 
   it("accepts a short useful business description without requesting optional details", async () => {
@@ -449,7 +490,7 @@ describe("Agent API", () => {
       currentStep: 1,
       business: { market: "Ukraine", teamType: "solo", presenceType: "online", productsServicesSummary: "tables" },
     });
-    expect(response.json().message).toContain("столів");
+    expect(response.json().message).toContain("конкретної цілі");
   });
 
   it("rejects an invalid onboarding goal without saving it and continues to traffic guidance", async () => {

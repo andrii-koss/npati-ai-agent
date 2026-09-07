@@ -37,12 +37,12 @@ function isResearchRequest(message?: string) {
   return Boolean(message && (/https?:\/\//i.test(message) || /competitor|competition|web research|search the web|конкурент|досліди|аналізуй/iu.test(message)));
 }
 
-function BusinessConversation({ initialPrompt = "", initialConversationId }: { initialPrompt?: string; initialConversationId?: string }) {
+function BusinessConversation({ initialPrompt = "", initialConversationId, businessSetup = false, businessId }: { initialPrompt?: string; initialConversationId?: string; businessSetup?: boolean; businessId?: string }) {
   const { overview, refresh } = useWorkspace();
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const business = overview?.currentBusiness;
-  const session = overview?.onboarding;
+  const session = businessId ? overview?.onboardings.find((item) => item.businessId === businessId) : overview?.onboarding;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -94,8 +94,8 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
     setResearching(isResearchRequest(payload.message));
     setError("");
     try {
-      const result = await request<AgentReply>("/chat", payload);
-      if (result.conversationId) {
+      const result = await request<AgentReply>("/chat", businessSetup ? { ...payload, businessSetup: true, businessId: session?.businessId ?? businessId } : payload);
+      if (result.conversationId && !businessSetup) {
         setHandoffConversationId(result.conversationId);
         navigate(`/c/${result.conversationId}`, { replace: true });
       }
@@ -149,7 +149,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
     }
   }
 
-  if (business || !session) return <BusinessChatPage initialPrompt={initialPrompt} initialConversationId={handoffConversationId || initialConversationId} />;
+  if (!businessSetup && (business || !session)) return <BusinessChatPage initialPrompt={initialPrompt} initialConversationId={handoffConversationId || initialConversationId} />;
 
   if (!session) return (
     <>
@@ -186,16 +186,17 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
           <AutoResizeChatTextarea aria-label="Chat message" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} disabled={sending || providerConnected === false} placeholder="Describe what you want to work on…" autoFocus />
           <div><button disabled={sending || providerConnected === false || !input.trim()}>Send →</button></div>
         </form>
-        <p className="onboarding-start-manual">Prefer a form? <Link to="/business">Set up manually</Link></p>
+        <p className="onboarding-start-manual">Prefer a form? <Link to="/settings/business">Set up manually</Link></p>
       </div>
     </>
   );
 
   const added = session.completedFields.length;
-  const recoveryQuestion: Record<string, string> = {
-    businessSnapshot: "Tell me about the business in one useful message. Include what you want to sell, where, and for whom; add any other details you already know.",
-    businessGoal: "What is the first meaningful goal you want to achieve? Example: “I want to get my first 1,000 customers.”",
-  };
+  const onboardingSuggestions = [
+    "Help me brainstorm business ideas",
+    "How do I research market demand?",
+    "Explain how NPATI Agent works",
+  ];
   return (
     <>
       {error && (
@@ -214,9 +215,18 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream">
           {messages.length === 0 && (
-            <article className="assistant" aria-label="NPATI Agent message">
-              <p>{recoveryQuestion[session.currentField ?? ""] ?? "Let’s continue setting up your business. Tell me a little about it."}</p>
-            </article>
+            <div className="chat-welcome">
+              <span>N</span>
+              <h2>What should we work on?</h2>
+              <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
+              <div>
+                {onboardingSuggestions.map((suggestion) => (
+                  <button key={suggestion} type="button" onClick={() => setInput(suggestion)}>
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {messages.map((message, index) => (
             <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} key={message.id} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}>
@@ -250,7 +260,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
             <div className="onboarding-live-actions">
               <button disabled={sending} onClick={() => void act({ onboardingAction: "skip" })}>Skip</button>
               <button disabled={sending} onClick={() => void act({ onboardingAction: "pause" })}>Continue later</button>
-              <Link to="/business">Edit profile manually</Link>
+              <Link to="/settings/business">Edit profile manually</Link>
               <button className="danger" disabled={sending} onClick={() => void startOver()}>Start over</button>
             </div>
           </>
@@ -260,16 +270,17 @@ function BusinessConversation({ initialPrompt = "", initialConversationId }: { i
   );
 }
 
-type ChatProps = { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean };
+type ChatProps = { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; businessSetup?: boolean; businessRoute?: boolean; businessId?: string };
 export function ConversationalChat(props: ChatProps) {
   const { user } = useAuth();
-  const chatKey = `${user?.id ?? "anonymous"}:${props.initialConversationId ?? "root"}`;
+  const chatKey = `${user?.id ?? "anonymous"}:${props.initialConversationId ?? "root"}:${props.businessSetup ? "business-setup" : props.businessRoute ? "business" : "chat"}`;
   return <ContextChat key={chatKey} {...props} userId={user?.id} />;
 }
-function ContextChat({ userId, neutralChat, ...props }: ChatProps & { userId?: string }) {
+function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...props }: ChatProps & { userId?: string }) {
   const { overview, switchBusiness } = useWorkspace();
+  const navigate = useNavigate();
   const key = "npati_chat_context:" + (userId ?? "anonymous");
-  const [selection, setSelection] = useState(() => { if (neutralChat) return "none"; try { const stored = sessionStorage.getItem(key); return !stored || stored === "none" ? "business" : stored; } catch { return "business"; } });
+  const [selection, setSelection] = useState(() => { if (neutralChat) return "none"; if (businessRoute || props.initialConversationId) return "business"; try { const stored = sessionStorage.getItem(key); return !stored || stored === "none" ? "business" : stored; } catch { return "business"; } });
   const [companies, setCompanies] = useState<Array<{id:string;name:string}>>([]);
   const [error,setError] = useState("");
   const [switching,setSwitching] = useState(false);
@@ -277,12 +288,26 @@ function ContextChat({ userId, neutralChat, ...props }: ChatProps & { userId?: s
   async function choose(value:string) {
     setSwitching(true);setError("");
     try {
-      if(value.startsWith("business:")) await switchBusiness(value.slice(9));
-      const next=value.startsWith("business:")?"business":value;
+      const isBusiness = value.startsWith("business:");
+      const businessId = isBusiness ? value.slice(9) : "";
+      if(isBusiness) await switchBusiness(businessId);
+      const next=isBusiness?"business":value;
       setSelection(next);try{sessionStorage.setItem(key,next);}catch{}
+      if(isBusiness) {
+        const conversation = await request<{ id: string }>(`/businesses/${businessId}/conversations`, { title: "New conversation" });
+        window.dispatchEvent(new Event("npati:conversations-changed"));
+        navigate(`/c/${conversation.id}`, { state: { businessId } });
+      }
     }catch(e){setError(e instanceof Error?e.message:"Could not switch context");}finally{setSwitching(false);}
   }
   const value=selection==="business"&&overview?.currentBusiness ? "business:"+overview.currentBusiness.id : selection;
+  const setupSwitcher = (
+    <div className="composer-context-switcher" title="Active context">
+      <select aria-label="Active context" value="business-setup" disabled className="composer-context-select">
+        <option value="business-setup">Business setup</option>
+      </select>
+    </div>
+  );
   const switcher = neutralChat ? null : (
     <div className="composer-context-switcher" title="Active context">
       <select
@@ -306,6 +331,14 @@ function ContextChat({ userId, neutralChat, ...props }: ChatProps & { userId?: s
       </select>
     </div>
   );
+
+  if (businessSetup) {
+    return (
+      <ChatContextSwitcherContext.Provider value={setupSwitcher}>
+        <BusinessConversation {...props} businessSetup />
+      </ChatContextSwitcherContext.Provider>
+    );
+  }
 
   if (neutralChat) {
     return (

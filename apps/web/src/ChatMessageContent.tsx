@@ -131,11 +131,13 @@ function renderInlineMarkdown(content: string, sourceMode: boolean, sourceTitles
 }
 
 export function ChatMessageContent({ content }: { content: string }) {
-  const sourceTitles = collectSourceTitles(content);
+  const safeContent = content.replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "").trim();
+  if (!safeContent) return null;
+  const sourceTitles = collectSourceTitles(safeContent);
   let inSourceSection = false;
   return (
     <div className="chat-message-content">
-      {content.split("\n").map((line, index) => {
+      {safeContent.split("\n").map((line, index) => {
         const heading = line.match(/^(#{1,3})\s+(.+)$/);
         const attachment = line.match(attachmentLine);
         if (attachment) {
