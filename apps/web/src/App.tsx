@@ -519,7 +519,7 @@ function SettingsPage() {
     { to: "/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
     { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
     { to: "/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
-    { to: "/settings/ai", icon: "MO", title: "Models", description: "Browse OmniRoute models and manage the NPATI model library." },
+    { to: "/settings/ai", icon: "MO", title: "Models", description: "Browse Npati models and manage the NPATI model library." },
   ];
 
   return (

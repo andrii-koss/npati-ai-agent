@@ -19,7 +19,7 @@ type ManifestProvider = Record<string, unknown> & {
 };
 
 export const RECOMMENDED_PROVIDER_IDS = [
-  "openai", "anthropic", "gemini", "openrouter", "groq", "mistral", "opencode", "ollama-local",
+  "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
 ] as const;
 
 export const PINNED_PROVIDER_CATALOG = catalog as {
@@ -156,6 +156,29 @@ export function normalizeModels(
   return result;
 }
 
+function searchRelevance(provider: AIProviderSummary, needle: string): number {
+  const id = provider.id.toLowerCase();
+  const name = provider.name.toLowerCase();
+
+  // 1. Exact ID or Name match -> top priority (e.g. searching "openai" -> provider "openai")
+  if (id === needle || name === needle) return 1000;
+
+  // 2. Starts with ID or Name -> second priority (e.g. "openai-codex", "OpenAI Codex")
+  if (id.startsWith(needle) || name.startsWith(needle)) return 600;
+
+  // 3. Name or ID contains needle (e.g. "Azure OpenAI")
+  if (name.includes(needle) || id.includes(needle)) return 300;
+
+  // 4. Description or auth matches
+  if (provider.description?.toLowerCase().includes(needle) || provider.authHint?.toLowerCase().includes(needle)) return 100;
+
+  // 5. Capability matches
+  if (provider.capabilities.some((c) => c.toLowerCase().includes(needle))) return 50;
+
+  // 6. Model ID / model name matches
+  return 10;
+}
+
 export function filterProviders(
   providers: AIProviderSummary[],
   manifestProviders: ManifestProvider[],
@@ -163,7 +186,7 @@ export function filterProviders(
 ): AIProviderSummary[] {
   const manifest = new Map(manifestProviders.map((provider) => [provider.id, provider]));
   const needle = query.search?.trim().toLowerCase();
-  return providers.filter((provider) => {
+  const filtered = providers.filter((provider) => {
     if (query.tab === "connected" && !provider.connected) return false;
     if (query.tab === "recommended" && !provider.recommended) return false;
     if (query.tab === "free" && !["free", "free_tier"].includes(provider.freeStatus)) return false;
@@ -184,4 +207,26 @@ export function filterProviders(
     }
     return true;
   });
+
+  if (needle) {
+    return [...filtered].sort((a, b) => {
+      const aScore = searchRelevance(a, needle);
+      const bScore = searchRelevance(b, needle);
+      if (bScore !== aScore) return bScore - aScore;
+      if (a.connected !== b.connected) return (b.connected ? 1 : 0) - (a.connected ? 1 : 0);
+      if (a.recommended !== b.recommended) return (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0);
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  if (query.tab === "recommended") {
+    const order = new Map((RECOMMENDED_PROVIDER_IDS as readonly string[]).map((id, index) => [id, index]));
+    return [...filtered].sort((a, b) => {
+      const aIdx = order.get(a.id) ?? 999;
+      const bIdx = order.get(b.id) ?? 999;
+      return aIdx - bIdx;
+    });
+  }
+
+  return filtered;
 }
