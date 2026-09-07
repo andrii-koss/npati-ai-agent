@@ -236,7 +236,8 @@ export function CapabilityInspectorPage() {
         <div className="inspector-search-box">
           <span className="search-icon" aria-hidden="true">⌕</span>
           <input
-            type="search"
+            type="text"
+            role="searchbox"
             placeholder="Filter capabilities by name, ID or domain..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}

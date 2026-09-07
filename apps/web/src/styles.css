@@ -5331,6 +5331,11 @@ a {
   margin-bottom: 20px;
 }
 
+.inspector-stats-grid span,
+.inspector-stats-grid small {
+  color: #111111 !important;
+}
+
 .inspector-controls {
   margin-bottom: 16px;
   display: flex;
@@ -5380,6 +5385,15 @@ a {
   padding: 0;
 }
 
+.inspector-search-input::-webkit-search-decoration,
+.inspector-search-input::-webkit-search-cancel-button,
+.inspector-search-input::-webkit-search-results-button,
+.inspector-search-input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none !important;
+}
+
 .search-clear-btn {
   background: transparent;
   border: none;
@@ -5390,7 +5404,9 @@ a {
   line-height: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
   transition: color 140ms ease;
+  flex-shrink: 0;
 }
 
 .search-clear-btn:hover {
