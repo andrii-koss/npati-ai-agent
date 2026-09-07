@@ -1088,6 +1088,39 @@ a {
   font-size: clamp(26px, 3vw, 34px);
   line-height: 1.15;
   letter-spacing: -.03em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.marketplace-back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--npati-black);
+  background: white;
+  border: 1px solid var(--npati-gray-100);
+  text-decoration: none;
+  transition: all 150ms ease;
+  flex-shrink: 0;
+}
+
+.marketplace-back-button:hover {
+  color: var(--npati-red);
+  border-color: #e9a5ad;
+  background: var(--npati-gray-50);
+  transform: translateX(-2px);
+}
+
+.marketplace-back-button:active {
+  transform: translateX(-3px) scale(0.96);
+}
+
+.marketplace-back-button svg {
+  display: block;
 }
 
 .marketplace-hero>div>p:last-child {
