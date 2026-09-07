@@ -471,7 +471,21 @@ export function AIProviderMarketplace() {
   };
 
   return <main className="ai-marketplace">
-    <header className="marketplace-hero"><div><p className="eyebrow">Settings · AI</p><h1>AI Provider</h1><p>Connect AI providers and choose the models NPATI Agent can use.</p></div><button className="refresh-button" disabled={loading} onClick={() => { cacheRef.current.clear(); void load(0, true); }}>↻ <span>Refresh catalog</span></button></header>
+    <header className="marketplace-hero">
+      <div>
+        <p className="eyebrow">Settings · AI</p>
+        <h1>
+          <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </Link>
+          <span>AI Provider</span>
+        </h1>
+        <p>Connect AI providers and choose the models NPATI Agent can use.</p>
+      </div>
+      <button className="refresh-button" disabled={loading} onClick={() => { cacheRef.current.clear(); void load(0, true); }}>↻ <span>Refresh catalog</span></button>
+    </header>
     <section className="overview-grid">
       <div><strong>{overview ? formatNumber(overview.providers) : (data ? formatNumber(data.overview.providers) : "—")}</strong><span>providers available</span></div>
       <div><strong>{overview ? formatNumber(overview.models) : (data ? formatNumber(data.overview.models) : "—")}</strong><span>models available</span></div>
