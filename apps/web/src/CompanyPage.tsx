@@ -279,6 +279,18 @@ export function CompanyPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not set main agent"); }
   }
 
+  async function updateCompanyBusiness(businessId: string) {
+    if (!selected) return;
+    try {
+      const updated = await api<Company>(`/companies/${selected.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ businessId: businessId || null, expectedRevision: selected.revision }),
+      });
+      setCompanies((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setNotice("Linked business updated.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not update linked business"); }
+  }
+
   async function deleteAgent() {
     if (!selected || !editingAgent || !window.confirm(`Delete agent "${editingAgent.name}"?`)) return;
     try {
@@ -330,28 +342,93 @@ export function CompanyPage() {
   }
 
   return <main className="company-page company-refined">
-    <header className="company-page-header inspector-header automations-header">
+    <header className="company-page-header">
       <div>
         <p className="eyebrow">Settings · AI Company</p>
         <div className="company-title-row">
-          <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">←</Link>
-          {companies.length > 0
-            ? <select aria-label="Select company" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-                {companies.map((company) => <option value={company.id} key={company.id}>{company.name}</option>)}
-              </select>
-            : <h1>Build your AI company</h1>}
+          <Link
+            to="/settings"
+            className="marketplace-back-button"
+            aria-label="Back to settings"
+            title="Back to settings"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </Link>
+          <h1
+            className="company-header-title"
+            title={selected ? selected.name : "Build your AI company"}
+          >
+            {selected ? selected.name : "Build your AI company"}
+          </h1>
           {selected && <span className={`company-status ${selected.status}`}>{selected.status}</span>}
+
+          {selected && (
+            <div className="company-title-actions">
+              <button
+                type="button"
+                className="content-action-btn edit-btn"
+                onClick={() => openCompanyEditor(selected)}
+                title="Edit company name, instructions and linked business"
+              >
+                ✎ Edit Company
+              </button>
+              <button
+                type="button"
+                className="content-action-btn delete-btn"
+                onClick={() => void deleteCompany()}
+                title="Delete this company"
+              >
+                🗑 Delete
+              </button>
+            </div>
+          )}
         </div>
-        <p>{selected?.description || "Create a configurable team of AI agents over OmniRoute."}</p>
+        {selected?.description && selected.description !== selected.name && selected.description !== "New Company" && (
+          <p className="company-header-desc">{selected.description}</p>
+        )}
       </div>
       <div className="company-header-actions">
-        <button className="button-secondary" onClick={() => openCompanyEditor()}>New Company</button>
-        {selected && <button className="button-secondary" onClick={() => openCompanyEditor(selected)}>Company Settings</button>}
-        {selected && <button className="button-primary" onClick={() => openAgentEditor()}>+ Add Agent</button>}
+        <button className="button-secondary" onClick={() => openCompanyEditor()}>
+          + New Company
+        </button>
+        {selected && (
+          <button className="button-primary automations-action-primary" onClick={() => openAgentEditor()}>
+            + Add Agent
+          </button>
+        )}
       </div>
     </header>
 
-    {notice && <div className={`workspace-notice ${/saved/i.test(notice) ? "" : "error"}`}>{notice}</div>}
+    {notice && (
+      <div className={`company-notice-banner ${/saved/i.test(notice) ? "success" : "error"}`}>
+        <span className="company-notice-icon" aria-hidden="true">
+          {/saved/i.test(notice) ? "✓" : "⚠"}
+        </span>
+        <div className="company-notice-content">
+          <strong>{/saved/i.test(notice) ? "Agent / Company Update" : "System Alert"}</strong>
+          <span>{notice}</span>
+        </div>
+        <button
+          type="button"
+          className="company-notice-close"
+          onClick={() => setNotice("")}
+          aria-label="Dismiss notice"
+        >
+          ×
+        </button>
+      </div>
+    )}
 
     {!selected ? <section className="company-first-run">
       <span className="provider-avatar">CO</span><h2>Create your first Company</h2>
@@ -359,33 +436,319 @@ export function CompanyPage() {
       <button className="button-primary" onClick={() => openCompanyEditor()}>Create Company</button>
     </section> : <>
       <section className="company-control-strip">
-        <label><span>Main Agent</span><select value={selected.mainAgentId ?? ""} onChange={(event) => void setMainAgent(event.target.value)}>
-          <option value="">Not selected</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}  -  {agent.role}</option>)}
-        </select></label>
-        <div><span>Linked Business</span><strong>{overview?.businesses.find((business) => business.id === selected.businessId)?.name ?? "Independent company"}</strong></div>
-        <div><span>Agents</span><strong>{agents.length}</strong></div>
-        <div><span>Active</span><strong>{agents.filter((agent) => agent.isActive).length}</strong></div>
+        {/* Block 1: Обираємо компанію */}
+        <div className="company-strip-card">
+          <div className="company-strip-eyebrow">
+            <span className="company-strip-label">Company</span>
+            <span className="company-strip-badge badge-active">Active</span>
+          </div>
+          <div className="company-strip-control-row">
+            <select
+              aria-label="Select company"
+              value={selectedId}
+              onChange={(event) => setSelectedId(event.target.value)}
+              className="company-strip-select"
+            >
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span
+            className="company-strip-footer-text"
+            title={`Main Orchestrator: ${agents.find((a) => a.id === selected.mainAgentId)?.name ?? "Add Agent"}`}
+          >
+            Main Orchestrator: {agents.find((a) => a.id === selected.mainAgentId)?.name ?? "Add Agent"}
+          </span>
+        </div>
+
+        {/* Block 2: Обираємо бізнес який є створений і підходить */}
+        <div className="company-strip-card">
+          <div className="company-strip-eyebrow">
+            <span className="company-strip-label">Linked Business</span>
+            <span className="company-strip-badge badge-linked">Linked</span>
+          </div>
+          <div className="company-strip-control-row">
+            <select
+              aria-label="Select linked business"
+              value={selected.businessId ?? ""}
+              onChange={(event) => void updateCompanyBusiness(event.target.value)}
+              className="company-strip-select"
+            >
+              <option value="">Independent (No business linked)</option>
+              {overview?.businesses.map((business) => (
+                <option key={business.id} value={business.id}>
+                  {business.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span
+            className="company-strip-footer-text"
+            title="Workspace business context connected"
+          >
+            Workspace business context connected
+          </span>
+        </div>
+
+        {/* Block 3: Кількість агентів */}
+        <div className="company-strip-card">
+          <div className="company-strip-eyebrow">
+            <span className="company-strip-label">Total Agents</span>
+            <span className="company-strip-badge badge-hierarchy">Hierarchy</span>
+          </div>
+          <div className="company-strip-control-row">
+            <strong>{agents.length} Agents</strong>
+          </div>
+          <span className="company-strip-footer-text" title="Ready for delegated company tasks">
+            Ready for delegated company tasks
+          </span>
+        </div>
       </section>
+
       <section className="company-run-card">
-        <div className="company-section-heading"><div><span>Runtime</span><h2>Delegate a task</h2></div><small>Main Agent plans through A2A; execution uses OmniRoute Auto, Pipeline or Fusion.</small></div>
+        <div className="company-section-heading">
+          <div>
+            <span>Runtime</span>
+            <h2>Delegate a task</h2>
+          </div>
+          <small>Main Agent plans through A2A; execution uses OmniRoute Auto, Pipeline or Fusion.</small>
+        </div>
+
         <form onSubmit={runCompany} className="company-run-form">
-          <textarea required rows={3} maxLength={20000} placeholder="Give your AI company a task..." value={task} onChange={(event) => setTask(event.target.value)} />
-          <select aria-label="Execution mode" value={runMode} onChange={(event) => setRunMode(event.target.value as typeof runMode)}>
-            <option value="auto">Auto by Main Agent</option><option value="single">Single</option>
-            <option value="pipeline">Pipeline</option><option value="fusion">Fusion</option>
-          </select>
-          <button className="button-primary" disabled={running || !selected.mainAgentId}>{running ? "Running..." : "Run Company"}</button>
+          <textarea
+            required
+            rows={3}
+            maxLength={20000}
+            placeholder="Give your AI company a task (e.g. Audit competitor offerings, synthesize buyer ICP, and generate marketing blueprints)..."
+            value={task}
+            onChange={(event) => setTask(event.target.value)}
+            className="company-run-textarea"
+          />
+
+          <div className="company-run-actions-bar">
+            <div className="company-run-mode-field">
+              <label htmlFor="company-run-mode" className="company-mode-label">
+                Execution Mode:
+              </label>
+              <select
+                id="company-run-mode"
+                aria-label="Execution mode"
+                value={runMode}
+                onChange={(event) => setRunMode(event.target.value as typeof runMode)}
+                className="company-mode-select"
+              >
+                <option value="auto">Auto by Main Agent</option>
+                <option value="single">Single Agent</option>
+                <option value="pipeline">Sequential Pipeline</option>
+                <option value="fusion">Fusion (Multi-agent Consensus)</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              className="button-primary automations-action-primary company-run-button"
+              disabled={running || !selected.mainAgentId}
+            >
+              {running ? (
+                <>
+                  <span className="company-run-spinner" aria-hidden="true" />
+                  <span>Running Company...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  <span>Run Company</span>
+                </>
+              )}
+            </button>
+          </div>
         </form>
-        {!selected.mainAgentId && <small className="company-field-hint">Select a Main Agent before running the company.</small>}
-        {runDetails && <p role="status" aria-live="polite">Run status: {runDetails.run.status}{runDetails.run.errorMessage ? ` — ${runDetails.run.errorMessage}` : ""}</p>}
-        {runDetails?.run.result && <div className="company-run-result"><strong>Final response</strong><p>{runDetails.run.result}</p><small>{runDetails.run.executionMode} � {runDetails.run.status}</small></div>}
+
+        {!selected.mainAgentId && (
+          <div className="company-field-notice-box">
+            <span className="company-notice-bulb" aria-hidden="true">ℹ</span>
+            <span>Select a <strong>Main Agent</strong> in the control strip above before running the company.</span>
+          </div>
+        )}
+
+        {runDetails && (
+          <div className="company-run-status-strip">
+            <span
+              className={`status-indicator-dot ${
+                runDetails.run.status === "completed"
+                  ? "ok"
+                  : runDetails.run.status === "failed"
+                  ? "error"
+                  : "standby"
+              }`}
+            />
+            <span>
+              Run status: <strong>{runDetails.run.status}</strong>
+              {runDetails.run.errorMessage ? ` — ${runDetails.run.errorMessage}` : ""}
+            </span>
+          </div>
+        )}
+
+        {runDetails?.run.result && (
+          <div className="company-run-result">
+            <div className="company-run-result-header">
+              <div className="company-result-title-group">
+                <span className="company-result-badge">Result</span>
+                <strong>Final response</strong>
+              </div>
+              <small className="company-result-meta">
+                {runDetails.run.executionMode} · {runDetails.run.status}
+              </small>
+            </div>
+            <div className="company-result-body">
+              <p>{runDetails.run.result}</p>
+            </div>
+          </div>
+        )}
       </section>
+
       <section className="company-run-card company-knowledge-card">
-        <div className="company-section-heading"><div><span>Context</span><h2>Company Knowledge</h2></div><small>Private MinIO documents, OmniRoute embeddings and rerank.</small></div>
-        <label className="button-secondary">{knowledgeBusy?"Uploading...":"Upload Document"}<input hidden type="file" disabled={knowledgeBusy} accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.xml" onChange={e=>{const f=e.target.files?.[0];if(f)void uploadKnowledge(f);e.currentTarget.value="";}} /></label>
-        <div className="company-knowledge-list">{documents.map(doc=><div key={doc.id}><strong>{doc.status}</strong><span>{doc.chunkCount} chunks</span>{doc.errorMessage&&<small>{doc.errorMessage}</small>}<a href={`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`}>Download</a>{doc.status==="failed"&&<button className="button-secondary" onClick={()=>void reprocessKnowledge(doc.id)}>Retry</button>}<button className="danger-button" onClick={()=>void deleteKnowledge(doc.id)}>Delete</button></div>)}{!documents.length&&<p>No Company documents yet.</p>}</div>
-        <div className="company-memory-editor"><textarea rows={2} placeholder="Add an important Company fact or rule..." value={memoryText} onChange={e=>setMemoryText(e.target.value)}/><button className="button-secondary" onClick={()=>void addCompanyMemory()}>Add Memory</button></div>
-        {memories.length>0&&<ul>{memories.slice(0,5).map(memory=><li key={memory.id}>{memory.content}<button className="danger-button" onClick={()=>void deleteCompanyMemory(memory.id)}>Delete</button></li>)}</ul>}
+        <div className="company-section-heading">
+          <div>
+            <span>Context</span>
+            <h2>Company Knowledge</h2>
+          </div>
+          <small>Private MinIO documents, OmniRoute embeddings and rerank.</small>
+        </div>
+
+        {/* Sub-block 1: Document Knowledge */}
+        <div className="company-knowledge-block">
+          <div className="company-knowledge-subhead">
+            <div className="company-subhead-title">
+              <span className="company-subhead-icon" aria-hidden="true">📁</span>
+              <h3>Knowledge Documents</h3>
+              <small className="tab-count">{documents.length}</small>
+            </div>
+
+            <label className="button-secondary company-upload-label">
+              <input
+                hidden
+                type="file"
+                disabled={knowledgeBusy}
+                accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.xml"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadKnowledge(f);
+                  e.currentTarget.value = "";
+                }}
+              />
+              <span className="upload-icon" aria-hidden="true">↑</span>
+              <span>{knowledgeBusy ? "Uploading..." : "Upload Document"}</span>
+            </label>
+          </div>
+
+          <div className="company-knowledge-list">
+            {documents.map((doc) => (
+              <div key={doc.id} className="company-doc-item">
+                <div className="company-doc-item-left">
+                  <span className="company-doc-icon">📄</span>
+                  <div className="company-doc-meta">
+                    <span className={`connection-status-pill status-${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`}>
+                      <span className={`status-indicator-dot ${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`} />
+                      {doc.status}
+                    </span>
+                    <span className="company-chunk-badge">{doc.chunkCount} chunks</span>
+                  </div>
+                </div>
+                {doc.errorMessage && <small className="company-doc-error">{doc.errorMessage}</small>}
+                <div className="company-doc-actions">
+                  <a
+                    href={`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`}
+                    className="company-doc-link"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download ↗
+                  </a>
+                  {doc.status === "failed" && (
+                    <button
+                      type="button"
+                      className="button-secondary company-doc-btn"
+                      onClick={() => void reprocessKnowledge(doc.id)}
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="danger-button company-doc-btn"
+                    onClick={() => void deleteKnowledge(doc.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {!documents.length && (
+              <div className="company-empty-docs-box">
+                <span className="company-empty-icon" aria-hidden="true">📄</span>
+                <strong>No Company documents yet</strong>
+                <p>Upload PDF, DOCX, XLSX, TXT, or MD files to ground agents in verified internal data.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sub-block 2: Durable Memory / Facts */}
+        <div className="company-knowledge-block company-memory-block">
+          <div className="company-knowledge-subhead">
+            <div className="company-subhead-title">
+              <span className="company-subhead-icon" aria-hidden="true">💡</span>
+              <h3>Durable Company Memory</h3>
+              <small className="tab-count">{memories.length}</small>
+            </div>
+          </div>
+
+          <div className="company-memory-editor-row">
+            <textarea
+              rows={2}
+              placeholder="Add an important Company fact or rule (e.g. Refund terms, brand boundary, operating guidelines)..."
+              value={memoryText}
+              onChange={(e) => setMemoryText(e.target.value)}
+              className="company-memory-textarea"
+            />
+            <button
+              type="button"
+              className="button-primary automations-action-primary company-add-memory-btn"
+              onClick={() => void addCompanyMemory()}
+              disabled={!memoryText.trim()}
+            >
+              + Add Memory
+            </button>
+          </div>
+
+          {memories.length > 0 && (
+            <ul className="company-memory-list">
+              {memories.slice(0, 5).map((memory) => (
+                <li key={memory.id} className="company-memory-item">
+                  <div className="company-memory-item-content">
+                    <span className="memory-bullet" aria-hidden="true">📌</span>
+                    <p>{memory.content}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="danger-button company-memory-delete-btn"
+                    onClick={() => void deleteCompanyMemory(memory.id)}
+                    title="Delete fact"
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
       <section className="company-chart-card">
         <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
