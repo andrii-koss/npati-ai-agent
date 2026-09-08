@@ -119,6 +119,8 @@ export function CompanyPage() {
   const [runDetails, setRunDetails] = useState<RunDetails>();
   const [running, setRunning] = useState(false);
   const [models, setModels] = useState<Model[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState("");
   const [documents,setDocuments]=useState<KnowledgeDocument[]>([]);
   const [memories,setMemories]=useState<CompanyMemory[]>([]);
   const [memoryText,setMemoryText]=useState("");
@@ -169,12 +171,28 @@ export function CompanyPage() {
     setAgents(nextAgents); setEdges(nextEdges); setAgentCursor(page.pagination.nextCursor);
   }
 
+  async function loadAddedModels(showError = false) {
+    setModelsLoading(true);
+    setModelsError("");
+    try {
+      const value = await api<Model[] | { models: Model[] }>("/ai/models/added");
+      const list = Array.isArray(value) ? value : (value.models ?? []);
+      setModels([...new Map(list.map((model) => [model.id, model])).values()]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load connected models";
+      setModelsError(message);
+      if (showError) setNotice(message);
+    } finally {
+      setModelsLoading(false);
+    }
+  }
+
   useEffect(() => {
     void loadCompanies().then((items) => {
       const first = items[0];
       if (first) void loadOrganization(first.id, undefined, false, items);
     });
-    void api<{ models: Model[] }>("/ai/models/added").then((value) => setModels(value.models ?? [])).catch(() => setModels([]));
+    void loadAddedModels();
   }, []);
 
   useEffect(() => {
@@ -222,6 +240,7 @@ export function CompanyPage() {
   }
   function openAgentEditor(agent?: Agent) {
     setEditingAgent(agent); setAgentForm(agentDraft(agent, edges)); setAgentEditor(true); setCompanyEditor(false); setNotice("");
+    void loadAddedModels(true);
   }
 
   async function saveCompany(event: FormEvent) {
@@ -869,12 +888,14 @@ export function CompanyPage() {
           </section>
           <section><h3>AI</h3>
             <div className="company-form-grid"><label><span>Model</span><select value={agentForm.modelId} onChange={(event) => setAgentForm({ ...agentForm, modelId: event.target.value })}>
-              <option value="">Auto  -  OmniRoute</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
+              <option value="">Auto  -  NPATI</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
             </select></label>
             <label><span>Fallback Model</span><select value={agentForm.fallbackModelId} onChange={(event) => setAgentForm({ ...agentForm, fallbackModelId: event.target.value })}>
-              <option value="">Auto  -  OmniRoute</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
+              <option value="">Auto  -  NPATI</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
             </select></label></div>
-            {models.length === 0 && <small className="company-field-hint">No concrete models in My Models. Auto still uses OmniRoute routing; add models in AI Providers.</small>}
+            {modelsLoading && <small className="company-field-hint">Loading connected models...</small>}
+            {!modelsLoading && modelsError && <small className="company-field-hint">Could not load connected models: {modelsError}</small>}
+            {!modelsLoading && !modelsError && models.length === 0 && <small className="company-field-hint">No models in My Models. Auto uses NPATI routing; add models in AI Providers.</small>}
           </section>
           <section><h3>Instructions</h3>
             <label><span>System Instruction</span><textarea rows={5} value={agentForm.systemInstruction} onChange={(event) => setAgentForm({ ...agentForm, systemInstruction: event.target.value })} /></label>

@@ -41,7 +41,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     if (!requested.length) return;
     const allowed = new Set((await aiPreferences.get(context)).addedModels.map((model) => model.id));
     const invalid = requested.find((id) => !allowed.has(id));
-    if (invalid) throw new Error("Agent model must come from the configured OmniRoute My Models library");
+    if (invalid) throw new Error("Agent model must come from the configured NPATI My Models library");
   }
   app.get("/workspace/context", async (request, reply) => {
     try { return await store.overview(await authorize(auth, request, 'workspace:read')); } catch (error) { return errorReply(reply, error); }
