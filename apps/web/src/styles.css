@@ -7888,7 +7888,8 @@ a {
 }
 
 .content-hub-header {
-  padding: 12px 18px !important;
+  padding: 0 0 2px 0 !important;
+  margin: 0 !important;
 }
 
 .content-hub-header h1 {
@@ -7902,6 +7903,7 @@ a {
 .content-hub-header .hero-copy {
   font-size: 12px !important;
   margin: 2px 0 0 !important;
+  padding: 0 !important;
   color: var(--npati-gray-600);
 }
 
@@ -7923,6 +7925,7 @@ a {
   border: 1px solid var(--npati-gray-200);
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  margin-top: -6px !important;
 }
 
 .content-type-tabs {
