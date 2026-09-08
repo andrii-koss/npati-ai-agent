@@ -6,9 +6,10 @@ import { AIProviderMarketplace, OAuthCallback } from "./AIProviderMarketplace";
 import { AuthProvider, useAuth, getStoredAuthToken } from "./AuthContext";
 import { AuthModal } from "./AuthModal";
 import {
-  BusinessPage, BusinessSwitcher, MemoryPage,
+  BusinessPage, BusinessSwitcher,
   SkillsPage, WorkspaceProvider, useWorkspace,
 } from "./BusinessWorkspace";
+import { MemoryPage } from "./MemoryPage";
 import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
@@ -426,7 +427,8 @@ function Workspace({ children }: { children: ReactNode }) {
   const isGoals = location.pathname === "/goals" || location.pathname.startsWith("/goals");
   const isContent = location.pathname === "/content" || location.pathname.startsWith("/content");
   const isConnections = location.pathname === "/connections" || location.pathname.startsWith("/connections");
-  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
+  const isMemory = location.pathname === "/memory" || location.pathname.startsWith("/memory");
+  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
 }
 
 function ChatRoute() {
