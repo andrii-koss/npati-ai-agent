@@ -103,6 +103,11 @@ function AgentNode({ agent, main, model, working, onClick }: { agent: Agent; mai
 
 function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelect }: { agents: Agent[]; edges: Edge[]; mainAgentId?: string; models: Model[]; workingAgentIds: Set<string>; onSelect(agent: Agent): void }) {
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
+  const animationKey = useMemo(() => [
+    ...agents.map((agent) => agent.id).sort(),
+    "edges",
+    ...edges.map((edge) => `${edge.parentAgentId}>${edge.childAgentId}`).sort(),
+  ].join("|"), [agents, edges]);
   const levels = useMemo(() => {
     const byId = new Map(agents.map((agent) => [agent.id, agent]));
     const parentByChild = new Map(edges.map((edge) => [edge.childAgentId, edge.parentAgentId]));
@@ -120,7 +125,7 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
   }, [agents, edges, mainAgentId]);
 
   if (!agents.length) return <div className="company-chart-empty"><strong>Your AI company has no agents yet.</strong><p>Add the first agent, then build the hierarchy with Parent Agent.</p></div>;
-  return <div className="company-org-chart">
+  return <div className="company-org-chart" key={animationKey}>
     {levels.map((level, index) => <div className="company-chart-level" key={index} style={{ "--chart-level-delay": `${Math.max(0, index - 1) * 1.5}s`, "--chart-line-inset": `calc(${50 / level.length}% - ${((level.length - 1) * 24) / (2 * level.length)}px)` } as CSSProperties}>
       {index > 0 && <span className="company-chart-trunk" aria-hidden="true" />}
       <div className="company-chart-row">
