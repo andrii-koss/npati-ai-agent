@@ -6046,12 +6046,21 @@ a {
   cursor: pointer !important;
   margin-top: 0 !important;
   transition: all 140ms ease !important;
+  background: var(--npati-black) !important;
+  border-color: var(--npati-black) !important;
+  color: #ffffff !important;
 }
 
 .company-upload-label:hover {
-  background: var(--npati-gray-100) !important;
-  border-color: var(--npati-gray-300) !important;
+  background: #2b2b2b !important;
+  border-color: #2b2b2b !important;
+  color: #ffffff !important;
   transform: translateY(-1px);
+}
+
+.company-upload-label:has(input:disabled) {
+  cursor: wait !important;
+  opacity: 0.65;
 }
 
 .company-empty-docs-box {
@@ -6297,6 +6306,7 @@ a {
   min-width: 0;
   box-sizing: border-box;
   overflow: hidden;
+  margin-bottom: 22px;
 }
 
 .company-refined .company-chart-scroll {
