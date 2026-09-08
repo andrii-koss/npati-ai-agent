@@ -130,6 +130,39 @@ try {
   await companyClose.click();
   await companyDrawer.waitFor({ state: "detached" });
 
+  const connectedModels = await page.evaluate(async () => {
+    const accessToken = localStorage.getItem("npati_agent_access_token");
+    const response = await fetch("/api/ai/models/added", { headers: { authorization: "Bearer " + accessToken } });
+    if (!response.ok) throw new Error("Could not read connected models");
+    return await response.json();
+  });
+  if (!Array.isArray(connectedModels) || connectedModels.length === 0) throw new Error("The authenticated My Models library is unexpectedly empty");
+  await page.getByRole("button", { name: "+ Add Agent" }).click();
+  const modelDrawer = page.locator(".agent-editor");
+  const primarySelect = modelDrawer.locator("select").nth(0);
+  const fallbackSelect = modelDrawer.locator("select").nth(1);
+  await page.waitForFunction(
+    (expected) => document.querySelectorAll(".agent-editor select")[0]?.querySelectorAll("option").length === expected + 1,
+    connectedModels.length,
+  );
+  const primaryOptions = await primarySelect.locator("option").evaluateAll((options) => options.map((option) => ({ value: option.value, text: option.textContent })));
+  const fallbackOptions = await fallbackSelect.locator("option").evaluateAll((options) => options.map((option) => ({ value: option.value, text: option.textContent })));
+  const expectedIds = connectedModels.map((model) => model.id).sort();
+  if (JSON.stringify(primaryOptions.slice(1).map((option) => option.value).sort()) !== JSON.stringify(expectedIds)) throw new Error("Primary Model mismatch: " + JSON.stringify({ primaryOptions, expectedIds, connectedModels }));
+  if (JSON.stringify(fallbackOptions.slice(1).map((option) => option.value).sort()) !== JSON.stringify(expectedIds)) throw new Error("Fallback Model mismatch: " + JSON.stringify({ fallbackOptions, expectedIds, connectedModels }));
+  if (primaryOptions[0]?.text?.includes("OmniRoute") || fallbackOptions[0]?.text?.includes("OmniRoute")) throw new Error("Agent Auto model still exposes the old provider name");
+  const preferred = connectedModels.find((model) => model.id.includes("gpt-5.6-luna")) ?? connectedModels[0];
+  const fallback = connectedModels.find((model) => model.id !== preferred.id) ?? preferred;
+  await modelDrawer.locator('input[required]').nth(0).fill("Model assignment verification");
+  await modelDrawer.locator('input[required]').nth(1).fill("Specialist");
+  await primarySelect.selectOption(preferred.id);
+  await fallbackSelect.selectOption(fallback.id);
+  await modelDrawer.getByRole("button", { name: "Save Agent" }).click();
+  await modelDrawer.waitFor({ state: "detached" });
+  const storedAgents = await request("/companies/" + companyId + "/agents?limit=60");
+  const storedAgent = storedAgents.agents.find((agent) => agent.name === "Model assignment verification");
+  if (storedAgent?.modelId !== preferred.id || storedAgent?.fallbackModelId !== fallback.id) throw new Error("Selected agent models were not persisted");
+
   const card = page.locator(".company-knowledge-card");
   const layoutAndUploadStyle = await page.evaluate(() => {
     const chart = document.querySelector(".company-chart-card");
@@ -216,6 +249,8 @@ try {
     agentCloseAnimationMatchesGoals: true,
     companyFieldFocusMatchesGoals: true,
     companyCloseAnimationMatchesGoals: true,
+    connectedModelCount: connectedModels.length,
+    agentPrimaryAndFallbackModelsPersisted: true,
   }, null, 2));
 } finally {
   await browser?.close().catch(() => {});
