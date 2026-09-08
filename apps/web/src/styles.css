@@ -4953,6 +4953,40 @@ a {
   padding: 42px 18px 24px;
 }
 
+.company-initial-state {
+  min-height: 55vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--npati-gray-500);
+  text-align: center;
+}
+
+.company-initial-state strong {
+  color: var(--npati-black);
+  font-size: 16px;
+}
+
+.company-initial-state p {
+  max-width: 520px;
+  margin: 0;
+}
+
+.company-initial-spinner {
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 2px solid var(--npati-gray-200);
+  border-top-color: var(--npati-red);
+  border-radius: 50%;
+  animation: company-initial-spin .8s linear infinite;
+}
+
+@keyframes company-initial-spin {
+  to { transform: rotate(360deg); }
+}
+
 .company-chart-level {
   position: relative;
   padding-bottom: 52px;
