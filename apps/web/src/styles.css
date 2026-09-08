@@ -4965,7 +4965,12 @@ a {
   left: 50%;
   width: 1px;
   height: 32px;
-  background: #d83438;
+  background-color: #d8d8d8;
+  background-image: linear-gradient(to bottom, transparent 0%, #d83438 42%, #ef5a5d 58%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 55%;
+  animation: company-chart-flow-vertical 6s ease-in-out infinite;
+  animation-delay: var(--chart-level-delay);
 }
 
 .company-chart-level:not(:first-child)::after {
@@ -4993,7 +4998,18 @@ a {
   left: 16%;
   right: 16%;
   height: 1px;
-  background: #d8d8d8;
+  background-color: transparent;
+  background-image: linear-gradient(to right, transparent 0%, #d83438 42%, #ef5a5d 58%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 24% 100%;
+  animation: company-chart-flow-horizontal 6s ease-in-out infinite;
+  animation-delay: calc(var(--chart-level-delay) + .35s);
+}
+
+.company-chart-node-slot {
+  position: relative;
+  flex: 0 0 210px;
+  display: block;
 }
 
 .company-agent-node {
@@ -5012,14 +5028,35 @@ a {
   cursor: pointer;
 }
 
-.company-chart-level:not(:first-child) .company-agent-node::before {
+.company-chart-node-slot .company-agent-node {
+  width: 100%;
+}
+
+.company-chart-level:not(:first-child) .company-chart-node-slot::before {
   content: "";
   position: absolute;
   left: 50%;
   top: -20px;
   width: 1px;
   height: 20px;
-  background: #d8d8d8;
+  z-index: 1;
+  background-color: #d8d8d8;
+  background-image: linear-gradient(to bottom, transparent 0%, #d83438 45%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 60%;
+  animation: company-chart-flow-vertical 6s ease-in-out infinite;
+  animation-delay: calc(var(--chart-node-delay) + .8s);
+}
+
+.company-chart-level:not(:first-child) .company-agent-node:not(.main)::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  animation: company-chart-node-glow 6s ease-in-out infinite;
+  animation-delay: calc(var(--chart-node-delay) + 1.05s);
 }
 
 .company-agent-node:hover {
@@ -5096,8 +5133,39 @@ a {
   }
 }
 
+@keyframes company-chart-flow-vertical {
+  0%, 7% { background-position: 0 -130%; }
+  18%, 100% { background-position: 0 230%; }
+}
+
+@keyframes company-chart-flow-horizontal {
+  0%, 8% { background-position: -32% 0; opacity: 0; }
+  10% { opacity: 1; }
+  26% { background-position: 132% 0; opacity: 1; }
+  29%, 100% { background-position: 132% 0; opacity: 0; }
+}
+
+@keyframes company-chart-node-glow {
+  0%, 15%, 100% {
+    border-color: transparent;
+    box-shadow: 0 0 0 rgba(216, 52, 56, 0);
+  }
+  20% {
+    border-color: rgba(216, 52, 56, .72);
+    box-shadow: 0 0 16px rgba(216, 52, 56, .13);
+  }
+  28% {
+    border-color: rgba(216, 52, 56, .2);
+    box-shadow: 0 0 7px rgba(216, 52, 56, .04);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .company-agent-activity-dot.working {
+  .company-agent-activity-dot.working,
+  .company-chart-level:not(:first-child)::before,
+  .company-chart-level:not(:first-child) .company-chart-row::before,
+  .company-chart-level:not(:first-child) .company-chart-node-slot::before,
+  .company-chart-level:not(:first-child) .company-agent-node:not(.main)::after {
     animation: none;
   }
 }
@@ -6425,7 +6493,7 @@ a {
 }
 
 .company-refined .company-agent-node {
-  flex: 0 0 210px;
+  flex: 0 0 auto;
 }
 
 .company-refined .company-chart-level {

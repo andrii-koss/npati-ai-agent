@@ -1,5 +1,5 @@
 import { getStoredAuthToken } from "./AuthContext";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
@@ -19,7 +19,7 @@ type AgentPage = { agents: Agent[]; pagination: { limit: number; nextCursor: str
 type KnowledgeDocument = { id:string;fileId:string;filename?:string;mimeType?:string;sizeBytes?:number;status:string;errorMessage?:string;chunkCount:number;createdAt:string };
 type CompanyMemory = { id:string;content:string;source:string;revision?:number;updatedAt:string };
 type RunStep = { agentId: string; status: "selected" | "delegated" | "completed" | "failed" | "cancelled" };
-type RunDetails = { run: { id: string; status: string; selectedAgentIds?: string[]; executionMode?: string; result?: string; errorMessage?: string }; steps: RunStep[]; toolAudit: unknown[] };
+type RunDetails = { run: { id: string; status: string; mainAgentId?: string; selectedAgentIds?: string[]; executionMode?: string; result?: string; errorMessage?: string }; steps: RunStep[]; toolAudit: unknown[] };
 type RunSummary = RunDetails["run"];
 type CompanyDraft = {
   name: string; businessId: string; website: string; industry: string; description: string;
@@ -121,9 +121,9 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 
   if (!agents.length) return <div className="company-chart-empty"><strong>Your AI company has no agents yet.</strong><p>Add the first agent, then build the hierarchy with Parent Agent.</p></div>;
   return <div className="company-org-chart">
-    {levels.map((level, index) => <div className="company-chart-level" key={index}>
+    {levels.map((level, index) => <div className="company-chart-level" key={index} style={{ "--chart-level-delay": `${Math.max(0, index - 1) * 1.35}s` } as CSSProperties}>
       {index > 0 && <span className="company-chart-trunk" aria-hidden="true" />}
-      <div className="company-chart-row">{level.map((agent) => <AgentNode key={agent.id} agent={agent} main={agent.id === mainAgentId} model={agent.modelId ? modelById.get(agent.modelId) : undefined} working={workingAgentIds.has(agent.id)} onClick={() => onSelect(agent)} />)}</div>
+      <div className="company-chart-row">{level.map((agent, nodeIndex) => <span className="company-chart-node-slot" key={agent.id} style={{ "--chart-node-delay": `${Math.max(0, index - 1) * 1.35 + nodeIndex * .12}s` } as CSSProperties}><AgentNode agent={agent} main={agent.id === mainAgentId} model={agent.modelId ? modelById.get(agent.modelId) : undefined} working={workingAgentIds.has(agent.id)} onClick={() => onSelect(agent)} /></span>)}</div>
     </div>)}
   </div>;
 }
@@ -236,14 +236,17 @@ export function CompanyPage() {
     const refreshWorkingAgents = async () => {
       try {
         const value = await api<{ runs: RunSummary[] }>(`/companies/${selectedId}/runs?limit=20`);
-        const activeRuns = (value.runs ?? []).filter((run) => run.status === "queued" || run.status === "running");
+        const activeRuns = (value.runs ?? []).filter((run) => ["queued", "planning", "running", "cancelling"].includes(run.status));
         const details = await Promise.all(activeRuns.map((run) => api<RunDetails>(`/companies/${selectedId}/runs/${run.id}`)));
         const ids = new Set<string>();
         for (const detail of details) {
-          if (detail.run.status !== "running") continue;
-          for (const agentId of detail.run.selectedAgentIds ?? []) ids.add(agentId);
-          for (const step of detail.steps ?? []) {
-            if (step.status === "selected" || step.status === "delegated") ids.add(step.agentId);
+          if (!["queued", "planning", "running", "cancelling"].includes(detail.run.status)) continue;
+          if (detail.run.mainAgentId) ids.add(detail.run.mainAgentId);
+          if (detail.run.status === "running" || detail.run.status === "cancelling") {
+            for (const agentId of detail.run.selectedAgentIds ?? []) ids.add(agentId);
+            for (const step of detail.steps ?? []) {
+              if (step.status === "selected" || step.status === "delegated") ids.add(step.agentId);
+            }
           }
         }
         if (active) setWorkingAgentIds(ids);
@@ -399,6 +402,7 @@ export function CompanyPage() {
     event.preventDefault();
     if (!selected || !task.trim() || running) return;
     setRunning(true); setNotice(""); setRunDetails(undefined);
+    if (selected.mainAgentId) setWorkingAgentIds((ids) => new Set([...ids, selected.mainAgentId!]));
     try {
       const result = await api<RunDetails>(`/companies/${selected.id}/runs`, {
         method: "POST", headers: { "idempotency-key": crypto.randomUUID() },
@@ -407,8 +411,10 @@ export function CompanyPage() {
       setRunDetails(result);
       if (result.run.status === "completed") setNotice("Company run completed.");
       else setNotice(result.run.errorMessage ?? `Company run ${result.run.status}.`);
-      setRunning(!["completed", "failed", "cancelled"].includes(result.run.status));
-    } catch (error) { setRunning(false); setNotice(error instanceof Error ? error.message : "Company run failed"); }
+      const remainsActive = !["completed", "failed", "cancelled"].includes(result.run.status);
+      setRunning(remainsActive);
+      if (!remainsActive) setWorkingAgentIds(new Set());
+    } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : "Company run failed"); }
   }
 
   async function readFileAsBase64(file:File){
