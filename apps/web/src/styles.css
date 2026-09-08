@@ -5402,6 +5402,178 @@ a {
   }
 }
 
+/* Company uses the shared settings spacing, with a full-width organization area. */
+.workspace-content:has(> .company-refined) {
+  padding: 28px clamp(16px, 2.5vw, 40px) 48px;
+}
+
+.company-page.company-refined {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.company-refined .company-page-header>div:first-child {
+  min-width: 0;
+}
+
+.company-refined .company-title-row select {
+  min-width: 0;
+  max-width: min(520px, 100%);
+  font-size: clamp(26px, 3vw, 34px);
+  color: #171717;
+}
+
+.company-refined .company-page-header p:last-child {
+  color: #171717;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.company-refined .company-control-strip,
+.company-refined .company-run-card,
+.company-refined .company-chart-card,
+.company-refined .company-first-run {
+  border: 1px solid #e4e4e4;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, .05);
+}
+
+.company-refined .company-control-strip {
+  padding: 20px 24px;
+  align-items: center;
+}
+
+.company-refined .company-control-strip span,
+.company-refined .company-section-heading small,
+.company-refined .company-field-hint {
+  color: #404040;
+  line-height: 1.5;
+}
+
+.company-refined .company-section-heading h2 {
+  font-size: 20px;
+  color: #171717;
+}
+
+.company-refined .company-run-form {
+  margin: 18px 0 10px;
+}
+
+.company-refined input:not([type=checkbox]):not([type=file]),
+.company-refined textarea,
+.company-refined select:not(.company-title-row select) {
+  box-sizing: border-box;
+  color: #171717;
+  background: #fff;
+  border: 1px solid #d8d8d8;
+  border-radius: 10px;
+}
+
+.company-refined textarea:focus,
+.company-refined select:focus,
+.company-refined input:focus {
+  outline: 2px solid #d83438;
+  outline-offset: 2px;
+}
+
+.company-refined button,
+.company-refined .company-knowledge-card>label {
+  cursor: pointer;
+}
+
+.company-refined .company-knowledge-card>label {
+  display: inline-flex;
+  margin-top: 18px;
+}
+
+.company-refined .company-knowledge-list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.company-refined .company-knowledge-list>div,
+.company-refined .company-knowledge-card>ul>li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  color: #171717;
+  overflow-wrap: anywhere;
+}
+
+.company-refined .company-knowledge-list>p {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed #d8d8d8;
+  border-radius: 10px;
+  color: #404040;
+}
+
+.company-refined .company-memory-editor {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.company-refined .company-memory-editor textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 90px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.company-refined .company-knowledge-card>ul {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.company-refined .company-chart-card {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.company-refined .company-chart-scroll {
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.company-refined .company-org-chart {
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
+.company-refined .company-agent-node {
+  flex: 0 0 210px;
+}
+
+.company-refined .company-chart-level {
+  content-visibility: visible;
+}
+
+@media (max-width: 700px) {
+  .company-refined .company-control-strip {
+    grid-template-columns: 1fr;
+  }
+  .company-refined .company-title-row {
+    flex-wrap: wrap;
+  }
+  .company-refined .company-memory-editor {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 
 /* NPATI Authentication Styles */
 .home-auth-nav {

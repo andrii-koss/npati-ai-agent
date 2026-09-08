@@ -1,5 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
 
@@ -328,11 +329,12 @@ export function CompanyPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not delete company"); }
   }
 
-  return <main className="company-page">
-    <header className="company-page-header">
+  return <main className="company-page company-refined">
+    <header className="company-page-header inspector-header automations-header">
       <div>
-        <p className="eyebrow">AI Company</p>
+        <p className="eyebrow">Settings · AI Company</p>
         <div className="company-title-row">
+          <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">←</Link>
           {companies.length > 0
             ? <select aria-label="Select company" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
                 {companies.map((company) => <option value={company.id} key={company.id}>{company.name}</option>)}
@@ -387,7 +389,9 @@ export function CompanyPage() {
       </section>
       <section className="company-chart-card">
         <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
-        <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} onSelect={openAgentEditor} />
+        <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
+          <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} onSelect={openAgentEditor} />
+        </div>
         {agentCursor && <button className="button-secondary company-load-more" onClick={() => void loadOrganization(selected.id, agentCursor, true)}>Load more agents</button>}
       </section>
     </>}
