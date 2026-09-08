@@ -6102,6 +6102,21 @@ a {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.company-doc-details {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.company-doc-details > strong {
+  overflow: hidden;
+  color: var(--npati-black);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .company-doc-icon {
@@ -6123,6 +6138,11 @@ a {
   color: var(--npati-gray-700);
 }
 
+.company-doc-size {
+  color: var(--npati-gray-500);
+  font-size: 11px;
+}
+
 .company-doc-actions {
   display: flex;
   align-items: center;
@@ -6130,12 +6150,22 @@ a {
 }
 
 .company-doc-link {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 600;
   color: var(--npati-black);
   text-decoration: none;
   padding: 4px 8px;
   border-radius: 6px;
+}
+
+.company-doc-link:disabled,
+.company-doc-btn:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .company-doc-link:hover {
@@ -6179,6 +6209,14 @@ a {
   box-sizing: border-box;
 }
 
+.company-memory-editor-row > .company-memory-textarea {
+  min-height: 90px;
+  padding: 14px 16px;
+  border: 1px solid var(--npati-red) !important;
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.08) !important;
+}
+
 .company-memory-textarea:focus {
   border-color: var(--npati-red) !important;
   box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.08) !important;
@@ -6192,6 +6230,11 @@ a {
   border-radius: 9px !important;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.company-add-memory-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .company-memory-list {
@@ -6226,6 +6269,20 @@ a {
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--npati-black);
+}
+
+.company-memory-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.company-memory-edit-btn {
+  min-height: auto !important;
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
 }
 
 .company-memory-delete-btn {
@@ -6268,9 +6325,14 @@ a {
   .company-refined .company-title-row {
     flex-wrap: wrap;
   }
-  .company-refined .company-memory-editor {
+  .company-refined .company-memory-editor-row,
+  .company-refined .company-doc-item {
     flex-direction: column;
     align-items: stretch;
+  }
+  .company-refined .company-doc-actions,
+  .company-refined .company-memory-actions {
+    flex-wrap: wrap;
   }
 }
 
