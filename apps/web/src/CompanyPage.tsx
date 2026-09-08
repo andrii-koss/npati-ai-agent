@@ -147,6 +147,8 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 export function CompanyPage() {
   const { overview } = useWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const [companiesLoadError, setCompaniesLoadError] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -226,12 +228,23 @@ export function CompanyPage() {
   }
 
   useEffect(() => {
-    void loadCompanies().then((items) => {
-      const first = items[0];
-      if (first) void loadOrganization(first.id, undefined, false, items);
-    });
+    void initializeCompanies();
     void loadAddedModels();
   }, []);
+
+  async function initializeCompanies() {
+    setCompaniesLoading(true);
+    setCompaniesLoadError("");
+    try {
+      const items = await loadCompanies();
+      const first = items[0];
+      if (first) await loadOrganization(first.id, undefined, false, items);
+    } catch (error) {
+      setCompaniesLoadError(error instanceof Error ? error.message : "Could not load companies");
+    } finally {
+      setCompaniesLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!selectedId) return;
@@ -501,6 +514,17 @@ export function CompanyPage() {
   const noticeIsSuccess = Boolean(notice)
     && /saved|uploaded|queued|added|updated|deleted|completed/i.test(notice)
     && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied/i.test(notice);
+
+  if (companiesLoading) return <main className="company-page company-refined company-initial-state" aria-busy="true">
+    <span className="company-initial-spinner" aria-hidden="true" />
+    <strong>Loading your AI Company…</strong>
+  </main>;
+
+  if (companiesLoadError) return <main className="company-page company-refined company-initial-state">
+    <strong>Could not load your AI Company</strong>
+    <p>{companiesLoadError}</p>
+    <button className="button-primary" type="button" onClick={() => void initializeCompanies()}>Try Again</button>
+  </main>;
 
   return <main className="company-page company-refined">
     <header className="company-page-header">
