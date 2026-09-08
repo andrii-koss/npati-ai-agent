@@ -678,6 +678,14 @@ export function CompanyPage() {
         )}
       </section>
 
+      <section className="company-chart-card">
+        <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
+        <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
+          <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} onSelect={openAgentEditor} />
+        </div>
+        {agentCursor && <button className="button-secondary company-load-more" onClick={() => void loadOrganization(selected.id, agentCursor, true)}>Load more agents</button>}
+      </section>
+
       <section className="company-run-card company-knowledge-card">
         <div className="company-section-heading">
           <div>
@@ -809,13 +817,6 @@ export function CompanyPage() {
             </ul>
           )}
         </div>
-      </section>
-      <section className="company-chart-card">
-        <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
-        <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
-          <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} onSelect={openAgentEditor} />
-        </div>
-        {agentCursor && <button className="button-secondary company-load-more" onClick={() => void loadOrganization(selected.id, agentCursor, true)}>Load more agents</button>}
       </section>
     </>}
 

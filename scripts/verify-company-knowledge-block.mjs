@@ -85,6 +85,22 @@ try {
   await page.getByLabel("Select company").selectOption(companyId);
 
   const card = page.locator(".company-knowledge-card");
+  const layoutAndUploadStyle = await page.evaluate(() => {
+    const chart = document.querySelector(".company-chart-card");
+    const knowledge = document.querySelector(".company-knowledge-card");
+    const upload = document.querySelector(".company-upload-label");
+    if (!chart || !knowledge || !upload) return null;
+    const style = getComputedStyle(upload);
+    return {
+      chartBeforeKnowledge: Boolean(chart.compareDocumentPosition(knowledge) & Node.DOCUMENT_POSITION_FOLLOWING),
+      chartKnowledgeGap: Math.round(knowledge.getBoundingClientRect().top - chart.getBoundingClientRect().bottom),
+      uploadBackground: style.backgroundColor,
+      uploadColor: style.color,
+    };
+  });
+  if (!layoutAndUploadStyle?.chartBeforeKnowledge) throw new Error("Organization must appear before Company Knowledge");
+  if (layoutAndUploadStyle.chartKnowledgeGap !== 22) throw new Error("Organization/Knowledge gap must be 22px");
+  if (layoutAndUploadStyle.uploadBackground !== "rgb(17, 17, 17)" || layoutAndUploadStyle.uploadColor !== "rgb(255, 255, 255)") throw new Error("Upload Document must be black with white text");
   const subtitle = await card.locator(".company-section-heading small").textContent();
   if (subtitle !== "Private MinIO documents, NPATI embeddings and rerank.") throw new Error("Knowledge subtitle mismatch: " + subtitle);
   if ((await card.textContent()).includes("OmniRoute")) throw new Error("Knowledge card still exposes the old provider name");
@@ -147,6 +163,9 @@ try {
     successNoticeStyle: true,
     memoryContourMatchesTask: true,
     deleteButtonsMatchHeader: true,
+    organizationBeforeKnowledge: true,
+    organizationKnowledgeGap: layoutAndUploadStyle.chartKnowledgeGap,
+    uploadButtonBlackWithWhiteText: true,
   }, null, 2));
 } finally {
   await browser?.close().catch(() => {});
