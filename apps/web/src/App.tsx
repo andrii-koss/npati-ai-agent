@@ -6,9 +6,10 @@ import { AIProviderMarketplace, OAuthCallback } from "./AIProviderMarketplace";
 import { AuthProvider, useAuth, getStoredAuthToken } from "./AuthContext";
 import { AuthModal } from "./AuthModal";
 import {
-  BusinessPage, BusinessSwitcher, GoalsPage, MemoryPage,
+  BusinessPage, BusinessSwitcher, MemoryPage,
   SkillsPage, WorkspaceProvider, useWorkspace,
 } from "./BusinessWorkspace";
+import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
 
@@ -422,7 +423,9 @@ function Workspace({ children }: { children: ReactNode }) {
   const isCompany = location.pathname === "/company";
   const isActivity = location.pathname === "/activity";
   const isAutomations = location.pathname === "/automations" || location.pathname.startsWith("/automations");
-  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
+  const isGoals = location.pathname === "/goals" || location.pathname.startsWith("/goals");
+  const isContent = location.pathname === "/content" || location.pathname.startsWith("/content");
+  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
 }
 
 function ChatRoute() {
