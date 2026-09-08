@@ -428,7 +428,8 @@ function Workspace({ children }: { children: ReactNode }) {
   const isContent = location.pathname === "/content" || location.pathname.startsWith("/content");
   const isConnections = location.pathname === "/connections" || location.pathname.startsWith("/connections");
   const isMemory = location.pathname === "/memory" || location.pathname.startsWith("/memory");
-  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
+  const isSkills = location.pathname === "/skills" || location.pathname.startsWith("/skills");
+  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
 }
 
 function ChatRoute() {
