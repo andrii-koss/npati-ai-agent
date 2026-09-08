@@ -16,8 +16,8 @@ type Agent = {
 };
 type Edge = { id: string; parentAgentId: string; childAgentId: string; relationType: string };
 type AgentPage = { agents: Agent[]; pagination: { limit: number; nextCursor: string | null } };
-type KnowledgeDocument = { id:string;fileId:string;status:string;errorMessage?:string;chunkCount:number;createdAt:string };
-type CompanyMemory = { id:string;content:string;source:string;updatedAt:string };
+type KnowledgeDocument = { id:string;fileId:string;filename?:string;mimeType?:string;sizeBytes?:number;status:string;errorMessage?:string;chunkCount:number;createdAt:string };
+type CompanyMemory = { id:string;content:string;source:string;revision?:number;updatedAt:string };
 type RunDetails = { run: { id: string; status: string; executionMode?: string; result?: string; errorMessage?: string }; steps: unknown[]; toolAudit: unknown[] };
 type CompanyDraft = {
   name: string; businessId: string; website: string; industry: string; description: string;
@@ -123,6 +123,10 @@ export function CompanyPage() {
   const [memories,setMemories]=useState<CompanyMemory[]>([]);
   const [memoryText,setMemoryText]=useState("");
   const [knowledgeBusy,setKnowledgeBusy]=useState(false);
+  const [knowledgeActionId,setKnowledgeActionId]=useState("");
+  const [memoryBusy,setMemoryBusy]=useState(false);
+  const [editingMemoryId,setEditingMemoryId]=useState("");
+  const [editingMemoryText,setEditingMemoryText]=useState("");
   const [companyEditor, setCompanyEditor] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company>();
   const [agentEditor, setAgentEditor] = useState(false);
@@ -175,10 +179,23 @@ export function CompanyPage() {
 
   useEffect(() => {
     if (!selectedId) return;
+    setMemoryText("");
+    setEditingMemoryId("");
+    setEditingMemoryText("");
     void loadOrganization(selectedId);
     void api<{ documents: KnowledgeDocument[] }>(`/companies/${selectedId}/knowledge/documents`).then((value) => setDocuments(value.documents ?? [])).catch(() => setDocuments([]));
     void api<{ memories: CompanyMemory[] }>(`/companies/${selectedId}/knowledge/memory`).then((value) => setMemories(value.memories ?? [])).catch(() => setMemories([]));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !documents.some((document) => document.status === "uploaded" || document.status === "processing")) return;
+    const timer = window.setInterval(() => {
+      void api<{ documents: KnowledgeDocument[] }>(`/companies/${selectedId}/knowledge/documents`)
+        .then((value) => setDocuments(value.documents ?? []))
+        .catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [selectedId, documents]);
 
   useEffect(() => { setRunDetails(undefined); setRunning(false); }, [selectedId]);
   useEffect(() => {
@@ -321,17 +338,62 @@ export function CompanyPage() {
     } catch (error) { setRunning(false); setNotice(error instanceof Error ? error.message : "Company run failed"); }
   }
 
-  async function uploadKnowledge(file:File){
-    if(!selected)return;setKnowledgeBusy(true);setNotice("");
-    try{const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error);reader.onload=()=>resolve(String(reader.result).split(",")[1]??"");reader.readAsDataURL(file);});
-      await api(`/companies/${selected.id}/knowledge/documents`,{method:"POST",headers:{"idempotency-key":crypto.randomUUID()},body:JSON.stringify({filename:file.name,mimeType:file.type||"application/octet-stream",data})});
-      const value=await api<{documents:KnowledgeDocument[]}>(`/companies/${selected.id}/knowledge/documents`);setDocuments(value.documents);setNotice("Document uploaded and queued for processing.");
-    }catch(error){setNotice(error instanceof Error?error.message:"Document upload failed");}finally{setKnowledgeBusy(false);}
+  async function readFileAsBase64(file:File){
+    return await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error??new Error("Could not read the document"));reader.onload=()=>resolve(String(reader.result).split(",")[1]??"");reader.readAsDataURL(file);});
   }
-  async function addCompanyMemory(){if(!selected||!memoryText.trim())return;try{await api(`/companies/${selected.id}/knowledge/memory`,{method:"POST",body:JSON.stringify({content:memoryText.trim()})});setMemoryText("");const v=await api<{memories:CompanyMemory[]}>(`/companies/${selected.id}/knowledge/memory`);setMemories(v.memories);}catch(error){setNotice(error instanceof Error?error.message:"Memory save failed");}}
-  async function deleteKnowledge(id:string){if(!selected)return;await api(`/companies/${selected.id}/knowledge/documents/${id}`,{method:"DELETE"});setDocuments(items=>items.filter(item=>item.id!==id));}
-  async function reprocessKnowledge(id:string){if(!selected)return;await api(`/companies/${selected.id}/knowledge/documents/${id}/reprocess`,{method:"POST"});const value=await api<{documents:KnowledgeDocument[]}>(`/companies/${selected.id}/knowledge/documents`);setDocuments(value.documents);setNotice("Document queued for reprocessing.");}
-  async function deleteCompanyMemory(id:string){if(!selected)return;await api(`/companies/${selected.id}/knowledge/memory/${id}`,{method:"DELETE"});setMemories(items=>items.filter(item=>item.id!==id));}
+  async function uploadKnowledge(files:File[]){
+    if(!selected||!files.length)return;
+    const companyId=selected.id;
+    setKnowledgeBusy(true);setNotice("");
+    let uploaded=0;
+    const failures:string[]=[];
+    for(const file of files){
+      try{
+        if(file.size===0)throw new Error("The file is empty");
+        if(file.size>25*1024*1024)throw new Error("The 25 MB limit was exceeded");
+        const data=await readFileAsBase64(file);
+        const document=await api<KnowledgeDocument>(`/companies/${companyId}/knowledge/documents`,{method:"POST",headers:{"idempotency-key":crypto.randomUUID()},body:JSON.stringify({filename:file.name,mimeType:file.type||"application/octet-stream",data})});
+        setDocuments(items=>[document,...items.filter(item=>item.id!==document.id)]);
+        uploaded++;
+      }catch(error){failures.push(`${file.name}: ${error instanceof Error?error.message:"upload failed"}`);}
+    }
+    try{const value=await api<{documents:KnowledgeDocument[]}>(`/companies/${companyId}/knowledge/documents`);setDocuments(value.documents??[]);}catch{}
+    setKnowledgeBusy(false);
+    setNotice(failures.length?`${uploaded} document(s) uploaded. ${failures.join("; ")}`:`${uploaded} document(s) uploaded and queued for processing.`);
+  }
+  async function addCompanyMemory(){
+    const content=memoryText.trim();if(!selected||!content||memoryBusy)return;
+    setMemoryBusy(true);setNotice("");
+    try{const created=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory`,{method:"POST",body:JSON.stringify({content})});setMemoryText("");setMemories(items=>[created,...items.filter(item=>item.id!==created.id)]);setNotice("Company memory added.");}
+    catch(error){setNotice(error instanceof Error?error.message:"Memory save failed");}finally{setMemoryBusy(false);}
+  }
+  function startEditingMemory(memory:CompanyMemory){setEditingMemoryId(memory.id);setEditingMemoryText(memory.content);}
+  async function updateCompanyMemory(){
+    const content=editingMemoryText.trim();if(!selected||!editingMemoryId||!content||memoryBusy)return;
+    setMemoryBusy(true);setNotice("");
+    try{const updated=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory/${editingMemoryId}`,{method:"PUT",body:JSON.stringify({content})});setMemories(items=>items.map(item=>item.id===updated.id?updated:item));setEditingMemoryId("");setEditingMemoryText("");setNotice("Company memory updated.");}
+    catch(error){setNotice(error instanceof Error?error.message:"Memory update failed");}finally{setMemoryBusy(false);}
+  }
+  async function deleteKnowledge(id:string){
+    if(!selected||knowledgeActionId||!window.confirm("Delete this document?"))return;setKnowledgeActionId(id);setNotice("");
+    try{await api(`/companies/${selected.id}/knowledge/documents/${id}`,{method:"DELETE"});setDocuments(items=>items.filter(item=>item.id!==id));setNotice("Document deleted.");}
+    catch(error){setNotice(error instanceof Error?error.message:"Document delete failed");}finally{setKnowledgeActionId("");}
+  }
+  async function downloadKnowledge(doc:KnowledgeDocument){
+    if(!selected||knowledgeActionId)return;setKnowledgeActionId(doc.id);setNotice("");
+    try{const headers=new Headers();const token=getStoredAuthToken();if(token)headers.set("authorization",`Bearer ${token}`);const response=await fetch(`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`,{headers});if(!response.ok){const body=await response.json().catch(()=>null) as {error?:{message?:string}}|null;throw new Error(body?.error?.message??`Download failed (${response.status})`);}const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=doc.filename||"company-document";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}
+    catch(error){setNotice(error instanceof Error?error.message:"Document download failed");}finally{setKnowledgeActionId("");}
+  }
+  async function reprocessKnowledge(id:string){
+    if(!selected||knowledgeActionId)return;setKnowledgeActionId(id);setNotice("");
+    try{const document=await api<KnowledgeDocument>(`/companies/${selected.id}/knowledge/documents/${id}/reprocess`,{method:"POST"});setDocuments(items=>items.map(item=>item.id===id?document:item));setNotice("Document queued for reprocessing.");}
+    catch(error){setNotice(error instanceof Error?error.message:"Document retry failed");}finally{setKnowledgeActionId("");}
+  }
+  async function deleteCompanyMemory(id:string){
+    if(!selected||memoryBusy||!window.confirm("Delete this Company memory?"))return;setMemoryBusy(true);setNotice("");
+    try{await api(`/companies/${selected.id}/knowledge/memory/${id}`,{method:"DELETE"});setMemories(items=>items.filter(item=>item.id!==id));if(editingMemoryId===id){setEditingMemoryId("");setEditingMemoryText("");}setNotice("Company memory deleted.");}
+    catch(error){setNotice(error instanceof Error?error.message:"Memory delete failed");}finally{setMemoryBusy(false);}
+  }
 
   async function deleteCompany() {
     if (!selected || !window.confirm(`Delete company "${selected.name}" and all its agents?`)) return;
@@ -340,6 +402,10 @@ export function CompanyPage() {
       setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies();
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not delete company"); }
   }
+
+  const noticeIsSuccess = Boolean(notice)
+    && /saved|uploaded|queued|added|updated|deleted|completed/i.test(notice)
+    && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied/i.test(notice);
 
   return <main className="company-page company-refined">
     <header className="company-page-header">
@@ -411,12 +477,12 @@ export function CompanyPage() {
     </header>
 
     {notice && (
-      <div className={`company-notice-banner ${/saved/i.test(notice) ? "success" : "error"}`}>
+      <div className={`company-notice-banner ${noticeIsSuccess ? "success" : "error"}`}>
         <span className="company-notice-icon" aria-hidden="true">
-          {/saved/i.test(notice) ? "✓" : "⚠"}
+          {noticeIsSuccess ? "✓" : "⚠"}
         </span>
         <div className="company-notice-content">
-          <strong>{/saved/i.test(notice) ? "Agent / Company Update" : "System Alert"}</strong>
+          <strong>{noticeIsSuccess ? "Update completed" : "System Alert"}</strong>
           <span>{notice}</span>
         </div>
         <button
@@ -618,7 +684,7 @@ export function CompanyPage() {
             <span>Context</span>
             <h2>Company Knowledge</h2>
           </div>
-          <small>Private MinIO documents, OmniRoute embeddings and rerank.</small>
+          <small>Private MinIO documents, NPATI embeddings and rerank.</small>
         </div>
 
         {/* Sub-block 1: Document Knowledge */}
@@ -634,11 +700,12 @@ export function CompanyPage() {
               <input
                 hidden
                 type="file"
+                multiple
                 disabled={knowledgeBusy}
-                accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.xml"
+                accept=".pdf,.docx,.xlsx,.txt,.md,.markdown,.csv,.tsv,.json,.xml"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadKnowledge(f);
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void uploadKnowledge(files);
                   e.currentTarget.value = "";
                 }}
               />
@@ -652,28 +719,26 @@ export function CompanyPage() {
               <div key={doc.id} className="company-doc-item">
                 <div className="company-doc-item-left">
                   <span className="company-doc-icon">📄</span>
-                  <div className="company-doc-meta">
-                    <span className={`connection-status-pill status-${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`}>
-                      <span className={`status-indicator-dot ${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`} />
-                      {doc.status}
-                    </span>
-                    <span className="company-chunk-badge">{doc.chunkCount} chunks</span>
+                  <div className="company-doc-details">
+                    <strong title={doc.filename}>{doc.filename||"Company document"}</strong>
+                    <div className="company-doc-meta">
+                      <span className={`connection-status-pill status-${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`}>
+                        <span className={`status-indicator-dot ${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`} />
+                        {doc.status}
+                      </span>
+                      <span className="company-chunk-badge">{doc.chunkCount} chunks</span>
+                      {typeof doc.sizeBytes==="number"&&<span className="company-doc-size">{doc.sizeBytes<1024*1024?`${Math.max(1,Math.round(doc.sizeBytes/1024))} KB`:`${(doc.sizeBytes/1024/1024).toFixed(1)} MB`}</span>}
+                    </div>
                   </div>
                 </div>
                 {doc.errorMessage && <small className="company-doc-error">{doc.errorMessage}</small>}
                 <div className="company-doc-actions">
-                  <a
-                    href={`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`}
-                    className="company-doc-link"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Download ↗
-                  </a>
+                  <button type="button" className="company-doc-link" disabled={knowledgeActionId===doc.id} onClick={()=>void downloadKnowledge(doc)}>Download</button>
                   {doc.status === "failed" && (
                     <button
                       type="button"
                       className="button-secondary company-doc-btn"
+                      disabled={knowledgeActionId===doc.id}
                       onClick={() => void reprocessKnowledge(doc.id)}
                     >
                       Retry
@@ -681,7 +746,8 @@ export function CompanyPage() {
                   )}
                   <button
                     type="button"
-                    className="danger-button company-doc-btn"
+                    className="content-action-btn delete-btn company-doc-btn"
+                    disabled={knowledgeActionId===doc.id}
                     onClick={() => void deleteKnowledge(doc.id)}
                   >
                     Delete
@@ -694,7 +760,7 @@ export function CompanyPage() {
               <div className="company-empty-docs-box">
                 <span className="company-empty-icon" aria-hidden="true">📄</span>
                 <strong>No Company documents yet</strong>
-                <p>Upload PDF, DOCX, XLSX, TXT, or MD files to ground agents in verified internal data.</p>
+                <p>Upload PDF, DOCX, XLSX, TXT, MD, CSV, TSV, JSON, or XML files (up to 25 MB each).</p>
               </div>
             )}
           </div>
@@ -716,34 +782,28 @@ export function CompanyPage() {
               placeholder="Add an important Company fact or rule (e.g. Refund terms, brand boundary, operating guidelines)..."
               value={memoryText}
               onChange={(e) => setMemoryText(e.target.value)}
+              disabled={memoryBusy}
               className="company-memory-textarea"
             />
             <button
               type="button"
               className="button-primary automations-action-primary company-add-memory-btn"
               onClick={() => void addCompanyMemory()}
-              disabled={!memoryText.trim()}
+              disabled={!memoryText.trim()||memoryBusy}
             >
-              + Add Memory
+              {memoryBusy?"Saving...":"+ Add Memory"}
             </button>
           </div>
 
           {memories.length > 0 && (
             <ul className="company-memory-list">
-              {memories.slice(0, 5).map((memory) => (
+              {memories.map((memory) => (
                 <li key={memory.id} className="company-memory-item">
-                  <div className="company-memory-item-content">
-                    <span className="memory-bullet" aria-hidden="true">📌</span>
-                    <p>{memory.content}</p>
+                  {editingMemoryId===memory.id?<textarea rows={2} className="company-memory-textarea" value={editingMemoryText} disabled={memoryBusy} onChange={(event)=>setEditingMemoryText(event.target.value)}/>:<div className="company-memory-item-content"><span className="memory-bullet" aria-hidden="true">📌</span><p>{memory.content}</p></div>}
+                  <div className="company-memory-actions">
+                    {editingMemoryId===memory.id?<><button type="button" className="button-primary company-memory-edit-btn" disabled={!editingMemoryText.trim()||memoryBusy} onClick={()=>void updateCompanyMemory()}>Save</button><button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>{setEditingMemoryId("");setEditingMemoryText("");}}>Cancel</button></>:<button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>startEditingMemory(memory)}>Edit</button>}
+                    <button type="button" className="content-action-btn delete-btn company-memory-delete-btn" disabled={memoryBusy} onClick={() => void deleteCompanyMemory(memory.id)} title="Delete fact">Delete</button>
                   </div>
-                  <button
-                    type="button"
-                    className="danger-button company-memory-delete-btn"
-                    onClick={() => void deleteCompanyMemory(memory.id)}
-                    title="Delete fact"
-                  >
-                    Delete
-                  </button>
                 </li>
               ))}
             </ul>
