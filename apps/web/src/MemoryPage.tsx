@@ -133,7 +133,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function MemoryPage() {
-  const { overview, refresh } = useWorkspace();
+  const { overview, loading: workspaceLoading, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
   const businessId = business?.id;
 
@@ -158,7 +158,7 @@ export function MemoryPage() {
 
   const loadMemory = async () => {
     if (!businessId) {
-      setLoading(false);
+      setLoading(workspaceLoading);
       return;
     }
     setLoading(true);
@@ -174,7 +174,7 @@ export function MemoryPage() {
 
   useEffect(() => {
     void loadMemory();
-  }, [businessId]);
+  }, [businessId, workspaceLoading]);
 
 
   // Tab definitions
@@ -512,7 +512,7 @@ export function MemoryPage() {
                       </span>
                     </div>
 
-                    <button
+                    {false && <button
                       type="button"
                       className="memory-card-top-delete"
                       onClick={() => void handleDeleteItem(item)}
@@ -535,7 +535,7 @@ export function MemoryPage() {
                         <line x1="14" y1="11" x2="14" y2="17" />
                       </svg>
                       <span>Delete</span>
-                    </button>
+                    </button>}
                   </div>
 
                   <h3 className="memory-card-title">{item.title}</h3>

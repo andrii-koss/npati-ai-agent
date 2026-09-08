@@ -7812,12 +7812,30 @@ a {
 }
 
 /* Memory Drawer specific fields */
+.memory-drawer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.memory-drawer>form {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.memory-drawer form>footer {
+  z-index: 2;
+  justify-content: flex-end;
+  box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.04);
+}
+
 .memory-drawer select,
 .memory-drawer-select {
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  border: 1px solid var(--npati-gray-200);
+  border: 1px solid var(--npati-gray-200, #d9d9d9);
   border-radius: 8px;
   font-size: 13px;
   color: var(--npati-black);
@@ -7838,7 +7856,7 @@ a {
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  border: 1px solid var(--npati-gray-200);
+  border: 1px solid var(--npati-gray-200, #d9d9d9);
   border-radius: 8px;
   font-size: 13px;
   color: var(--npati-black);
@@ -7858,7 +7876,7 @@ a {
 .memory-drawer-textarea {
   width: 100%;
   padding: 12px;
-  border: 1px solid var(--npati-gray-200);
+  border: 1px solid var(--npati-gray-200, #d9d9d9);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.6;
