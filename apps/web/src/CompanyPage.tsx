@@ -18,7 +18,9 @@ type Edge = { id: string; parentAgentId: string; childAgentId: string; relationT
 type AgentPage = { agents: Agent[]; pagination: { limit: number; nextCursor: string | null } };
 type KnowledgeDocument = { id:string;fileId:string;filename?:string;mimeType?:string;sizeBytes?:number;status:string;errorMessage?:string;chunkCount:number;createdAt:string };
 type CompanyMemory = { id:string;content:string;source:string;revision?:number;updatedAt:string };
-type RunDetails = { run: { id: string; status: string; executionMode?: string; result?: string; errorMessage?: string }; steps: unknown[]; toolAudit: unknown[] };
+type RunStep = { agentId: string; status: "selected" | "delegated" | "completed" | "failed" | "cancelled" };
+type RunDetails = { run: { id: string; status: string; selectedAgentIds?: string[]; executionMode?: string; result?: string; errorMessage?: string }; steps: RunStep[]; toolAudit: unknown[] };
+type RunSummary = RunDetails["run"];
 type CompanyDraft = {
   name: string; businessId: string; website: string; industry: string; description: string;
   productsServices: string; languages: string; brandTone: string; companyInstructions: string; status: "active" | "inactive";
@@ -73,15 +75,34 @@ function agentDraft(agent: Agent | undefined, edges: Edge[]): AgentDraft {
   } : { ...emptyAgent };
 }
 
-function AgentNode({ agent, main, onClick }: { agent: Agent; main: boolean; onClick(): void }) {
-  return <button className={`company-agent-node ${main ? "main" : ""} ${agent.isActive ? "" : "inactive"}`} onClick={onClick}>
-    <span className="company-agent-avatar">{agent.name.slice(0, 2).toUpperCase()}</span>
+function AgentModelIcon({ agent, model, working }: { agent: Agent; model?: Model; working: boolean }) {
+  const [providerIconFailed, setProviderIconFailed] = useState(false);
+  useEffect(() => setProviderIconFailed(false), [agent.modelId]);
+  const providerId = model?.providerId ?? agent.modelId?.split("/")[0];
+  const providerName = model?.providerName ?? providerId ?? "NPATI";
+  const useProviderIcon = Boolean(agent.modelId && providerId && !providerIconFailed);
+  const source = useProviderIcon
+    ? `/api/ai/providers/${encodeURIComponent(providerId!)}/icon?surface=light-v2`
+    : "/npati-auto.png";
+  return <span className={`company-agent-model-icon ${agent.modelId ? "provider" : "npati-auto"}`} title={`${agent.modelId ? `${model?.name ?? agent.modelId} via ${providerName}` : "NPATI Auto"} · ${working ? "Working" : "Idle"}`}>
+    <img src={source} alt="" onError={(event) => {
+      if (useProviderIcon) setProviderIconFailed(true);
+      else event.currentTarget.style.visibility = "hidden";
+    }} />
+    <span className={`company-agent-activity-dot ${working ? "working" : "idle"}`} aria-label={working ? "Agent is working" : "Agent is idle"} />
+  </span>;
+}
+
+function AgentNode({ agent, main, model, working, onClick }: { agent: Agent; main: boolean; model?: Model; working: boolean; onClick(): void }) {
+  return <button className={`company-agent-node ${main ? "main" : ""} ${agent.isActive ? "" : "inactive"} ${working ? "working" : ""}`} onClick={onClick}>
+    <AgentModelIcon agent={agent} model={model} working={working} />
     <span><strong>{agent.name}</strong><small>{agent.role}</small><em>{agent.modelId || "Auto"}</em></span>
     {main && <b>Main</b>}
   </button>;
 }
 
-function OrgChart({ agents, edges, mainAgentId, onSelect }: { agents: Agent[]; edges: Edge[]; mainAgentId?: string; onSelect(agent: Agent): void }) {
+function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelect }: { agents: Agent[]; edges: Edge[]; mainAgentId?: string; models: Model[]; workingAgentIds: Set<string>; onSelect(agent: Agent): void }) {
+  const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
   const levels = useMemo(() => {
     const byId = new Map(agents.map((agent) => [agent.id, agent]));
     const parentByChild = new Map(edges.map((edge) => [edge.childAgentId, edge.parentAgentId]));
@@ -102,7 +123,7 @@ function OrgChart({ agents, edges, mainAgentId, onSelect }: { agents: Agent[]; e
   return <div className="company-org-chart">
     {levels.map((level, index) => <div className="company-chart-level" key={index}>
       {index > 0 && <span className="company-chart-trunk" aria-hidden="true" />}
-      <div className="company-chart-row">{level.map((agent) => <AgentNode key={agent.id} agent={agent} main={agent.id === mainAgentId} onClick={() => onSelect(agent)} />)}</div>
+      <div className="company-chart-row">{level.map((agent) => <AgentNode key={agent.id} agent={agent} main={agent.id === mainAgentId} model={agent.modelId ? modelById.get(agent.modelId) : undefined} working={workingAgentIds.has(agent.id)} onClick={() => onSelect(agent)} />)}</div>
     </div>)}
   </div>;
 }
@@ -118,6 +139,7 @@ export function CompanyPage() {
   const [runMode, setRunMode] = useState<"auto" | "single" | "pipeline" | "fusion">("auto");
   const [runDetails, setRunDetails] = useState<RunDetails>();
   const [running, setRunning] = useState(false);
+  const [workingAgentIds, setWorkingAgentIds] = useState<Set<string>>(() => new Set());
   const [models, setModels] = useState<Model[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState("");
@@ -203,6 +225,38 @@ export function CompanyPage() {
     void loadOrganization(selectedId);
     void api<{ documents: KnowledgeDocument[] }>(`/companies/${selectedId}/knowledge/documents`).then((value) => setDocuments(value.documents ?? [])).catch(() => setDocuments([]));
     void api<{ memories: CompanyMemory[] }>(`/companies/${selectedId}/knowledge/memory`).then((value) => setMemories(value.memories ?? [])).catch(() => setMemories([]));
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setWorkingAgentIds(new Set());
+      return;
+    }
+    let active = true;
+    const refreshWorkingAgents = async () => {
+      try {
+        const value = await api<{ runs: RunSummary[] }>(`/companies/${selectedId}/runs?limit=20`);
+        const activeRuns = (value.runs ?? []).filter((run) => run.status === "queued" || run.status === "running");
+        const details = await Promise.all(activeRuns.map((run) => api<RunDetails>(`/companies/${selectedId}/runs/${run.id}`)));
+        const ids = new Set<string>();
+        for (const detail of details) {
+          if (detail.run.status !== "running") continue;
+          for (const agentId of detail.run.selectedAgentIds ?? []) ids.add(agentId);
+          for (const step of detail.steps ?? []) {
+            if (step.status === "selected" || step.status === "delegated") ids.add(step.agentId);
+          }
+        }
+        if (active) setWorkingAgentIds(ids);
+      } catch {
+        if (active) setWorkingAgentIds(new Set());
+      }
+    };
+    void refreshWorkingAgents();
+    const timer = window.setInterval(() => void refreshWorkingAgents(), 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [selectedId]);
 
   useEffect(() => {
@@ -700,7 +754,7 @@ export function CompanyPage() {
       <section className="company-chart-card">
         <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
         <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
-          <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} onSelect={openAgentEditor} />
+          <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} models={models} workingAgentIds={workingAgentIds} onSelect={openAgentEditor} />
         </div>
         {agentCursor && <button className="button-secondary company-load-more" onClick={() => void loadOrganization(selected.id, agentCursor, true)}>Load more agents</button>}
       </section>

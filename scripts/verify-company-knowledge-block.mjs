@@ -162,6 +162,54 @@ try {
   const storedAgents = await request("/companies/" + companyId + "/agents?limit=60");
   const storedAgent = storedAgents.agents.find((agent) => agent.name === "Model assignment verification");
   if (storedAgent?.modelId !== preferred.id || storedAgent?.fallbackModelId !== fallback.id) throw new Error("Selected agent models were not persisted");
+  await request(
+    "/companies/" + companyId + "/agents",
+    "POST",
+    { name: "NPATI Auto icon verification", role: "Assistant", tools: [], isActive: true },
+    "npati-auto-icon-agent-" + stamp,
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByLabel("Select company").selectOption(companyId);
+  const modelAgentNode = page.locator(".company-agent-node").filter({ hasText: "Model assignment verification" });
+  const autoAgentNode = page.locator(".company-agent-node").filter({ hasText: "NPATI Auto icon verification" });
+  await modelAgentNode.waitFor();
+  await autoAgentNode.waitFor();
+  const modelIcon = modelAgentNode.locator(".company-agent-model-icon > img");
+  const autoIcon = autoAgentNode.locator(".company-agent-model-icon > img");
+  await page.waitForFunction(
+    ([modelName, autoName]) => {
+      const find = (name) => [...document.querySelectorAll(".company-agent-node")].find((node) => node.textContent?.includes(name));
+      return find(modelName)?.querySelector("img")?.complete && find(autoName)?.querySelector("img")?.complete;
+    },
+    ["Model assignment verification", "NPATI Auto icon verification"],
+  );
+  const modelIconState = await modelIcon.evaluate((image) => ({ src: image.getAttribute("src"), width: image.naturalWidth }));
+  const autoIconState = await autoIcon.evaluate((image) => ({ src: image.getAttribute("src"), width: image.naturalWidth }));
+  if (!modelIconState.src?.includes("/api/ai/providers/" + encodeURIComponent(preferred.providerId) + "/icon") || modelIconState.width < 1) throw new Error("Assigned model provider icon was not rendered");
+  if (autoIconState.src !== "/npati-auto.png" || autoIconState.width < 1) throw new Error("NPATI Auto favicon was not rendered");
+  const agentNodes = page.locator(".company-agent-node");
+  if (await page.locator(".company-agent-activity-dot").count() !== await agentNodes.count()) throw new Error("Every agent must have an activity indicator");
+  if (await page.locator(".company-agent-activity-dot.idle").count() !== await agentNodes.count()) throw new Error("Agents without an active run must show idle status");
+  const runsListUrl = "**/api/companies/" + companyId + "/runs?limit=20";
+  const runDetailsUrl = "**/api/companies/" + companyId + "/runs/indicator-verification";
+  await page.route(runsListUrl, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ runs: [{ id: "indicator-verification", status: "running" }] }),
+  }));
+  await page.route(runDetailsUrl, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      run: { id: "indicator-verification", status: "running", selectedAgentIds: [storedAgent.id] },
+      steps: [{ agentId: storedAgent.id, status: "delegated" }],
+      toolAudit: [],
+    }),
+  }));
+  await modelAgentNode.locator(".company-agent-activity-dot.working").waitFor({ timeout: 7000 });
+  if (!await modelAgentNode.evaluate((node) => node.classList.contains("working"))) throw new Error("Working agent card did not receive its live state");
+  await page.unroute(runsListUrl);
+  await page.unroute(runDetailsUrl);
 
   const card = page.locator(".company-knowledge-card");
   const layoutAndUploadStyle = await page.evaluate(() => {
@@ -251,6 +299,10 @@ try {
     companyCloseAnimationMatchesGoals: true,
     connectedModelCount: connectedModels.length,
     agentPrimaryAndFallbackModelsPersisted: true,
+    assignedModelProviderIcon: true,
+    npatiAutoUploadedIcon: true,
+    everyAgentHasActivityIndicator: true,
+    workingAgentIndicatorTurnsGreen: true,
   }, null, 2));
 } finally {
   await browser?.close().catch(() => {});
