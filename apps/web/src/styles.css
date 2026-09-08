@@ -2588,6 +2588,220 @@ a {
 }
 
 /* Skills catalog — aligned with the settings inspector pages */
+.business-settings-page {
+  width: 100%;
+}
+
+.business-stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.business-list-status {
+  margin-top: 4px;
+}
+
+.business-profile-list {
+  gap: 12px;
+}
+
+.business-profile-card {
+  min-height: 112px;
+  padding: 18px 20px;
+  cursor: pointer;
+  border: 1px solid #e5e5e5;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgba(17, 17, 17, .03);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.business-profile-card:hover {
+  border-color: #d0d0d0;
+  box-shadow: 0 9px 24px rgba(17, 17, 17, .065);
+  transform: translateY(-1px);
+}
+
+.business-card-main {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.business-card-main>div {
+  min-width: 0;
+}
+
+.business-card-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #171717;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.business-profile-card h3 {
+  color: #171717;
+}
+
+.business-profile-card p {
+  max-width: 680px;
+  color: #262626;
+}
+
+.business-card-meta {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.business-card-meta span {
+  padding: 4px 7px;
+  color: #303030;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.business-profile-card .record-actions {
+  justify-content: flex-end;
+}
+
+.business-profile-card .record-actions button {
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+.business-profile-form {
+  width: min(100%, 1100px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #e5e5e5;
+  border-radius: 14px;
+  box-shadow: 0 5px 18px rgba(17, 17, 17, .04);
+}
+
+.business-profile-form .form-section-title {
+  margin: 0;
+  padding: 20px 24px;
+  background: #fafafa;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.business-profile-form .form-section-title span {
+  color: #171717;
+}
+
+.business-profile-form .form-section-title p {
+  color: #4a4a4a;
+  line-height: 1.55;
+}
+
+.business-profile-form .field-grid,
+.business-profile-form>label.field {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+
+.business-profile-form .field-grid {
+  padding-top: 14px;
+  column-gap: 16px;
+}
+
+.business-profile-form .field>span {
+  color: #262626;
+}
+
+.business-profile-form .field input,
+.business-profile-form .field textarea,
+.business-profile-form .field select {
+  color: #171717;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 9px;
+  box-sizing: border-box;
+}
+
+.business-profile-form .field textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.business-narrative-fields {
+  width: calc(100% - 48px);
+  max-width: 830px;
+  margin: 8px 24px 0;
+  display: grid;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+.business-narrative-fields .field {
+  width: 100%;
+  margin: 0;
+}
+
+.business-profile-form .field input::placeholder,
+.business-profile-form .field textarea::placeholder {
+  color: #777;
+}
+
+.business-profile-form .form-actions {
+  margin-top: 20px;
+  padding: 16px 24px;
+  justify-content: flex-end;
+  background: #fafafa;
+  border-top: 1px solid #e5e5e5;
+}
+
+@media (max-width: 1080px) {
+  .business-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .business-profile-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .business-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .business-profile-form .field-grid {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+
+  .business-narrative-fields {
+    width: calc(100% - 32px);
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+
+  .business-profile-card .record-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 900px) {
+  .business-narrative-fields {
+    width: calc(100% - 48px);
+    max-width: 830px;
+  }
+}
+
 .skills-container {
   width: 100%;
 }

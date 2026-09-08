@@ -151,7 +151,7 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
     finally { setSaving(false); }
   }
   return (
-    <form className="workspace-form" onSubmit={submit}>
+    <form className="workspace-form business-profile-form" onSubmit={submit}>
       <div className="form-section-title"><span>Business profile</span><p>Give NPATI enough context to make relevant recommendations. You can refine this later.</p></div>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="field-grid">
@@ -166,11 +166,39 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <label className="field"><span>Business model</span><input {...field("businessModel")} placeholder="Services, products, subscription…" /></label>
         <label className="field"><span>Website</span><input {...field("website")} type="url" placeholder="https://" /></label>
       </div>
-      <label className="field"><span>What does the business do?</span><textarea {...field("description")} placeholder="Products, services, value proposition…" /></label>
-      <label className="field"><span>Products or services</span><textarea {...field("productsServicesSummary")} placeholder="What you sell or plan to offer…" /></label>
-      <label className="field"><span>Target audience</span><textarea {...field("audienceSummary")} placeholder="Who you serve and what problem they have…" /></label>
-      <div className="form-actions"><button className="button-primary" disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create business"}</button>{onCancel && <button type="button" className="button-secondary" onClick={onCancel}>Cancel</button>}</div>
+      <div className="business-narrative-fields">
+        <label className="field"><span>What does the business do?</span><textarea {...field("description")} placeholder="Products, services, value proposition…" /></label>
+        <label className="field"><span>Products or services</span><textarea {...field("productsServicesSummary")} placeholder="What you sell or plan to offer…" /></label>
+        <label className="field"><span>Target audience</span><textarea {...field("audienceSummary")} placeholder="Who you serve and what problem they have…" /></label>
+      </div>
+      <div className="form-actions">{onCancel && <button type="button" className="button-secondary" onClick={onCancel} disabled={saving}>Cancel</button>}<button className="button-primary" disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create business"}</button></div>
     </form>
+  );
+}
+
+function BusinessSettingsHeader({ title = "Business Profiles", copy, action, backTo = "/settings", onBack }: { title?: string; copy: string; action?: ReactNode; backTo?: string; onBack?: () => void }) {
+  return (
+    <header className="inspector-header automations-header business-settings-header">
+      <div className="automations-header-top">
+        <div>
+          <p className="eyebrow">Settings · Business</p>
+          <h1>
+            {onBack ? <button type="button" className="marketplace-back-button" aria-label="Back to business profiles" title="Back to business profiles" onClick={onBack}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </button> : <Link to={backTo} className="marketplace-back-button" aria-label={backTo === "/settings" ? "Back to settings" : "Back to business profiles"} title={backTo === "/settings" ? "Back to settings" : "Back to business profiles"}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </Link>}
+            <span>{title}</span>
+          </h1>
+          <p className="hero-copy">{copy}</p>
+        </div>
+        {action && <div className="automations-header-actions">{action}</div>}
+      </div>
+    </header>
   );
 }
 
@@ -178,6 +206,8 @@ export function BusinessPage() {
   const { overview, loading, error, refresh, switchBusiness } = useWorkspace();
   const { businessId: editBusinessId } = useParams();
   const navigate = useNavigate();
+  const [creatingManually, setCreatingManually] = useState(false);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
   const current = overview?.currentBusiness;
   const editDraft = editBusinessId ? overview?.onboardings.find((session) => session.businessId === editBusinessId) ?? null : null;
   const editTarget = editBusinessId ? overview?.businesses.find((business) => business.id === editBusinessId) : undefined;
@@ -202,54 +232,123 @@ export function BusinessPage() {
     await refresh();
   }
 
-  if (loading) return <div className="workspace-loading">Loading business workspace…</div>;
-  if (error) return <Notice tone="error">{error}</Notice>;
+  async function convertToCompany(business: Business) {
+    if (!window.confirm(`Create a company from ${business.name} and transfer its profile, goals, and confirmed memory?`)) return;
+    setConvertingId(business.id);
+    try {
+      await api(`/businesses/${business.id}/convert-to-company`, {
+        method: "POST",
+        headers: { "idempotency-key": `business-convert-${business.id}` },
+        body: JSON.stringify({
+          companyName: business.name,
+          includeConfirmedMemory: true,
+          includeGoals: true,
+          includeResearchSummary: true,
+          includeInstructions: true,
+        }),
+      });
+      navigate("/company");
+    } catch (reason) {
+      window.alert(reason instanceof Error ? reason.message : "Could not create company from this business");
+    } finally {
+      setConvertingId(null);
+    }
+  }
+
+  if (loading) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo={editBusinessId ? "/settings/business" : "/settings"} /><div className="workspace-loading">Loading business workspace…</div></main>;
+  if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
+
+  if (creatingManually) {
+    return (
+      <main className="automations-container business-settings-page">
+        <BusinessSettingsHeader title="New Business" copy="Create a complete business profile manually. You can update every field later." onBack={() => setCreatingManually(false)} />
+        <BusinessForm
+          mode="existing"
+          onCancel={() => setCreatingManually(false)}
+          onSaved={async () => { await refresh(); setCreatingManually(false); }}
+        />
+      </main>
+    );
+  }
 
   if (editDraft) {
-    return <><PageIntro eyebrow="Business draft" title={editDraft.business.name} copy="Edit the saved details for this business idea." /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></>;
+    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editDraft.business.name} copy="Edit the saved details for this business idea." backTo="/settings/business" /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></main>;
   }
-  if (editTarget && current?.id !== editTarget.id) return <div className="workspace-loading">Opening business profile…</div>;
+  if (editTarget && current?.id !== editTarget.id) return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy="Opening this business profile and its active context." backTo="/settings/business" /><div className="workspace-loading">Opening business profile…</div></main>;
   if (editTarget) {
-    return <><PageIntro eyebrow="Business profile" title={editTarget.name} copy="Keep the facts NPATI relies on accurate." /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></>;
+    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy="Keep the business facts NPATI relies on accurate and complete." backTo="/settings/business" /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></main>;
   }
-  if (editBusinessId) return <Notice tone="error">This business does not exist or is not available to your user.</Notice>;
+  if (editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo="/settings/business" /><Notice tone="error">This business does not exist or is not available to your user.</Notice></main>;
 
   const businesses = overview?.businesses ?? [];
   const drafts = overview?.onboardings ?? [];
   const ideaCount = businesses.length + drafts.length;
   return (
-    <>
-      <PageIntro
-        eyebrow="Business workspace"
-        title="Business ideas"
-        copy="Open any business idea in its own chat, or use the edit button to update its profile."
-        action={<button className="button-primary" onClick={() => void createBusinessIdea()}>+ Add business idea</button>}
+    <main className="automations-container business-settings-page">
+      <BusinessSettingsHeader
+        copy="Manage the business profiles, markets, audiences, and operating context NPATI uses across chats and recommendations."
+        action={<><button className="button-secondary" onClick={() => void createBusinessIdea()}>Guided setup</button><button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Add Business</button></>}
       />
+
+      <section className="overview-grid inspector-stats-grid business-stats-grid">
+        <div><strong>{ideaCount}</strong><span>business profiles</span><small>All active profiles and drafts</small></div>
+        <div><strong>{businesses.length}</strong><span>active businesses</span><small>Ready to use with NPATI Agent</small></div>
+        <div><strong>{drafts.length}</strong><span>setup drafts</span><small>Profiles awaiting completion</small></div>
+        <div><strong>{current ? 1 : 0}</strong><span>current context</span><small>{current?.name || "No business selected"}</small></div>
+      </section>
+
+      <div className="inspector-table-status business-list-status">
+        <div className="status-left"><span>Showing <strong>{ideaCount}</strong> business {ideaCount === 1 ? "profile" : "profiles"}</span></div>
+      </div>
+
       {ideaCount === 0 ? (
-        <Notice><strong>No business ideas yet.</strong><span>Create the first idea to start its two-step setup chat.</span></Notice>
+        <div className="automations-empty-card">
+          <div className="automations-empty-icon">B</div>
+          <h3>No Business Profiles Yet</h3>
+          <p>Create the first business profile to give NPATI the context it needs for relevant recommendations.</p>
+          <button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Create First Business</button>
+        </div>
       ) : (
-        <div className="record-list">
+        <div className="record-list business-profile-list">
           {drafts.map((draft) => (
-            <article className="record-card" key={draft.businessId} onClick={() => navigate(`/b/${draft.businessId}`)} style={{ cursor: "pointer" }}>
-              <div><span className="record-status">Setup draft</span><h3>{draft.business.name}</h3><p>{draft.completedFields.length} of {draft.totalFields} setup steps completed</p></div>
+            <article className="record-card business-profile-card" key={draft.businessId} onClick={() => navigate(`/b/${draft.businessId}`)}>
+              <div className="business-card-main">
+                <span className="business-card-icon">{draft.business.name.charAt(0).toUpperCase() || "B"}</span>
+                <div><span className="record-status">Setup draft</span><h3>{draft.business.name}</h3><p>{draft.completedFields.length} of {draft.totalFields} setup steps completed</p></div>
+              </div>
               <div className="record-actions">
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${draft.businessId}`); }}>Continue setup</button>
                 <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${draft.businessId}`); }}>Edit</button>
                 <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(draft.businessId, draft.business.name); }}>Delete</button>
               </div>
             </article>
           ))}
           {businesses.map((business) => (
-            <article className="record-card" key={business.id} onClick={() => navigate(`/b/${business.id}`)} style={{ cursor: "pointer" }}>
-              <div><span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? "Current" : "Business"}</span><h3>{business.name}</h3><p>{business.description || business.industry || business.businessStage || "Business idea"}</p></div>
+            <article className="record-card business-profile-card" key={business.id} onClick={() => navigate(`/b/${business.id}`)}>
+              <div className="business-card-main">
+                <span className="business-card-icon">{business.name.charAt(0).toUpperCase() || "B"}</span>
+                <div>
+                  <span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? "Current" : business.businessStage}</span>
+                  <h3>{business.name}</h3>
+                  <p>{business.description || business.industry || "Business profile"}</p>
+                  <div className="business-card-meta">
+                    {business.industry && <span>{business.industry}</span>}
+                    {business.market && <span>{business.market}</span>}
+                    {business.country && <span>{business.country}</span>}
+                  </div>
+                </div>
+              </div>
               <div className="record-actions">
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${business.id}`); }}>Open chat</button>
                 <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>Edit</button>
+                <button disabled={convertingId === business.id} onClick={(event) => { event.stopPropagation(); void convertToCompany(business); }}>{convertingId === business.id ? "Converting..." : "Create company"}</button>
                 <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>Delete</button>
               </div>
             </article>
           ))}
         </div>
       )}
-    </>
+    </main>
   );
 }
 function EmptyBusiness({ feature }: { feature: string }) {
