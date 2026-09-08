@@ -84,6 +84,52 @@ try {
   await page.goto("http://localhost:3000/company", { waitUntil: "networkidle" });
   await page.getByLabel("Select company").selectOption(companyId);
 
+  await page.getByRole("button", { name: "+ Add Agent" }).click();
+  const agentDrawer = page.locator(".agent-editor");
+  await agentDrawer.waitFor();
+  const agentNameField = agentDrawer.locator('input[required]').first();
+  await agentNameField.focus();
+  await page.waitForTimeout(200);
+  const focusedFieldStyle = await agentNameField.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor, boxShadow: style.boxShadow, transitionDuration: style.transitionDuration };
+  });
+  if (focusedFieldStyle.borderColor !== "rgb(225, 29, 46)" || !focusedFieldStyle.boxShadow.includes("rgba(225, 29, 46, 0.08)")) throw new Error("Agent field focus does not match Goals");
+  const agentClose = agentDrawer.getByRole("button", { name: "Close" });
+  if (await agentClose.locator("svg").count() !== 1) throw new Error("Agent drawer close icon must use the Goals SVG style");
+  await agentClose.hover();
+  await page.waitForTimeout(220);
+  const closeHoverStyle = await agentClose.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, color: style.color, transform: style.transform };
+  });
+  if (closeHoverStyle.backgroundColor !== "rgb(254, 226, 226)" || closeHoverStyle.color !== "rgb(225, 29, 46)" || closeHoverStyle.transform === "none") throw new Error("Agent close hover does not match Goals");
+  await agentClose.click();
+  await agentDrawer.waitFor({ state: "detached" });
+
+  await page.getByRole("button", { name: "+ New Company" }).click();
+  const companyDrawer = page.locator(".company-drawer:not(.agent-editor)");
+  await companyDrawer.waitFor();
+  const companyNameField = companyDrawer.locator('input[required]').first();
+  await companyNameField.focus();
+  await page.waitForTimeout(200);
+  const companyFieldStyle = await companyNameField.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor, boxShadow: style.boxShadow };
+  });
+  if (companyFieldStyle.borderColor !== focusedFieldStyle.borderColor || companyFieldStyle.boxShadow !== focusedFieldStyle.boxShadow) throw new Error("New Company field focus does not match Add Agent/Goals");
+  const companyClose = companyDrawer.getByRole("button", { name: "Close" });
+  if (await companyClose.locator("svg").count() !== 1) throw new Error("New Company close icon must use the Goals SVG style");
+  await companyClose.hover();
+  await page.waitForTimeout(220);
+  const companyCloseHoverStyle = await companyClose.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, color: style.color, transform: style.transform };
+  });
+  if (JSON.stringify(companyCloseHoverStyle) !== JSON.stringify(closeHoverStyle)) throw new Error("New Company close hover does not match Add Agent/Goals");
+  await companyClose.click();
+  await companyDrawer.waitFor({ state: "detached" });
+
   const card = page.locator(".company-knowledge-card");
   const layoutAndUploadStyle = await page.evaluate(() => {
     const chart = document.querySelector(".company-chart-card");
@@ -166,6 +212,10 @@ try {
     organizationBeforeKnowledge: true,
     organizationKnowledgeGap: layoutAndUploadStyle.chartKnowledgeGap,
     uploadButtonBlackWithWhiteText: true,
+    agentFieldFocusMatchesGoals: true,
+    agentCloseAnimationMatchesGoals: true,
+    companyFieldFocusMatchesGoals: true,
+    companyCloseAnimationMatchesGoals: true,
   }, null, 2));
 } finally {
   await browser?.close().catch(() => {});

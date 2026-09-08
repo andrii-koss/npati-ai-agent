@@ -822,7 +822,15 @@ export function CompanyPage() {
 
     {companyEditor && <div className="company-drawer-backdrop" onMouseDown={() => setCompanyEditor(false)}>
       <aside className="company-drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><span>Company</span><h2>{editingCompany ? "Company Settings" : "New Company"}</h2></div><button aria-label="Close" onClick={() => setCompanyEditor(false)}>x</button></header>
+        <header>
+          <div><span>Company</span><h2>{editingCompany ? "Company Settings" : "New Company"}</h2></div>
+          <button type="button" className="company-drawer-close" aria-label="Close" onClick={() => setCompanyEditor(false)}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </header>
         <form onSubmit={saveCompany}>
           <section><h3>Company Context</h3>
             <label><span>Company Name</span><input required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></label>
@@ -844,7 +852,15 @@ export function CompanyPage() {
 
     {agentEditor && selected && <div className="company-drawer-backdrop" onMouseDown={() => setAgentEditor(false)}>
       <aside className="company-drawer agent-editor" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><span>AI Agent</span><h2>{editingAgent ? editingAgent.name : "Add Agent"}</h2></div><button aria-label="Close" onClick={() => setAgentEditor(false)}>x</button></header>
+        <header>
+          <div><span>AI Agent</span><h2>{editingAgent ? editingAgent.name : "Add Agent"}</h2></div>
+          <button type="button" className="company-drawer-close" aria-label="Close" onClick={() => setAgentEditor(false)}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </header>
         <form onSubmit={saveAgent}>
           <section><h3>General</h3>
             <div className="company-form-grid"><label><span>Name</span><input required value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>

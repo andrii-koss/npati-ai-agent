@@ -5202,6 +5202,56 @@ a {
   min-height: 80px;
 }
 
+.company-drawer input:not([type=checkbox]),
+.company-drawer select,
+.company-drawer textarea {
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.company-drawer input:not([type=checkbox]):focus,
+.company-drawer select:focus,
+.company-drawer textarea:focus {
+  outline: none !important;
+  border-color: var(--npati-red) !important;
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.08) !important;
+  background: #ffffff !important;
+}
+
+.company-drawer > header .company-drawer-close {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 50%;
+  background: var(--npati-gray-50);
+  color: #111111;
+  cursor: pointer;
+  outline: none;
+  transition: transform 180ms ease, background 180ms ease, color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.company-drawer > header .company-drawer-close svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+  stroke: currentColor;
+}
+
+.company-drawer > header .company-drawer-close:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #e11d2e !important;
+  transform: scale(1.08) rotate(90deg);
+  box-shadow: 0 2px 8px rgba(225, 29, 46, 0.15);
+}
+
+.company-drawer > header .company-drawer-close:active {
+  transform: scale(0.95);
+}
+
 .company-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
