@@ -121,9 +121,20 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 
   if (!agents.length) return <div className="company-chart-empty"><strong>Your AI company has no agents yet.</strong><p>Add the first agent, then build the hierarchy with Parent Agent.</p></div>;
   return <div className="company-org-chart">
-    {levels.map((level, index) => <div className="company-chart-level" key={index} style={{ "--chart-level-delay": `${Math.max(0, index - 1) * 1.35}s` } as CSSProperties}>
+    {levels.map((level, index) => <div className="company-chart-level" key={index} style={{ "--chart-level-delay": `${Math.max(0, index - 1) * 1.5}s`, "--chart-line-inset": `calc(${50 / level.length}% - ${((level.length - 1) * 24) / (2 * level.length)}px)` } as CSSProperties}>
       {index > 0 && <span className="company-chart-trunk" aria-hidden="true" />}
-      <div className="company-chart-row">{level.map((agent, nodeIndex) => <span className="company-chart-node-slot" key={agent.id} style={{ "--chart-node-delay": `${Math.max(0, index - 1) * 1.35 + nodeIndex * .12}s` } as CSSProperties}><AgentNode agent={agent} main={agent.id === mainAgentId} model={agent.modelId ? modelById.get(agent.modelId) : undefined} working={workingAgentIds.has(agent.id)} onClick={() => onSelect(agent)} /></span>)}</div>
+      <div className="company-chart-row">
+        {index > 0 && level.map((agent, nodeIndex) => {
+          const targetPercent = ((nodeIndex + .5) * 100) / level.length;
+          const targetOffset = ((2 * nodeIndex - level.length + 1) * 24) / (2 * level.length);
+          return <i className="company-chart-branch-pulse" key={`pulse-${agent.id}`} style={{ "--chart-pulse-target": `calc(${targetPercent}% + ${targetOffset}px)` } as CSSProperties} aria-hidden="true" />;
+        })}
+        {level.map((agent, nodeIndex) => {
+          const precedingAgentCount = levels.slice(1, index).reduce((count, row) => count + row.length, 0);
+          const cardDelay = Math.max(0, levels.length - 2) * 1.5 + 2.1 + (precedingAgentCount + nodeIndex) * .18;
+          return <span className="company-chart-node-slot" key={agent.id} style={{ "--chart-card-delay": `${cardDelay}s` } as CSSProperties}><AgentNode agent={agent} main={agent.id === mainAgentId} model={agent.modelId ? modelById.get(agent.modelId) : undefined} working={workingAgentIds.has(agent.id)} onClick={() => onSelect(agent)} /></span>;
+        })}
+      </div>
     </div>)}
   </div>;
 }
