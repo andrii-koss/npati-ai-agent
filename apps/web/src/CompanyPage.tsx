@@ -514,7 +514,7 @@ export function CompanyPage() {
             <span>Runtime</span>
             <h2>Delegate a task</h2>
           </div>
-          <small>Main Agent plans through A2A; execution uses OmniRoute Auto, Pipeline or Fusion.</small>
+          <small>Main Agent plans through A2A; execution uses NPATI Auto, Pipeline or Fusion.</small>
         </div>
 
         <form onSubmit={runCompany} className="company-run-form">
