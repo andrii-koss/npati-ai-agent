@@ -4969,7 +4969,7 @@ a {
   background-image: linear-gradient(to bottom, transparent 0%, #d83438 42%, #ef5a5d 58%, transparent 100%);
   background-repeat: no-repeat;
   background-size: 100% 55%;
-  animation: company-chart-flow-vertical 6s ease-in-out infinite;
+  animation: company-chart-flow-vertical 10s ease-in-out infinite;
   animation-delay: var(--chart-level-delay);
 }
 
@@ -4977,8 +4977,8 @@ a {
   content: "";
   position: absolute;
   top: -20px;
-  left: 16%;
-  right: 16%;
+  left: var(--chart-line-inset);
+  right: var(--chart-line-inset);
   height: 1px;
   background: #d8d8d8;
 }
@@ -4991,19 +4991,19 @@ a {
   gap: 24px;
 }
 
-.company-chart-level:not(:first-child) .company-chart-row::before {
-  content: "";
+.company-chart-branch-pulse {
   position: absolute;
-  top: -20px;
-  left: 16%;
-  right: 16%;
+  top: -21px;
+  left: 50%;
+  width: 9px;
   height: 1px;
-  background-color: transparent;
-  background-image: linear-gradient(to right, transparent 0%, #d83438 42%, #ef5a5d 58%, transparent 100%);
-  background-repeat: no-repeat;
-  background-size: 24% 100%;
-  animation: company-chart-flow-horizontal 6s ease-in-out infinite;
-  animation-delay: calc(var(--chart-level-delay) + .35s);
+  z-index: 2;
+  border-radius: 999px;
+  background: linear-gradient(to right, transparent 0%, rgba(216, 52, 56, .72) 45%, transparent 100%);
+  opacity: 0;
+  transform: translateX(-50%);
+  animation: company-chart-branch-travel 10s ease-in-out infinite;
+  animation-delay: calc(var(--chart-level-delay) + .55s);
 }
 
 .company-chart-node-slot {
@@ -5044,8 +5044,8 @@ a {
   background-image: linear-gradient(to bottom, transparent 0%, #d83438 45%, transparent 100%);
   background-repeat: no-repeat;
   background-size: 100% 60%;
-  animation: company-chart-flow-vertical 6s ease-in-out infinite;
-  animation-delay: calc(var(--chart-node-delay) + .8s);
+  animation: company-chart-flow-vertical 10s ease-in-out infinite;
+  animation-delay: calc(var(--chart-level-delay) + 1.8s);
 }
 
 .company-chart-level:not(:first-child) .company-agent-node:not(.main)::after {
@@ -5055,8 +5055,8 @@ a {
   pointer-events: none;
   border: 1px solid transparent;
   border-radius: inherit;
-  animation: company-chart-node-glow 6s ease-in-out infinite;
-  animation-delay: calc(var(--chart-node-delay) + 1.05s);
+  animation: company-chart-node-glow 10s ease-in-out infinite;
+  animation-delay: var(--chart-card-delay);
 }
 
 .company-agent-node:hover {
@@ -5138,11 +5138,23 @@ a {
   18%, 100% { background-position: 0 230%; }
 }
 
-@keyframes company-chart-flow-horizontal {
-  0%, 8% { background-position: -32% 0; opacity: 0; }
-  10% { opacity: 1; }
-  26% { background-position: 132% 0; opacity: 1; }
-  29%, 100% { background-position: 132% 0; opacity: 0; }
+@keyframes company-chart-branch-travel {
+  0%, 4% {
+    left: 50%;
+    opacity: 0;
+  }
+  6% {
+    left: 50%;
+    opacity: 1;
+  }
+  22% {
+    left: var(--chart-pulse-target);
+    opacity: 1;
+  }
+  26%, 100% {
+    left: var(--chart-pulse-target);
+    opacity: 0;
+  }
 }
 
 @keyframes company-chart-node-glow {
@@ -5163,7 +5175,7 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .company-agent-activity-dot.working,
   .company-chart-level:not(:first-child)::before,
-  .company-chart-level:not(:first-child) .company-chart-row::before,
+  .company-chart-branch-pulse,
   .company-chart-level:not(:first-child) .company-chart-node-slot::before,
   .company-chart-level:not(:first-child) .company-agent-node:not(.main)::after {
     animation: none;
