@@ -64,6 +64,26 @@ export interface AudioTranscriptionResult {
   model?: string;
 }
 
+export type SpeechAudioFormat = "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+
+export interface SpeechSynthesisInput {
+  text: string;
+  model?: string;
+  voice?: string;
+  speed?: number;
+  format?: SpeechAudioFormat;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface SpeechSynthesisResult {
+  data: Uint8Array;
+  mimeType: string;
+  model: string;
+  voice: string;
+  format: SpeechAudioFormat;
+}
+
 export interface EmbeddingInput { input: string[]; model?: string; signal?: AbortSignal; timeoutMs?: number; }
 export interface EmbeddingResult { model: string; vectors: number[][]; usage?: Record<string, number>; }
 export interface RerankInput { query: string; documents: string[]; model?: string; topN?: number; signal?: AbortSignal; timeoutMs?: number; }
@@ -160,6 +180,7 @@ export interface AIEngine {
   healthCheck(): Promise<ServiceHealth>;
   resilienceStatus?(): Promise<OmniRouteResilienceSnapshot>;
   transcribeAudio?(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult>;
+  synthesizeSpeech?(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult>;
   a2aSend?(request: A2AMessageRequest): Promise<A2AMessageResult>;
   cancelA2ATask?(taskId: string, signal?: AbortSignal): Promise<void>;
   ensureA2AEnabled?(): Promise<void>;
@@ -177,6 +198,7 @@ export interface OmniRouteConfig {
   timeoutMs?: number;
   catalogTtlMs?: number;
   transcriptionModel?: string;
+  ttsModel?: string;
   embeddingModel?: string;
   rerankModel?: string;
 }

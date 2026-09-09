@@ -68,11 +68,23 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       }
     });
 
-    it("verifies that each capability has an active verified or blocked_external status", () => {
+    it("uses an explicit audited implementation status for every capability", () => {
       for (const item of CAPABILITY_MATRIX) {
-        expect(["VERIFIED_EXISTING", "BLOCKED_EXTERNAL"]).toContain(item.status);
+        expect(["VERIFIED_EXISTING", "PARTIALLY_IMPLEMENTED", "NOT_IMPLEMENTED", "BLOCKED_EXTERNAL"]).toContain(item.status);
         expect(item.testFiles.length).toBeGreaterThan(0);
       }
+    });
+
+    it("reports the audited runtime status for capabilities 18 through 25", () => {
+      const status = new Map(CAPABILITY_MATRIX.map((item) => [item.id, item.status]));
+      expect(status.get(18)).toBe("VERIFIED_EXISTING");
+      expect(status.get(19)).toBe("VERIFIED_EXISTING");
+      expect(status.get(20)).toBe("VERIFIED_EXISTING");
+      expect(status.get(21)).toBe("VERIFIED_EXISTING");
+      expect(status.get(22)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(23)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(24)).toBe("VERIFIED_EXISTING");
+      expect(status.get(25)).toBe("NOT_IMPLEMENTED");
     });
   });
 

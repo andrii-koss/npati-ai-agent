@@ -9,7 +9,7 @@ export interface CapabilityMatrixEntry {
   risk: "low" | "medium" | "high" | "critical";
   testType: "unit" | "integration" | "e2e" | "manual" | "blocked_external";
   testFiles: string[];
-  status: "VERIFIED_EXISTING" | "BLOCKED_EXTERNAL";
+  status: "VERIFIED_EXISTING" | "PARTIALLY_IMPLEMENTED" | "NOT_IMPLEMENTED" | "BLOCKED_EXTERNAL";
 }
 
 export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
@@ -146,16 +146,17 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/agent-api.test.ts",
+      "tests/runtime-compat-capabilities.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
   {
     "id": 9,
     "capabilityId": "security.35_model_providers",
-    "name": "35+ model providers",
+    "name": "OmniRoute provider catalog",
     "type": "configuration",
-    "domain": "security",
+    "domain": "ai",
     "agentCallable": false,
     "risk": "low",
     "testType": "integration",
@@ -204,14 +205,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
   {
     "id": 12,
     "capabilityId": "communications.webchat_channel",
-    "name": "WebChat channel",
+    "name": "WebChat transport channel",
     "type": "runtime",
     "domain": "communications",
     "agentCallable": false,
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/runtime-compat-capabilities.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -225,11 +226,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/audit-and-usage-analytics.test.ts",
-      "tests/browser-tab-click-drag-automation.test.ts",
-      "tests/pii-and-subagents.test.ts",
-      "tests/telemetry-cache-compaction.test.ts",
-      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
+      "tests/runtime-compat-capabilities.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -243,7 +240,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/telegram-ollama-tts.test.ts"
+      "tests/runtime-compat-capabilities.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -257,8 +254,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/swarm-audio-translation-video.test.ts",
-      "tests/telegram-ollama-tts.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/runtime-compat-capabilities.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -272,8 +269,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/swarm-audio-translation-video.test.ts",
-      "tests/telegram-ollama-tts.test.ts"
+      "tests/omniroute-adapter.test.ts"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -363,7 +359,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/admission-queue-and-conversation-memory.test.ts",
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 23,
@@ -377,7 +373,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 24,
@@ -406,7 +402,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 26,

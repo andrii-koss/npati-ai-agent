@@ -52,6 +52,8 @@ type SortField = "id" | "name" | "capabilityId" | "domain" | "type" | "risk" | "
 function formatStatus(status: string): { label: string; className: string } {
   const s = status.toLowerCase();
   if (s.includes("verified")) return { label: "Verified", className: "verified" };
+  if (s.includes("partially")) return { label: "Partial", className: "partial" };
+  if (s.includes("not_implemented") || s.includes("not implemented")) return { label: "Not implemented", className: "not-implemented" };
   if (s.includes("blocked")) return { label: "Blocked", className: "blocked" };
   if (s === "allowed") return { label: "Allowed", className: "allowed" };
   if (s === "denied") return { label: "Denied", className: "denied" };

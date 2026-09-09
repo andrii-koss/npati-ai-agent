@@ -174,6 +174,21 @@ describe("OmniRoute adapter", () => {
     expect((request.body as FormData).get("file")).toBeInstanceOf(Blob);
   });
 
+  it("synthesizes real speech bytes through the OmniRoute audio endpoint", async () => {
+    const bytes = new Uint8Array([0x49, 0x44, 0x33, 4, 5, 6]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(bytes, { status: 200, headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128", apiKey: "secret", ttsModel: "openai/tts-1" });
+
+    await expect(engine.synthesizeSpeech({ text: "Hello", voice: "nova", format: "mp3" })).resolves.toMatchObject({
+      data: bytes, mimeType: "audio/mpeg", model: "openai/tts-1", voice: "nova", format: "mp3",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("http://omniroute:20128/api/v1/audio/speech", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ model: "openai/tts-1", input: "Hello", voice: "nova", response_format: "mp3" }),
+    }));
+  });
+
   it("rebrands AAC-in-3GP files mislabeled as M4A before transcription", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Lyrics" }), {
       status: 200,
