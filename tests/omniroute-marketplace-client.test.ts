@@ -43,8 +43,18 @@ describe("OmniRoute marketplace client", () => {
     const icon = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).providerIcon("9router");
     const svg = new TextDecoder().decode(icon.body);
     expect(icon.contentType).toBe("image/svg+xml");
-    expect(svg).toContain(">9R</text>");
+    expect(svg).toContain('data-fallback-icon="router"');
+    expect(svg).toContain("<circle");
+    expect(svg).not.toContain("<text");
     expect(svg).not.toContain("<script");
+  });
+
+  it("renders a terminal pictogram for Antigravity CLI when no brand asset exists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
+    const icon = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).providerIcon("agy");
+    const svg = new TextDecoder().decode(icon.body);
+    expect(svg).toContain('data-fallback-icon="terminal"');
+    expect(svg).toContain('M25 30l15 15-15 15');
   });
 
   it("makes a white-only OmniRoute SVG visible on the light NPATI icon surface", async () => {
@@ -118,5 +128,12 @@ describe("OmniRoute marketplace client", () => {
     const result = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).marketplace({ search: "Model 4999", limit: 24 });
     expect(result.providers.map((provider) => provider.id)).toEqual(["openai"]);
     expect(result.overview.models).toBe(5_000);
+  });
+
+  it("21. keeps All count equal to the filtered pagination total", async () => {
+    mockOmni();
+    const result = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).marketplace({ tab: "all", connectableOnly: true });
+    expect(result.counts.all).toBe(result.pagination.total);
+    expect(result.providers[0]?.id).toBe("openai");
   });
 });

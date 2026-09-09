@@ -65,15 +65,27 @@ function dockerHostUrl(value?: string) {
 }
 
 function fallbackProviderIcon(provider: Record<string, unknown>) {
-  const rawLabel = typeof provider.textIcon === "string"
-    ? provider.textIcon
-    : String(provider.name ?? provider.id ?? "AI").split(/\s+/).slice(0, 2).map((part) => part[0]).join("");
-  const label = rawLabel.slice(0, 5).replace(/[&<>"']/g, (character) => ({
+  const title = String(provider.name ?? provider.id ?? "AI provider").slice(0, 80).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;",
   })[character]!);
   const color = typeof provider.color === "string" && /^#[0-9a-f]{3,8}$/i.test(provider.color) ? provider.color : "#171717";
-  const fontSize = label.length > 3 ? 24 : label.length > 2 ? 28 : 34;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="24" fill="${color}"/><text x="48" y="51" fill="white" font-family="Arial,sans-serif" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${label}</text></svg>`;
+  const icon = String(provider.icon ?? "").toLowerCase();
+  const glyph = /terminal|code/.test(icon)
+    ? '<path d="M25 30l15 15-15 15M46 62h25"/>'
+    : /rocket/.test(icon)
+      ? '<path d="M39 58l-10 9 2-14m26-14 10-10c3-3 4-8 4-13-5 0-10 1-13 4L48 30m9 9-18 18-10-10 19-17m-9 27-2 10 10-2"/><circle cx="57" cy="30" r="4"/>'
+      : /hub|router|share|network/.test(icon)
+        ? '<circle cx="48" cy="27" r="7"/><circle cx="27" cy="65" r="7"/><circle cx="69" cy="65" r="7"/><path d="M43 33 31 58m22-25 12 25M34 65h28"/>'
+        : /group|people|community/.test(icon)
+          ? '<circle cx="38" cy="38" r="8"/><circle cx="61" cy="41" r="7"/><path d="M21 68c2-12 9-18 18-18s16 6 18 18m-3-14c10 0 17 5 19 14"/>'
+          : /image|photo|palette|video/.test(icon)
+            ? '<rect x="22" y="25" width="52" height="46" rx="7"/><circle cx="39" cy="40" r="5"/><path d="m27 64 14-14 10 9 8-8 10 13"/>'
+            : /search/.test(icon)
+              ? '<circle cx="43" cy="43" r="19"/><path d="m57 57 15 15"/>'
+              : /cloud/.test(icon)
+                ? '<path d="M29 65h39a11 11 0 0 0 1-22 21 21 0 0 0-40-4 13 13 0 0 0 0 26Z"/>'
+                : '<path d="m48 20 5 16 16 5-16 5-5 16-5-16-16-5 16-5 5-16Zm20 37 3 8 8 3-8 3-3 8-3-8-8-3 8-3 3-8Z"/>';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" data-fallback-icon="${icon || "generic"}"><title>${title}</title><rect width="96" height="96" rx="24" fill="${color}"/><g fill="none" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">${glyph}</g></svg>`;
   return { body: new TextEncoder().encode(svg), contentType: "image/svg+xml" };
 }
 
@@ -214,7 +226,9 @@ export class OmniRouteMarketplace {
     const { providers, manifest, health } = await this.getProviders(query.refresh === true);
     const allModels = manifest.reduce((sum, provider) => sum + (provider.models?.length ?? 0), 0);
     const visibleProviders = query.connectableOnly
-      ? providers.filter((provider) => provider.connected || provider.connectable)
+      ? providers.filter((provider) => provider.connected || (
+          provider.connectable && provider.connectionMode !== "web_session"
+        ))
       : providers;
     const counts = {
       connected: visibleProviders.filter((provider) => provider.connected).length,
