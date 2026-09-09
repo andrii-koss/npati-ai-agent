@@ -29,6 +29,12 @@ export const RECOMMENDED_PROVIDER_IDS = [
   "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
 ] as const;
 
+const POPULAR_PROVIDER_IDS = [
+  "openai", "anthropic", "gemini", "xai", "openrouter", "groq", "mistral", "deepseek",
+  "cohere", "perplexity", "cerebras", "together", "fireworks", "nvidia", "huggingface", "ai21",
+  "bedrock", "vertex", "azure-openai", "ollama-cloud", "ollama-local", "stability-ai", "elevenlabs", "assemblyai",
+] as const;
+
 export const PINNED_PROVIDER_CATALOG = catalog as {
   sourceVersion: string;
   sourceCommit: string;
@@ -281,6 +287,17 @@ export function filterProviders(
       const aIdx = order.get(a.id) ?? 999;
       const bIdx = order.get(b.id) ?? 999;
       return aIdx - bIdx;
+    });
+  }
+
+  if (query.tab === "all" || query.tab === undefined) {
+    const order = new Map((POPULAR_PROVIDER_IDS as readonly string[]).map((id, index) => [id, index]));
+    return [...filtered].sort((a, b) => {
+      const aIdx = order.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const bIdx = order.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      if (a.connected !== b.connected) return (b.connected ? 1 : 0) - (a.connected ? 1 : 0);
+      return a.name.localeCompare(b.name);
     });
   }
 

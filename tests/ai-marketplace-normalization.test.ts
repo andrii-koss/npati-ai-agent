@@ -94,4 +94,11 @@ describe("AI marketplace normalization", () => {
     expect(visible.map((provider) => provider.id)).not.toContain("9router");
     expect(visible.map((provider) => provider.id)).not.toContain("auggie");
   });
+
+  it("15. places popular providers first in All before pagination", () => {
+    const visible = filterProviders(normalizeCatalog(manifest, connection), manifest, { tab: "all", connectableOnly: true });
+    expect(visible.slice(0, 8).map((provider) => provider.id)).toEqual([
+      "openai", "anthropic", "gemini", "xai", "openrouter", "groq", "mistral", "deepseek",
+    ]);
+  });
 });
