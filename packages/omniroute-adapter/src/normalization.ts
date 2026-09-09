@@ -4,6 +4,8 @@ import type {
   AIProviderSummary,
   MarketplaceQuery,
   ProviderAuthType,
+  ProviderAvailability,
+  ProviderConnectionMode,
   ProviderConnectionSummary,
   ProviderFreeStatus,
 } from "./types";
@@ -17,6 +19,11 @@ type ManifestProvider = Record<string, unknown> & {
   capabilities?: string[];
   models?: ManifestModel[];
 };
+
+// These adapters were verified against the generic provider endpoint exposed by
+// the pinned OmniRoute runtime. Other no-auth catalog records need their own
+// adapter/service lifecycle and must not be presented as ordinary connections.
+const GENERIC_NO_AUTH_PROVIDER_IDS = new Set(["aihorde", "opencode"]);
 
 export const RECOMMENDED_PROVIDER_IDS = [
   "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
@@ -76,6 +83,48 @@ function providerCapabilities(provider: RegistryProvider, manifest?: ManifestPro
   return [...result].sort();
 }
 
+function connectionMetadata(provider: RegistryProvider, auth: ProviderAuthType, connected: boolean): {
+  connectionMode: ProviderConnectionMode;
+  availability: ProviderAvailability;
+  availabilityReason?: string;
+  connectable: boolean;
+} {
+  const embedded = provider.isEmbeddedService === true || provider.category === "upstream-proxy";
+  const localCli = provider.isLocalCli === true;
+  const connectionMode: ProviderConnectionMode = provider.category === "system" ? "internal"
+    : embedded ? "embedded_service"
+    : localCli ? "local_cli"
+    : provider.category === "cloud-agent" ? "cloud_agent"
+    : auth === "oauth" ? "oauth"
+    : auth === "web_session" ? "web_session"
+    : auth === "local" ? "local"
+    : auth === "none" ? "no_auth"
+    : "api_key";
+
+  if (connected) return { connectionMode, availability: "connected", connectable: true };
+  if (connectionMode === "internal") return {
+    connectionMode, availability: "internal", connectable: false,
+    availabilityReason: "Internal routing entry; it is selected by NPATI automatically and is not connected manually.",
+  };
+  if (connectionMode === "embedded_service") return {
+    connectionMode, availability: "requires_service", connectable: false,
+    availabilityReason: "This is an embedded OmniRoute service. Install and start the service before synchronizing its models.",
+  };
+  if (connectionMode === "local_cli") return {
+    connectionMode, availability: "requires_local_runtime", connectable: false,
+    availabilityReason: "This provider requires its CLI to be installed and authenticated inside the OmniRoute runtime.",
+  };
+  if (connectionMode === "no_auth" && !GENERIC_NO_AUTH_PROVIDER_IDS.has(provider.id)) return {
+    connectionMode, availability: "unavailable", connectable: false,
+    availabilityReason: "The installed OmniRoute generic connection API does not support connecting this no-auth adapter.",
+  };
+  if (connectionMode === "oauth") return { connectionMode, availability: "requires_login", connectable: true };
+  if (connectionMode === "web_session") return { connectionMode, availability: "requires_login", connectable: true };
+  if (connectionMode === "local") return { connectionMode, availability: "requires_local_runtime", connectable: true };
+  if (connectionMode === "api_key" || connectionMode === "cloud_agent") return { connectionMode, availability: "requires_credentials", connectable: true };
+  return { connectionMode, availability: "ready", connectable: true };
+}
+
 export function normalizeCatalog(
   manifestProviders: ManifestProvider[],
   connections: ProviderConnectionSummary[],
@@ -95,6 +144,7 @@ export function normalizeCatalog(
     const local = provider.category === "local";
     const localRuntime = localHealth[provider.id];
     const auth = authType(provider, plugin);
+    const metadata = connectionMetadata(provider, auth, providerConnections.length > 0);
     const modelCount = new Set((plugin?.models ?? []).map((model) => model.id).filter(Boolean)).size;
     return {
       id: provider.id,
@@ -119,7 +169,10 @@ export function normalizeCatalog(
       authHint: typeof provider.authHint === "string" ? provider.authHint : undefined,
       baseUrlDefault: typeof provider.localDefault === "string" ? provider.localDefault : undefined,
       credentialOptional: auth === "none" || auth === "local" || plugin?.auth?.type === "optional",
-      connectable: provider.category !== "system",
+      connectable: metadata.connectable,
+      connectionMode: metadata.connectionMode,
+      availability: metadata.availability,
+      availabilityReason: metadata.availabilityReason,
       connections: providerConnections,
     };
   });
@@ -187,6 +240,9 @@ export function filterProviders(
   const manifest = new Map(manifestProviders.map((provider) => [provider.id, provider]));
   const needle = query.search?.trim().toLowerCase();
   const filtered = providers.filter((provider) => {
+    if (query.connectableOnly && !provider.connected && (
+      !provider.connectable || provider.connectionMode === "web_session"
+    )) return false;
     if (query.tab === "connected" && !provider.connected) return false;
     if (query.tab === "recommended" && !provider.recommended) return false;
     if (query.tab === "free" && !["free", "free_tier"].includes(provider.freeStatus)) return false;

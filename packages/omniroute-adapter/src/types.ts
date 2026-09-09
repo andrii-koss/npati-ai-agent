@@ -185,6 +185,8 @@ export type ProviderAuthType = "api_key" | "oauth" | "none" | "local" | "web_ses
 export type ProviderConnectionStatus = "connected" | "not_connected" | "error" | "unknown";
 export type ProviderFreeStatus = "free" | "free_tier" | "paid" | "unknown";
 export type LocalProviderStatus = "running" | "not_detected" | "needs_configuration" | "unknown";
+export type ProviderConnectionMode = "api_key" | "oauth" | "no_auth" | "web_session" | "local" | "local_cli" | "embedded_service" | "cloud_agent" | "internal";
+export type ProviderAvailability = "connected" | "ready" | "requires_credentials" | "requires_login" | "requires_local_runtime" | "requires_service" | "unavailable" | "internal";
 
 export interface ProviderConnectionSummary {
   id: string;
@@ -216,6 +218,9 @@ export interface AIProviderSummary {
   baseUrlDefault?: string;
   credentialOptional: boolean;
   connectable: boolean;
+  connectionMode: ProviderConnectionMode;
+  availability: ProviderAvailability;
+  availabilityReason?: string;
   connections: ProviderConnectionSummary[];
 }
 
@@ -241,6 +246,7 @@ export interface MarketplaceQuery {
   auth?: ProviderAuthType;
   cost?: ProviderFreeStatus;
   capability?: string;
+  connectableOnly?: boolean;
   offset?: number;
   limit?: number;
   refresh?: boolean;

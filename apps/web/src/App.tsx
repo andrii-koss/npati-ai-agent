@@ -518,6 +518,8 @@ import { ContentPage } from "./ContentPage";
 function SettingsPage() {
   const cards = [
     { to: "/settings/ai", icon: "AI", title: "AI Providers", description: "Connect providers, browse models, and choose AI routing." },
+    { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
+    { to: "/settings/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
     { to: "/settings/capabilities", icon: "CP", title: "Capability Inspector", description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
     { to: "/settings/activity", icon: "AC", title: "Activity & Run Trace", description: "Inspect live execution traces, step delegations, and tool decisions." },
     { to: "/settings/automations", icon: "AU", title: "Automations", description: "Schedule recurring cron jobs and background agent tasks." },
@@ -526,8 +528,6 @@ function SettingsPage() {
     { to: "/settings/connections", icon: "CN", title: "Connections", description: "Monitor service health and integrations." },
     { to: "/settings/memory", icon: "M", title: "Memory", description: "Review and edit confirmed business context." },
     { to: "/settings/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
-    { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
-    { to: "/settings/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
   ];
 
   return (

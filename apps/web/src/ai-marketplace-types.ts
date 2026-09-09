@@ -1,5 +1,7 @@
 export type AuthType = "api_key" | "oauth" | "none" | "local" | "web_session" | "other";
 export type FreeStatus = "free" | "free_tier" | "paid" | "unknown";
+export type ConnectionMode = "api_key" | "oauth" | "no_auth" | "web_session" | "local" | "local_cli" | "embedded_service" | "cloud_agent" | "internal";
+export type ProviderAvailability = "connected" | "ready" | "requires_credentials" | "requires_login" | "requires_local_runtime" | "requires_service" | "unavailable" | "internal";
 
 export interface ProviderConnection { id: string; status: string; healthy: boolean | null; lastError?: string }
 export interface Provider {
@@ -7,7 +9,8 @@ export interface Provider {
   connectionStatus: string; freeStatus: FreeStatus; local: boolean; localStatus?: string;
   modelCount: number; capabilities: string[]; connected: boolean; recommended: boolean;
   experimental: boolean; website?: string; authHint?: string; baseUrlDefault?: string;
-  credentialOptional: boolean; connectable: boolean; connections: ProviderConnection[];
+  credentialOptional: boolean; connectable: boolean; connectionMode: ConnectionMode;
+  availability: ProviderAvailability; availabilityReason?: string; connections: ProviderConnection[];
 }
 export interface Model {
   id: string; upstreamId: string; providerId: string; providerName: string; name: string;
