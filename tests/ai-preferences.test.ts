@@ -11,6 +11,7 @@ let store: AIPreferencesStore;
 const owner: AuthContext = { workspaceId: 'workspace-a', userId: 'user-a', permissions: ['workspace:read', 'workspace:write'] };
 const otherTenant: AuthContext = { workspaceId: 'workspace-b', userId: 'user-b', permissions: ['workspace:read', 'workspace:write'] };
 const model: AIModelSummary = { id: 'openai/gpt-test', upstreamId: 'gpt-test', providerId: 'openai', providerName: 'OpenAI', name: 'GPT Test', capabilities: ['text'], added: false, local: false, freeStatus: 'unknown' };
+const otherModel: AIModelSummary = { id: 'anthropic/claude-test', upstreamId: 'claude-test', providerId: 'anthropic', providerName: 'Anthropic', name: 'Claude Test', capabilities: ['text'], added: false, local: false, freeStatus: 'unknown' };
 
 beforeEach(() => { workspace = new InMemoryWorkspaceStore(); store = new AIPreferencesStore(workspace); });
 
@@ -24,6 +25,18 @@ describe('NPATI AI preferences', () => {
   it('14. removes a model', async () => {
     await store.add(owner, model); await store.remove(owner, model.id);
     expect((await store.get(owner)).addedModels).toEqual([]);
+  });
+
+  it('14a. removes every model owned by a disconnected provider and resets its default route', async () => {
+    await store.add(owner, model);
+    await store.add(owner, { ...model, id: 'openai/gpt-second', upstreamId: 'gpt-second' });
+    await store.add(owner, otherModel);
+    await store.setDefault(owner, model.id);
+
+    const result = await store.removeProvider(owner, 'openai');
+
+    expect(result.addedModels.map((item) => item.id)).toEqual([otherModel.id]);
+    expect(result.routing).toMatchObject({ mode: 'automatic', defaultModelId: null });
   });
 
   it('15. selects one default model', async () => {

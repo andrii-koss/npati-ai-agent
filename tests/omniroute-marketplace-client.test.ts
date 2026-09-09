@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function mockOmni(options: { valid?: boolean; connected?: boolean; models?: Array<Record<string, unknown>> } = {}) {
+function mockOmni(options: { valid?: boolean; healthValid?: boolean; connected?: boolean; models?: Array<Record<string, unknown>> } = {}) {
   const calls: Array<{ path: string; body?: string }> = [];
   const models = options.models ?? [{ id: "gpt-test", name: "GPT Test" }];
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -15,6 +15,8 @@ function mockOmni(options: { valid?: boolean; connected?: boolean; models?: Arra
     if (url.pathname === "/api/providers" && (!init?.method || init.method === "GET")) return json({ connections: options.connected ? [{ id: "c1", provider: "openai", isActive: true, testStatus: "active" }] : [] });
     if (url.pathname === "/api/providers/validate") return json({ valid: options.valid !== false, error: options.valid === false ? "Invalid API key" : null });
     if (url.pathname === "/api/providers" && init?.method === "POST") return json({ connection: { id: "c1", provider: "openai" } }, 201);
+    if (url.pathname === "/api/providers/c1/test") return json({ valid: options.healthValid !== false, error: options.healthValid === false ? "Provider health check failed" : null });
+    if (url.pathname === "/api/providers/c1" && init?.method === "DELETE") return json({ ok: true });
     if (url.pathname === "/api/providers/c1/models") return json({ provider: "openai", connectionId: "c1", source: "api", models });
     if (url.pathname === "/api/providers/c1/sync-models") return json({ ok: true, syncedModels: models.length, modelChanges: { added: 1, removed: 0, updated: 0 } });
     return json({ error: "Not found" }, 404);
@@ -69,6 +71,24 @@ describe("OmniRoute marketplace client", () => {
     const calls = mockOmni({ valid: false });
     await expect(new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).connect("openai", { apiKey: "bad" })).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
     expect(calls.filter((call) => call.path === "/api/providers" && call.body !== undefined)).toHaveLength(0);
+  });
+
+  it("10a. rejects embedded services before calling the generic connection API", async () => {
+    const calls = mockOmni();
+    await expect(new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).connect("9router", {})).rejects.toMatchObject({
+      code: "PROVIDER_SETUP_REQUIRED",
+      status: 400,
+    });
+    expect(calls.filter((call) => call.path === "/api/providers" && call.body !== undefined)).toHaveLength(0);
+  });
+
+  it("10b. rolls back a newly created connection when its health check fails", async () => {
+    const calls = mockOmni({ healthValid: false });
+    await expect(new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).connect("openai", { apiKey: "secret" })).rejects.toMatchObject({
+      code: "PROVIDER_TEST_FAILED",
+      status: 502,
+    });
+    expect(calls.map((call) => call.path)).toContain("/api/providers/c1");
   });
 
   it("11. loads the provider-specific model catalog", async () => {

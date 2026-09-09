@@ -213,14 +213,17 @@ export class OmniRouteMarketplace {
   async marketplace(query: MarketplaceQuery = {}, addedModelIds: string[] = []): Promise<MarketplaceResponse> {
     const { providers, manifest, health } = await this.getProviders(query.refresh === true);
     const allModels = manifest.reduce((sum, provider) => sum + (provider.models?.length ?? 0), 0);
+    const visibleProviders = query.connectableOnly
+      ? providers.filter((provider) => provider.connected || provider.connectable)
+      : providers;
     const counts = {
-      connected: providers.filter((provider) => provider.connected).length,
-      recommended: providers.filter((provider) => provider.recommended).length,
-      free: providers.filter((provider) => ["free", "free_tier"].includes(provider.freeStatus)).length,
-      local: providers.filter((provider) => provider.local).length,
-      all: providers.length,
+      connected: visibleProviders.filter((provider) => provider.connected).length,
+      recommended: visibleProviders.filter((provider) => provider.recommended).length,
+      free: visibleProviders.filter((provider) => ["free", "free_tier"].includes(provider.freeStatus)).length,
+      local: visibleProviders.filter((provider) => provider.local).length,
+      all: visibleProviders.length,
     };
-    const filtered = filterProviders(providers, manifest, query);
+    const filtered = filterProviders(visibleProviders, manifest, query);
     const offset = Math.max(0, query.offset ?? 0);
     const limit = Math.min(100, Math.max(1, query.limit ?? 24));
     const page = filtered.slice(offset, offset + limit);
@@ -231,12 +234,12 @@ export class OmniRouteMarketplace {
         registryProviders: Number(health.providerSummary?.catalogCount ?? providers.length),
         routableProviders: manifest.length,
       },
-      overview: { providers: providers.length, models: allModels, connectedProviders: counts.connected, addedModels: addedModelIds.length },
+      overview: { providers: visibleProviders.length, models: allModels, connectedProviders: counts.connected, addedModels: addedModelIds.length },
       counts,
       availableFilters: {
-        auth: [...new Set(providers.map((provider) => provider.authType))].sort(),
-        cost: [...new Set(providers.map((provider) => provider.freeStatus))].sort(),
-        capabilities: [...new Set(providers.flatMap((provider) => provider.capabilities))].sort(),
+        auth: [...new Set(visibleProviders.map((provider) => provider.authType))].sort(),
+        cost: [...new Set(visibleProviders.map((provider) => provider.freeStatus))].sort(),
+        capabilities: [...new Set(visibleProviders.flatMap((provider) => provider.capabilities))].sort(),
       },
       providers: page,
       pagination: { offset, limit, returned: page.length, total: filtered.length, hasMore: offset + page.length < filtered.length },
@@ -322,7 +325,8 @@ export class OmniRouteMarketplace {
 
   async connect(providerId: string, input: ProviderConnectInput) {
     const provider = await this.provider(providerId);
-    if (!provider.connectable) throw new OmniRouteError("This registry entry cannot be connected", 400);
+    if (!provider.connectable) throw new OmniRouteError(provider.availabilityReason ?? "This registry entry cannot be connected", 400, "PROVIDER_SETUP_REQUIRED");
+    if (provider.connections.length > 0) throw new OmniRouteError("Provider is already configured", 409, "ALREADY_CONNECTED");
     if (provider.authType === "oauth") throw new OmniRouteError("Use the OAuth connection flow", 400, "OAUTH_REQUIRED");
     const credential = input.apiKey?.trim();
     if (!provider.credentialOptional && !credential) throw new OmniRouteError("A credential is required", 400, "CREDENTIAL_REQUIRED");
@@ -356,8 +360,29 @@ export class OmniRouteMarketplace {
         testStatus: validated ? "active" : "unknown",
       }),
     }, { management: true, timeoutMs: 30_000 });
+    const connectionId = typeof payload.connection?.id === "string" ? payload.connection.id : "";
+    if (!connectionId) {
+      this.invalidate();
+      throw new OmniRouteError("Provider connection was created without an identifier", 502, "PROVIDER_CONNECT_FAILED");
+    }
+    let testResult: Json;
+    try {
+      testResult = await this.request<Json>(`/api/providers/${encodeURIComponent(connectionId)}/test`, {
+        method: "POST", body: "{}",
+      }, { management: true, timeoutMs: 30_000 });
+      if (testResult.valid !== true) throw new OmniRouteError(errorMessage(testResult, "Provider health check failed"), 502, "PROVIDER_TEST_FAILED");
+    } catch (error) {
+      try {
+        await this.request(`/api/providers/${encodeURIComponent(connectionId)}`, { method: "DELETE" }, { management: true });
+      } catch {
+        // Preserve the actionable health-check error; cleanup is best-effort.
+      }
+      this.invalidate();
+      if (error instanceof OmniRouteError && error.code === "PROVIDER_TEST_FAILED") throw error;
+      throw new OmniRouteError(error instanceof Error ? error.message : "Provider health check failed", 502, "PROVIDER_TEST_FAILED");
+    }
     this.invalidate();
-    return { connected: true, providerId, connectionId: payload.connection?.id, status: "connected" };
+    return { connected: true, healthy: true, providerId, connectionId, status: "connected", test: testResult };
   }
 
   async disconnect(providerId: string) {

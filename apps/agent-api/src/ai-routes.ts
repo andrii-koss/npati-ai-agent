@@ -56,6 +56,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
         auth: request.query.auth as ProviderAuthType,
         cost: request.query.cost as ProviderFreeStatus,
         capability: request.query.capability,
+        connectableOnly: request.query.connectableOnly === "true",
         offset: Number.parseInt(request.query.offset ?? "0", 10) || 0,
         limit: Number.parseInt(request.query.limit ?? "24", 10) || 24,
         refresh: request.query.refresh === "true",
@@ -113,7 +114,13 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   );
 
   app.delete<{ Params: { providerId: string } }>("/ai/providers/:providerId", async (request, reply) => {
-    try { return await marketplace.disconnect(request.params.providerId); }
+    try {
+      const scope = await authorize(auth, request, "workspace:write");
+      const result = await marketplace.disconnect(request.params.providerId);
+      const before = await preferences.get(scope);
+      const updated = await preferences.removeProvider(scope, request.params.providerId);
+      return { ...result, removedModels: before.addedModels.length - updated.addedModels.length };
+    }
     catch (error) { return sendError(reply, error); }
   });
 

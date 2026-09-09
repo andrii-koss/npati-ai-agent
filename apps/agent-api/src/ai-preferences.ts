@@ -155,6 +155,24 @@ export class AIPreferencesStore {
     }));
   }
 
+  removeProvider(scope: AuthContext, providerId: string) {
+    return this.update(scope, (current) => {
+      const removedIds = new Set(current.addedModels
+        .filter((model) => model.providerId === providerId || model.id.startsWith(`${providerId}/`))
+        .map((model) => model.id));
+      if (removedIds.size === 0) return current;
+      const defaultRemoved = current.routing.defaultModelId !== null && removedIds.has(current.routing.defaultModelId);
+      return {
+        addedModels: current.addedModels.filter((model) => !removedIds.has(model.id)),
+        routing: {
+          ...current.routing,
+          defaultModelId: defaultRemoved ? null : current.routing.defaultModelId,
+          mode: defaultRemoved ? 'automatic' : current.routing.mode,
+        },
+      };
+    });
+  }
+
   setDefault(scope: AuthContext, modelId: string) {
     return this.update(scope, (current) => {
       if (!current.addedModels.some((model) => model.id === modelId)) throw new Error('Model must be added before it can be the default');

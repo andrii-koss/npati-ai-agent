@@ -2062,6 +2062,65 @@ a {
   line-height: 1.55;
 }
 
+.provider-availability-note {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  color: #6f4d18;
+  background: #fff9ed;
+  border: 1px solid #f0dfbd;
+  border-radius: 11px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.provider-setup-note {
+  margin: 16px 0;
+  padding: 18px;
+  display: grid;
+  gap: 7px;
+  color: var(--npati-black);
+  background: var(--npati-gray-50);
+  border: 1px solid var(--npati-gray-200);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.provider-setup-note span {
+  color: var(--npati-gray-500);
+}
+
+.provider-setup-note a {
+  width: fit-content;
+  color: var(--npati-red);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.provider-drawer button {
+  transition: transform 140ms ease, box-shadow 140ms ease, color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.provider-drawer button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.provider-drawer button:not(:disabled):active {
+  transform: translateY(0) scale(.985);
+}
+
+.provider-drawer .button-primary:not(:disabled):hover {
+  box-shadow: 0 6px 16px rgba(216, 52, 56, .18);
+  filter: brightness(.96);
+}
+
+.provider-drawer .button-secondary:not(:disabled):hover,
+.provider-drawer .model-row button:not(:disabled):hover {
+  color: var(--npati-red);
+  background: #fff8f8;
+  border-color: rgba(216, 52, 56, .42);
+}
+
 .field {
   margin: 16px 0;
 }

@@ -45,6 +45,25 @@ const labels: Record<string, string> = {
   free: "Free", free_tier: "Free tier", paid: "Paid", unknown: "Cost unknown",
   not_detected: "Not detected", needs_configuration: "Needs configuration", running: "Running",
 };
+const connectionModeLabels: Record<Provider["connectionMode"], string> = {
+  api_key: "API key", oauth: "OAuth", no_auth: "No auth", web_session: "Web session",
+  local: "Local server", local_cli: "Local CLI", embedded_service: "Embedded service",
+  cloud_agent: "Cloud agent", internal: "Internal",
+};
+const availabilityLabels: Record<Provider["availability"], string> = {
+  connected: "Connected", ready: "Ready to connect", requires_credentials: "Credentials required",
+  requires_login: "Sign-in required", requires_local_runtime: "Local runtime required",
+  requires_service: "Service setup required", unavailable: "Unavailable in this runtime", internal: "Internal only",
+};
+
+function providerActionLabel(provider: Provider) {
+  if (provider.connected) return "Manage";
+  if (!provider.connectable) return "View setup";
+  if (provider.connectionMode === "oauth") return "Sign in";
+  if (provider.connectionMode === "web_session") return "Add session";
+  if (provider.connectionMode === "local") return "Configure";
+  return "Connect";
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredAuthToken();
@@ -82,7 +101,9 @@ function ProviderBadges({ provider }: { provider: Provider }) {
     {provider.freeStatus === "free" && <Badge tone="free">FREE</Badge>}
     {provider.freeStatus === "free_tier" && <Badge tone="free">FREE TIER</Badge>}
     {provider.local && <Badge tone="dark">LOCAL</Badge>}
-    <Badge>{labels[provider.authType]?.toUpperCase()}</Badge>
+    <Badge>{connectionModeLabels[provider.connectionMode].toUpperCase()}</Badge>
+    {provider.availability === "unavailable" && <Badge>UNAVAILABLE</Badge>}
+    {provider.availability === "requires_service" && <Badge>SERVICE SETUP</Badge>}
     {provider.connected && <Badge tone="connected">CONNECTED</Badge>}
     {provider.recommended && <Badge tone="red">RECOMMENDED</Badge>}
     {provider.experimental && <Badge>EXPERIMENTAL</Badge>}
@@ -101,8 +122,8 @@ function ProviderCard({ provider, busy, onOpen, onConnect }: { provider: Provide
     <div className="capability-row">{provider.capabilities.slice(0, 4).map((item) => <span key={item}>{item}</span>)}</div>
     <div className="provider-card-footer">
       <span><strong>{formatNumber(provider.modelCount)}</strong> registry models</span>
-      <button className={provider.connected ? "button-secondary" : "button-primary"} disabled={!!busy || !provider.connectable} onClick={onConnect}>
-        {busy || (provider.connected ? "Manage" : provider.local ? "Configure" : "Connect")}
+      <button className={provider.connected ? "button-secondary" : "button-primary"} disabled={!!busy} onClick={onConnect}>
+        {busy || providerActionLabel(provider)}
       </button>
     </div>
   </article>;
@@ -254,7 +275,7 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
     event?.preventDefault(); setBusy("Connecting…"); setMessage("");
     try {
       await api(`/api/ai/providers/${encodeURIComponent(provider.id)}/connect`, { method: "POST", body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) }) });
-      setApiKey(""); setMessage("Connected successfully"); onChanged(); setMode("details");
+      setApiKey(""); setMessage("Connected successfully — choose a model below"); setMode("models"); onChanged();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Connection failed"); }
     finally { setBusy(""); }
   }
@@ -269,7 +290,7 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
           try {
             const result = await api<{ status: string; message?: string }>(`/api/ai/oauth/${flow.flowId}/poll`, { method: "POST" });
             setMessage(result.message || "Waiting for authorization…");
-            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); onChanged(); setMode("details"); }
+            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); setMessage("Connected successfully — choose a model below"); setMode("models"); onChanged(); }
           } catch (error) { setMessage(error instanceof Error ? error.message : "OAuth failed"); if (pollRef.current) window.clearInterval(pollRef.current); }
         };
         pollRef.current = window.setInterval(poll, Math.max(3, flow.interval || 5) * 1000); void poll();
@@ -280,7 +301,7 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
 
   async function completeOauth() {
     if (!oauth) return; setBusy("Completing…");
-    try { const result = await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage(result.message || "Connected successfully"); setOauth(null); onChanged(); setMode("details"); }
+    try { await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage("Connected successfully — choose a model below"); setOauth(null); setMode("models"); onChanged(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "OAuth failed"); }
     finally { setBusy(""); }
   }
@@ -295,28 +316,35 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
     finally { setBusy(""); }
   }
 
-  async function addModel(model: Model) { await api("/api/ai/models/add", { method: "POST", body: JSON.stringify({ providerId: provider.id, modelId: model.id }) }); onChanged(); setModels((items) => items.map((item) => item.id === model.id ? { ...item, added: true } : item)); if (addedIds.size === 0) onReady(); }
+  async function addModel(model: Model) {
+    await api("/api/ai/models/add", { method: "POST", body: JSON.stringify({ providerId: provider.id, modelId: model.id }) });
+    onChanged();
+    setModels((items) => items.map((item) => item.id === model.id ? { ...item, added: true } : item));
+    onClose();
+    if (addedIds.size === 0) onReady();
+  }
 
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="provider-drawer" aria-label="Provider details">
       <button className="drawer-close" onClick={onClose} aria-label="Close"><span>×</span></button>
       <header className="drawer-header"><ProviderIcon providerId={provider.id} name={provider.name} size="large" /><div><p className="section-kicker">Provider details</p><h2>{provider.name}</h2></div></header>
       <ProviderBadges provider={provider} />
-      <div className="drawer-tabs"><button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>Overview</button><button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>Available Models</button><button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? "Settings" : "Connect"}</button></div>
+      <div className="drawer-tabs"><button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>Overview</button><button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>Available Models</button><button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? "Settings" : "Setup"}</button></div>
       {message && <div className="inline-message">{message}</div>}
       {mode === "details" && <div className="details-body">
-        <dl><div><dt>Status</dt><dd>{provider.connected ? "Connected" : "Not connected"}</dd></div><div><dt>Type</dt><dd>{provider.local ? "Local" : "Cloud"}</dd></div><div><dt>Authentication</dt><dd>{labels[provider.authType]}</dd></div><div><dt>Registry models</dt><dd>{provider.modelCount}</dd></div>{provider.localStatus && <div><dt>Local status</dt><dd>{labels[provider.localStatus] || provider.localStatus}</dd></div>}</dl>
-        <div className="drawer-actions">{provider.connected ? <><button className="button-primary" onClick={() => setMode("models")}>Browse models</button><button className="button-secondary" disabled={!!busy} onClick={() => action("test")}>Test connection</button><button className="button-secondary" disabled={!!busy} onClick={() => action("refresh-models")}>Refresh models</button><button className="button-danger" disabled={!!busy} onClick={() => action("disconnect")}>Disconnect</button></> : <button className="button-primary" onClick={() => setMode("connect")}>Connect</button>}</div>
+        <dl><div><dt>Status</dt><dd>{availabilityLabels[provider.availability]}</dd></div><div><dt>Type</dt><dd>{provider.local ? "Local" : "Cloud"}</dd></div><div><dt>Setup</dt><dd>{connectionModeLabels[provider.connectionMode]}</dd></div><div><dt>Registry models</dt><dd>{provider.modelCount}</dd></div>{provider.localStatus && <div><dt>Local status</dt><dd>{labels[provider.localStatus] || provider.localStatus}</dd></div>}</dl>
+        {provider.availabilityReason && <p className="provider-availability-note">{provider.availabilityReason}</p>}
+        <div className="drawer-actions">{provider.connected ? <><button className="button-primary" onClick={() => setMode("models")}>Browse models</button><button className="button-secondary" disabled={!!busy} onClick={() => action("test")}>Test connection</button><button className="button-secondary" disabled={!!busy} onClick={() => action("refresh-models")}>Refresh models</button><button className="button-danger" disabled={!!busy} onClick={() => action("disconnect")}>Disconnect</button></> : <button className="button-primary" onClick={() => setMode("connect")}>{providerActionLabel(provider)}</button>}</div>
       </div>}
       {mode === "connect" && <div className="connect-body">
         {provider.authHint && <p className="auth-hint">{provider.authHint.replaceAll("OmniRoute", "Npati")}</p>}
-        {provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || `Continue with ${provider.name}`}</button>{oauth && <><div className="oauth-instructions"><strong>Complete authorization in the new window.</strong>{oauth.userCode && <p>Your code: <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">Open authorization page ↗</a></div>{oauth.method === "authorization_code" && <div className="field"><label>Authorization code or callback URL</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>Complete connection</button></div>}</>}</div> :
-          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>No API key required.</strong><span>Npati supports this provider without credentials.</span></div>}{provider.local && <div className="field"><label>Server URL</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? "Session credential" : "API key"}{provider.credentialOptional ? " (optional)" : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>The credential is sent directly to Npati and is never stored in the browser.</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || "Connect provider"}</button></form>}
+        {!provider.connectable ? <div className="provider-setup-note"><strong>{availabilityLabels[provider.availability]}</strong><span>{provider.availabilityReason ?? "This provider cannot be configured from the current NPATI runtime."}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider documentation ↗</a>}</div> : provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || `Continue with ${provider.name}`}</button>{oauth && <><div className="oauth-instructions"><strong>Complete authorization in the new window.</strong>{oauth.userCode && <p>Your code: <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">Open authorization page ↗</a></div>{oauth.method === "authorization_code" && <div className="field"><label>Authorization code or callback URL</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>Complete connection</button></div>}</>}</div> :
+          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>No API key required.</strong><span>Npati supports this provider without credentials.</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>Sign in, then return here with the session credential.</strong><span>Opening the provider website does not connect it automatically. Copy the Bearer token or cookie described above and paste it below.</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider sign-in ↗</a>}</div>}{provider.local && <div className="field"><label>Server URL</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? "Bearer token or session cookie" : "API key"}{provider.credentialOptional ? " (optional)" : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>The credential is sent directly to Npati and is never stored in the browser.</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || "Connect provider"}</button></form>}
       </div>}
       {mode === "models" && <div className="models-body">
         <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models…" /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(true, true)}>Refresh models</button></div>
         <p className="showing-copy">Showing {models.length} of {modelTotal} models</p>
-        {loadingModels && models.length === 0 ? <div className="loading-state">Loading models…</div> : models.length === 0 ? <div className="empty-inline"><strong>No models returned.</strong><span>{provider.connected ? "Try Refresh models or check the provider connection." : "Connect this provider to discover live models."}</span></div> : <div className="model-list">{models.map((model) => <div className="model-row" key={model.id}><span><strong>{model.name}</strong><small>{model.upstreamId}</small><span className="capability-row">{model.capabilities.slice(0, 4).map((capability) => <i key={capability}>{capability}</i>)}</span></span><button disabled={model.added || addedIds.has(model.id)} onClick={() => addModel(model)}>{model.added || addedIds.has(model.id) ? "Added" : "Add to NPATI"}</button></div>)}</div>}
+        {loadingModels && models.length === 0 ? <div className="loading-state">Loading models…</div> : models.length === 0 ? <div className="empty-inline"><strong>No models returned.</strong><span>{provider.connected ? "Try Refresh models or check the provider connection." : "Connect this provider to discover live models."}</span></div> : <div className="model-list">{models.map((model) => <div className="model-row" key={model.id}><span><strong>{model.name}</strong><small>{model.upstreamId}</small><span className="capability-row">{model.capabilities.slice(0, 4).map((capability) => <i key={capability}>{capability}</i>)}</span></span><button disabled={!provider.connected || model.added || addedIds.has(model.id)} onClick={() => addModel(model)}>{model.added || addedIds.has(model.id) ? "Added" : provider.connected ? "Add to NPATI" : "Connect first"}</button></div>)}</div>}
         {models.length < modelTotal && <button className="load-more" disabled={loadingModels} onClick={() => loadModels(false)}>{loadingModels ? "Loading…" : "Load more"}</button>}
       </div>}
     </aside>
@@ -401,6 +429,7 @@ export function AIProviderMarketplace() {
     try {
       const query = new URLSearchParams({
         tab,
+        connectableOnly: "true",
         offset: String(offset),
         limit: "24",
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
@@ -432,7 +461,7 @@ export function AIProviderMarketplace() {
         for (const other of others) {
           const otherKey = getCacheKey(other, "", "", "", "", "", 0);
           if (!cacheRef.current.has(otherKey)) {
-            api<MarketplaceData>(`/api/ai/marketplace?tab=${other}&offset=0&limit=24`)
+            api<MarketplaceData>(`/api/ai/marketplace?tab=${other}&connectableOnly=true&offset=0&limit=24`)
               .then((res) => {
                 const resProviders = other === "recommended" ? sortRecommended(res.providers) : res.providers;
                 cacheRef.current.set(otherKey, { data: { ...res, providers: resProviders }, providers: resProviders });
@@ -467,7 +496,12 @@ export function AIProviderMarketplace() {
   const changed = () => {
     cacheRef.current.clear();
     setVersion((value) => value + 1);
-    if (selected) api<Provider>(`/api/ai/providers/${encodeURIComponent(selected.id)}`).then(setSelected).catch(() => undefined);
+    if (selected) {
+      const selectedId = selected.id;
+      api<Provider>(`/api/ai/providers/${encodeURIComponent(selectedId)}`)
+        .then((updated) => setSelected((current) => current?.id === selectedId ? updated : current))
+        .catch(() => undefined);
+    }
   };
 
   return <main className="ai-marketplace">
@@ -499,7 +533,7 @@ export function AIProviderMarketplace() {
       {tab === "all" && data && <div className="filter-row"><select value={type} onChange={(event) => setType(event.target.value)}><option value="">All types</option><option value="cloud">Cloud</option><option value="local">Local</option></select><select value={auth} onChange={(event) => setAuth(event.target.value)}><option value="">All authentication</option>{data.availableFilters.auth.map((item) => <option value={item} key={item}>{labels[item]}</option>)}</select><select value={cost} onChange={(event) => setCost(event.target.value)}><option value="">All costs</option>{data.availableFilters.cost.map((item) => <option value={item} key={item}>{labels[item]}</option>)}</select><select value={capability} onChange={(event) => setCapability(event.target.value)}><option value="">All capabilities</option>{data.availableFilters.capabilities.map((item) => <option value={item} key={item}>{item}</option>)}</select></div>}
       {error ? <div className="engine-error"><strong>AI Engine unavailable</strong><p>NPATI Agent cannot load providers right now. {error}</p><button className="button-primary" onClick={() => load()}>Retry</button></div> : (loading && !data && providers.length === 0) ? <div className="loading-state">Loading providers…</div> : providers.length === 0 ? <div className="engine-error"><strong>{tab === "connected" ? "No AI providers connected yet." : "No providers found."}</strong><p>{tab === "connected" ? "Explore the marketplace and connect your first provider." : "Try a different search or filter."}</p>{tab === "connected" && <button className="button-primary" onClick={() => switchTab("recommended")}>Explore providers</button>}</div> : <><p className="showing-copy">Showing {providers.length} of {data?.pagination.total ?? providers.length} providers</p><div className="provider-grid">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} onOpen={() => setSelected(provider)} onConnect={() => setSelected(provider)} />)}</div>{data?.pagination.hasMore && <button className="load-more" disabled={loadingMore} onClick={() => load(providers.length)}>{loadingMore ? "Loading…" : "Load more providers"}</button>}</>}
     </section>
-    {selected && <ProviderDrawer key={`${selected.id}-${version}`} provider={selected} addedIds={addedIds} onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
+    {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
   </main>;
 }
 

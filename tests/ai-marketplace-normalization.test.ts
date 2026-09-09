@@ -52,4 +52,46 @@ describe("AI marketplace normalization", () => {
     expect(provider.connections[0]).not.toHaveProperty("apiKey");
     expect(models[0]).toMatchObject({ id: "openai/gpt-5", upstreamId: "gpt-5", added: true });
   });
+
+  it("9. routes embedded services to service setup instead of generic connect", () => {
+    const provider = normalizeCatalog(manifest, connection).find((item) => item.id === "9router");
+    expect(provider).toMatchObject({ connectionMode: "embedded_service", availability: "requires_service", connectable: false });
+  });
+
+  it("10. keeps verified no-auth adapters connectable", () => {
+    const provider = normalizeCatalog(manifest, connection).find((item) => item.id === "opencode");
+    expect(provider).toMatchObject({ connectionMode: "no_auth", availability: "ready", connectable: true });
+  });
+
+  it("11. does not offer a generic connection for unavailable no-auth adapters", () => {
+    const runtimeManifest = [...manifest, { id: "chipotle", auth: { type: "none" }, models: [] }];
+    const provider = normalizeCatalog(runtimeManifest, connection).find((item) => item.id === "chipotle");
+    expect(provider).toMatchObject({ connectionMode: "no_auth", availability: "unavailable", connectable: false });
+  });
+
+  it("12. identifies local CLI providers without exposing the API-key form", () => {
+    const runtimeManifest = [...manifest, { id: "auggie", auth: { type: "none" }, models: [] }];
+    const provider = normalizeCatalog(runtimeManifest, connection).find((item) => item.id === "auggie");
+    expect(provider).toMatchObject({ connectionMode: "local_cli", availability: "requires_local_runtime", connectable: false });
+  });
+
+  it("13. keeps catalog-backed media providers connectable outside the chat plugin manifest", () => {
+    const provider = normalizeCatalog(manifest, connection).find((item) => item.id === "adobe-firefly");
+    expect(provider).toMatchObject({
+      connectionMode: "web_session",
+      availability: "requires_login",
+      connectable: true,
+    });
+  });
+
+  it("14. hides providers without a supported setup flow while preserving connected providers", () => {
+    const providers = normalizeCatalog(manifest, connection);
+    const visible = filterProviders(providers, manifest, { connectableOnly: true });
+    expect(visible.map((provider) => provider.id)).toContain("openai");
+    expect(visible.map((provider) => provider.id)).toContain("opencode");
+    expect(visible.map((provider) => provider.id)).toContain("agy");
+    expect(visible.map((provider) => provider.id)).not.toContain("adobe-firefly");
+    expect(visible.map((provider) => provider.id)).not.toContain("9router");
+    expect(visible.map((provider) => provider.id)).not.toContain("auggie");
+  });
 });
