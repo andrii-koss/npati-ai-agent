@@ -13,6 +13,7 @@ import { MemoryPage } from "./MemoryPage";
 import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
+import { DashboardPage } from "./DashboardPage";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -520,6 +521,7 @@ function SettingsPage() {
     { to: "/settings/ai", icon: "AI", title: "AI Providers", description: "Connect providers, browse models, and choose AI routing." },
     { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
     { to: "/settings/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
+    { to: "/settings/dashboard", icon: "D", title: "Dashboard", description: "Monitor workspace activity and runtime service health." },
     { to: "/settings/capabilities", icon: "CP", title: "Capability Inspector", description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
     { to: "/settings/activity", icon: "AC", title: "Activity & Run Trace", description: "Inspect live execution traces, step delegations, and tool decisions." },
     { to: "/settings/automations", icon: "AU", title: "Automations", description: "Schedule recurring cron jobs and background agent tasks." },
@@ -573,6 +575,8 @@ export function App() {
           <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
           <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
           <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
+          <Route path="/dashboard" element={<Workspace><DashboardPage /></Workspace>} />
+          <Route path="/settings/dashboard" element={<Workspace><DashboardPage /></Workspace>} />
           <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
           <Route path="/settings/activity" element={<Workspace><ActivityPage /></Workspace>} />
           <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />

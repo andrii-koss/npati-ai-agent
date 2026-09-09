@@ -23,6 +23,7 @@ const app = buildApp({
   omnirouteApiKey: process.env.OMNIROUTE_API_KEY,
   omnirouteManagementPassword: process.env.OMNIROUTE_MANAGEMENT_PASSWORD,
   omnirouteTranscriptionModel: process.env.OMNIROUTE_TRANSCRIPTION_MODEL,
+  omnirouteTtsModel: process.env.OMNIROUTE_TTS_MODEL,
   omnirouteEmbeddingModel: process.env.OMNIROUTE_EMBEDDING_MODEL,
   omnirouteRerankModel: process.env.OMNIROUTE_RERANK_MODEL,
   omnirouteVisionModel: process.env.OMNIROUTE_VISION_MODEL,

@@ -1,5 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
-import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, EmbeddingInput, EmbeddingResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
+import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, EmbeddingInput, EmbeddingResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -78,6 +78,7 @@ export class OmniRouteEngine implements AIEngine {
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
   private readonly transcriptionModel: string;
+  private readonly ttsModel: string;
   private readonly embeddingModel?: string;
   private readonly rerankModel?: string;
 
@@ -86,6 +87,7 @@ export class OmniRouteEngine implements AIEngine {
     this.apiKey = config.apiKey;
     this.timeoutMs = config.timeoutMs ?? 4_000;
     this.transcriptionModel = config.transcriptionModel ?? "openai/whisper-1";
+    this.ttsModel = config.ttsModel ?? "openai/gpt-4o-mini-tts";
     this.embeddingModel = config.embeddingModel;
     this.rerankModel = config.rerankModel;
   }
@@ -184,6 +186,38 @@ export class OmniRouteEngine implements AIEngine {
     const payload = await response.json() as { text?: string; model?: string };
     if (!payload.text?.trim()) throw new Error("OmniRoute audio transcription returned no text");
     return { text: payload.text.trim(), model: payload.model ?? input.model ?? this.transcriptionModel };
+  }
+
+  async synthesizeSpeech(input: SpeechSynthesisInput): Promise<SpeechSynthesisResult> {
+    if (!this.baseUrl) throw new Error("OmniRoute is not configured");
+    const text = input.text.trim();
+    if (!text) throw new Error("Text-to-speech input is required");
+    const format: SpeechAudioFormat = input.format ?? "mp3";
+    const model = input.model?.trim() || this.ttsModel;
+    const voice = input.voice?.trim() || "alloy";
+    const response = await fetch(this.baseUrl + "/api/v1/audio/speech", {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        model,
+        input: text,
+        voice,
+        response_format: format,
+        ...(typeof input.speed === "number" ? { speed: Math.max(0.25, Math.min(input.speed, 4)) } : {}),
+      }),
+      signal: requestSignal(input.signal, input.timeoutMs ?? Math.max(this.timeoutMs, 60_000)),
+    });
+    if (!response.ok) throw await this.responseError("text-to-speech", response);
+    const mimeByFormat: Record<SpeechAudioFormat, string> = {
+      mp3: "audio/mpeg", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/L16",
+    };
+    return {
+      data: new Uint8Array(await response.arrayBuffer()),
+      mimeType: response.headers.get("content-type")?.split(";", 1)[0] || mimeByFormat[format],
+      model,
+      voice,
+      format,
+    };
   }
 
   async ensureA2AEnabled(): Promise<void> {
@@ -422,6 +456,20 @@ export class OmniRouteEngine implements AIEngine {
       if (!url) throw new Error("web.fetch requires a URL");
       return this.webFetch({ url, format: value.format === "html" || value.format === "links" ? value.format : "markdown" });
     }
+    if (name === "audio.speech") {
+      const input = typeof value.input === "string" ? value.input : typeof value.text === "string" ? value.text : "";
+      const format = ["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(String(value.format))
+        ? value.format as SpeechAudioFormat
+        : undefined;
+      const result = await this.synthesizeSpeech({
+        text: input,
+        model: typeof value.model === "string" ? value.model : undefined,
+        voice: typeof value.voice === "string" ? value.voice : undefined,
+        speed: typeof value.speed === "number" ? value.speed : undefined,
+        format,
+      });
+      return { ...result, data: undefined, audioBase64: Buffer.from(result.data).toString("base64") };
+    }
     throw new Error(`Tool "${name}" is not exposed by the NPATI OmniRoute adapter`);
   }
 
@@ -482,7 +530,7 @@ export class OmniRouteEngine implements AIEngine {
   }
 
   async getCapabilities(): Promise<string[]> {
-    return ["chat", "vision", "audio.transcription", "embeddings", "rerank", "stream", "models", "web.search", "web.fetch", "health"];
+    return ["chat", "vision", "audio.transcription", "audio.speech", "embeddings", "rerank", "stream", "models", "web.search", "web.fetch", "health"];
   }
 
   async resilienceStatus(): Promise<OmniRouteResilienceSnapshot> {

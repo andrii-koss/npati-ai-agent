@@ -173,7 +173,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "WebChat",
-    "description": "У тебе чат уже є; з OpenClaw варто запозичити session/agent routing, не UI 1:1.",
+    "description": "User-facing NPATI WebChat UI with persisted conversations and workspace-aware agent routing.",
     "useWhen": [
       "Internal system execution requires WebChat"
     ],
@@ -194,9 +194,9 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
       9
     ],
     "type": "configuration",
-    "domain": "security",
-    "name": "35+ model providers",
-    "description": "OmniRoute у тебе тут сильніший; залишити OmniRoute як model gateway.",
+    "domain": "ai",
+    "name": "OmniRoute provider catalog",
+    "description": "Dynamic OmniRoute provider catalog used by Settings and model routing; the count is discovered at runtime rather than hard-coded.",
     "useWhen": [
       "Internal system execution requires 35+ model providers"
     ],
@@ -270,8 +270,8 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     ],
     "type": "runtime",
     "domain": "communications",
-    "name": "WebChat channel",
-    "description": "У тебе вже є.",
+    "name": "WebChat transport channel",
+    "description": "Authenticated backend transport for WebChat messages, streaming progress, conversation persistence, and agent responses.",
     "useWhen": [
       "User asks to execute or inspect WebChat channel"
     ],
@@ -296,7 +296,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "configuration",
     "domain": "system",
     "name": "Dashboard",
-    "description": "Використовувати як admin/ops-шар, не обов’язково показувати кінцевому користувачу.",
+    "description": "Workspace operations dashboard with live service health, business summary, and links to runtime diagnostics.",
     "useWhen": [
       "Internal system execution requires Dashboard"
     ],
@@ -319,7 +319,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Ollama-compatible API",
-    "description": "Зберегти для local AI.",
+    "description": "Authenticated Ollama-compatible /api/tags, /api/generate, /api/chat and /api/version endpoints backed by OmniRoute.",
     "useWhen": [
       "Internal system execution requires Ollama-compatible API"
     ],
@@ -342,7 +342,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "system",
     "name": "Text-to-Speech",
-    "description": "Audit 2026-08-30: у NPATI реалізовано STT/voice transcription, але TTS endpoint ще не підключений. Не дублювати - інтегрувати OmniRoute TTS.",
+    "description": "Real text-to-speech through OmniRoute /api/v1/audio/speech with authenticated NPATI API and agent-tool adapters.",
     "useWhen": [
       "User asks to execute or inspect Text-to-Speech"
     ],

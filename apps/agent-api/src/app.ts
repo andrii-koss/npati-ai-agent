@@ -40,6 +40,7 @@ import { ChatFileService } from "./chat-file-service";
 import { InMemoryFileMetadataRepository, PostgresFileMetadataRepository, type FileMetadataRepository } from "./file-metadata";
 import { InMemoryStorageProtection, RedisStorageProtection, StorageRateLimitError, type StorageProtection } from "./storage-protection";
 import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reconciler";
+import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 
 export interface AppConfig {
   webOrigin?: string;
@@ -47,6 +48,7 @@ export interface AppConfig {
   omnirouteApiKey?: string;
   omnirouteManagementPassword?: string;
   omnirouteTranscriptionModel?: string;
+  omnirouteTtsModel?: string;
   omnirouteEmbeddingModel?: string;
   omnirouteRerankModel?: string;
   omnirouteVisionModel?: string;
@@ -223,6 +225,7 @@ export function buildApp(config: AppConfig = {}) {
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
     transcriptionModel: config.omnirouteTranscriptionModel,
+    ttsModel: config.omnirouteTtsModel,
     embeddingModel: config.omnirouteEmbeddingModel, rerankModel: config.omnirouteRerankModel,
   });
   const researchBundle = aiEngine instanceof OmniRouteEngine && config.crawlerBaseUrl
@@ -410,6 +413,7 @@ export function buildApp(config: AppConfig = {}) {
   });
   registerAuthRoutes(app, { authClient, workspaceStore, authProvider });
   registerAIRoutes(app, marketplace, aiPreferences, authProvider, aiEngine);
+  registerRuntimeCompatRoutes(app, aiEngine, authProvider);
   registerWorkspaceRoutes(app, workspaceStore, authProvider, aiPreferences, {
     beforeDeleteBusiness: async (context,businessId) => { await chatFiles?.deleteBusiness(context,businessId); },
     beforeDeleteCompany: async (context,companyId) => {

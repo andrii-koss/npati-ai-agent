@@ -69,6 +69,10 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         refresh: input.refresh === true,
       });
     }
+    if (tool === "audio.speech") {
+      const speechText = text(input.text ?? input.input, "Speech text", 4_096);
+      return this.ai.executeTool(tool, { ...input, text: speechText });
+    }
     if (tool === "mcp") {
       if (!this.ai.mcpCall) throw new Error("OmniRoute MCP runtime is unavailable");
       const name = text(input.name ?? input.toolName, "MCP tool name", 200);
