@@ -519,16 +519,15 @@ function SettingsPage() {
   const cards = [
     { to: "/settings/ai", icon: "AI", title: "AI Providers", description: "Connect providers, browse models, and choose AI routing." },
     { to: "/settings/capabilities", icon: "CP", title: "Capability Inspector", description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
-    { to: "/activity", icon: "AC", title: "Activity & Run Trace", description: "Inspect live execution traces, step delegations, and tool decisions." },
-    { to: "/automations", icon: "AU", title: "Automations", description: "Schedule recurring cron jobs and background agent tasks." },
-    { to: "/goals", icon: "G", title: "Goals", description: "Define and track measurable business outcomes." },
-    { to: "/content", icon: "C", title: "Content", description: "Plan, generate, and manage content for your audience." },
-    { to: "/connections", icon: "CN", title: "Connections", description: "Monitor service health and integrations." },
-    { to: "/memory", icon: "M", title: "Memory", description: "Review and edit confirmed business context." },
-    { to: "/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
+    { to: "/settings/activity", icon: "AC", title: "Activity & Run Trace", description: "Inspect live execution traces, step delegations, and tool decisions." },
+    { to: "/settings/automations", icon: "AU", title: "Automations", description: "Schedule recurring cron jobs and background agent tasks." },
+    { to: "/settings/goals", icon: "G", title: "Goals", description: "Define and track measurable business outcomes." },
+    { to: "/settings/content", icon: "C", title: "Content", description: "Plan, generate, and manage content for your audience." },
+    { to: "/settings/connections", icon: "CN", title: "Connections", description: "Monitor service health and integrations." },
+    { to: "/settings/memory", icon: "M", title: "Memory", description: "Review and edit confirmed business context." },
+    { to: "/settings/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
     { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
-    { to: "/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
-    { to: "/settings/ai", icon: "MO", title: "Models", description: "Browse Npati models and manage the NPATI model library." },
+    { to: "/settings/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
   ];
 
   return (
@@ -573,16 +572,23 @@ export function App() {
           <Route path="/settings/business" element={<Workspace><BusinessPage /></Workspace>} />
           <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
           <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
+          <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
           <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
+          <Route path="/settings/activity" element={<Workspace><ActivityPage /></Workspace>} />
           <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />
+          <Route path="/settings/content" element={<Workspace><ContentPage /></Workspace>} />
           <Route path="/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
+          <Route path="/settings/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
           <Route path="/automations" element={<Workspace><AutomationsPage /></Workspace>} />
           <Route path="/settings/automations" element={<Workspace><AutomationsPage /></Workspace>} />
           <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
           <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
           <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
+          <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />
           <Route path="/memory" element={<Workspace><MemoryPage /></Workspace>} />
+          <Route path="/settings/memory" element={<Workspace><MemoryPage /></Workspace>} />
           <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
+          <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
           <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
