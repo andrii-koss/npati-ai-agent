@@ -19,185 +19,197 @@ export interface ScopedMemoryItem {
   updatedAt: string;
 }
 
+type MemoryAccess = {
+  companyId: string;
+  tenantId: string;
+  apiKeyId?: string;
+  sessionId?: string;
+};
+
+const columns = `id, company_id AS "companyId", tenant_id AS "tenantId",
+  api_key_id AS "apiKeyId", session_id AS "sessionId", scope_type AS "scopeType",
+  category, title, content, tags, confidence, created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+function required(value: string, name: string, max: number) {
+  const normalized = value?.trim();
+  if (!normalized) throw new Error(name + " is required");
+  if (normalized.length > max) throw new Error(name + " exceeds " + max + " characters");
+  return normalized;
+}
+
 export class ScopedMemoryEngine {
-  private readonly inMemoryStore = new Map<string, ScopedMemoryItem>();
+  private readonly inMemoryStore = new Map<string, ScopedMemoryItem & { idempotencyKey?: string }>();
 
   constructor(private readonly pool?: Pool) {}
 
-  /**
-   * Store a memory with specific scope boundaries (company-wide, API key specific, or session specific)
-   */
-  async storeMemory(params: {
-    companyId: string;
-    tenantId: string;
-    apiKeyId?: string;
-    sessionId?: string;
+  async storeMemory(params: MemoryAccess & {
     category?: string;
     title: string;
     content: string;
     tags?: string[];
     confidence?: number;
+    idempotencyKey?: string;
   }): Promise<ScopedMemoryItem> {
-    const id = randomUUID();
+    const companyId = required(params.companyId, "Company id", 100);
+    const tenantId = required(params.tenantId, "Tenant id", 100);
+    const apiKeyId = params.apiKeyId ? required(params.apiKeyId, "API key id", 100) : undefined;
+    const sessionId = params.sessionId ? required(params.sessionId, "Session id", 100) : undefined;
+    const scopeType: MemoryScopeType = sessionId ? "session" : apiKeyId ? "api_key" : "company";
+    const idempotencyKey = params.idempotencyKey ? required(params.idempotencyKey, "Idempotency key", 160) : undefined;
+    const confidence = Math.max(0, Math.min(1, Number.isFinite(params.confidence) ? Number(params.confidence) : 1));
     const now = new Date().toISOString();
-    
-    let scopeType: MemoryScopeType = "company";
-    if (params.sessionId) {
-      scopeType = "session";
-    } else if (params.apiKeyId) {
-      scopeType = "api_key";
-    }
-
     const item: ScopedMemoryItem = {
-      id,
-      companyId: params.companyId,
-      tenantId: params.tenantId,
-      apiKeyId: params.apiKeyId || null,
-      sessionId: params.sessionId || null,
+      id: randomUUID(),
+      companyId,
+      tenantId,
+      apiKeyId: apiKeyId ?? null,
+      sessionId: sessionId ?? null,
       scopeType,
-      category: params.category ?? "fact",
-      title: params.title.trim(),
-      content: params.content.trim(),
-      tags: params.tags ?? [],
-      confidence: params.confidence ?? 1.0,
+      category: required(params.category ?? "fact", "Category", 80),
+      title: required(params.title, "Title", 240),
+      content: required(params.content, "Content", 8_000),
+      tags: [...new Set((params.tags ?? []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 32),
+      confidence,
       createdAt: now,
       updatedAt: now,
     };
 
     if (this.pool) {
-      await this.pool.query(
-        `INSERT INTO company_scoped_memories (
-          id, company_id, tenant_id, api_key_id, session_id, scope_type, category, title, content, tags, confidence, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [
-          item.id,
-          item.companyId,
-          item.tenantId,
-          item.apiKeyId,
-          item.sessionId,
-          item.scopeType,
-          item.category,
-          item.title,
-          item.content,
-          item.tags,
-          item.confidence,
-          item.createdAt,
-          item.updatedAt,
-        ]
-      );
-      return item;
+      if (idempotencyKey) {
+        const existing = await this.pool.query<ScopedMemoryItem>(
+          `SELECT ${columns} FROM company_scoped_memories
+           WHERE tenant_id=$1 AND company_id=$2 AND scope_type=$3
+             AND api_key_id IS NOT DISTINCT FROM $4 AND session_id IS NOT DISTINCT FROM $5
+             AND idempotency_key=$6 AND deleted_at IS NULL`,
+          [tenantId, companyId, scopeType, apiKeyId ?? null, sessionId ?? null, idempotencyKey],
+        );
+        if (existing.rows[0]) return existing.rows[0];
+      }
+      try {
+        const stored = await this.pool.query<ScopedMemoryItem>(
+          `INSERT INTO company_scoped_memories
+            (id,company_id,tenant_id,api_key_id,session_id,scope_type,category,title,content,tags,confidence,idempotency_key,created_at,updated_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           RETURNING ${columns}`,
+          [item.id, companyId, tenantId, apiKeyId ?? null, sessionId ?? null, scopeType, item.category,
+            item.title, item.content, item.tags, confidence, idempotencyKey ?? null, now, now],
+        );
+        return stored.rows[0]!;
+      } catch (error) {
+        if (!idempotencyKey || (error as { code?: string }).code !== "23505") throw error;
+        const existing = await this.pool.query<ScopedMemoryItem>(
+          `SELECT ${columns} FROM company_scoped_memories
+           WHERE tenant_id=$1 AND company_id=$2 AND scope_type=$3
+             AND api_key_id IS NOT DISTINCT FROM $4 AND session_id IS NOT DISTINCT FROM $5
+             AND idempotency_key=$6 AND deleted_at IS NULL`,
+          [tenantId, companyId, scopeType, apiKeyId ?? null, sessionId ?? null, idempotencyKey],
+        );
+        if (!existing.rows[0]) throw error;
+        return existing.rows[0];
+      }
     }
 
-    this.inMemoryStore.set(id, item);
+    if (idempotencyKey) {
+      const existing = [...this.inMemoryStore.values()].find((candidate) =>
+        candidate.tenantId === tenantId && candidate.companyId === companyId &&
+        candidate.scopeType === scopeType && candidate.apiKeyId === (apiKeyId ?? null) &&
+        candidate.sessionId === (sessionId ?? null) && candidate.idempotencyKey === idempotencyKey);
+      if (existing) return existing;
+    }
+    this.inMemoryStore.set(item.id, { ...item, idempotencyKey });
     return item;
   }
 
-  /**
-   * Retrieve memories strictly accessible by the caller's context:
-   * 1. Company-wide memories are always accessible.
-   * 2. If caller provides `apiKeyId`, apiKey-scoped memories for THAT apiKey are accessible.
-   * 3. If caller provides `sessionId`, session-scoped memories for THAT session are accessible.
-   * 4. Memories belonging to OTHER API keys or OTHER sessions are NEVER returned (Strict Scope Isolation).
-   */
-  async retrieveMemories(params: {
-    companyId: string;
-    tenantId: string;
-    apiKeyId?: string;
-    sessionId?: string;
-    query?: string;
-    limit?: number;
-  }): Promise<ScopedMemoryItem[]> {
-    const limit = Math.min(params.limit ?? 50, 200);
-    const query = params.query?.trim().toLowerCase();
-
+  async retrieveMemories(params: MemoryAccess & { query?: string; limit?: number }): Promise<ScopedMemoryItem[]> {
+    const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
+    const query = params.query?.trim();
+    const searchTerms = query
+      ? [...new Set((query.toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? [])
+          .map((term) => term.replace(/[^\p{L}\p{N}_]/gu, "")).filter(Boolean))].slice(0,24)
+      : [];
+    const ftsQuery = searchTerms.join(" | ");
+    const keyId = params.apiKeyId?.trim() || undefined;
+    const sessionId = params.sessionId?.trim() || undefined;
     if (this.pool) {
-      const conditions: string[] = ["company_id = $1", "tenant_id = $2"];
-      const values: unknown[] = [params.companyId, params.tenantId];
-      let valIdx = 3;
-
-      const scopeFilters: string[] = ["scope_type = 'company'"];
-
-      if (params.apiKeyId) {
-        scopeFilters.push(`(scope_type = 'api_key' AND api_key_id = $${valIdx})`);
-        values.push(params.apiKeyId);
-        valIdx++;
+      const values: unknown[] = [required(params.companyId, "Company id", 100), required(params.tenantId, "Tenant id", 100)];
+      const scopes = ["scope_type='company'"];
+      if (keyId) {
+        values.push(keyId);
+        scopes.push(`(scope_type='api_key' AND api_key_id=$${values.length})`);
       }
-
-      if (params.sessionId) {
-        scopeFilters.push(`(scope_type = 'session' AND session_id = $${valIdx})`);
-        values.push(params.sessionId);
-        valIdx++;
+      if (sessionId) {
+        values.push(sessionId);
+        const sessionParam = values.length;
+        values.push(keyId ?? null);
+        const keyParam = values.length;
+        scopes.push(`(scope_type='session' AND session_id=$${sessionParam} AND api_key_id IS NOT DISTINCT FROM $${keyParam})`);
       }
-
-      conditions.push(`(${scopeFilters.join(" OR ")})`);
-
-      if (query) {
-        conditions.push(`(title ILIKE $${valIdx} OR content ILIKE $${valIdx})`);
-        values.push(`%${query}%`);
-        valIdx++;
+      const filters = ["company_id=$1", "tenant_id=$2", "deleted_at IS NULL", `(${scopes.join(" OR ")})`];
+      if (query && ftsQuery) {
+        values.push(ftsQuery);
+        const queryParam = values.length;
+        values.push(query);
+        const exactParam = values.length;
+        filters.push(`(to_tsquery('simple',$${queryParam}) @@ to_tsvector('simple',title||' '||content)
+          OR title ILIKE '%'||$${exactParam}||'%' OR content ILIKE '%'||$${exactParam}||'%')`);
       }
-
       values.push(limit);
-      const querySql = `
-        SELECT id, company_id AS "companyId", tenant_id AS "tenantId",
-               api_key_id AS "apiKeyId", session_id AS "sessionId",
-               scope_type AS "scopeType", category, title, content, tags,
-               confidence, created_at AS "createdAt", updated_at AS "updatedAt"
-        FROM company_scoped_memories
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY created_at DESC
-        LIMIT $${valIdx}
-      `;
-
-      const res = await this.pool.query(querySql, values);
-      return res.rows;
+      const result = await this.pool.query<ScopedMemoryItem>(
+        `SELECT ${columns} FROM company_scoped_memories
+         WHERE ${filters.join(" AND ")}
+         ORDER BY updated_at DESC,id DESC LIMIT $${values.length}`,
+        values,
+      );
+      return result.rows;
     }
 
-    return Array.from(this.inMemoryStore.values())
-      .filter((item) => {
-        if (item.companyId !== params.companyId || item.tenantId !== params.tenantId) return false;
-
-        // Check scope access
-        let isScopeAllowed = false;
-        if (item.scopeType === "company") {
-          isScopeAllowed = true;
-        } else if (item.scopeType === "api_key" && params.apiKeyId && item.apiKeyId === params.apiKeyId) {
-          isScopeAllowed = true;
-        } else if (item.scopeType === "session" && params.sessionId && item.sessionId === params.sessionId) {
-          isScopeAllowed = true;
-        }
-
-        if (!isScopeAllowed) return false;
-
-        if (query) {
-          const matchTitle = item.title.toLowerCase().includes(query);
-          const matchContent = item.content.toLowerCase().includes(query);
-          if (!matchTitle && !matchContent) return false;
-        }
-
-        return true;
-      })
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-      .slice(0, limit);
+    return [...this.inMemoryStore.values()].filter((item) => {
+      if (item.companyId !== params.companyId || item.tenantId !== params.tenantId) return false;
+      const allowed = item.scopeType === "company" ||
+        (item.scopeType === "api_key" && Boolean(keyId) && item.apiKeyId === keyId) ||
+        (item.scopeType === "session" && Boolean(sessionId) && item.sessionId === sessionId &&
+          item.apiKeyId === (keyId ?? null));
+      if (!allowed) return false;
+      const searchable=(item.title+" "+item.content).toLowerCase();
+      return !searchTerms.length || searchTerms.some((term)=>searchable.includes(term));
+    }).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0,limit);
   }
 
-  /**
-   * Delete a scoped memory item
-   */
-  async deleteMemory(id: string, companyId: string, tenantId: string): Promise<boolean> {
+  async deleteMemory(params: MemoryAccess & { id: string; owner?: boolean }): Promise<boolean> {
+    const filters = ["id=$1", "company_id=$2", "tenant_id=$3", "deleted_at IS NULL"];
+    const values: unknown[] = [params.id, params.companyId, params.tenantId];
+    if (!params.owner) {
+      values.push(params.apiKeyId ?? null);
+      filters.push(`api_key_id IS NOT DISTINCT FROM $${values.length}`);
+      if (params.sessionId) {
+        values.push(params.sessionId);
+        filters.push(`session_id=$${values.length}`);
+      } else {
+        filters.push("scope_type='api_key' AND session_id IS NULL");
+      }
+    }
     if (this.pool) {
-      const res = await this.pool.query(
-        `DELETE FROM company_scoped_memories WHERE id = $1 AND company_id = $2 AND tenant_id = $3`,
-        [id, companyId, tenantId]
+      const result = await this.pool.query(
+        `UPDATE company_scoped_memories SET deleted_at=now(),updated_at=now() WHERE ${filters.join(" AND ")}`,
+        values,
       );
-      return (res.rowCount ?? 0) > 0;
+      return Boolean(result.rowCount);
     }
+    const item = this.inMemoryStore.get(params.id);
+    if (!item || item.companyId !== params.companyId || item.tenantId !== params.tenantId) return false;
+    if (!params.owner) {
+      if (item.apiKeyId !== (params.apiKeyId ?? null)) return false;
+      if (params.sessionId ? item.sessionId !== params.sessionId : item.scopeType !== "api_key" || item.sessionId !== null) return false;
+    }
+    this.inMemoryStore.delete(params.id);
+    return true;
+  }
 
-    const item = this.inMemoryStore.get(id);
-    if (item && item.companyId === companyId && item.tenantId === tenantId) {
-      this.inMemoryStore.delete(id);
-      return true;
+  async purgeCompany(companyId: string, tenantId: string) {
+    if (this.pool) {
+      await this.pool.query("DELETE FROM company_scoped_memories WHERE company_id=$1 AND tenant_id=$2", [companyId, tenantId]);
+      return;
     }
-    return false;
+    for (const [id,item] of this.inMemoryStore) if (item.companyId===companyId && item.tenantId===tenantId) this.inMemoryStore.delete(id);
   }
 }

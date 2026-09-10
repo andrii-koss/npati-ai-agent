@@ -33,6 +33,8 @@ import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
 import { ApiKeysRepository } from "./api-keys-repository";
 import { registerApiKeyRoutes } from "./api-keys-routes";
+import { ScopedMemoryEngine } from "./scoped-memory";
+import { registerScopedMemoryRoutes } from "./scoped-memory-routes";
 import { CompanyToolRuntime } from "./company-tool-runtime";
 import { CompanyRunQueueProducer } from "./company-run-queue";
 import { InMemoryObjectStorage, type ObjectStorage } from "./object-storage";
@@ -259,10 +261,24 @@ export function buildApp(config: AppConfig = {}) {
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
+  const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
-    knowledgeProcessor ? (ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query) : undefined);
+    knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
+      const [knowledge,scoped]=await Promise.all([
+        knowledgeProcessor.retrieveContext(ctx,companyId,query),
+        scopedMemory.retrieveMemories({
+          companyId,
+          tenantId:ctx.workspaceId,
+          apiKeyId:scope?.apiKeyId??ctx.apiKeyId,
+          sessionId:scope?.sessionId,
+          query,
+          limit:12,
+        }),
+      ]);
+      return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
+    } : undefined);
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = config.databaseUrl ? new CompanyAutomationsRepository(config.databaseUrl) : undefined;
@@ -427,6 +443,7 @@ export function buildApp(config: AppConfig = {}) {
   registerWorkspaceRoutes(app, workspaceStore, authProvider, aiPreferences, {
     beforeDeleteBusiness: async (context,businessId) => { await chatFiles?.deleteBusiness(context,businessId); },
     beforeDeleteCompany: async (context,companyId) => {
+      await scopedMemory.purgeCompany(companyId,context.workspaceId);
       if (!objectStorage || !knowledgeRepo) return;
       const companyFiles=await fileRepository.listCompany(context,companyId);
       for (const file of companyFiles) { await objectStorage.remove(file.bucket,file.objectKey); await fileRepository.markStorageDeleted(file.id); }
@@ -442,6 +459,7 @@ export function buildApp(config: AppConfig = {}) {
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
+  registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   app.addHook("onClose", async () => { storageReconciler?.stop(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
@@ -647,7 +665,7 @@ export function buildApp(config: AppConfig = {}) {
         const runResult = await companyRuntime.execute(
           auth,
           company.id,
-          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive },
+          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
         return {
@@ -850,7 +868,7 @@ export function buildApp(config: AppConfig = {}) {
           const runResult = await companyRuntime.execute(
             auth,
             resolved.company!.id,
-            { task: message, noMemory: memoryPolicy.noMemoryActive },
+            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
             (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`
           );
           progress({ type: "final_generation_completed" });

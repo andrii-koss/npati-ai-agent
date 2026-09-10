@@ -1552,7 +1552,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Memory scoped by API key",
-    "description": "Production Company Knowledge виконує scoped pgvector semantic search у PostgreSQL, перевірений на завантаженому документі зі strict auth і cross-company isolation.",
+    "description": "PostgreSQL-backed Company Memory ізолюється за tenant, company та точним API key; key scopes deny-by-default, cross-key читання і видалення блокуються.",
     "useWhen": [
       "Internal system execution requires Memory scoped by API key"
     ],
@@ -1575,7 +1575,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Optional sessionId scoping",
-    "description": "Єдиний production retrieval path об'єднує pgvector і PostgreSQL FTS через reciprocal-rank fusion та додає релевантну Company Memory з workspace/company/user scope.",
+    "description": "Опційний sessionId звужує пам'ять усередині API key scope; однаковий sessionId різних ключів не перетинає межу, а стан переживає restart.",
     "useWhen": [
       "Internal system execution requires Optional sessionId scoping"
     ],
@@ -1598,7 +1598,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Memory injection",
-    "description": "Company Agent runtime інжектує scoped Company Memory і retrieved Knowledge лише за fail-closed permissions. Повна універсальна OmniRoute Memory injection для всіх chat flows ще не доведена.",
+    "description": "JSON, SSE та Company API chat інжектують лише релевантну дозволену пам'ять у model call; no-memory повністю обходить retrieval та injection.",
     "useWhen": [
       "Internal system execution requires Memory injection"
     ],

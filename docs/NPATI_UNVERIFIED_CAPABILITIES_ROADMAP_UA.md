@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 62 пункти.
+- `PARTIALLY_IMPLEMENTED`: 59 пунктів.
 - `NOT_IMPLEMENTED`: 132 пункти.
-- Разом у цьому backlog: 194 пункти.
+- Разом у цьому backlog: 191 пункт.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -43,7 +43,7 @@ Verified gate: cross-tenant, prompt-injection, token replay, path traversal, SSR
 
 Це найкорисніша функція для бізнес-агента після базового chat/model routing.
 
-Пункти: #64 `Embeddings` (P), #65 `Rerank` (P), #67 `Memory scoped by API key` (P), #68 `Optional sessionId scoping` (P), #69 `Memory injection` (P), #72 `Context compaction` (P), #78 `Automatic memory extraction` (N), #80 `Memory rerank` (N), #302 `OmniRoute Rerank integration` (P).
+Пункти: #64 `Embeddings` (P), #65 `Rerank` (P), #72 `Context compaction` (P), #78 `Automatic memory extraction` (N), #80 `Memory rerank` (N), #302 `OmniRoute Rerank integration` (P).
 
 Що реалізувати: один scoped Retrieval Engine на PostgreSQL FTS + pgvector; reciprocal-rank fusion; підключена production rerank-модель; callable `memory.get/search/create/update` з окремими read/write permissions; `no-memory` прапорець; контрольований extractor із provenance; token-budget compaction.
 
@@ -150,7 +150,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 ## Наступні 10 конкретних задач
 
 1. Підключити й live-перевірити rerank provider; закрити #65 і #302 одним adapter path.
-2. 🟡 Частково: #82 завершено; завершити production memory scope/injection для #67-#69.
+2. ✅ Завершено: #67-#69 production memory scope/injection та #82 per-request no-memory.
 3. 🟡 Частково: #70, #71, #75 і #76 завершено одним PostgreSQL hybrid retrieval; #80 очікує live rerank provider.
 4. Завершити централізовані redaction/guardrails: #31-#34.
 5. Завершити deny-by-default tool/MCP/approval policy: #39, #40, #48, #49, #54, #102.
@@ -162,6 +162,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 
 ## Завершені кроки
 
+- 2026-09-10 — #67 `Memory scoped by API key`, #68 `Optional sessionId scoping`, #69 `Memory injection`: PostgreSQL-backed scoped memory, deny-by-default API-key scopes, вкладена ізоляція однакового `sessionId` між ключами, idempotent writes, soft delete, cleanup компанії, natural-language FTS retrieval та реальна ін’єкція у Company model call. Strict-auth E2E підтверджує restart recovery, cross-key read/delete denial і `no-memory` bypass.
 - 2026-09-10 — #296 `File delete and orphan cleanup`: єдиний cleanup path, post-delete MinIO verification, pending retry, failed/succeeded audit та strict-auth Docker restart-recovery E2E.
 - 2026-09-10 — #306 `NPATI-004 end-to-end production validation`: strict Bearer auth, Excel/MinIO/embeddings/retrieval, concurrent idempotency, restart recovery, cancellation, tenant/company isolation і Main Agent → specialist pipeline.
 - 2026-09-10 — #84 `Memory get` і #299 `Company memory`: scoped repository get, agent-callable list/search/get/create/update/delete, окремі write permissions, per-agent allowlist, Run Trace audit та strict-auth Main Agent live get.

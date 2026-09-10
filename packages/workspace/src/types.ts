@@ -3,6 +3,7 @@ export interface AuthContext {
   externalSubject?: string;
   workspaceId: string;
   permissions: string[];
+  apiKeyId?: string;
 }
 
 export type BusinessStage = "idea" | "starting" | "operating" | "growing" | "scaling";

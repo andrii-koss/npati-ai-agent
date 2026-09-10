@@ -1023,14 +1023,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/company-knowledge.test.ts",
-      "tests/inference-and-memory-injection.test.ts",
+      "tests/production-scoped-memory.test.ts",
       "tests/scoped-memory-and-user-model.test.ts",
-      "tests/storage-protection.test.ts"
+      "scripts/verify-production-scoped-memory.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 68,
@@ -1040,11 +1039,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/production-scoped-memory.test.ts",
+      "scripts/verify-production-scoped-memory.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 69,
@@ -1054,14 +1054,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/action-sensitive-memory-and-compat-apis.test.ts",
-      "tests/admission-queue-and-conversation-memory.test.ts",
-      "tests/inference-and-memory-injection.test.ts",
-      "tests/per-request-no-memory-and-rtk.test.ts"
+      "tests/production-scoped-memory.test.ts",
+      "tests/per-request-no-memory-and-rtk.test.ts",
+      "scripts/verify-production-scoped-memory.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 70,
