@@ -139,6 +139,16 @@ try {
   if (!Array.isArray(connectedModels) || connectedModels.length === 0) throw new Error("The authenticated My Models library is unexpectedly empty");
   await page.getByRole("button", { name: "+ Add Agent" }).click();
   const modelDrawer = page.locator(".agent-editor");
+  const toolLabels = await modelDrawer.locator(".company-tool strong").allTextContents();
+  const knowledgeIndex = toolLabels.indexOf("Knowledge");
+  const companyMemoryIndex = toolLabels.indexOf("Company Memory");
+  const knowledgeTool = modelDrawer.locator(".company-tool").nth(knowledgeIndex);
+  const companyMemoryTool = modelDrawer.locator(".company-tool").nth(companyMemoryIndex);
+  if (knowledgeIndex < 0 || companyMemoryIndex < 0) {
+    throw new Error("Add Agent must expose separate Knowledge and Company Memory controls: " + JSON.stringify(toolLabels));
+  }
+  await knowledgeTool.locator('input[type="checkbox"]').check();
+  await companyMemoryTool.locator('input[type="checkbox"]').check();
   const primarySelect = modelDrawer.locator("select").nth(0);
   const fallbackSelect = modelDrawer.locator("select").nth(1);
   await page.waitForFunction(
@@ -162,6 +172,9 @@ try {
   const storedAgents = await request("/companies/" + companyId + "/agents?limit=60");
   const storedAgent = storedAgents.agents.find((agent) => agent.name === "Model assignment verification");
   if (storedAgent?.modelId !== preferred.id || storedAgent?.fallbackModelId !== fallback.id) throw new Error("Selected agent models were not persisted");
+  if (!storedAgent.tools.includes("Knowledge") || !storedAgent.tools.includes("Company Memory")) {
+    throw new Error("Knowledge and Company Memory selections were not persisted");
+  }
   await request(
     "/companies/" + companyId + "/agents",
     "POST",
@@ -299,6 +312,8 @@ try {
     companyCloseAnimationMatchesGoals: true,
     connectedModelCount: connectedModels.length,
     agentPrimaryAndFallbackModelsPersisted: true,
+    knowledgeAndCompanyMemoryControlsVisible: true,
+    knowledgeAndCompanyMemorySelectionsPersisted: true,
     assignedModelProviderIcon: true,
     npatiAutoUploadedIcon: true,
     everyAgentHasActivityIndicator: true,

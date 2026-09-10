@@ -6,6 +6,7 @@ import path from "node:path";
 import type { FileCategory, FileMetadataRepository, StoredFile } from "./file-metadata";
 import { NPATI_BUCKETS, objectKey, objectKeySegment as segment, type ObjectStorage } from "./object-storage";
 import type { StorageProtection } from "./storage-protection";
+import { cleanupStoredFileObject } from "./file-cleanup";
 
 export interface PersistableAttachment {
   clientId?: string;
@@ -129,14 +130,7 @@ export class ChatFileService {
   }
 
   private async removeObject(file: StoredFile, context: AuthContext, action: "delete" | "cleanup") {
-    try {
-      await this.storage.remove(file.bucket,file.objectKey);
-      await this.repository.markStorageDeleted(file.id);
-      await this.repository.audit(context,file.id,action,"succeeded");
-    } catch (error) {
-      await this.repository.audit(context,file.id,action,"failed",{ message: error instanceof Error ? error.message : "delete failed" }).catch(()=>undefined);
-      throw error;
-    }
+    await cleanupStoredFileObject(this.storage,this.repository,file,{context,action,throwOnFailure:true});
   }
 
   async migrateLegacy() {

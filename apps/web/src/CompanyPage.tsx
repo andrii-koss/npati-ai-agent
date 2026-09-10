@@ -42,7 +42,16 @@ type CapabilityItem = {
   requiredConnections: string[];
 };
 
-const defaultToolOptions = ["Web Search", "Web Fetch", "Crawler", "MCP", "Files", "Knowledge"];
+const defaultToolOptions: CapabilityItem[] = [
+  { id: "storage.agent_knowledge_retrieval", name: "Knowledge", description: "Search uploaded Company Knowledge documents.", domain: "storage", risk: "high", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "storage.company_memory", name: "Company Memory", description: "Read durable Company facts and operating rules.", domain: "storage", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "research.web_search", name: "Web Search", description: "Search the web for current information.", domain: "research", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "browser.web_fetch", name: "Web Fetch", description: "Read a specific web page.", domain: "browser", risk: "medium", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "web.crawl", name: "Crawler", description: "Crawl multiple pages from a website.", domain: "research", risk: "medium", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "mcp", name: "MCP", description: "Use approved MCP tools.", domain: "system", risk: "medium", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "files", name: "Files", description: "List and read Company files.", domain: "files", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "system.text-to-speech", name: "Text-to-Speech", description: "Generate speech audio with the selected voice.", domain: "system", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+];
 const emptyCompany: CompanyDraft = { name: "", businessId: "", website: "", industry: "", description: "", productsServices: "", languages: "", brandTone: "", companyInstructions: "", status: "active" };
 const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: [], isActive: true, parentAgentId: "" };
 
@@ -181,11 +190,18 @@ export function CompanyPage() {
   const agentCreateKey = useRef(crypto.randomUUID());
   const selected = companies.find((company) => company.id === selectedId);
 
-  const [availableTools, setAvailableTools] = useState<CapabilityItem[]>([]);
+  const [availableTools, setAvailableTools] = useState<CapabilityItem[]>(defaultToolOptions);
 
   useEffect(() => {
-    api<{ capabilities: CapabilityItem[] }>("/capabilities?agentCallable=true")
-      .then((res) => { if (res.capabilities?.length) setAvailableTools(res.capabilities); })
+    api<CapabilityItem[]>("/capabilities?callable=true")
+      .then((capabilities) => {
+        if (!Array.isArray(capabilities)) return;
+        const catalog = new Map(capabilities.map((tool) => [tool.id, tool]));
+        setAvailableTools(defaultToolOptions.map((fallback) => {
+          const capability = catalog.get(fallback.id);
+          return capability ? { ...capability, name: fallback.name, description: fallback.description } : fallback;
+        }));
+      })
       .catch(() => {});
   }, []);
 
@@ -1004,11 +1020,9 @@ export function CompanyPage() {
           </section>
           <section>
             <h3>Tools & Capabilities</h3>
+            <small className="company-field-hint">Knowledge searches uploaded documents. Company Memory gives this agent access to durable Company facts and rules.</small>
             <div className="company-tool-grid">
-              {(availableTools.length > 0
-                ? availableTools
-                : defaultToolOptions.map((name) => ({ id: name.toLowerCase().replace(/\s+/g, "."), name, description: "", domain: "general", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] }))
-              ).map((tool) => {
+              {availableTools.map((tool) => {
                 const isChecked = agentForm.tools.includes(tool.name) || agentForm.tools.includes(tool.id);
                 return (
                   <label className="company-tool" key={tool.id} title={tool.description || tool.name}>

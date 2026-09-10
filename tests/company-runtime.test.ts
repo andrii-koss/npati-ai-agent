@@ -124,6 +124,23 @@ describe("Company delegation runtime", () => {
     const cancelled=await runtime.cancel(ctx,company.id,created.run.id);expect(cancelled.run).toMatchObject({status:"cancelled",cancelRequested:true,errorCode:"RUN_CANCELLED"});
   });
 
+  it("routes allowlisted Company Memory through the production audit path",async()=>{
+    const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
+    const company=await store.createCompany(ctx,{name:"Memory Tool Co"},"memory-tool-company");
+    const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager",tools:["Company Memory"]},"memory-tool-manager");
+    await store.setCompanyMainAgent(ctx,company.id,manager.id,company.revision);
+    const execute=vi.fn(async()=>[{id:"memory-1",content:"Refunds take 14 days"}]);
+    const ai=engine({a2aSend:async()=>({taskId:"memory-plan",content:JSON.stringify({mode:"single",agentIds:[],toolRequests:[{agentId:manager.id,tool:"storage.company_memory",input:{operation:"search",query:"refunds"}}]}),metadata:{}})});
+    const runtime=new CompanyDelegationRuntime(store,ai,5_000,{execute});
+    const result=await runtime.execute(ctx,company.id,{task:"Find the refund memory",mode:"single"},"memory-tool-run");
+    expect(result.run.status).toBe("completed");
+    expect(execute).toHaveBeenCalledWith(ctx,expect.objectContaining({id:company.id}),"storage.company_memory",{operation:"search",query:"refunds"},expect.any(AbortSignal));
+    expect(result.toolAudit).toEqual([
+      expect.objectContaining({toolName:"storage.company_memory",decision:"allowed",status:"requested"}),
+      expect.objectContaining({toolName:"storage.company_memory",decision:"allowed",status:"succeeded"}),
+    ]);
+  });
+
   it("does not retrieve Company Knowledge when any workflow participant lacks permission", async () => {
     const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
     const company=await store.createCompany(ctx,{name:"Knowledge Policy Co"},"knowledge-policy-company");

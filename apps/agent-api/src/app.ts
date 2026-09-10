@@ -257,8 +257,8 @@ export function buildApp(config: AppConfig = {}) {
   });
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles);
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? (ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query) : undefined);
