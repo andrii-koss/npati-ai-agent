@@ -519,6 +519,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
+  const [noMemory, setNoMemory] = useState(false);
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
@@ -660,6 +661,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
+    const privateRequest = noMemory;
     const optimisticId = `pending-${Date.now()}`;
     const sentAttachments = attachments;
     const optimisticContent = message;
@@ -674,17 +676,25 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         conversationId: selected ?? undefined,
         attachments: sentAttachments,
         contextType: business ? "business" : "none",
+        noMemory: privateRequest,
       }, enqueueProgress);
       setReplyMeta(result);
-      await loadConversations(result.conversationId);
-      navigate(`/c/${result.conversationId}`, { replace: !selected, state: business ? { businessId: business.id } : { neutralChat: true } });
-      window.dispatchEvent(new Event("npati:conversations-changed"));
+      if (privateRequest) {
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
+      } else if (result.conversationId) {
+        await loadConversations(result.conversationId);
+        navigate(`/c/${result.conversationId}`, { replace: !selected, state: business ? { businessId: business.id } : { neutralChat: true } });
+        window.dispatchEvent(new Event("npati:conversations-changed"));
+      }
       setProgressComplete(true);
     } catch (reason) {
       const typed = reason as Error & { code?: string };
       setProgressFailed(true);
       setNotice(typed.message);
-      try {
+      if (privateRequest) {
+        setMessages((current) => current.filter((item) => item.id !== optimisticId));
+        setInput(message); setAttachments(sentAttachments);
+      } else try {
         const loaded = await loadConversations(selected ?? undefined);
         const latestUser = [...loaded].reverse().find((item) => item.role === "user");
         const persisted = Boolean(latestUser)
@@ -730,6 +740,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
           {contextSwitcher}
+          <label className={`composer-private-toggle ${noMemory ? "active" : ""}`} title="Do not read or save memory, chat history, or attachments for this request">
+            <input type="checkbox" checked={noMemory} disabled={sending} onChange={(event) => setNoMemory(event.target.checked)} />
+            <span className="composer-private-check" aria-hidden="true">✓</span>
+            <span>Private request</span>
+          </label>
           <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
           <div><button disabled={sending || (!input.trim() && attachments.length === 0)}>Send →</button></div>

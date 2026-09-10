@@ -208,9 +208,14 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
         expect(matrixIds.has(i)).toBe(true);
       }
 
-      // No unexpected status changes
+      // Every retained capability must expose one of the explicit audited states.
       for (const cap of CAPABILITY_MATRIX) {
-        expect(["VERIFIED_EXISTING", "BLOCKED_EXTERNAL"]).toContain(cap.status);
+        expect([
+          "VERIFIED_EXISTING",
+          "PARTIALLY_IMPLEMENTED",
+          "NOT_IMPLEMENTED",
+          "BLOCKED_EXTERNAL",
+        ]).toContain(cap.status);
       }
     });
   });

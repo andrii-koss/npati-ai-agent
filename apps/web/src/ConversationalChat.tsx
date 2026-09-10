@@ -361,12 +361,12 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 }
 function ScopedConversation({companyId}:{companyId?:string}) {
   const contextSwitcher = useContext(ChatContextSwitcherContext);
-  const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[sending,setSending]=useState(false),[error,setError]=useState("");
+  const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[sending,setSending]=useState(false),[error,setError]=useState(""),[noMemory,setNoMemory]=useState(false);
   async function submit(event:FormEvent) {
     event.preventDefault();if(!input.trim()||sending)return;
     const prompt=input.trim();setInput("");setSending(true);setError("");
     setMessages(v=>[...v,{id:crypto.randomUUID(),role:"user",content:prompt}]);
-    try {const reply=await request<AgentReply>("/chat",{message:prompt,contextType:companyId?"company":"none",...(companyId?{companyId}:{})});
+    try {const reply=await request<AgentReply>("/chat",{message:prompt,contextType:companyId?"company":"none",...(companyId?{companyId}:{}),noMemory});
       setMessages(v=>[...v,{id:crypto.randomUUID(),role:"assistant",content:reply.message}]);
     }catch(e){setError(e instanceof Error?e.message:"Chat failed");}finally{setSending(false);}
   }
@@ -375,6 +375,11 @@ function ScopedConversation({companyId}:{companyId?:string}) {
     <div className="message-stream">{messages.map(m=><article key={m.id} className={m.role} aria-label={m.role==="user"?"Your message":"NPATI Agent message"}><ChatMessageContent content={m.content}/></article>)}{sending&&<p role="status">Working…</p>}</div>
     <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}>
       {contextSwitcher}
+      <label className={`composer-private-toggle ${noMemory ? "active" : ""}`} title="Do not read or save memory for this request">
+        <input type="checkbox" checked={noMemory} disabled={sending} onChange={event=>setNoMemory(event.target.checked)}/>
+        <span className="composer-private-check" aria-hidden="true">✓</span>
+        <span>Private request</span>
+      </label>
       <AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/>
       <div><button disabled={sending||!input.trim()}>Send →</button></div>
     </form>

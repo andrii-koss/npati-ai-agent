@@ -1245,7 +1245,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
       "tests/action-sensitive-memory-and-compat-apis.test.ts",
       "tests/agent-api.test.ts",
@@ -1257,11 +1257,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-md-quota-and-channel-auth.test.ts",
       "tests/omniroute-adapter.test.ts",
       "tests/per-request-no-memory-and-rtk.test.ts",
+      "tests/per-request-no-memory-production.test.ts",
       "tests/scoped-memory-and-user-model.test.ts",
       "tests/web-research.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 83,

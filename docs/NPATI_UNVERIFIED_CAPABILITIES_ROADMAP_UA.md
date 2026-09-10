@@ -165,6 +165,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 - 2026-09-10 — #296 `File delete and orphan cleanup`: єдиний cleanup path, post-delete MinIO verification, pending retry, failed/succeeded audit та strict-auth Docker restart-recovery E2E.
 - 2026-09-10 — #306 `NPATI-004 end-to-end production validation`: strict Bearer auth, Excel/MinIO/embeddings/retrieval, concurrent idempotency, restart recovery, cancellation, tenant/company isolation і Main Agent → specialist pipeline.
 - 2026-09-10 — #84 `Memory get` і #299 `Company memory`: scoped repository get, agent-callable list/search/get/create/update/delete, окремі write permissions, per-agent allowlist, Run Trace audit та strict-auth Main Agent live get.
+- 2026-09-10 — #82 `Per-request no-memory`: user-facing Private request, payload/header API flags, memory/history/file persistence bypass у JSON + SSE chat, Company Knowledge/Memory prompt isolation та audited fail-closed denial для memory/files tools.
 
 ## Контроль актуальності
 

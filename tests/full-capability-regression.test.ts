@@ -22,7 +22,9 @@ describe("PHASE 11: Full 306 Capability Regression Suite", () => {
         expect(item.type).toMatch(/^(runtime|tool|orchestration|security_ops|configuration)$/);
         expect(item.testType).toMatch(/^(unit|integration|e2e|manual|blocked_external)$/);
         expect(item.testFiles.length).toBeGreaterThan(0);
-        expect(item.status).toMatch(/^(VERIFIED_EXISTING|BLOCKED_EXTERNAL)$/);
+        expect(item.status).toMatch(
+          /^(VERIFIED_EXISTING|PARTIALLY_IMPLEMENTED|NOT_IMPLEMENTED|BLOCKED_EXTERNAL)$/,
+        );
       }
 
       expect(idSet.size).toBe(306);

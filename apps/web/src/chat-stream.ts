@@ -25,6 +25,8 @@ export async function streamChat<T>(
     contextType?: "none" | "business" | "company";
     businessId?: string;
     companyId?: string;
+    noMemory?: boolean;
+    ephemeral?: boolean;
   },
   onProgress: (event: ChatProgressEvent) => void,
 ): Promise<T> {
