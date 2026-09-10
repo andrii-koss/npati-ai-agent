@@ -77,8 +77,8 @@ describe("PII Masker, Hybrid Memory Search & Multi-Agent Parallel Delegation", (
       expect(results.length).toBe(1);
       expect(results[0]?.content).toContain("Новою Поштою");
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("ILIKE"),
-        [ctx.workspaceId, "comp-1", ctx.userId, "%Новою Поштою%", 10]
+        expect.stringContaining("websearch_to_tsquery('simple'"),
+        [ctx.workspaceId, "comp-1", ctx.userId, "Новою Поштою", 10]
       );
     });
   });

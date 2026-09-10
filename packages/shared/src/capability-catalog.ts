@@ -1552,7 +1552,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Memory scoped by API key",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Production Company Knowledge виконує scoped pgvector semantic search у PostgreSQL, перевірений на завантаженому документі зі strict auth і cross-company isolation.",
     "useWhen": [
       "Internal system execution requires Memory scoped by API key"
     ],
@@ -1575,7 +1575,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Optional sessionId scoping",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Єдиний production retrieval path об'єднує pgvector і PostgreSQL FTS через reciprocal-rank fusion та додає релевантну Company Memory з workspace/company/user scope.",
     "useWhen": [
       "Internal system execution requires Optional sessionId scoping"
     ],
@@ -1690,7 +1690,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "USER.md user model",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Семантичний пошук Company Knowledge працює через реальні embeddings і pgvector з keyword fallback, strict auth та tenant/company/user isolation.",
     "useWhen": [
       "Internal system execution requires USER.md user model"
     ],
@@ -1713,7 +1713,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "MEMORY.md long-term memory",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "PostgreSQL GIN full-text та pgvector кандидати об'єднуються reciprocal-rank fusion в одному CompanyKnowledgeProcessor; при відмові embeddings залишається scoped keyword fallback.",
     "useWhen": [
       "Internal system execution requires MEMORY.md long-term memory"
     ],

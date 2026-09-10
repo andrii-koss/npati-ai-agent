@@ -169,6 +169,18 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("MAIN_AGENT_INACTIVE", `Main agent "${main.name}" is inactive`, 400);
       }
+      const mainTools = main.tools.map(toolName);
+      const knowledgeRequested =
+        /\b(?:find|search|look\s+up|read|extract|summari[sz]e)\b[^.\n]{0,80}\b(?:uploaded|company)\s+(?:document|documents|file|files|spreadsheet)\b|\b(?:excel|xlsx)\b|(?:знайд|пошук|прочита|витяг|проаналіз)[^.\n]{0,80}(?:у|в|із|з)\s+(?:завантажен\w*\s+)?(?:документ|файл|таблиц)\w*|\bексел\w*/iu.test(
+          input.task,
+        );
+      if (!options.noMemory && knowledgeRequested && !mainTools.includes("knowledge")) {
+        throw new CompanyRuntimeError(
+          "KNOWLEDGE_PERMISSION_REQUIRED",
+          `Company Knowledge is disabled for Main Agent "${main.name}". Open Company → edit the Main Agent → enable Knowledge, then retry.`,
+          403,
+        );
+      }
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
@@ -190,6 +202,7 @@ export class CompanyDelegationRuntime {
             'web.fetch: {"url":"absolute https URL","format":"markdown"}; web.crawl: {"url":"absolute https URL","query":"research goal","maxPages":5}.',
             'audio.speech: {"text":"text to synthesize","voice":"alloy","format":"mp3"}.',
             'knowledge: {"query":"question about this Company"}; files: {"operation":"list"} or {"operation":"read","key":"known file key"}.',
+            "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
             options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
@@ -215,11 +228,19 @@ export class CompanyDelegationRuntime {
       if (reviewer && selected.length === 1 && selected[0]?.id === reviewer.id) {
         throw new CompanyRuntimeError("CIRCULAR_DELEGATION", "An agent cannot review only its own work", 400);
       }
-      // OmniRoute combo stages share the workflow prompt, so fail closed unless every
-      // participating agent is explicitly allowed to receive Company Knowledge.
-      const knowledgeAllowed = !options.noMemory && [main,...selected].every(agent=>agent.tools.map(toolName).includes("knowledge"));
+      // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
+      // Specialists still require their own allowlist entry for direct knowledge tool calls.
+      const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
       const knowledge = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
-      const evidence = await this.tools(ctx, company, created.run.id, plan.toolRequests, byId, signal, knowledge, options.noMemory === true);
+      const normalizedToolRequests = plan.toolRequests.map((request) => {
+        const requestingAgent = byId.get(request.agentId);
+        const allowed = new Set(requestingAgent?.tools.map(toolName) ?? []);
+        if (toolName(request.tool) === "files" && !allowed.has("files") && allowed.has("knowledge") && knowledgeAllowed) {
+          return { ...request, tool: "knowledge", input: { query: input.task.trim() } };
+        }
+        return request;
+      });
+      const evidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true);
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n"+knowledge.chunks.map(item=>item.content).join("\n\n---\n\n") : "",

@@ -417,6 +417,23 @@ export function CompanyPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not set main agent"); }
   }
 
+  async function enableMainAgentKnowledge() {
+    if (!selected?.mainAgentId) return;
+    const mainAgent = agents.find((agent) => agent.id === selected.mainAgentId);
+    if (!mainAgent || mainAgent.tools.some((tool) => tool === "Knowledge" || tool === "storage.agent_knowledge_retrieval" || tool.toLowerCase() === "knowledge")) return;
+    setKnowledgeBusy(true); setNotice("");
+    try {
+      await api<Agent>(`/companies/${selected.id}/agents/${mainAgent.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ tools: [...mainAgent.tools, "Knowledge"], expectedRevision: mainAgent.revision }),
+      });
+      await loadOrganization(selected.id);
+      setNotice(`Knowledge enabled for Main Agent "${mainAgent.name}".`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not enable Knowledge for the Main Agent");
+    } finally { setKnowledgeBusy(false); }
+  }
+
   async function updateCompanyBusiness(businessId: string) {
     if (!selected) return;
     try {
@@ -856,6 +873,18 @@ export function CompanyPage() {
               <span>{knowledgeBusy ? "Uploading..." : "Upload Document"}</span>
             </label>
           </div>
+
+          {documents.some((document) => document.status === "ready") && selected.mainAgentId && !agents.find((agent) => agent.id === selected.mainAgentId)?.tools.some((tool) => tool === "Knowledge" || tool === "storage.agent_knowledge_retrieval" || tool.toLowerCase() === "knowledge") && (
+            <div className="company-knowledge-permission-alert" role="alert">
+              <div>
+                <strong>Main Agent cannot search these documents yet</strong>
+                <small>Enable the Knowledge capability to use ready files from Company chat.</small>
+              </div>
+              <button type="button" disabled={knowledgeBusy} onClick={() => void enableMainAgentKnowledge()}>
+                {knowledgeBusy ? "Enabling…" : "Enable Knowledge for Main Agent"}
+              </button>
+            </div>
+          )}
 
           <div className="company-knowledge-list">
             {documents.map((doc) => (

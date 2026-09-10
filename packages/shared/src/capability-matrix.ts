@@ -1071,11 +1071,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "research",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/company-hybrid-retrieval.test.ts",
+      "tests/company-knowledge.test.ts",
+      "scripts/verify-company-hybrid-retrieval.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 71,
@@ -1085,11 +1087,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "high",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/company-hybrid-retrieval.test.ts",
+      "tests/company-knowledge.test.ts",
+      "scripts/verify-company-hybrid-retrieval.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 72,
@@ -1144,11 +1148,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "research",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/company-hybrid-retrieval.test.ts",
+      "tests/company-knowledge.test.ts",
+      "scripts/verify-company-hybrid-retrieval.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 76,
@@ -1158,11 +1164,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "research",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/company-hybrid-retrieval.test.ts",
+      "tests/company-knowledge.test.ts",
+      "scripts/verify-company-hybrid-retrieval.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 77,

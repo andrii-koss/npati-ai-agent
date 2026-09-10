@@ -24,10 +24,10 @@ describe("Company Knowledge processing",()=>{
   await new CompanyKnowledgeProcessor(repo as any,files,storage,ai as any).process(doc.id);
   const content=complete.mock.calls[0]![1].map((item:{content:string})=>item.content).join("\n");expect(content).toContain("[Sheet: Knowledge]");expect(content).toContain("NPATI Pro");expect(content).toContain("09:00-18:00 Kyiv");
  });
- it("uses OmniRoute rerank order after vector candidates",async()=>{
-  const repo={candidates:vi.fn().mockResolvedValue([{content:"A",score:.5},{content:"B",score:.4}])};
+ it("uses OmniRoute rerank order after unified hybrid candidates",async()=>{
+  const repo={hybridCandidates:vi.fn().mockResolvedValue([{id:"a",content:"A",score:.5,vectorScore:.5,keywordScore:0},{id:"b",content:"B",score:.4,vectorScore:.4,keywordScore:0}])};
   const ai={embed:vi.fn().mockResolvedValue({model:"embed",vectors:[[1,0]]}),rerank:vi.fn().mockResolvedValue({model:"rerank",results:[{index:1,relevanceScore:.9}]})};
   const result=await new CompanyKnowledgeProcessor(repo as any,{} as any,{} as any,ai as any).retrieve(ctx,"company","query",1);
-  expect(result).toEqual([{content:"B",score:.4}]);
+  expect(result).toEqual([{id:"b",content:"B",score:.4,vectorScore:.4,keywordScore:0}]);
  });
 });
