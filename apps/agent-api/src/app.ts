@@ -44,6 +44,9 @@ import { InMemoryStorageProtection, RedisStorageProtection, StorageRateLimitErro
 import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reconciler";
 import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
+import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
+import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
+import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 
 export interface AppConfig {
   webOrigin?: string;
@@ -223,7 +226,7 @@ async function prepareChatAttachments(aiEngine: AIEngine, message: string, attac
 }
 
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test", bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
   const aiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
@@ -262,6 +265,7 @@ export function buildApp(config: AppConfig = {}) {
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
+  const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
@@ -278,7 +282,7 @@ export function buildApp(config: AppConfig = {}) {
         }),
       ]);
       return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
-    } : undefined);
+    } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId));
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = config.databaseUrl ? new CompanyAutomationsRepository(config.databaseUrl) : undefined;
@@ -317,6 +321,7 @@ export function buildApp(config: AppConfig = {}) {
     memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments);
+    const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -339,7 +344,7 @@ export function buildApp(config: AppConfig = {}) {
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateConversation(auth, businessId, conversation.id, conversationTitle(media.prompt));
     }
-    let context = await contextBuilder.build(auth, businessId, media.prompt, { includeMemory: memoryPolicy.readAllowed });
+    let context = SecurityPolicyEngine.protectObject(await contextBuilder.build(auth, businessId, safePrompt, { includeMemory: memoryPolicy.readAllowed }));
     if (media.images.length > 0) {
       const preferences = await aiPreferences.get(auth);
       const visionModel = config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
@@ -358,17 +363,17 @@ export function buildApp(config: AppConfig = {}) {
     let researchJob;
     const imageResearchRequested = !media.images.length
       || /https?:|web|internet|website|site|search|online|веб|інтернет|сайт|пошук/iu.test(message);
-    if (imageResearchRequested && webResearch?.shouldResearch(media.prompt)) {
+    if (imageResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };
       try {
         researchJob = memoryPolicy.writeAllowed ? await researchBundle?.jobs.create({
           ...scope,
           type: /https?:\/\//i.test(message) ? "crawl" : "search",
-          input: { message: media.prompt, conversationId: conversation?.id },
+          input: { message: safePrompt, conversationId: conversation?.id },
         }) : undefined;
         if (researchJob) await researchBundle?.jobs.update(scope, researchJob.id, { status: "running" });
         research = await webResearch.run(
-          media.prompt,
+          safePrompt,
           context.business ?? {},
           /\b(refresh|analyze again)\b|\u043e\u043d\u043e\u0432\u0438|\u043f\u043e\u0432\u0442\u043e\u0440\u0438\s+\u0430\u043d\u0430\u043b\u0456\u0437/iu.test(message),
           progress,
@@ -387,7 +392,7 @@ export function buildApp(config: AppConfig = {}) {
       }
     }
     progress?.({ type: "final_generation_started" });
-    const result = await agent.handleBusinessMessage({ message: media.prompt, context, history: memoryPolicy.readAllowed ? existing.messages : [], research: research ?? undefined, images: media.images });
+    const result = await agent.handleBusinessMessage({ message: safePrompt, context, history: memoryPolicy.readAllowed ? existing.messages.map(item=>({...item,content:SecurityPolicyEngine.protectText(item.content).sanitized})) : [], research: research ? SecurityPolicyEngine.protectObject(research) : undefined, images: media.images });
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
     return { ...result, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive };
@@ -402,6 +407,7 @@ export function buildApp(config: AppConfig = {}) {
     memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments);
+    const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -419,8 +425,8 @@ export function buildApp(config: AppConfig = {}) {
       fallbackModel: ai.fallbackModel,
       messages: [
         { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
-        ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: item.content })) : []),
-        { role: "user", content: media.prompt },
+        ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized })) : []),
+        { role: "user", content: safePrompt },
       ],
     });
     progress?.({ type: "final_generation_completed" });
@@ -435,6 +441,7 @@ export function buildApp(config: AppConfig = {}) {
         error: { code: error.code, message: error.message },
       });
     }
+    if(error instanceof SecurityPolicyViolation)return reply.code(error.status).send({error:{code:error.code,reasonCode:error.reasonCode,message:error.message}});
     return reply.send(error);
   });
   registerAuthRoutes(app, { authClient, workspaceStore, authProvider });
@@ -444,6 +451,7 @@ export function buildApp(config: AppConfig = {}) {
     beforeDeleteBusiness: async (context,businessId) => { await chatFiles?.deleteBusiness(context,businessId); },
     beforeDeleteCompany: async (context,companyId) => {
       await scopedMemory.purgeCompany(companyId,context.workspaceId);
+      await guardrailPolicies.purge(context,companyId);
       if (!objectStorage || !knowledgeRepo) return;
       const companyFiles=await fileRepository.listCompany(context,companyId);
       for (const file of companyFiles) { await objectStorage.remove(file.bucket,file.objectKey); await fileRepository.markStorageDeleted(file.id); }
@@ -460,6 +468,7 @@ export function buildApp(config: AppConfig = {}) {
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
+  registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
   app.addHook("onClose", async () => { storageReconciler?.stop(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
@@ -668,6 +677,7 @@ export function buildApp(config: AppConfig = {}) {
           { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
+        if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED")return reply.code(400).send({error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
         return {
           message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
           suggestedActions: [],
@@ -798,6 +808,7 @@ export function buildApp(config: AppConfig = {}) {
       if (error instanceof ContextValidationError) {
         return reply.code(400).send({ error: { code: "INVALID_CONTEXT", message: error.message } });
       }
+      if(error instanceof SecurityPolicyViolation)return reply.code(error.status).send({error:{code:error.code,reasonCode:error.reasonCode,message:error.message}});
       if (error instanceof WorkspaceAccessError) {
         return reply.code(403).send({ error: { code: error.code, message: error.message } });
       }
@@ -871,13 +882,17 @@ export function buildApp(config: AppConfig = {}) {
             { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
             (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`
           );
-          progress({ type: "final_generation_completed" });
-          send("result", {
-            message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
-            suggestedActions: [],
-            activeContext: resolved.context,
-            companyRunId: runResult.run.id,
-          });
+          if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED"){
+            send("error",{error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
+          }else{
+            progress({ type: "final_generation_completed" });
+            send("result", {
+              message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
+              suggestedActions: [],
+              activeContext: resolved.context,
+              companyRunId: runResult.run.id,
+            });
+          }
         } else {
           const result = await runBusinessMessage(
             auth,
@@ -893,9 +908,9 @@ export function buildApp(config: AppConfig = {}) {
         }
       } catch (error) {
         request.log.error(error);
-        const detail = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError ? error.message : publicChatError(error);
+        const detail = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? error.message : publicChatError(error);
         progress({ type: "final_generation_failed", error: detail });
-        send("error", { error: { code: error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
+        send("error", { error: { code: error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
         clearInterval(heartbeat);
         reply.raw.end();

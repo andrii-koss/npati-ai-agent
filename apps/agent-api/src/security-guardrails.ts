@@ -14,6 +14,9 @@ const INJECTION_PATTERNS = [
   { regex: /\b(output\s+your\s+(entire\s+)?system\s+instructions?\s+verbatim)\b/i, weight: 0.85, name: "System prompt extraction" },
 ];
 
+export const PROMPT_INJECTION_USER_MESSAGE =
+  "This request was blocked because it attempts to override the agent's instructions. Rephrase it as a normal question or task.";
+
 export class PromptInjectionGuard {
   static analyze(text: string): InjectionAnalysisResult {
     if (!text || typeof text !== "string") {
@@ -42,9 +45,10 @@ export class PromptInjectionGuard {
   static assertSafe(text: string): void {
     const analysis = this.analyze(text);
     if (!analysis.safe) {
-      throw Object.assign(new Error(analysis.reason || "Security policy violation: prompt injection detected"), {
+      throw Object.assign(new Error(PROMPT_INJECTION_USER_MESSAGE), {
         status: 400,
         code: "SECURITY_GUARDRAIL_BLOCKED",
+        reasonCode: "prompt_injection",
       });
     }
   }
@@ -134,3 +138,74 @@ export class PiiMasker {
   }
 }
 
+export interface CompanyGuardrailPolicy {
+  blockPromptInjection: boolean;
+  redactPii: boolean;
+  redactCredentials: boolean;
+  customBlockedTerms: string[];
+  maxInputCharacters: number;
+}
+
+export const DEFAULT_GUARDRAIL_POLICY: CompanyGuardrailPolicy = {
+  blockPromptInjection: true,
+  redactPii: true,
+  redactCredentials: true,
+  customBlockedTerms: [],
+  maxInputCharacters: 100_000,
+};
+
+export class SecurityPolicyViolation extends Error {
+  readonly status=400;
+  readonly code="SECURITY_GUARDRAIL_BLOCKED";
+  constructor(public readonly reasonCode:string,message:string){super(message);}
+}
+
+export class SecurityPolicyEngine {
+  static normalize(policy?:Partial<CompanyGuardrailPolicy>):CompanyGuardrailPolicy {
+    return {
+      blockPromptInjection:policy?.blockPromptInjection??DEFAULT_GUARDRAIL_POLICY.blockPromptInjection,
+      redactPii:policy?.redactPii??DEFAULT_GUARDRAIL_POLICY.redactPii,
+      redactCredentials:policy?.redactCredentials??DEFAULT_GUARDRAIL_POLICY.redactCredentials,
+      customBlockedTerms:[...new Set((policy?.customBlockedTerms??[]).map(term=>term.trim()).filter(Boolean))].slice(0,100),
+      maxInputCharacters:Math.min(1_000_000,Math.max(1_000,policy?.maxInputCharacters??DEFAULT_GUARDRAIL_POLICY.maxInputCharacters)),
+    };
+  }
+
+  static protectText(text:string,policy?:Partial<CompanyGuardrailPolicy>){
+    const effective=this.normalize(policy);
+    if(text.length>effective.maxInputCharacters)throw new SecurityPolicyViolation("input_too_large","Input exceeds the configured guardrail limit.");
+    if(effective.blockPromptInjection){
+      const analysis=PromptInjectionGuard.analyze(text);
+      if(!analysis.safe)throw new SecurityPolicyViolation("prompt_injection",PROMPT_INJECTION_USER_MESSAGE);
+    }
+    const lowered=text.toLocaleLowerCase();
+    if(effective.customBlockedTerms.some(term=>lowered.includes(term.toLocaleLowerCase())))
+      throw new SecurityPolicyViolation("custom_blocked_term","Input violates a Company custom guardrail.");
+    let sanitized=text;
+    if(effective.redactCredentials)sanitized=CredentialMasker.mask(sanitized);
+    if(effective.redactPii)sanitized=PiiMasker.mask(sanitized);
+    return {sanitized,policy:effective,redacted:sanitized!==text};
+  }
+
+  static redactText(text:string,policy?:Partial<CompanyGuardrailPolicy>){
+    const effective=this.normalize(policy);
+    let sanitized=text;
+    if(effective.redactCredentials)sanitized=CredentialMasker.mask(sanitized);
+    if(effective.redactPii)sanitized=PiiMasker.mask(sanitized);
+    return sanitized;
+  }
+
+  static redactObject<T>(value:T,policy?:Partial<CompanyGuardrailPolicy>):T {
+    const credentials=CredentialMasker.maskObject(value);
+    return PiiMasker.maskObject(credentials);
+  }
+
+  static protectObject<T>(value:T,policy?:Partial<CompanyGuardrailPolicy>):T {
+    if(typeof value==="string")return this.protectText(value,policy).sanitized as T;
+    if(Array.isArray(value))return value.map(item=>this.protectObject(item,policy)) as T;
+    if(value&&typeof value==="object"){
+      return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,this.protectObject(item,policy)])) as T;
+    }
+    return value;
+  }
+}

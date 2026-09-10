@@ -716,7 +716,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Prompt-injection guard",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "Центральний policy engine блокує instruction override у user input, Company fields, retrieved documents/memory та tool evidence до model call.",
     "useWhen": [
       "Internal system execution requires Prompt-injection guard"
     ],
@@ -739,7 +739,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "PII masker",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "Email, phone, payment card, IBAN і tax identifiers маскуються перед JSON/SSE model calls, tool execution та audit summaries.",
     "useWhen": [
       "Internal system execution requires PII masker"
     ],
@@ -762,7 +762,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Credential masking",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "API keys, JWT, GitHub/AWS tokens, passwords і connection strings маскуються перед model/tool calls, Run Trace та Fastify logs.",
     "useWhen": [
       "Internal system execution requires Credential masking"
     ],
@@ -785,7 +785,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Custom guardrails",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "Versioned Company policy у PostgreSQL керує injection block, PII/credential redaction, blocked terms і input limit з optimistic revision.",
     "useWhen": [
       "Internal system execution requires Custom guardrails"
     ],
