@@ -110,7 +110,7 @@ describe("Company delegation runtime", () => {
     plan = JSON.stringify({ mode: "single", agentIds: [seo.id],
       toolRequests: [{ agentId: seo.id, tool: "knowledge", input: { query: "private company facts" } }] });
     const denied = await app.inject({ method: "POST", url: `/companies/${companyId}/runs`,
-      headers: { "idempotency-key": "denied-run-0001" }, payload: { task: "Read private Company Knowledge" } });
+      headers: { "idempotency-key": "denied-run-0001" }, payload: { task: "Complete the assigned internal task" } });
     expect(denied.statusCode).toBe(403);
     const audit = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${denied.json().run.id}` });
     expect(audit.json().run).toMatchObject({ status: "failed", errorCode: "TOOL_FORBIDDEN" });
@@ -141,7 +141,7 @@ describe("Company delegation runtime", () => {
     ]);
   });
 
-  it("does not retrieve Company Knowledge when any workflow participant lacks permission", async () => {
+  it("retrieves Company Knowledge for the allowlisted Main Agent without granting it to a specialist", async () => {
     const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
     const company=await store.createCompany(ctx,{name:"Knowledge Policy Co"},"knowledge-policy-company");
     const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager",tools:["Knowledge"]},"knowledge-policy-manager");
@@ -151,6 +151,19 @@ describe("Company delegation runtime", () => {
     const runtime=new CompanyDelegationRuntime(store,engine({a2aSend:async()=>({taskId:"policy-plan",content:JSON.stringify({mode:"single",agentIds:[external.id],toolRequests:[]}),metadata:{}})}),5_000,undefined,retrieve);
     const result=await runtime.execute(ctx,company.id,{task:"Use private knowledge",mode:"single"},"knowledge-policy-run");
     expect(result.run.status).toBe("completed");
+    expect(retrieve).toHaveBeenCalledWith(ctx,company.id,"Use private knowledge");
+  });
+
+  it("returns an actionable error when a document query is attempted without Main Agent Knowledge permission", async () => {
+    const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
+    const company=await store.createCompany(ctx,{name:"Knowledge Disabled Co"},"knowledge-disabled-company");
+    const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager",tools:["Web Search"]},"knowledge-disabled-manager");
+    await store.setCompanyMainAgent(ctx,company.id,manager.id,company.revision);
+    const retrieve=vi.fn(async()=>({chunks:[{content:"private"}],memories:[]}));
+    const runtime=new CompanyDelegationRuntime(store,engine(),5_000,undefined,retrieve);
+    const result=await runtime.execute(ctx,company.id,{task:"Find this value in the Excel file",mode:"single"},"knowledge-disabled-run");
+    expect(result.run).toMatchObject({status:"failed",errorCode:"KNOWLEDGE_PERMISSION_REQUIRED"});
+    expect(result.run.errorMessage).toContain("enable Knowledge");
     expect(retrieve).not.toHaveBeenCalled();
   });
 

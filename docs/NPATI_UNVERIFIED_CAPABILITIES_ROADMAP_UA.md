@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 63 пункти.
-- `NOT_IMPLEMENTED`: 136 пунктів.
-- Разом у цьому backlog: 199 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 62 пункти.
+- `NOT_IMPLEMENTED`: 132 пункти.
+- Разом у цьому backlog: 194 пункти.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -43,7 +43,7 @@ Verified gate: cross-tenant, prompt-injection, token replay, path traversal, SSR
 
 Це найкорисніша функція для бізнес-агента після базового chat/model routing.
 
-Пункти: #64 `Embeddings` (P), #65 `Rerank` (P), #67 `Memory scoped by API key` (P), #68 `Optional sessionId scoping` (P), #69 `Memory injection` (P), #70 `Vector semantic search` (P), #71 `Hybrid memory retrieval` (N), #72 `Context compaction` (P), #75 `Semantic memory search` (N), #76 `Hybrid keyword + vector search` (N), #78 `Automatic memory extraction` (N), #80 `Memory rerank` (N), #82 `Per-request no-memory` (N), #302 `OmniRoute Rerank integration` (P).
+Пункти: #64 `Embeddings` (P), #65 `Rerank` (P), #67 `Memory scoped by API key` (P), #68 `Optional sessionId scoping` (P), #69 `Memory injection` (P), #72 `Context compaction` (P), #78 `Automatic memory extraction` (N), #80 `Memory rerank` (N), #302 `OmniRoute Rerank integration` (P).
 
 Що реалізувати: один scoped Retrieval Engine на PostgreSQL FTS + pgvector; reciprocal-rank fusion; підключена production rerank-модель; callable `memory.get/search/create/update` з окремими read/write permissions; `no-memory` прапорець; контрольований extractor із provenance; token-budget compaction.
 
@@ -150,8 +150,8 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 ## Наступні 10 конкретних задач
 
 1. Підключити й live-перевірити rerank provider; закрити #65 і #302 одним adapter path.
-2. Завершити універсальний memory scope/injection та per-request opt-out: #67-#69 і #82.
-3. Побудувати PostgreSQL hybrid retrieval; закрити #70, #71, #75, #76 і #80 без окремих search сервісів.
+2. 🟡 Частково: #82 завершено; завершити production memory scope/injection для #67-#69.
+3. 🟡 Частково: #70, #71, #75 і #76 завершено одним PostgreSQL hybrid retrieval; #80 очікує live rerank provider.
 4. Завершити централізовані redaction/guardrails: #31-#34.
 5. Завершити deny-by-default tool/MCP/approval policy: #39, #40, #48, #49, #54, #102.
 6. Додати справжній isolated Exec sandbox: #47, #53, #63, #159, #160 і #244.
@@ -166,6 +166,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 - 2026-09-10 — #306 `NPATI-004 end-to-end production validation`: strict Bearer auth, Excel/MinIO/embeddings/retrieval, concurrent idempotency, restart recovery, cancellation, tenant/company isolation і Main Agent → specialist pipeline.
 - 2026-09-10 — #84 `Memory get` і #299 `Company memory`: scoped repository get, agent-callable list/search/get/create/update/delete, окремі write permissions, per-agent allowlist, Run Trace audit та strict-auth Main Agent live get.
 - 2026-09-10 — #82 `Per-request no-memory`: user-facing Private request, payload/header API flags, memory/history/file persistence bypass у JSON + SSE chat, Company Knowledge/Memory prompt isolation та audited fail-closed denial для memory/files tools.
+- 2026-09-10 — #70 `Vector semantic search`, #71 `Hybrid memory retrieval`, #75 `Semantic memory search`, #76 `Hybrid keyword + vector search`: єдиний production Company Knowledge path на pgvector + PostgreSQL FTS/GIN + reciprocal-rank fusion, keyword fallback при відмові embeddings, релевантна Company Memory, явне Knowledge permission UI та повний strict-auth E2E `Excel/TXT → Ready → Company chat → grounded answer` із cross-company isolation.
 
 ## Контроль актуальності
 

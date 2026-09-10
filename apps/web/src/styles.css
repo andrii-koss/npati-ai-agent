@@ -6357,6 +6357,57 @@ a {
   gap: 12px;
 }
 
+.company-knowledge-permission-alert {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: #7f1d1d;
+  background: #fff7f7;
+  border: 1px solid rgb(225 29 46 / 24%);
+  border-radius: 12px;
+}
+
+.company-knowledge-permission-alert > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.company-knowledge-permission-alert strong {
+  font-size: 13px;
+}
+
+.company-knowledge-permission-alert small {
+  color: #7a6262;
+  font-size: 11px;
+}
+
+.company-knowledge-permission-alert button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  color: #fff;
+  background: var(--npati-black);
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.company-knowledge-permission-alert button:hover:not(:disabled) {
+  background: var(--npati-red);
+  transform: translateY(-1px);
+}
+
+.company-knowledge-permission-alert button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
 .company-subhead-title {
   display: flex;
   align-items: center;

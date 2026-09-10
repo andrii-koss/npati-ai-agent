@@ -236,7 +236,7 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     expect(result.steps.some((s) => s.role === "reviewer" && s.agentId === reviewer.id)).toBe(true);
   });
 
-  it("enforces fail-closed Knowledge policy: agent without Knowledge tool never receives Company Knowledge", async () => {
+  it("retrieves Company Knowledge for the allowlisted Main Agent without granting it to a worker", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.initialize();
 
@@ -263,7 +263,7 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
 
     const result = await runtime.execute(baseAuth, company.id, { task: "Summarize knowledge", mode: "single" }, "kb-run-001");
     expect(result.run.status).toBe("completed");
-    expect(retrieve).not.toHaveBeenCalled(); // Knowledge retriever must NOT be called!
+    expect(retrieve).toHaveBeenCalledWith(baseAuth, company.id, "Summarize knowledge");
   });
 
   it("rejects circular reviewer delegation (agent reviewing only its own work)", async () => {
