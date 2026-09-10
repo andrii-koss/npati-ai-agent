@@ -8,6 +8,15 @@ export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 }
 
+export interface CompanyMemoryToolRepository {
+  memories(context:AuthContext,companyId:string):Promise<unknown[]>;
+  getMemory(context:AuthContext,companyId:string,id:string):Promise<unknown>;
+  searchMemories(context:AuthContext,companyId:string,query:string,limit?:number):Promise<unknown[]>;
+  addMemory(context:AuthContext,companyId:string,content:string,source?:string):Promise<unknown>;
+  updateMemory(context:AuthContext,companyId:string,id:string,content:string):Promise<unknown>;
+  deleteMemory(context:AuthContext,companyId:string,id:string):Promise<boolean>;
+}
+
 const SAFE_MCP_TOOLS = new Set([
   "omniroute_tool_search", "omniroute_get_health", "omniroute_list_models_catalog",
   "omniroute_agent_skills_list", "omniroute_agent_skills_get", "omniroute_agent_skills_coverage",
@@ -27,6 +36,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly research?: DefaultWebResearchProvider,
     private readonly attachmentDirectory?: string,
     private readonly attachmentReader?: { authorize(context: AuthContext, fileId: string): Promise<{ originalFilename: string; mimeType: string; sizeBytes: number } | null> },
+    private readonly memoryRepository?: CompanyMemoryToolRepository,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -80,7 +90,23 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });
     }
     if (tool === "files") return this.files(context, company, input);
+    if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     throw new Error(`Tool "${tool}" has no runtime adapter`);
+  }
+
+  private async companyMemory(context:AuthContext,company:Company,input:Record<string,unknown>){
+    if(!this.memoryRepository)throw new Error("Company Memory runtime is not configured");
+    if(company.workspaceId!==context.workspaceId||company.userId!==context.userId)throw new Error("Company Memory tenant access denied");
+    const operation=typeof input.operation==="string"?input.operation.trim().toLowerCase():"search";
+    if(operation==="list")return this.memoryRepository.memories(context,company.id);
+    if(operation==="search")return this.memoryRepository.searchMemories(context,company.id,text(input.query,"Memory query",2_000),Math.max(1,Math.min(Number(input.limit)||20,100)));
+    if(operation==="get")return this.memoryRepository.getMemory(context,company.id,text(input.id??input.memoryId,"Memory id",200));
+    const canWrite=context.permissions.includes("business:manage")||context.permissions.includes("workspace:write")||context.permissions.includes("owner")||context.permissions.includes("*");
+    if(!canWrite)throw new Error("Company Memory write permission is required");
+    if(operation==="create")return this.memoryRepository.addMemory(context,company.id,text(input.content,"Memory content",8_000),typeof input.source==="string"?input.source.trim().slice(0,100):"agent");
+    if(operation==="update")return this.memoryRepository.updateMemory(context,company.id,text(input.id??input.memoryId,"Memory id",200),text(input.content,"Memory content",8_000));
+    if(operation==="delete"){const id=text(input.id??input.memoryId,"Memory id",200);if(!await this.memoryRepository.deleteMemory(context,company.id,id))throw new Error("Company memory not found");return {id,deleted:true};}
+    throw new Error("Company Memory operation must be list, search, get, create, update or delete");
   }
 
   private async files(context: AuthContext, company: Company, input: Record<string, unknown>) {

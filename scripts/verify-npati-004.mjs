@@ -2,12 +2,16 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 const base=process.env.NPATI_API_URL??"http://localhost:3001",stamp=Date.now(),sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 const docker=(...args)=>execFileSync("docker",args,{encoding:"utf8"}).trim();
-async function raw(path,method="GET",body,key){return fetch(base+path,{method,headers:{...(body?{"content-type":"application/json"}:{}),...(key?{"idempotency-key":key}:{})},body:body?JSON.stringify(body):undefined})}
+let token;
+async function raw(path,method="GET",body,key){return fetch(base+path,{method,headers:{...(token?{authorization:"Bearer "+token}:{}),...(body?{"content-type":"application/json"}:{}),...(key?{"idempotency-key":key}:{})},body:body?JSON.stringify(body):undefined})}
 async function req(path,method="GET",body,key){const r=await raw(path,method,body,key),text=await r.text(),value=text?JSON.parse(text):undefined;if(!r.ok)throw Error(r.status+" "+text);return value}
 async function ready(){for(let i=0;i<90;i++){try{if((await fetch(base+"/health")).ok)return}catch{}await sleep(1000)}throw Error("API did not recover")}
 async function waitDoc(companyId,id){for(let i=0;i<180;i++){const v=await req("/companies/"+companyId+"/knowledge/documents");const d=v.documents.find(x=>x.id===id);if(d?.status==="ready")return d;if(d?.status==="failed")throw Error("document failed: "+d.errorMessage);await sleep(1000)}throw Error("document timeout")}
 let companyId,companyBId,bWorkspace="npati004-ws-"+stamp,bUser="npati004-user-"+stamp,bCompany="npati004-company-"+stamp,workerStopped=false;
 try{
+ const anonymous=await raw("/companies");if(anonymous.status!==401)throw Error("strict auth is not enforced: anonymous status="+anonymous.status);
+ const loginResponse=await fetch(base+"/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:process.env.NPATI_TEST_EMAIL??"webuser1@example.com",password:process.env.NPATI_TEST_PASSWORD??"Password123!"})});
+ const login=await loginResponse.json();if(!loginResponse.ok)throw Error("login failed: "+JSON.stringify(login));token=login.tokens.accessToken;
  const company=await req("/companies","POST",{name:"NPATI-004 verification "+stamp},"npati004-company-"+stamp);companyId=company.id;
  const manager=await req("/companies/"+companyId+"/agents","POST",{name:"Knowledge Manager",role:"Manager",tools:["Knowledge"],isActive:true},"npati004-manager-"+stamp);
  await req("/companies/"+companyId+"/main-agent","PUT",{agentId:manager.id,expectedRevision:company.revision});
@@ -44,7 +48,7 @@ try{
  if(companyARetrieve.chunks.some(x=>x.content.includes(isolationSecret)))throw Error("Company B knowledge leaked into Company A");
  const removedB=await raw("/companies/"+companyBId,"DELETE");if(removedB.status!==204)throw Error("Company B cleanup status="+removedB.status);companyBId=undefined;
  const removed=await raw("/companies/"+companyId,"DELETE");if(removed.status!==204)throw Error("company cleanup status="+removed.status);const remaining=Number(docker("exec","npati-agent-postgres","psql","-U","npati","-d","npati_agent","-Atc","select count(*) from companies where id='"+companyId+"'"));if(remaining!==0)throw Error("company cleanup remaining="+remaining);companyId=undefined;
- console.log(JSON.stringify({concurrentUploads:uploads.length,uniqueDocuments:documentIds.length,concurrentIdempotentDeletes:deleteResponses.length,cancelledDocumentState:cancelledState,documentStatus:document.status,chunks,distinctHashes:hashes,queuedCancellation:cancelled.run.status,crossTenantStatus:cross.status,crossCompanyRetrievalBlocked:true,retrievalMatched:true,recoveredAfterApiRedisWorkerRestart:true},null,2));
+ console.log(JSON.stringify({strictAuth:true,concurrentUploads:uploads.length,uniqueDocuments:documentIds.length,concurrentIdempotentDeletes:deleteResponses.length,cancelledDocumentState:cancelledState,documentStatus:document.status,chunks,distinctHashes:hashes,queuedCancellation:cancelled.run.status,crossTenantStatus:cross.status,crossCompanyRetrievalBlocked:true,retrievalMatched:true,recoveredAfterApiRedisWorkerRestart:true},null,2));
 }finally{
  try{if(workerStopped)docker("start","npati-agent-company-worker")}catch{}
  try{docker("exec","npati-agent-postgres","psql","-U","npati","-d","npati_agent","-v","ON_ERROR_STOP=1","-c","DELETE FROM workspaces WHERE id='"+bWorkspace+"'; DELETE FROM users WHERE id='"+bUser+"';")}catch{}

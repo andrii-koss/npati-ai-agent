@@ -21,7 +21,7 @@ function toolName(value: string) {
   if (key.startsWith("files.")) return "files";
   return ({ "websearch": "web.search", "web.search": "web.search", "webfetch": "web.fetch", "web.fetch": "web.fetch",
     crawler: "web.crawl", "web.crawl": "web.crawl", "text-to-speech": "audio.speech", tts: "audio.speech", "audio.speech": "audio.speech",
-    mcp: "mcp", files: "files", knowledge: "knowledge" } as Record<string, string>)[key] ?? key;
+    mcp: "mcp", files: "files", knowledge: "knowledge", "company.memory":"storage.company_memory", "storage.company.memory":"storage.company_memory" } as Record<string, string>)[key] ?? key;
 }
 function summary(input: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
@@ -188,6 +188,7 @@ export class CompanyDelegationRuntime {
             'web.fetch: {"url":"absolute https URL","format":"markdown"}; web.crawl: {"url":"absolute https URL","query":"research goal","maxPages":5}.',
             'audio.speech: {"text":"text to synthesize","voice":"alloy","format":"mp3"}.',
             'knowledge: {"query":"question about this Company"}; files: {"operation":"list"} or {"operation":"read","key":"known file key"}.',
+            'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
             "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
             "Use pipeline for dependent work and fusion for independent parallel perspectives.",

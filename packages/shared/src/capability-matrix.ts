@@ -430,7 +430,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/audit-and-usage-analytics.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 28,
@@ -459,7 +459,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/audit-and-usage-analytics.test.ts",
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 30,
@@ -489,7 +489,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/telemetry-cache-compaction.test.ts",
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 32,
@@ -503,7 +503,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 33,
@@ -517,7 +517,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 34,
@@ -533,7 +533,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/integrations-and-security.test.ts",
       "tests/pii-and-subagents.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 35,
@@ -547,7 +547,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 36,
@@ -593,7 +593,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 39,
@@ -608,7 +608,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/oauth-tokens-and-route-tiers.test.ts",
       "tests/pii-and-subagents.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 40,
@@ -623,7 +623,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/oauth-tokens-and-route-tiers.test.ts",
       "tests/security-auth-vault-scopes.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 41,
@@ -655,7 +655,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 43,
@@ -687,7 +687,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/group-sessions-and-tool-policy.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 45,
@@ -721,7 +721,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-user-dm-pairing-subagents.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 47,
@@ -735,7 +735,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/sandboxing-and-format-translation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 48,
@@ -750,7 +750,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/group-sessions-and-tool-policy.test.ts",
       "tests/multi-user-dm-pairing-subagents.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 49,
@@ -764,7 +764,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/human-approvals.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 50,
@@ -778,7 +778,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 51,
@@ -823,7 +823,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/sandboxing-and-format-translation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 54,
@@ -837,7 +837,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/human-approvals.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 55,
@@ -851,7 +851,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/memory-md-quota-and-channel-auth.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 56,
@@ -865,7 +865,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 57,
@@ -879,7 +879,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 58,
@@ -896,7 +896,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/modality-bridge-image-editing-browser.test.ts",
       "tests/multimodal-inference-and-moderation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 59,
@@ -911,7 +911,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/modality-bridge-image-editing-browser.test.ts",
       "tests/multimodal-inference-and-moderation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 60,
@@ -925,7 +925,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 61,
@@ -939,7 +939,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 62,
@@ -953,7 +953,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 63,
@@ -968,7 +968,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/auto-reviewer-and-fts-memory.test.ts",
       "tests/company-runtime.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 64,
@@ -983,7 +983,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/inference-and-memory-injection.test.ts",
       "tests/omniroute-embeddings-resilience.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 65,
@@ -999,7 +999,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/inference-and-memory-injection.test.ts",
       "tests/memory-decay-rerank-and-journal.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 66,
@@ -1030,7 +1030,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/scoped-memory-and-user-model.test.ts",
       "tests/storage-protection.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 68,
@@ -1044,7 +1044,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 69,
@@ -1061,7 +1061,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/inference-and-memory-injection.test.ts",
       "tests/per-request-no-memory-and-rtk.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 70,
@@ -1075,7 +1075,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 71,
@@ -1089,7 +1089,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 72,
@@ -1104,7 +1104,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/admission-queue-and-conversation-memory.test.ts",
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 73,
@@ -1119,7 +1119,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/inference-and-memory-injection.test.ts",
       "tests/scoped-memory-and-user-model.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 74,
@@ -1134,7 +1134,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/inference-and-memory-injection.test.ts",
       "tests/memory-md-quota-and-channel-auth.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 75,
@@ -1148,7 +1148,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 76,
@@ -1162,7 +1162,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 77,
@@ -1176,7 +1176,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 78,
@@ -1190,7 +1190,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 79,
@@ -1204,7 +1204,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/auto-reviewer-and-fts-memory.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 80,
@@ -1221,7 +1221,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-decay-rerank-and-journal.test.ts",
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 81,
@@ -1235,7 +1235,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/memory-decay-rerank-and-journal.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 82,
@@ -1261,7 +1261,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/web-research.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 83,
@@ -1275,7 +1275,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/memory-decay-rerank-and-journal.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 84,
@@ -1285,9 +1285,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/company-tool-runtime.test.ts",
+      "tests/company-runtime.test.ts",
+      "scripts/verify-npati-004-e2e.mjs"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -1303,7 +1305,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/standing-intents-wiki-and-dreaming.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 86,
@@ -1317,7 +1319,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/standing-intents-wiki-and-dreaming.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 87,
@@ -1331,7 +1333,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/standing-intents-wiki-and-dreaming.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 88,
@@ -1345,7 +1347,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/action-sensitive-memory-and-compat-apis.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 89,
@@ -1436,7 +1438,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/quota-share-transparency-session-dedup.test.ts",
       "tests/routing-strategies.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 95,
@@ -1451,7 +1453,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-presets-adaptive-budget.test.ts",
       "tests/routing-strategies.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 96,
@@ -1466,7 +1468,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/quota-share-transparency-session-dedup.test.ts",
       "tests/routing-strategies.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 97,
@@ -1480,7 +1482,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/auto-offline-lkgp-and-a2a.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 98,
@@ -1575,7 +1577,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/company-knowledge.test.ts",
       "tests/storage-protection.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 103,
@@ -1590,7 +1592,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/auto-offline-lkgp-and-a2a.test.ts",
       "tests/pii-and-subagents.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 104,
@@ -1604,7 +1606,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 105,
@@ -1618,7 +1620,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 106,
@@ -1632,7 +1634,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/a2a-smart-conductor.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 107,
@@ -1721,7 +1723,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 113,
@@ -1735,7 +1737,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/multi-agent-messaging.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 114,
@@ -1749,7 +1751,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/background-jobs-and-mcp-server.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 115,
@@ -1793,7 +1795,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-import-codemode-clawhub.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 118,
@@ -1840,7 +1842,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 121,
@@ -1854,7 +1856,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 122,
@@ -1868,7 +1870,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 123,
@@ -1882,7 +1884,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 124,
@@ -1896,7 +1898,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/a2a-capabilities-eval-and-dlq.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 125,
@@ -1910,7 +1912,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 126,
@@ -1938,7 +1940,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/swarm-audio-translation-video.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 128,
@@ -1953,7 +1955,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/integrations-and-security.test.ts",
       "tests/webhooks-documents-and-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 129,
@@ -1967,7 +1969,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/automation-scheduler.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 130,
@@ -1981,7 +1983,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 131,
@@ -1995,7 +1997,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 132,
@@ -2025,7 +2027,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/automation-flows-and-email.test.ts",
       "tests/company-runtime.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 134,
@@ -2039,7 +2041,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/automation-flows-and-email.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 135,
@@ -2053,7 +2055,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/integrations-and-security.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 136,
@@ -2067,7 +2069,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/automation-flows-and-email.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 137,
@@ -2081,7 +2083,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/a2a-capabilities-eval-and-dlq.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 138,
@@ -2095,7 +2097,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/automation-reminders-heartbeat-hooks.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 139,
@@ -2127,7 +2129,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/channel-docking-and-hooks.test.ts",
       "tests/webhooks-documents-and-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 141,
@@ -2141,7 +2143,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 142,
@@ -2157,7 +2159,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-adapter.test.ts",
       "tests/webhooks-documents-and-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 143,
@@ -2171,7 +2173,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/modality-bridge-image-editing-browser.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 144,
@@ -2199,7 +2201,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/modality-bridge-image-editing-browser.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 146,
@@ -2227,7 +2229,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/swarm-audio-translation-video.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 148,
@@ -2241,7 +2243,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/swarm-audio-translation-video.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 149,
@@ -2255,7 +2257,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/modality-bridge-image-editing-browser.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 150,
@@ -2270,7 +2272,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-tab-click-drag-automation.test.ts",
       "tests/tools-exec-process-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 151,
@@ -2284,7 +2286,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/browser-tab-click-drag-automation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 152,
@@ -2298,7 +2300,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/browser-tab-click-drag-automation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 153,
@@ -2312,7 +2314,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 154,
@@ -2326,7 +2328,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/browser-dom-screenshot-and-pdf.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 155,
@@ -2341,7 +2343,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-dom-screenshot-and-pdf.test.ts",
       "tests/tools-exec-process-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 156,
@@ -2355,7 +2357,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/browser-downloads-multiprofile-cdp.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 157,
@@ -2370,7 +2372,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-downloads-multiprofile-cdp.test.ts",
       "tests/modality-bridge-image-editing-browser.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 158,
@@ -2384,7 +2386,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/browser-downloads-multiprofile-cdp.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 159,
@@ -2402,7 +2404,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-import-codemode-clawhub.test.ts",
       "tests/tools-exec-process-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 160,
@@ -2417,7 +2419,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-import-codemode-clawhub.test.ts",
       "tests/tools-exec-process-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 161,
@@ -2439,7 +2441,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/tools-exec-process-search.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 162,
@@ -2457,7 +2459,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/file-tools-and-coding-cli.test.ts",
       "tests/multi-user-dm-pairing-subagents.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 163,
@@ -2471,7 +2473,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/file-tools-and-coding-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 164,
@@ -2485,7 +2487,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 165,
@@ -2499,7 +2501,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 166,
@@ -2528,7 +2530,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/cloud-agents-oauth-and-codex.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 168,
@@ -2543,7 +2545,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/acp-claude-code-and-priority-routing.test.ts",
       "tests/cli-configure-and-acp-editors.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 169,
@@ -2565,7 +2567,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-agent-messaging.test.ts",
       "tests/radar-videogen-remote-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 170,
@@ -2583,7 +2585,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-adapter.test.ts",
       "tests/web-research.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 171,
@@ -2597,7 +2599,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/cli-configure-and-acp-editors.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 172,
@@ -2612,7 +2614,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/cli-configure-and-acp-editors.test.ts",
       "tests/cloud-agents-oauth-and-codex.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 173,
@@ -2626,7 +2628,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/acp-harnesses-and-drivers.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 174,
@@ -2640,7 +2642,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/acp-harnesses-and-drivers.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 175,
@@ -2654,7 +2656,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/acp-harnesses-and-drivers.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 176,
@@ -2668,7 +2670,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 177,
@@ -2690,7 +2692,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-user-dm-pairing-subagents.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 178,
@@ -2704,7 +2706,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/fill-first-weighted-round-robin.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 179,
@@ -2718,7 +2720,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/fill-first-weighted-round-robin.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 180,
@@ -2732,7 +2734,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/fill-first-weighted-round-robin.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 181,
@@ -2746,7 +2748,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/p2c-least-used-random-routing.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 182,
@@ -2760,7 +2762,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/p2c-least-used-random-routing.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 183,
@@ -2778,7 +2780,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/storage-protection.test.ts",
       "tests/strict-random-headroom-reset-window.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 184,
@@ -2794,7 +2796,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/p2c-least-used-random-routing.test.ts",
       "tests/strict-random-headroom-reset-window.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 185,
@@ -2809,7 +2811,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-lite-tool-headroom.test.ts",
       "tests/strict-random-headroom-reset-window.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 186,
@@ -2824,7 +2826,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/reset-aware-context-relay-rolling-leases.test.ts",
       "tests/strict-random-headroom-reset-window.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 187,
@@ -2838,7 +2840,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/reset-aware-context-relay-rolling-leases.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 188,
@@ -2852,7 +2854,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/reset-aware-context-relay-rolling-leases.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 189,
@@ -2866,7 +2868,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/reset-aware-context-relay-rolling-leases.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 190,
@@ -2880,7 +2882,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/quota-share-transparency-session-dedup.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 191,
@@ -2894,7 +2896,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/quota-share-transparency-session-dedup.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 192,
@@ -2909,7 +2911,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/quota-share-transparency-session-dedup.test.ts",
       "tests/web-research.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 193,
@@ -2937,7 +2939,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/relevance-aggressive-llmlingua2-compression.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 195,
@@ -2951,7 +2953,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/relevance-aggressive-llmlingua2-compression.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 196,
@@ -2965,7 +2967,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/relevance-aggressive-llmlingua2-compression.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 197,
@@ -2979,7 +2981,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/compression-presets-adaptive-budget.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 198,
@@ -2993,7 +2995,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/compression-presets-adaptive-budget.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 199,
@@ -3007,7 +3009,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/compression-presets-adaptive-budget.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 200,
@@ -3021,7 +3023,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/output-styles-eval-and-cache.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 201,
@@ -3035,7 +3037,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/output-styles-eval-and-cache.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 202,
@@ -3050,7 +3052,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/output-styles-eval-and-cache.test.ts",
       "tests/telemetry-cache-compaction.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 203,
@@ -3064,7 +3066,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/cache-savings-backups-session-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 204,
@@ -3093,7 +3095,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/cache-savings-backups-session-search.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 206,
@@ -3127,7 +3129,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/web-research.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 208,
@@ -3141,7 +3143,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/sessions-custom-models-chunking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 209,
@@ -3155,7 +3157,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/sessions-custom-models-chunking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 210,
@@ -3199,7 +3201,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/freetier-dedicated-routes-and-ccr.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 213,
@@ -3213,7 +3215,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/compression-lite-tool-headroom.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 214,
@@ -3228,7 +3230,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-lite-tool-headroom.test.ts",
       "tests/sandboxing-and-format-translation.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 215,
@@ -3243,7 +3245,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-lite-tool-headroom.test.ts",
       "tests/strict-random-headroom-reset-window.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 216,
@@ -3272,7 +3274,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/audit-and-usage-analytics.test.ts",
       "tests/compression-caveman-ultra-omniglyph.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 218,
@@ -3286,7 +3288,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/compression-caveman-ultra-omniglyph.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 219,
@@ -3300,7 +3302,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/qdrant-quantization-device-tracking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 220,
@@ -3316,7 +3318,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-import-codemode-clawhub.test.ts",
       "tests/qdrant-quantization-device-tracking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 221,
@@ -3330,7 +3332,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/qdrant-quantization-device-tracking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 222,
@@ -3349,7 +3351,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/versioning-xsearch-channel-plugins.test.ts",
       "tests/webhooks-documents-and-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 223,
@@ -3363,7 +3365,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-groups-and-mentions.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 224,
@@ -3377,7 +3379,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/sessions-custom-models-chunking.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 225,
@@ -3391,7 +3393,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-docking-and-hooks.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 226,
@@ -3406,7 +3408,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/channel-docking-and-hooks.test.ts",
       "tests/webhooks-documents-and-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 227,
@@ -3421,7 +3423,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/channel-docking-and-hooks.test.ts",
       "tests/integrations-and-security.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 228,
@@ -3436,7 +3438,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-user-dm-pairing-subagents.test.ts",
       "tests/telegram-ollama-tts.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 229,
@@ -3450,7 +3452,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/versioning-xsearch-channel-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 230,
@@ -3464,7 +3466,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/versioning-xsearch-channel-plugins.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 231,
@@ -3478,7 +3480,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-groups-and-mentions.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 232,
@@ -3494,7 +3496,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/channel-groups-and-mentions.test.ts",
       "tests/telegram-ollama-tts.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 233,
@@ -3508,7 +3510,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-groups-and-mentions.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 234,
@@ -3523,7 +3525,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/memory-import-codemode-clawhub.test.ts",
       "tests/radar-videogen-remote-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 235,
@@ -3537,7 +3539,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/radar-videogen-remote-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 236,
@@ -3551,7 +3553,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/radar-videogen-remote-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 237,
@@ -3565,7 +3567,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/network-tproxy-and-bifrost-mux.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 238,
@@ -3579,7 +3581,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/network-tproxy-and-bifrost-mux.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 239,
@@ -3593,7 +3595,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/network-tproxy-and-bifrost-mux.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 240,
@@ -3607,7 +3609,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/infrastructure-deployers-and-memory-engines.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 241,
@@ -3621,7 +3623,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/infrastructure-deployers-and-memory-engines.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 242,
@@ -3635,7 +3637,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/infrastructure-deployers-and-memory-engines.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 243,
@@ -3683,7 +3685,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/web-research.test.ts",
       "tests/workspace-store.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 244,
@@ -3715,7 +3717,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/scoped-memory-and-user-model.test.ts",
       "tests/web-research.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 245,
@@ -3729,7 +3731,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/memory-import-codemode-clawhub.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 246,
@@ -3743,7 +3745,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/radar-videogen-remote-cli.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 247,
@@ -3757,7 +3759,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/voice-music-and-calls.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 248,
@@ -3771,7 +3773,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/voice-music-and-calls.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 249,
@@ -3787,7 +3789,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-adapter.test.ts",
       "tests/voice-music-and-calls.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 250,
@@ -3801,7 +3803,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/companion-and-mobile-pairing.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 251,
@@ -3815,7 +3817,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/companion-and-mobile-pairing.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 252,
@@ -3829,7 +3831,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/companion-and-mobile-pairing.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 253,
@@ -3844,7 +3846,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/mobile-chat-voice-camera.test.ts",
       "tests/oauth-tokens-and-route-tiers.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 254,
@@ -3858,7 +3860,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/mobile-chat-voice-camera.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 255,
@@ -3872,7 +3874,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/mobile-chat-voice-camera.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 256,
@@ -3886,7 +3888,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/device-screen-location-commands.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 257,
@@ -3900,7 +3902,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/device-screen-location-commands.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 258,
@@ -3914,7 +3916,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/device-screen-location-commands.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 259,
@@ -3928,7 +3930,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/linux-companion-and-inline-media.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 260,
@@ -3942,7 +3944,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 261,
@@ -4371,7 +4373,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 287,
@@ -4427,7 +4429,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/concurrent-session-capacity.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 291,
@@ -4507,9 +4509,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "files",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/chat-file-service.test.ts"
+      "tests/chat-file-service.test.ts",
+      "tests/storage-protection.test.ts",
+      "scripts/verify-file-delete-recovery.mjs"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -4557,7 +4561,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": true,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
       "tests/action-sensitive-memory-and-compat-apis.test.ts",
       "tests/admission-queue-and-conversation-memory.test.ts",
@@ -4576,7 +4580,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/pii-and-subagents.test.ts",
       "tests/scoped-memory-and-user-model.test.ts",
       "tests/standing-intents-wiki-and-dreaming.test.ts",
-      "tests/workspace-store.test.ts"
+      "tests/workspace-store.test.ts",
+      "scripts/verify-npati-004-e2e.mjs"
     ],
     "status": "VERIFIED_EXISTING"
   },
@@ -4620,7 +4625,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/capability-registry.test.ts"
     ],
-    "status": "VERIFIED_EXISTING"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 303,
@@ -4673,9 +4678,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/output-styles-eval-and-cache.test.ts"
+      "tests/company-knowledge-concurrency.test.ts",
+      "tests/company-knowledge-hub-e2e.test.ts",
+      "tests/company-knowledge-ui.test.ts",
+      "scripts/verify-npati-004.mjs",
+      "scripts/verify-npati-004-e2e.mjs"
     ],
     "status": "VERIFIED_EXISTING"
   }

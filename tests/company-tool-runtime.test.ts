@@ -44,4 +44,23 @@ describe("Company tool runtime adapters",()=>{
     const runtime=new CompanyToolRuntime({executeTool:vi.fn()} as unknown as AIEngine);
     await expect(runtime.execute(context,company,"shell",{},new AbortController().signal)).rejects.toThrow(/no runtime adapter/);
   });
+  it("provides scoped Company Memory CRUD with separate read and write permission",async()=>{
+    const memories=[{id:"memory-1",content:"Refunds take 14 days"}];
+    const repository={
+      memories:vi.fn(async()=>memories),getMemory:vi.fn(async()=>memories[0]),searchMemories:vi.fn(async()=>memories),
+      addMemory:vi.fn(async(_ctx,_companyId,content)=>({id:"memory-2",content})),updateMemory:vi.fn(async(_ctx,_companyId,id,content)=>({id,content})),deleteMemory:vi.fn(async()=>true),
+    };
+    const runtime=new CompanyToolRuntime({executeTool:vi.fn()} as unknown as AIEngine,undefined,undefined,undefined,repository);
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"search",query:"Refunds"},new AbortController().signal)).resolves.toEqual(memories);
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"list"},new AbortController().signal)).resolves.toEqual(memories);
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"get",id:"memory-1"},new AbortController().signal)).resolves.toEqual(memories[0]);
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"create",content:"Escalate after 24 hours"},new AbortController().signal)).resolves.toMatchObject({id:"memory-2"});
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"update",id:"memory-1",content:"Refunds take 10 days"},new AbortController().signal)).resolves.toMatchObject({id:"memory-1",content:"Refunds take 10 days"});
+    await expect(runtime.execute(context,company,"storage.company_memory",{operation:"delete",id:"memory-1"},new AbortController().signal)).resolves.toEqual({id:"memory-1",deleted:true});
+    await expect(runtime.execute({...context,permissions:["workspace:read"]},company,"storage.company_memory",{operation:"create",content:"blocked"},new AbortController().signal)).rejects.toThrow(/write permission/);
+    await expect(runtime.execute({...context,workspaceId:"ws-b"},company,"storage.company_memory",{operation:"list"},new AbortController().signal)).rejects.toThrow(/tenant access denied/);
+    expect(repository.searchMemories).toHaveBeenCalledWith(context,company.id,"Refunds",20);
+    expect(repository.updateMemory).toHaveBeenCalledWith(context,company.id,"memory-1","Refunds take 10 days");
+    expect(repository.deleteMemory).toHaveBeenCalledWith(context,company.id,"memory-1");
+  });
 });
