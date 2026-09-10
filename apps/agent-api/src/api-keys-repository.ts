@@ -27,6 +27,7 @@ export interface ApiKeyAuthResult {
   scopes?: string[];
   keyId?: string;
   keyName?: string;
+  userId?: string;
   error?: string;
 }
 
@@ -45,6 +46,7 @@ export class ApiKeysRepository {
   async createApiKey(params: {
     companyId: string;
     tenantId: string;
+    ownerUserId?: string;
     name: string;
     scopes?: string[];
     expiresInDays?: number;
@@ -81,6 +83,7 @@ export class ApiKeysRepository {
       id,
       companyId: params.companyId,
       tenantId: params.tenantId,
+      ownerUserId: params.ownerUserId,
       name: params.name,
       keyHash,
       keyPrefix,
@@ -160,9 +163,11 @@ export class ApiKeysRepository {
 
     if (this.pool) {
       const res = await this.pool.query(
-        `SELECT id, company_id AS "companyId", tenant_id AS "tenantId", name, scopes, expires_at AS "expiresAt", revoked_at AS "revokedAt"
-         FROM company_api_keys
-         WHERE key_hash = $1`,
+        `SELECT k.id, k.company_id AS "companyId", k.tenant_id AS "tenantId", k.name, k.scopes,
+                k.expires_at AS "expiresAt", k.revoked_at AS "revokedAt", c.user_id AS "userId"
+         FROM company_api_keys k
+         JOIN companies c ON c.id = k.company_id AND c.workspace_id = k.tenant_id
+         WHERE k.key_hash = $1`,
         [keyHash]
       );
 
@@ -188,6 +193,7 @@ export class ApiKeysRepository {
         scopes: key.scopes,
         keyId: key.id,
         keyName: key.name,
+        userId: key.userId,
       };
     }
 
@@ -210,6 +216,7 @@ export class ApiKeysRepository {
       scopes: match.scopes,
       keyId: match.id,
       keyName: match.name,
+      userId: match.ownerUserId,
     };
   }
 }

@@ -15,14 +15,14 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       if (error instanceof WorkspaceAccessError) throw new AuthenticationError("Company not found", 404, "NOT_FOUND");
       throw error;
     }
-    return context.workspaceId;
+    return context;
   }
   // List API keys for a company
   app.get(
     "/companies/:companyId/api-keys",
     async (request: FastifyRequest<{ Params: { companyId: string } }>, reply: FastifyReply) => {
-      const tenantId = await authorize(request);
-      const keys = await repo.listApiKeys(request.params.companyId, tenantId);
+      const context = await authorize(request);
+      const keys = await repo.listApiKeys(request.params.companyId, context.workspaceId);
       return { keys };
     }
   );
@@ -37,7 +37,7 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       }>,
       reply: FastifyReply
     ) => {
-      const tenantId = await authorize(request, true);
+      const context = await authorize(request, true);
       const { name, scopes, expiresInDays } = request.body || {};
 
       if (!name || typeof name !== "string" || name.trim() === "") {
@@ -46,7 +46,8 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
 
       const created = await repo.createApiKey({
         companyId: request.params.companyId,
-        tenantId,
+        tenantId: context.workspaceId,
+        ownerUserId: context.userId,
         name: name.trim(),
         scopes: Array.isArray(scopes) ? scopes : ["*"],
         expiresInDays: typeof expiresInDays === "number" ? expiresInDays : undefined,
@@ -65,8 +66,8 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       }>,
       reply: FastifyReply
     ) => {
-      const tenantId = await authorize(request, true);
-      const revoked = await repo.revokeApiKey(request.params.keyId, request.params.companyId, tenantId);
+      const context = await authorize(request, true);
+      const revoked = await repo.revokeApiKey(request.params.keyId, request.params.companyId, context.workspaceId);
 
       if (!revoked) {
         return reply.status(404).send({ error: "KEY_NOT_FOUND", message: "API key not found or already revoked" });

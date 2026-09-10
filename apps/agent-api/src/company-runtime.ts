@@ -8,6 +8,7 @@ const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
 type ToolPlan = { agentId: string; tool: string; input: Record<string, unknown> };
 type Plan = { mode: Mode; agentIds: string[]; reviewerAgentId?: string; toolRequests: ToolPlan[] };
+type MemoryScope = { apiKeyId?: string; sessionId?: string };
 
 export class CompanyRuntimeError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
@@ -87,7 +88,7 @@ export class CompanyDelegationRuntime {
     private readonly ai: AIEngine,
     private readonly timeoutMs = DEFAULT_TIMEOUT,
     toolRuntime?: CompanyToolExecutor,
-    private readonly knowledgeRetriever?: (ctx: AuthContext, companyId: string, query: string) => Promise<{chunks:Array<{content:string}>;memories:Array<{content:string}>}>,
+    private readonly knowledgeRetriever?: (ctx: AuthContext, companyId: string, query: string, scope?: MemoryScope) => Promise<{chunks:Array<{content:string}>;memories:Array<{content:string}>}>,
     capabilityResolver?: EffectiveCapabilityResolver,
     riskApprovalService?: RiskApprovalService,
   ) {
@@ -100,13 +101,13 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto" }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean }, key: string): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope }, key: string): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
@@ -231,7 +232,7 @@ export class CompanyDelegationRuntime {
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
       // Specialists still require their own allowlist entry for direct knowledge tool calls.
       const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
-      const knowledge = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
+      const knowledge = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const normalizedToolRequests = plan.toolRequests.map((request) => {
         const requestingAgent = byId.get(request.agentId);
         const allowed = new Set(requestingAgent?.tools.map(toolName) ?? []);

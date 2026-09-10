@@ -151,7 +151,7 @@ describe("Company delegation runtime", () => {
     const runtime=new CompanyDelegationRuntime(store,engine({a2aSend:async()=>({taskId:"policy-plan",content:JSON.stringify({mode:"single",agentIds:[external.id],toolRequests:[]}),metadata:{}})}),5_000,undefined,retrieve);
     const result=await runtime.execute(ctx,company.id,{task:"Use private knowledge",mode:"single"},"knowledge-policy-run");
     expect(result.run.status).toBe("completed");
-    expect(retrieve).toHaveBeenCalledWith(ctx,company.id,"Use private knowledge");
+    expect(retrieve).toHaveBeenCalledWith(ctx,company.id,"Use private knowledge",undefined);
   });
 
   it("returns an actionable error when a document query is attempted without Main Agent Knowledge permission", async () => {

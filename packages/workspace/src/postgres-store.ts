@@ -315,6 +315,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       }
       catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     }
+    const productionScopedMemoryMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='026_production_scoped_memory'");
+    if (!productionScopedMemoryMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration026 } = await import("./migration-026");
+        await runMigration026(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('026_production_scoped_memory') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
