@@ -485,11 +485,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/integrations-and-security.test.ts",
-      "tests/telemetry-cache-compaction.test.ts",
-      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
+      "tests/production-security-guardrails.test.ts",
+      "scripts/verify-production-security-guardrails.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 32,
@@ -501,9 +500,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/production-security-guardrails.test.ts",
+      "tests/pii-and-subagents.test.ts",
+      "scripts/verify-production-security-guardrails.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 33,
@@ -515,9 +516,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/production-security-guardrails.test.ts",
+      "tests/integrations-and-security.test.ts",
+      "scripts/verify-production-security-guardrails.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 34,
@@ -529,11 +532,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/human-approvals.test.ts",
-      "tests/integrations-and-security.test.ts",
-      "tests/pii-and-subagents.test.ts"
+      "tests/production-security-guardrails.test.ts",
+      "scripts/verify-production-security-guardrails.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 35,

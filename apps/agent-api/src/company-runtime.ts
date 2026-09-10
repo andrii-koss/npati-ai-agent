@@ -3,6 +3,7 @@ import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, WorkspaceStore } from "@npati/workspace";
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
+import {SecurityPolicyEngine,SecurityPolicyViolation,type CompanyGuardrailPolicy} from "./security-guardrails";
 
 const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
@@ -25,11 +26,11 @@ function toolName(value: string) {
     mcp: "mcp", files: "files", knowledge: "knowledge", "company.memory":"storage.company_memory", "storage.company.memory":"storage.company_memory" } as Record<string, string>)[key] ?? key;
 }
 function summary(input: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
+  return SecurityPolicyEngine.redactObject(Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
     key, /token|secret|password|api.?key|authorization/i.test(key) ? "[REDACTED]"
       : typeof value === "string" ? value.slice(0, 500)
       : typeof value === "number" || typeof value === "boolean" || value === null ? value : "[structured value]",
-  ]));
+  ])));
 }
 function json(value: unknown, max = 20_000) {
   try { return JSON.stringify(value).slice(0, max); } catch { return "[unserializable]"; }
@@ -91,6 +92,7 @@ export class CompanyDelegationRuntime {
     private readonly knowledgeRetriever?: (ctx: AuthContext, companyId: string, query: string, scope?: MemoryScope) => Promise<{chunks:Array<{content:string}>;memories:Array<{content:string}>}>,
     capabilityResolver?: EffectiveCapabilityResolver,
     riskApprovalService?: RiskApprovalService,
+    private readonly guardrailPolicyResolver?: (ctx:AuthContext,companyId:string)=>Promise<CompanyGuardrailPolicy>,
   ) {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
@@ -149,6 +151,9 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("COMPANY_INACTIVE", `Company "${company.name}" is inactive`, 400);
       }
+      const guardrailPolicy=await this.guardrailPolicyResolver?.(ctx,companyId);
+      const protect=(text:string)=>SecurityPolicyEngine.protectText(text,guardrailPolicy).sanitized;
+      const protectedTask=protect(input.task.trim());
 
       let main: CompanyAgent;
       try {
@@ -190,9 +195,9 @@ export class CompanyDelegationRuntime {
         model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
-          { role: "system", content: instruction(company, main, true, !options.noMemory) },
-          { role: "user", content: [
-            `Task: ${input.task.trim()}`, `Requested mode: ${input.mode ?? "auto"}`,
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)) },
+          { role: "user", content: protect([
+            `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
               id: agent.id, name: agent.name, role: agent.role, description: agent.description,
               tools: agent.tools.map(toolName).filter((tool) => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)),
@@ -209,7 +214,7 @@ export class CompanyDelegationRuntime {
             options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
             "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
             "Use pipeline for dependent work and fusion for independent parallel perspectives.",
-          ].join("\n\n") },
+          ].join("\n\n")) },
         ],
       });
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
@@ -232,16 +237,21 @@ export class CompanyDelegationRuntime {
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
       // Specialists still require their own allowlist entry for direct knowledge tool calls.
       const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
-      const knowledge = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
+      const retrieved = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
+      const knowledge={
+        chunks:retrieved.chunks.map(item=>({content:protect(item.content)})),
+        memories:retrieved.memories.map(item=>({content:protect(item.content)})),
+      };
       const normalizedToolRequests = plan.toolRequests.map((request) => {
         const requestingAgent = byId.get(request.agentId);
         const allowed = new Set(requestingAgent?.tools.map(toolName) ?? []);
         if (toolName(request.tool) === "files" && !allowed.has("files") && allowed.has("knowledge") && knowledgeAllowed) {
-          return { ...request, tool: "knowledge", input: { query: input.task.trim() } };
+          return { ...request, tool: "knowledge", input: SecurityPolicyEngine.protectObject({ query: input.task.trim() },guardrailPolicy) };
         }
-        return request;
+        return {...request,input:SecurityPolicyEngine.protectObject(request.input,guardrailPolicy)};
       });
-      const evidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true);
+      const rawEvidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true);
+      const evidence=rawEvidence?protect(rawEvidence):rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n"+knowledge.chunks.map(item=>item.content).join("\n\n---\n\n") : "",
@@ -262,16 +272,16 @@ export class CompanyDelegationRuntime {
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:final`,
         messages: [
-          { role: "system", content: instruction(company, main, true, !options.noMemory) },
-          { role: "user", content: [input.task.trim(), knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n") },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)) },
+          { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
         ],
       });
       if (knowledgeContext) {
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: instruction(company, main, true, !options.noMemory) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." },
-            { role: "user", content: [input.task.trim(), knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n") },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user.") },
+            { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
       }
@@ -281,7 +291,7 @@ export class CompanyDelegationRuntime {
       const cancelled = current.run.cancelRequested || controller.signal.aborted, timedOut = !cancelled && timeout.aborted;
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
         status: cancelled ? "cancelled" : "failed",
-        errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : "RUN_FAILED",
+        errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : error instanceof SecurityPolicyViolation ? error.code : "RUN_FAILED",
         errorMessage: cancelled ? "Company run was cancelled" : timedOut ? "Company run exceeded its timeout" : error instanceof Error ? error.message : String(error),
       });
     } finally { this.controllers.delete(created.run.id); }

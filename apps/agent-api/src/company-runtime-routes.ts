@@ -21,6 +21,7 @@ function failure(reply: FastifyReply, error: unknown) {
   return reply.code(status).send({ error: { code: status === 400 ? "INVALID_INPUT" : "COMPANY_RUNTIME_ERROR", message } });
 }
 function runtimeStatus(code?: string) {
+  if (code === "SECURITY_GUARDRAIL_BLOCKED") return 400;
   if (code === "TOOL_FORBIDDEN" || code === "APPROVAL_REQUIRED" || code === "INVALID_APPROVAL_TOKEN") return 403;
   if (code === "APPROVAL_ALREADY_USED") return 409;
   if (code === "CIRCULAR_DELEGATION" || code === "TOOL_LOOP_DETECTED") return 400;

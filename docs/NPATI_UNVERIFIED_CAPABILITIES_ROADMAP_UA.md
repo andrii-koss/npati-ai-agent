@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 59 пунктів.
-- `NOT_IMPLEMENTED`: 132 пункти.
-- Разом у цьому backlog: 191 пункт.
+- `PARTIALLY_IMPLEMENTED`: 57 пунктів.
+- `NOT_IMPLEMENTED`: 130 пунктів.
+- Разом у цьому backlog: 187 пунктів.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -33,7 +33,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 
 Найвищий пріоритет: без цього небезпечно додавати browser, exec, channels і autonomous workflows.
 
-Пункти: #31 `Prompt-injection guard` (P), #32 `PII masker` (N), #33 `Credential masking` (P), #34 `Custom guardrails` (N), #35 `API key auth` (P), #38 `AES-256-GCM at rest` (P), #39 `Route guard tiers` (N), #40 `MCP authorization scopes` (P), #47 `Sandboxing` (N), #48 `Tool allow/deny policy` (P), #49 `Exec approvals` (P), #53 `Sandbox + host separation` (N), #54 `Human approvals` (P), #57 `Moderations` (N), #60 `Vision bridge guardrail` (N), #61 `OIDC dashboard gate` (N), #62 `Scoped remote access tokens` (N), #63 `Auto reviewer for exec` (N), #102 `MCP scoped permissions` (P), #159 `Exec` (N), #160 `Process control` (N), #221 `Device tracking per API key` (N), #244 `Code Mode` (N), #260 `Tenant-scoped AI model/routing preferences` (P).
+Пункти: #35 `API key auth` (P), #38 `AES-256-GCM at rest` (P), #39 `Route guard tiers` (N), #40 `MCP authorization scopes` (P), #47 `Sandboxing` (N), #48 `Tool allow/deny policy` (P), #49 `Exec approvals` (P), #53 `Sandbox + host separation` (N), #54 `Human approvals` (P), #57 `Moderations` (N), #60 `Vision bridge guardrail` (N), #61 `OIDC dashboard gate` (N), #62 `Scoped remote access tokens` (N), #63 `Auto reviewer for exec` (N), #102 `MCP scoped permissions` (P), #159 `Exec` (N), #160 `Process control` (N), #221 `Device tracking per API key` (N), #244 `Code Mode` (N), #260 `Tenant-scoped AI model/routing preferences` (P).
 
 Що реалізувати: один Effective Policy Engine для API, agent tools, MCP, exec і media; deny-by-default scopes; short-lived scoped tokens; encrypted secret vault із rotation; PII/credential redaction до logs і model calls; isolated container runner без host filesystem/network за замовчуванням; approval lifecycle із TTL, one-time token та audit.
 
@@ -152,7 +152,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 1. Підключити й live-перевірити rerank provider; закрити #65 і #302 одним adapter path.
 2. ✅ Завершено: #67-#69 production memory scope/injection та #82 per-request no-memory.
 3. 🟡 Частково: #70, #71, #75 і #76 завершено одним PostgreSQL hybrid retrieval; #80 очікує live rerank provider.
-4. Завершити централізовані redaction/guardrails: #31-#34.
+4. ✅ Завершено: централізовані redaction/guardrails #31-#34.
 5. Завершити deny-by-default tool/MCP/approval policy: #39, #40, #48, #49, #54, #102.
 6. Додати справжній isolated Exec sandbox: #47, #53, #63, #159, #160 і #244.
 7. Завершити SSE streaming/cancellation/response chunking: #42 і #224.
@@ -162,6 +162,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 
 ## Завершені кроки
 
+- 2026-09-10 — #31 `Prompt-injection guard`, #32 `PII masker`, #33 `Credential masking`, #34 `Custom guardrails`: єдиний SecurityPolicyEngine захищає JSON/SSE/Company API, planning, retrieved documents/memory, tool inputs/results і final model calls; versioned Company policy зберігається у PostgreSQL, має optimistic revision та cleanup. Live E2E підтверджує user/document injection block, PII/credential redaction, custom term, restart recovery і чисті container logs.
 - 2026-09-10 — #67 `Memory scoped by API key`, #68 `Optional sessionId scoping`, #69 `Memory injection`: PostgreSQL-backed scoped memory, deny-by-default API-key scopes, вкладена ізоляція однакового `sessionId` між ключами, idempotent writes, soft delete, cleanup компанії, natural-language FTS retrieval та реальна ін’єкція у Company model call. Strict-auth E2E підтверджує restart recovery, cross-key read/delete denial і `no-memory` bypass.
 - 2026-09-10 — #296 `File delete and orphan cleanup`: єдиний cleanup path, post-delete MinIO verification, pending retry, failed/succeeded audit та strict-auth Docker restart-recovery E2E.
 - 2026-09-10 — #306 `NPATI-004 end-to-end production validation`: strict Bearer auth, Excel/MinIO/embeddings/retrieval, concurrent idempotency, restart recovery, cancellation, tenant/company isolation і Main Agent → specialist pipeline.

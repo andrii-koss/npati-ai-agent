@@ -109,6 +109,7 @@ export function registerScopedMemoryRoutes(app: FastifyInstance, deps: {
         noMemory: request.body.noMemory === true,
         memoryScope: { apiKeyId: result.keyId, sessionId: request.body.sessionId },
       }, request.headers["idempotency-key"] ?? "company-api-chat-" + Date.now());
+      if(run.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED")return reply.code(400).send({error:{code:run.run.errorCode,message:run.run.errorMessage}});
       return {
         message: run.run.result ?? run.run.errorMessage ?? "Company run completed.",
         companyRunId: run.run.id,
