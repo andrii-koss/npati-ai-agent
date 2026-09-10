@@ -3854,6 +3854,68 @@ a {
   color: #8b8b8b;
 }
 
+.composer-private-toggle {
+  position: absolute;
+  left: 62px;
+  bottom: 15px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: color .16s ease, transform .16s ease;
+}
+
+.composer-private-toggle:hover,
+.composer-private-toggle.active {
+  color: var(--npati-red);
+}
+
+.composer-private-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.composer-private-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.composer-private-check {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  background: #fff;
+  border: 1px solid #b7b7b7;
+  border-radius: 5px;
+  box-shadow: 0 1px 2px rgb(17 17 17 / 5%);
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
+  transition: color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.composer-private-toggle:hover .composer-private-check {
+  border-color: var(--npati-red);
+  box-shadow: 0 0 0 3px rgb(215 39 53 / 8%);
+}
+
+.composer-private-toggle.active .composer-private-check {
+  color: #fff;
+  background: var(--npati-red);
+  border-color: var(--npati-red);
+}
+
 .onboarding-live-composer>div {
   position: absolute;
   z-index: 2;

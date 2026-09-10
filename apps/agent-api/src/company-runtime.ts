@@ -33,7 +33,7 @@ function summary(input: Record<string, unknown>) {
 function json(value: unknown, max = 20_000) {
   try { return JSON.stringify(value).slice(0, max); } catch { return "[unserializable]"; }
 }
-function context(company: Company) {
+function context(company: Company, includeMemory = true) {
   return [
     `Company: ${company.name}`, company.website && `Website: ${company.website}`,
     company.industry && `Industry: ${company.industry}`, company.description && `Description: ${company.description}`,
@@ -41,17 +41,18 @@ function context(company: Company) {
     company.languages.length && `Languages: ${company.languages.join(", ")}`,
     company.brandTone && `Brand tone: ${company.brandTone}`,
     company.companyInstructions && `Company instructions: ${company.companyInstructions}`,
-    company.knowledge.length && `Company knowledge: ${json(company.knowledge, 8_000)}`,
-    Object.keys(company.memory).length && `Company memory: ${json(company.memory, 8_000)}`,
+    includeMemory && company.knowledge.length && `Company knowledge: ${json(company.knowledge, 8_000)}`,
+    includeMemory && Object.keys(company.memory).length && `Company memory: ${json(company.memory, 8_000)}`,
   ].filter(Boolean).join("\n");
 }
-function instruction(company: Company, agent: CompanyAgent, manager = false) {
+function instruction(company: Company, agent: CompanyAgent, manager = false, includeMemory = true) {
   return [
-    "You are an AI Agent inside an NPATI Company.", context(company), `Agent name: ${agent.name}`,
+    "You are an AI Agent inside an NPATI Company.", context(company, includeMemory), `Agent name: ${agent.name}`,
     `Agent role: ${agent.role}`, agent.description && `Role description: ${agent.description}`,
     agent.systemInstruction && `System instruction: ${agent.systemInstruction}`,
     agent.promptGuidelines && `Prompt guidelines: ${agent.promptGuidelines}`,
-    agent.tools.map(toolName).includes("knowledge") && "Grounding rule: when Relevant Company Knowledge or Company Memory is supplied, treat it as authoritative. Copy exact factual values when asked. Never replace them with assumptions or invented facts; if the answer is absent, say that it is not available in Company Knowledge.",
+    includeMemory && agent.tools.map(toolName).includes("knowledge") && "Grounding rule: when Relevant Company Knowledge or Company Memory is supplied, treat it as authoritative. Copy exact factual values when asked. Never replace them with assumptions or invented facts; if the answer is absent, say that it is not available in Company Knowledge.",
+    !includeMemory && "Private no-memory request: do not read, request, infer, or write Company Knowledge, Company Memory, Files, or prior conversation memory.",
     manager ? "As Main Agent, verify delegated work and return one final answer to the user."
       : "Complete your assigned responsibility and return concrete work to the next agent.",
   ].filter(Boolean).join("\n\n");
@@ -99,13 +100,13 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto" }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode }, key: string): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean }, key: string): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id);
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
@@ -176,11 +177,12 @@ export class CompanyDelegationRuntime {
         model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
-          { role: "system", content: instruction(company, main, true) },
+          { role: "system", content: instruction(company, main, true, !options.noMemory) },
           { role: "user", content: [
             `Task: ${input.task.trim()}`, `Requested mode: ${input.mode ?? "auto"}`,
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
-              id: agent.id, name: agent.name, role: agent.role, description: agent.description, tools: agent.tools.map(toolName),
+              id: agent.id, name: agent.name, role: agent.role, description: agent.description,
+              tools: agent.tools.map(toolName).filter((tool) => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)),
             })), 30_000),
             'Return JSON only: {"mode":"single|pipeline|fusion","agentIds":["id"],"reviewerAgentId":"id or omit","toolRequests":[{"agentId":"id","tool":"tool id","input":{}}]}.',
             "Tool input contracts (only request a tool allowed for that agent):",
@@ -190,6 +192,7 @@ export class CompanyDelegationRuntime {
             'knowledge: {"query":"question about this Company"}; files: {"operation":"list"} or {"operation":"read","key":"known file key"}.',
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
+            options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
             "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
             "Use pipeline for dependent work and fusion for independent parallel perspectives.",
           ].join("\n\n") },
@@ -214,14 +217,14 @@ export class CompanyDelegationRuntime {
       }
       // OmniRoute combo stages share the workflow prompt, so fail closed unless every
       // participating agent is explicitly allowed to receive Company Knowledge.
-      const knowledgeAllowed = [main,...selected].every(agent=>agent.tools.map(toolName).includes("knowledge"));
+      const knowledgeAllowed = !options.noMemory && [main,...selected].every(agent=>agent.tools.map(toolName).includes("knowledge"));
       const knowledge = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
-      const evidence = await this.tools(ctx, company, created.run.id, plan.toolRequests, byId, signal, knowledge);
+      const evidence = await this.tools(ctx, company, created.run.id, plan.toolRequests, byId, signal, knowledge, options.noMemory === true);
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n"+knowledge.chunks.map(item=>item.content).join("\n\n---\n\n") : "",
       ].filter(Boolean).join("\n\n");
-      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal);
+      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory);
       const ids = [...new Set([...selected.map((agent) => agent.id), main.id])];
       await this.store.replaceCompanyAgentRunSteps(ctx, companyId, created.run.id, ids.map((id, index) => {
         const agent = byId.get(id) ?? main;
@@ -237,7 +240,7 @@ export class CompanyDelegationRuntime {
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:final`,
         messages: [
-          { role: "system", content: instruction(company, main, true) },
+          { role: "system", content: instruction(company, main, true, !options.noMemory) },
           { role: "user", content: [input.task.trim(), knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n") },
         ],
       });
@@ -245,7 +248,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: instruction(company, main, true) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." },
+            { role: "system", content: instruction(company, main, true, !options.noMemory) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." },
             { role: "user", content: [input.task.trim(), knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n") },
           ],
         });
@@ -285,7 +288,7 @@ export class CompanyDelegationRuntime {
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}) {
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false) {
     const evidence: string[] = [];
     let sequenceNumber = 1;
     for (const plan of plans.slice(0, 10)) {
@@ -293,6 +296,11 @@ export class CompanyDelegationRuntime {
       const agent = agents.get(plan.agentId);
       if (!agent) throw new CompanyRuntimeError("INVALID_TOOL_AGENT", "Tool request references an unavailable agent", 502);
       const tool = toolName(plan.tool), allowed = new Set(agent.tools.map(toolName));
+      if (noMemory && ["knowledge", "files", "storage.company_memory"].includes(tool)) {
+        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
+          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "No-memory request blocks persistent context access", reasonCode: "no_memory", sequenceNumber: sequenceNumber++ });
+        throw new CompanyRuntimeError("NO_MEMORY_TOOL_FORBIDDEN", `No-memory request may not use ${tool}`, 403);
+      }
       if (!allowed.has(tool)) {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
           { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "Tool is not permitted", reasonCode: "agent_allowlist", sequenceNumber: sequenceNumber++ });
@@ -397,7 +405,7 @@ export class CompanyDelegationRuntime {
     return evidence.join("\n\n");
   }
 
-  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal) {
+  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true) {
     if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "OmniRoute combos are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();
     for (const agent of unique) {
@@ -405,7 +413,7 @@ export class CompanyDelegationRuntime {
       const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
       await this.ai.ensureCombo({ name, strategy: "priority", models: [...new Set([primary, fallback])],
-        description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id),
+        description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory),
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs } }, signal);
       names.set(agent.id, name);

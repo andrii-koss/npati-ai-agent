@@ -41,6 +41,7 @@ import { InMemoryFileMetadataRepository, PostgresFileMetadataRepository, type Fi
 import { InMemoryStorageProtection, RedisStorageProtection, StorageRateLimitError, type StorageProtection } from "./storage-protection";
 import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reconciler";
 import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
+import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
 
 export interface AppConfig {
   webOrigin?: string;
@@ -297,13 +298,18 @@ export function buildApp(config: AppConfig = {}) {
     log: { warn(value: unknown, message?: string): void },
     progress?: ResearchProgressListener,
     attachments: ChatAttachmentInput[] = [],
+    memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments);
-    let conversation = conversationId
-      ? (await workspaceStore.getConversation(auth, businessId, conversationId)).conversation
-      : await workspaceStore.createConversation(auth, businessId, conversationTitle(media.prompt));
-    if (media.decoded.length && !chatFiles) throw new Error("Persistent object storage is not configured.");
-    const savedAttachments = chatFiles ? await chatFiles.persist(auth,businessId,conversation.id,media.decoded.map((item)=>({ ...item, transcript: item.kind === "audio" ? media.transcripts.find((entry)=>entry.name===item.name)?.text : undefined }))) : [];
+    let conversation = memoryPolicy.noMemoryActive
+      ? undefined
+      : conversationId
+        ? (await workspaceStore.getConversation(auth, businessId, conversationId)).conversation
+        : await workspaceStore.createConversation(auth, businessId, conversationTitle(media.prompt));
+    if (!memoryPolicy.noMemoryActive && media.decoded.length && !chatFiles) throw new Error("Persistent object storage is not configured.");
+    const savedAttachments = !memoryPolicy.noMemoryActive && chatFiles && conversation
+      ? await chatFiles.persist(auth,businessId,conversation.id,media.decoded.map((item)=>({ ...item, transcript: item.kind === "audio" ? media.transcripts.find((entry)=>entry.name===item.name)?.text : undefined })))
+      : [];
     const storedDisplay = savedAttachments.length
       ? [
           ...savedAttachments.flatMap((item) => [
@@ -313,23 +319,24 @@ export function buildApp(config: AppConfig = {}) {
           message.trim(),
         ].filter(Boolean).join(String.fromCharCode(10, 10))
       : media.display;
-    const existing = await workspaceStore.getConversation(auth, businessId, conversation.id);
-    if (existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
+    const existing = conversation ? await workspaceStore.getConversation(auth, businessId, conversation.id) : { messages: [] };
+    if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateConversation(auth, businessId, conversation.id, conversationTitle(media.prompt));
     }
-    let context = await contextBuilder.build(auth, businessId, media.prompt);
+    let context = await contextBuilder.build(auth, businessId, media.prompt, { includeMemory: memoryPolicy.readAllowed });
     if (media.images.length > 0) {
       const preferences = await aiPreferences.get(auth);
       const visionModel = config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
       context = { ...context, ai: { ...context.ai, model: visionModel, fallbackModel: undefined } };
     }
-    let userMessage;
-    try {
-      userMessage = await workspaceStore.appendMessage(auth, businessId, conversation.id, "user", storedDisplay);
-      await chatFiles?.linkMessage(auth,savedAttachments.map((item)=>item.id),userMessage.id);
-    } catch (error) {
-      if (chatFiles) for (const item of savedAttachments) await chatFiles.delete(auth,item.id).catch(()=>undefined);
-      throw error;
+    if (memoryPolicy.writeAllowed && conversation) {
+      try {
+        const userMessage = await workspaceStore.appendMessage(auth, businessId, conversation.id, "user", storedDisplay);
+        await chatFiles?.linkMessage(auth,savedAttachments.map((item)=>item.id),userMessage.id);
+      } catch (error) {
+        if (chatFiles) for (const item of savedAttachments) await chatFiles.delete(auth,item.id).catch(()=>undefined);
+        throw error;
+      }
     }
     let research;
     let researchJob;
@@ -338,11 +345,11 @@ export function buildApp(config: AppConfig = {}) {
     if (imageResearchRequested && webResearch?.shouldResearch(media.prompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };
       try {
-        researchJob = await researchBundle?.jobs.create({
+        researchJob = memoryPolicy.writeAllowed ? await researchBundle?.jobs.create({
           ...scope,
           type: /https?:\/\//i.test(message) ? "crawl" : "search",
-          input: { message: media.prompt, conversationId: conversation.id },
-        });
+          input: { message: media.prompt, conversationId: conversation?.id },
+        }) : undefined;
         if (researchJob) await researchBundle?.jobs.update(scope, researchJob.id, { status: "running" });
         research = await webResearch.run(
           media.prompt,
@@ -364,10 +371,10 @@ export function buildApp(config: AppConfig = {}) {
       }
     }
     progress?.({ type: "final_generation_started" });
-    const result = await agent.handleBusinessMessage({ message: media.prompt, context, history: existing.messages, research: research ?? undefined, images: media.images });
+    const result = await agent.handleBusinessMessage({ message: media.prompt, context, history: memoryPolicy.readAllowed ? existing.messages : [], research: research ?? undefined, images: media.images });
     progress?.({ type: "final_generation_completed" });
-    await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, conversationId: conversation.id, researchJobId: researchJob?.id };
+    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
+    return { ...result, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive };
   }
 
   async function runNeutralMessage(
@@ -376,16 +383,19 @@ export function buildApp(config: AppConfig = {}) {
     conversationId: string | undefined,
     attachments: ChatAttachmentInput[] = [],
     progress?: ResearchProgressListener,
+    memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments);
-    let conversation = conversationId
-      ? (await workspaceStore.getNeutralConversation(auth, conversationId)).conversation
-      : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
-    const existing = await workspaceStore.getNeutralConversation(auth, conversation.id);
-    if (existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
+    let conversation = memoryPolicy.noMemoryActive
+      ? undefined
+      : conversationId
+        ? (await workspaceStore.getNeutralConversation(auth, conversationId)).conversation
+        : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
+    const existing = conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id) : { messages: [] };
+    if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
     }
-    await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
+    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
     const ai = await getAIContext(auth);
     progress?.({ type: "final_generation_started" });
     const completion = await aiEngine.chat({
@@ -393,13 +403,13 @@ export function buildApp(config: AppConfig = {}) {
       fallbackModel: ai.fallbackModel,
       messages: [
         { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
-        ...existing.messages.map((item) => ({ role: item.role, content: item.content })),
+        ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: item.content })) : []),
         { role: "user", content: media.prompt },
       ],
     });
     progress?.({ type: "final_generation_completed" });
-    await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", completion.content);
-    return { message: completion.content, suggestedActions: [], conversationId: conversation.id };
+    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", completion.content);
+    return { message: completion.content, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive };
   }
 
   app.register(cors, { origin: config.webOrigin ?? true });
@@ -561,6 +571,8 @@ export function buildApp(config: AppConfig = {}) {
     contextType?: "none" | "business" | "company";
     businessId?: string;
     companyId?: string;
+    noMemory?: boolean;
+    ephemeral?: boolean;
   } }>("/chat", {
     schema: {
       body: {
@@ -588,12 +600,15 @@ export function buildApp(config: AppConfig = {}) {
           contextType: { type: "string", enum: ["none", "business", "company"] },
           businessId: { type: "string", minLength: 1, maxLength: 100 },
           companyId: { type: "string", minLength: 1, maxLength: 100 },
+          noMemory: { type: "boolean" },
+          ephemeral: { type: "boolean" },
         },
       },
     },
   }, async (request, reply): Promise<AgentReply | unknown> => {
     try {
       const auth = await authProvider.authenticate(request);
+      const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
       if (connected.overview.connectedProviders === 0) {
         return reply.code(409).send({ error: { code: "AI_PROVIDER_REQUIRED", message: "Connect an AI provider to start using NPATI Agent." } });
@@ -618,7 +633,7 @@ export function buildApp(config: AppConfig = {}) {
         if (!prompt && !request.body.attachments?.length) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
-        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments);
+        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy);
         return { ...result, activeContext: resolved.context };
       }
 
@@ -632,7 +647,7 @@ export function buildApp(config: AppConfig = {}) {
         const runResult = await companyRuntime.execute(
           auth,
           company.id,
-          { task: prompt || "Analyze company state" },
+          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
         return {
@@ -645,6 +660,9 @@ export function buildApp(config: AppConfig = {}) {
 
       // 3. BUSINESS CONTEXT ('business')
       if (!resolved.business) {
+        if (memoryPolicy.noMemoryActive) {
+          return reply.code(409).send({ error: { code: "NO_MEMORY_ONBOARDING_UNSUPPORTED", message: "Finish business setup before using a private no-memory request." } });
+        }
         const action = request.body.onboardingAction;
         let session = request.body.businessId ? await workspaceStore.getOnboarding(auth, request.body.businessId) : overview.onboarding;
         if (action === "start") {
@@ -752,6 +770,7 @@ export function buildApp(config: AppConfig = {}) {
         request.log,
         undefined,
         request.body.attachments,
+        memoryPolicy,
       );
       return { ...businessResult, activeContext: resolved.context };
     } catch (error) {
@@ -778,9 +797,12 @@ export function buildApp(config: AppConfig = {}) {
     contextType?: "none" | "business" | "company";
     businessId?: string;
     companyId?: string;
+    noMemory?: boolean;
+    ephemeral?: boolean;
   } }>("/chat/stream", async (request, reply) => {
     try {
       const auth = await authProvider.authenticate(request);
+      const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
       if (connected.overview.connectedProviders === 0) {
         return reply.code(409).send({ error: { code: "AI_PROVIDER_REQUIRED", message: "Connect an AI provider to start using NPATI Agent." } });
@@ -821,14 +843,14 @@ export function buildApp(config: AppConfig = {}) {
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
         if (resolved.context.contextType === "none") {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress);
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(
             auth,
             resolved.company!.id,
-            { task: message },
+            { task: message, noMemory: memoryPolicy.noMemoryActive },
             (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`
           );
           progress({ type: "final_generation_completed" });
@@ -847,6 +869,7 @@ export function buildApp(config: AppConfig = {}) {
             request.log,
             progress,
             request.body.attachments,
+            memoryPolicy,
           );
           send("result", { ...result, activeContext: resolved.context });
         }

@@ -1897,7 +1897,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Per-request no-memory",
-    "description": "Окремого user-facing/API per-request no-memory flag у NPATI не знайдено. Не вважати реалізованим лише через наявність memory компонентів.",
+    "description": "Production /chat and /chat/stream support a user-facing Private request plus noMemory/ephemeral payload flags and x-npati-no-memory header. Business Memory, conversation history, message/file persistence and research-job persistence are bypassed. Company runs remove Knowledge/Memory from prompts and deny memory/files tools with audited reasonCode no_memory.",
     "useWhen": [
       "Internal system execution requires Per-request no-memory"
     ],

@@ -35,6 +35,7 @@ export interface AgentReply {
   message: string;
   suggestedActions: string[];
   conversationId?: string;
+  noMemory?: boolean;
   model?: string;
   memoryCandidate?: { type: string; title: string; content: string };
   research?: { used: boolean; kind?: string; degraded?: string; sources: Array<{ url: string; title?: string; accessedAt: string }> };

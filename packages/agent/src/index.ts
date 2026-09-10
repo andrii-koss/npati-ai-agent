@@ -80,11 +80,11 @@ export class ContextBuilder {
   private readonly skills: SkillRegistry;
   constructor(private readonly dependencies: ContextBuilderDependencies) { this.skills = dependencies.skills ?? defaultSkillRegistry; }
 
-  async build(auth: AuthContext, businessId: string, message: string): Promise<AgentContext> {
+  async build(auth: AuthContext, businessId: string, message: string, options: { includeMemory?: boolean } = {}): Promise<AgentContext> {
     const business = await this.dependencies.store.getBusiness(auth, businessId);
     const [goals, allMemory, rawConnections, ai] = await Promise.all([
       this.dependencies.store.listGoals(auth, businessId),
-      this.dependencies.store.listMemory(auth, businessId, "", 30),
+      options.includeMemory === false ? Promise.resolve([]) : this.dependencies.store.listMemory(auth, businessId, "", 30),
       this.dependencies.hub.getConnections(),
       this.dependencies.getAIContext(auth),
     ]);
