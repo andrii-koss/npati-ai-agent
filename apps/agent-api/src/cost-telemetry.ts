@@ -61,4 +61,34 @@ export class CostTelemetry {
       remainingUsd: Number(remaining.toFixed(4)),
     };
   }
+
+  static getRunTelemetryHeaders(input: {
+    requestId: string;
+    modelId?: string;
+    strategy?: string;
+    provider?: string;
+    totalTokens?: number;
+    totalCostUsd?: number;
+    latencyMs?: number;
+    cacheHit?: boolean;
+    cachedTokens?: number;
+    cacheSavingsUsd?: number;
+    failoverCount?: number;
+    costSource?: string;
+  }): Record<string, string> {
+    return {
+      "X-NPATI-Request-ID": input.requestId,
+      "X-NPATI-Selected-Model": input.modelId ?? "unknown",
+      "X-NPATI-Selected-Provider": input.provider ?? "unknown",
+      "X-NPATI-Routing-Strategy": input.strategy ?? "unknown",
+      "X-NPATI-Tokens-Total": String(input.totalTokens ?? 0),
+      "X-NPATI-Cost-USD": String(input.totalCostUsd ?? 0),
+      "X-NPATI-Cost-Source": input.costSource ?? "estimated",
+      "X-NPATI-Latency-MS": String(input.latencyMs ?? 0),
+      "X-NPATI-Cache-Hit": input.cacheHit ? "true" : "false",
+      "X-NPATI-Cached-Tokens": String(input.cachedTokens ?? 0),
+      "X-NPATI-Cache-Savings-USD": String(input.cacheSavingsUsd ?? 0),
+      "X-NPATI-Failover-Count": String(input.failoverCount ?? 0),
+    };
+  }
 }

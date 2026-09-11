@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import type { AIEngine } from "@npati/omniroute-adapter";
+import type { AIEngine, ChatResult } from "@npati/omniroute-adapter";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, WorkspaceStore } from "@npati/workspace";
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
 import {SecurityPolicyEngine,SecurityPolicyViolation,type CompanyGuardrailPolicy} from "./security-guardrails";
 import {AutoExecReviewer} from "./auto-exec-reviewer";
+import { CostTelemetry } from "./cost-telemetry";
+import type { AuditRepository } from "./audit-repository";
 
 const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
@@ -14,6 +16,26 @@ type MemoryScope = { apiKeyId?: string; sessionId?: string };
 export interface DurableApprovalGateway {
   requestApproval(ctx:AuthContext,companyId:string,input:{runId:string;agentId:string;toolName:string;riskLevel:"high"|"critical";actionSummary:string;inputPayload:Record<string,unknown>}):Promise<{id:string}>;
   consumeApproved(ctx:AuthContext,companyId:string,id:string,input:{runId:string;agentId:string;toolName:string;inputPayload:Record<string,unknown>}):Promise<unknown>;
+}
+
+export function companyRunTelemetryHeaders(details: CompanyAgentRunDetails) {
+  const inference = details.toolAudit.filter((entry) => entry.toolName === "ai.inference");
+  const latest = inference.at(-1)?.inputSummary ?? {};
+  const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return CostTelemetry.getRunTelemetryHeaders({
+    requestId: details.run.id,
+    modelId: typeof latest.modelId === "string" ? latest.modelId : details.run.omnirouteComboName,
+    provider: typeof latest.providerId === "string" ? latest.providerId : undefined,
+    strategy: typeof latest.routingStrategy === "string" ? latest.routingStrategy : details.run.executionMode ?? details.run.requestedMode,
+    totalTokens: details.run.totalTokens,
+    totalCostUsd: details.run.totalCost,
+    latencyMs: details.run.totalDurationMs,
+    cacheHit: inference.some((entry) => entry.inputSummary.cacheHit === true),
+    cachedTokens: inference.reduce((total, entry) => total + number(entry.inputSummary.cachedTokens), 0),
+    cacheSavingsUsd: inference.reduce((total, entry) => total + number(entry.inputSummary.cacheSavingsUsd), 0),
+    failoverCount: inference.reduce((total, entry) => total + number(entry.inputSummary.failoverCount), 0),
+    costSource: inference.some((entry) => entry.inputSummary.costSource === "upstream") ? "upstream" : "estimated",
+  });
 }
 
 export class CompanyRuntimeError extends Error {
@@ -99,6 +121,7 @@ export class CompanyDelegationRuntime {
     riskApprovalService?: RiskApprovalService,
     private readonly guardrailPolicyResolver?: (ctx:AuthContext,companyId:string)=>Promise<CompanyGuardrailPolicy>,
     private readonly durableApprovals?: DurableApprovalGateway,
+    private readonly telemetry?: Pick<AuditRepository, "recordUsage" | "log">,
   ) {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
@@ -121,6 +144,9 @@ export class CompanyDelegationRuntime {
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
     const controller = new AbortController(), timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = AbortSignal.any([controller.signal, timeout,...(options.signal?[options.signal]:[])]);
+    const runStartedAt = Date.now();
+    let totalCost = 0;
+    let totalTokens = 0;
     this.controllers.set(created.run.id, controller);
     try {
       if (!this.ai.a2aSend || !this.ai.ensureCombo || !this.ai.ensureA2AEnabled)
@@ -283,6 +309,9 @@ export class CompanyDelegationRuntime {
           { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
         ],
       });
+      let measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "final", execution.mode, result, 10_001);
+      totalCost += measured.costUsd;
+      totalTokens += measured.totalTokens;
       if (knowledgeContext) {
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:grounded-final`,
@@ -291,8 +320,19 @@ export class CompanyDelegationRuntime {
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
+        measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "grounded-final", execution.mode, result, 10_002);
+        totalCost += measured.costUsd;
+        totalTokens += measured.totalTokens;
       }
-      await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { status: "completed", result: result.content, errorCode:"", errorMessage:"" });
+      await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
+        status: "completed",
+        result: result.content,
+        errorCode: "",
+        errorMessage: "",
+        totalCost,
+        totalTokens,
+        totalDurationMs: Math.max(0, Date.now() - runStartedAt),
+      });
     } catch (error) {
       const current = await this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
       const cancelled = current.run.cancelRequested || controller.signal.aborted || Boolean(options.signal?.aborted), timedOut = !cancelled && timeout.aborted;
@@ -300,6 +340,9 @@ export class CompanyDelegationRuntime {
         status: cancelled ? "cancelled" : "failed",
         errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : error instanceof SecurityPolicyViolation ? error.code : "RUN_FAILED",
         errorMessage: cancelled ? "Company run was cancelled" : timedOut ? "Company run exceeded its timeout" : error instanceof Error ? error.message : String(error),
+        totalCost,
+        totalTokens,
+        totalDurationMs: Math.max(0, Date.now() - runStartedAt),
       });
     } finally { this.controllers.delete(created.run.id); }
     return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
@@ -325,6 +368,77 @@ export class CompanyDelegationRuntime {
     if (current.run.omnirouteTaskId && this.ai.cancelA2ATask)
       await this.ai.cancelA2ATask(current.run.omnirouteTaskId).catch(() => undefined);
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
+  }
+
+  private async recordInference(
+    ctx: AuthContext,
+    companyId: string,
+    runId: string,
+    agentId: string,
+    phase: string,
+    strategy: string,
+    result: ChatResult,
+    sequenceNumber: number,
+  ) {
+    const modelId = result.model ?? "auto";
+    const usage = result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    const upstreamCost = result.telemetry?.costUsd;
+    const calculated = CostTelemetry.calculate(modelId, usage);
+    const costUsd = upstreamCost ?? calculated.totalCostUsd;
+    const costSource = upstreamCost != null ? "upstream" as const : "estimated" as const;
+    const providerId = result.telemetry?.provider ?? modelId.split("/", 1)[0] ?? "unknown";
+    const inputSummary = {
+      phase,
+      requestId: result.telemetry?.requestId,
+      providerId,
+      modelId,
+      routingStrategy: result.telemetry?.routingStrategy ?? strategy,
+      cacheHit: result.telemetry?.cacheHit ?? false,
+      cachedTokens: usage.cachedTokens ?? 0,
+      cacheSavingsUsd: result.telemetry?.cacheSavingsUsd ?? 0,
+      failoverCount: result.telemetry?.failoverCount ?? 0,
+      costSource,
+    };
+    await this.store.appendCompanyAgentToolAudit(ctx, companyId, runId, {
+      agentId,
+      toolName: "ai.inference",
+      decision: "allowed",
+      status: "succeeded",
+      inputSummary,
+      latencyMs: result.telemetry?.latencyMs ?? 0,
+      cost: costUsd,
+      tokens: usage.totalTokens,
+      reasonCode: "routing_decision",
+      sequenceNumber,
+    });
+    if (this.telemetry) {
+      await Promise.all([
+        this.telemetry.recordUsage(ctx, companyId, {
+          agentId,
+          modelId,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          costUsd,
+          latencyMs: result.telemetry?.latencyMs ?? 0,
+          requestId: result.telemetry?.requestId ?? `${runId}:${phase}`,
+          providerId,
+          routingStrategy: result.telemetry?.routingStrategy ?? strategy,
+          cacheHit: result.telemetry?.cacheHit ?? false,
+          cachedTokens: usage.cachedTokens ?? 0,
+          cacheSavingsUsd: result.telemetry?.cacheSavingsUsd ?? 0,
+          failoverCount: result.telemetry?.failoverCount ?? 0,
+          costSource,
+        }),
+        this.telemetry.log(ctx, companyId, {
+          action: "ai.inference.completed",
+          category: "agent",
+          resourceType: "company_agent_run",
+          resourceId: runId,
+          details: inputSummary,
+        }),
+      ]);
+    }
+    return { costUsd, totalTokens: usage.totalTokens };
   }
 
   private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false, approvalId?:string) {

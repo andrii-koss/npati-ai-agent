@@ -18,7 +18,7 @@ import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, ty
 import { registerAuthRoutes } from "./auth-routes";
 import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
-import { CompanyDelegationRuntime } from "./company-runtime";
+import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeQueue } from "./company-knowledge-queue";
@@ -49,6 +49,7 @@ import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
+import {CostTelemetry} from "./cost-telemetry";
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
   for(let offset=0;offset<value.length;){
@@ -57,6 +58,27 @@ function* boundedResponseChunks(value:string,maxCharacters=1_024){
     if(end<=offset)end=Math.min(value.length,offset+maxCharacters+1);
     yield value.slice(offset,end);offset=end;
   }
+}
+
+function applyChatTelemetryHeaders(reply: { header(name: string, value: string): unknown }, result: { model?: string; telemetry?: AgentReply["telemetry"] }) {
+  if (!result.telemetry) return;
+  const usage = result.telemetry.usage;
+  const costUsd = result.telemetry.costUsd ?? (usage ? CostTelemetry.calculate(result.model ?? "auto", usage).totalCostUsd : 0);
+  const headers = CostTelemetry.getRunTelemetryHeaders({
+    requestId: result.telemetry.requestId ?? crypto.randomUUID(),
+    modelId: result.model,
+    provider: result.telemetry.provider,
+    strategy: result.telemetry.routingStrategy,
+    totalTokens: usage?.totalTokens,
+    totalCostUsd: costUsd,
+    latencyMs: result.telemetry.latencyMs,
+    cacheHit: result.telemetry.cacheHit,
+    cachedTokens: usage?.cachedTokens,
+    cacheSavingsUsd: result.telemetry.cacheSavingsUsd,
+    failoverCount: result.telemetry.failoverCount,
+    costSource: result.telemetry.costSource ?? "estimated",
+  });
+  for (const [name, value] of Object.entries(headers)) reply.header(name, value);
 }
 
 export interface AppConfig {
@@ -279,6 +301,7 @@ export function buildApp(config: AppConfig = {}) {
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
+  const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox());
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
@@ -295,12 +318,11 @@ export function buildApp(config: AppConfig = {}) {
         }),
       ]);
       return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
-    } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo);
+    } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo,auditRepo);
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = config.databaseUrl ? new CompanyAutomationsRepository(config.databaseUrl) : undefined;
   const integrationsRepo = config.databaseUrl ? new IntegrationsRepository(config.databaseUrl) : undefined;
-  const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
@@ -450,15 +472,26 @@ export function buildApp(config: AppConfig = {}) {
       signal,
     };
     let content="";
+    let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
     if(onDelta){
       for await(const chunk of aiEngine.stream(chatRequest)){
         if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
         content+=chunk;onDelta(chunk);
       }
-    }else content=(await aiEngine.chat(chatRequest)).content;
+    }else {
+      chatResult=await aiEngine.chat(chatRequest);
+      content=chatResult.content;
+    }
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
-    return { message: content, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive };
+    return {
+      message: content,
+      suggestedActions: [],
+      model: chatResult?.model,
+      telemetry: chatResult?.telemetry ? { ...chatResult.telemetry, usage: chatResult.usage } : undefined,
+      conversationId: conversation?.id,
+      noMemory: memoryPolicy.noMemoryActive,
+    };
   }
 
   app.register(cors, { origin: config.webOrigin ?? true });
@@ -698,6 +731,7 @@ export function buildApp(config: AppConfig = {}) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy);
+        applyChatTelemetryHeaders(reply, result);
         return { ...result, activeContext: resolved.context };
       }
 
@@ -714,6 +748,7 @@ export function buildApp(config: AppConfig = {}) {
           { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
+        for (const [name, value] of Object.entries(companyRunTelemetryHeaders(runResult))) reply.header(name, value);
         if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED")return reply.code(400).send({error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
         return {
           message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
@@ -837,6 +872,7 @@ export function buildApp(config: AppConfig = {}) {
         request.body.attachments,
         memoryPolicy,
       );
+      applyChatTelemetryHeaders(reply, businessResult);
       return { ...businessResult, activeContext: resolved.context };
     } catch (error) {
       if (error instanceof AuthenticationError) {
@@ -940,6 +976,7 @@ export function buildApp(config: AppConfig = {}) {
               suggestedActions: [],
               activeContext: resolved.context,
               companyRunId: runResult.run.id,
+              telemetry: companyRunTelemetryHeaders(runResult),
             });
           }
         } else {

@@ -71,7 +71,7 @@ describe("OmniRoute adapter", () => {
     await expect(engine.chat({
       model: "openai/gpt-5.6-luna",
       messages: [{ role: "user", content: "Hello" }],
-    })).resolves.toEqual({ content: "Hello from Luna", model: "gpt-5.6-luna" });
+    })).resolves.toMatchObject({ content: "Hello from Luna", model: "gpt-5.6-luna" });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://omniroute:20128/api/v1/responses",
@@ -102,6 +102,46 @@ describe("OmniRoute adapter", () => {
       "http://omniroute:20128/api/v1/chat/completions",
       expect.any(Object),
     );
+  });
+
+  it("normalizes live usage, routing, cost, cache, and failover telemetry", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      model: "openai/gpt-4o",
+      provider: "openai",
+      choices: [{ message: { content: "Measured answer" } }],
+      usage: {
+        prompt_tokens: 120,
+        completion_tokens: 30,
+        total_tokens: 150,
+        prompt_tokens_details: { cached_tokens: 80 },
+      },
+    }), { status: 200, headers: {
+      "content-type": "application/json",
+      "x-request-id": "req-live-telemetry",
+      "x-omniroute-routing-strategy": "priority",
+      "x-omniroute-cost-usd": "0.0042",
+      "x-omniroute-cache-hit": "true",
+      "x-omniroute-cache-savings-usd": "0.0018",
+      "x-omniroute-failover-count": "1",
+      "x-omniroute-latency-ms": "240",
+    } })));
+    const result = await new OmniRouteEngine({ baseUrl: "http://omniroute:20128" }).chat({
+      model: "openai/gpt-4o",
+      messages: [{ role: "user", content: "Measure this" }],
+    });
+
+    expect(result.usage).toEqual({ promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedTokens: 80 });
+    expect(result.telemetry).toEqual({
+      requestId: "req-live-telemetry",
+      provider: "openai",
+      routingStrategy: "priority",
+      latencyMs: 240,
+      costUsd: 0.0042,
+      costSource: "upstream",
+      cacheHit: true,
+      cacheSavingsUsd: 0.0018,
+      failoverCount: 1,
+    });
   });
 
   it("streams chat-completion deltas from split upstream SSE frames", async () => {
