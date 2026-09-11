@@ -233,6 +233,39 @@ describe("Agent API", () => {
     expect(response.body).toContain('"message":"First live tokens"');
   });
 
+  it("aborts Business provider work on client disconnect and never persists a late assistant reply", async () => {
+    let markAborted!:()=>void;
+    const aborted=new Promise<void>(resolve=>{markAborted=resolve;});
+    const aiEngine:AIEngine={
+      chat:async request=>new Promise((_resolve,reject)=>{
+        if(!request.signal)throw new Error("Business model call did not receive an AbortSignal");
+        request.signal.addEventListener("abort",()=>{markAborted();reject(request.signal?.reason??new DOMException("Cancelled","AbortError"));},{once:true});
+      }),
+      async *stream(){yield "unused";},listModels:async()=>[],getModel:async()=>undefined,
+      executeTool:async()=>undefined,searchMemory:async()=>[],saveMemory:async()=>undefined,
+      getCapabilities:async()=>["chat"],healthCheck:async()=>({status:"ok"}),
+    };
+    const marketplace={marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace;
+    const app=buildApp({workspaceStore:new InMemoryWorkspaceStore(),aiEngine,marketplace});apps.push(app);
+    const business=await app.inject({method:"POST",url:"/businesses",payload:{name:"Cancellation Lab",businessStage:"operating"}});
+    const conversation=await app.inject({method:"POST",url:`/businesses/${business.json().id}/conversations`,payload:{title:"Cancel stream"}});
+    await app.listen({host:"127.0.0.1",port:0});
+    const address=app.server.address() as {port:number};
+    const controller=new AbortController(),streamId=crypto.randomUUID();
+    const response=await fetch(`http://127.0.0.1:${address.port}/chat/stream`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message:"Write a long answer",contextType:"business",businessId:business.json().id,conversationId:conversation.json().id,streamId}),signal:controller.signal});
+    const reader=response.body!.getReader();
+    await reader.read();
+
+    const cancellation=await app.inject({method:"POST",url:`/chat/streams/${streamId}/cancel`});
+    expect(cancellation.json()).toEqual({cancelled:true});
+    controller.abort(new DOMException("Stopped","AbortError"));
+    await aborted;
+    await new Promise(resolve=>setTimeout(resolve,50));
+
+    const history=await app.inject({method:"GET",url:`/businesses/${business.json().id}/conversations/${conversation.json().id}`});
+    expect(history.json().messages.map((message:{role:string})=>message.role)).toEqual(["user"]);
+  });
+
   it("accepts a photo and voice message, transcribes audio, and keeps binary data out of history", async () => {
     let lastChat: ChatRequest | undefined;
     let transcriptionMimeType = "";

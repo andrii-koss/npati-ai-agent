@@ -148,7 +148,7 @@ export class NpatiAgent {
     return { message: "I’m ready to help shape this into a practical business task. What outcome do you want first?", suggestedActions: ["Sell something", "Start a business", "Grow my business", "Create content"] };
   }
 
-  async handleBusinessMessage(input: { message: string; context: AgentContext; history?: ConversationMessage[]; research?: ResearchOutcome; images?: Array<{ mimeType: string; dataBase64: string }> }): Promise<AgentReply> {
+  async handleBusinessMessage(input: { message: string; context: AgentContext; history?: ConversationMessage[]; research?: ResearchOutcome; images?: Array<{ mimeType: string; dataBase64: string }>; signal?:AbortSignal }): Promise<AgentReply> {
     const message = input.message.trim();
     if (!message) return { message: "Tell me what you would like to accomplish.", suggestedActions: [] };
     const selectedSkill = input.context.selectedSkill ? defaultSkillRegistry.get(input.context.selectedSkill.id) : undefined;
@@ -187,7 +187,7 @@ export class NpatiAgent {
           })),
         ]
       : message;
-    const result = await this.dependencies.aiEngine.chat({ ...aiRoute(input.context.ai), messages: [{ role: "system", content: system + mediaInstruction + (researchInstruction ? "\n\n" + researchInstruction : "") }, ...history, { role: "user", content: userContent }] });
+    const result = await this.dependencies.aiEngine.chat({ ...aiRoute(input.context.ai), signal:input.signal, messages: [{ role: "system", content: system + mediaInstruction + (researchInstruction ? "\n\n" + researchInstruction : "") }, ...history, { role: "user", content: userContent }] });
     return {
       message: attachResearchSources(normalizeChatStyle(result.content, "I couldn’t generate a useful response. Please try again."), input.research),
       suggestedActions: skillResult?.suggestedActions ?? [],

@@ -124,6 +124,23 @@ describe("Company delegation runtime", () => {
     const cancelled=await runtime.cancel(ctx,company.id,created.run.id);expect(cancelled.run).toMatchObject({status:"cancelled",cancelRequested:true,errorCode:"RUN_CANCELLED"});
   });
 
+  it("propagates an external chat disconnect into an active Company provider call",async()=>{
+    const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
+    const company=await store.createCompany(ctx,{name:"Disconnect Co"},"disconnect-company");
+    const manager=await store.createCompanyAgent(ctx,company.id,{name:"Manager",role:"Manager"},"disconnect-manager");
+    await store.setCompanyMainAgent(ctx,company.id,manager.id,company.revision);
+    let providerStarted!:()=>void;const started=new Promise<void>(resolve=>{providerStarted=resolve;});
+    const ai=engine({chat:async request=>new Promise((_resolve,reject)=>{providerStarted();request.signal?.addEventListener("abort",()=>reject(request.signal?.reason??new DOMException("Cancelled","AbortError")),{once:true});})});
+    const runtime=new CompanyDelegationRuntime(store,ai);const controller=new AbortController();
+    const pending=runtime.execute(ctx,company.id,{task:"Write a long answer",mode:"single"},"disconnect-run",controller.signal);
+    await started;controller.abort(new DOMException("Client disconnected","AbortError"));
+
+    const result=await pending;
+
+    expect(result.run).toMatchObject({status:"cancelled",errorCode:"RUN_CANCELLED"});
+    expect(result.run.result).toBeUndefined();
+  });
+
   it("routes allowlisted Company Memory through the production audit path",async()=>{
     const store=new InMemoryWorkspaceStore(),ctx={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage"]};await store.initialize();
     const company=await store.createCompany(ctx,{name:"Memory Tool Co"},"memory-tool-company");

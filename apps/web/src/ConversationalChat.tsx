@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { BusinessChatPage, ChatContextSwitcherContext, useWorkspace } from "./BusinessWorkspace";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
-import { streamChat } from "./chat-stream";
+import { cancelChatStream, streamChat } from "./chat-stream";
 
 type Message = { id: string; role: "user" | "assistant" | "system"; content: string };
 type Scenario = "existing" | "starting" | "seller";
@@ -363,19 +363,19 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 function ScopedConversation({companyId}:{companyId?:string}) {
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const [messages,setMessages]=useState<Message[]>([]),[input,setInput]=useState(""),[sending,setSending]=useState(false),[error,setError]=useState(""),[noMemory,setNoMemory]=useState(false);
-  const streamControllerRef=useRef<AbortController|null>(null);
-  useEffect(()=>()=>streamControllerRef.current?.abort(),[]);
+  const streamControllerRef=useRef<{controller:AbortController;streamId:string}|null>(null);
+  useEffect(()=>()=>streamControllerRef.current?.controller.abort(),[]);
   async function submit(event:FormEvent) {
     event.preventDefault();if(!input.trim()||sending)return;
     const prompt=input.trim();setInput("");setSending(true);setError("");
     const assistantId=crypto.randomUUID();let receivedDelta=false;
     setMessages(v=>[...v,{id:crypto.randomUUID(),role:"user",content:prompt}]);
-    const controller=new AbortController();streamControllerRef.current=controller;
-    try {const reply=await streamChat<AgentReply>({message:prompt,contextType:companyId?"company":"none",...(companyId?{companyId}:{}),noMemory},()=>{}, {onDelta:delta=>{
+    const controller=new AbortController(),streamId=crypto.randomUUID();streamControllerRef.current={controller,streamId};
+    try {const reply=await streamChat<AgentReply>({message:prompt,contextType:companyId?"company":"none",...(companyId?{companyId}:{}),noMemory,streamId},()=>{}, {onDelta:delta=>{
       receivedDelta=true;setMessages(current=>{const found=current.some(message=>message.id===assistantId);return found?current.map(message=>message.id===assistantId?{...message,content:message.content+delta}:message):[...current,{id:assistantId,role:"assistant",content:delta}];});
     },signal:controller.signal});
       if(!receivedDelta)setMessages(v=>[...v,{id:assistantId,role:"assistant",content:reply.message}]);
-    }catch(e){if(!(e instanceof DOMException&&e.name==="AbortError"))setError(e instanceof Error?e.message:"Chat failed");}finally{if(streamControllerRef.current===controller)streamControllerRef.current=null;setSending(false);}
+    }catch(e){if(!(e instanceof DOMException&&e.name==="AbortError"))setError(e instanceof Error?e.message:"Chat failed");}finally{if(streamControllerRef.current?.controller===controller)streamControllerRef.current=null;setSending(false);}
   }
   return <div className="onboarding-live-chat standard-live-chat">
     {error&&<div role="alert" className="workspace-notice error">{error}</div>}
@@ -388,7 +388,7 @@ function ScopedConversation({companyId}:{companyId?:string}) {
         <span>Private request</span>
       </label>
       <AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/>
-      <div>{sending?<button type="button" onClick={()=>streamControllerRef.current?.abort()}>Stop</button>:<button disabled={!input.trim()}>Send →</button>}</div>
+      <div>{sending?<button type="button" onClick={()=>{const active=streamControllerRef.current;if(active)void cancelChatStream(active.streamId).finally(()=>active.controller.abort(new DOMException("Stopped","AbortError")));}}>Stop</button>:<button disabled={!input.trim()}>Send →</button>}</div>
     </form>
   </div>;
 }
