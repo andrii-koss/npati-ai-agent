@@ -209,6 +209,30 @@ describe("Agent API", () => {
     expect(conversations.json()[0].title).toBe("Analyze Hostkoss and its services");
   });
 
+  it("forwards ordered model deltas through the chat SSE endpoint", async () => {
+    const aiEngine: AIEngine = {
+      chat: async () => { throw new Error("Non-streaming chat must not be used"); },
+      async *stream(request) {
+        expect(request.signal).toBeInstanceOf(AbortSignal);
+        yield "First "; yield "live "; yield "tokens";
+      },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace });
+    apps.push(app);
+
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Stream this", contextType: "none" } });
+
+    expect(response.statusCode).toBe(200);
+    const deltas=[...response.body.matchAll(/event: delta\ndata: ({[^\n]+})/g)].map(match=>JSON.parse(match[1]!).delta);
+    expect(deltas).toEqual(["First ","live ","tokens"]);
+    expect(response.body.indexOf("event: delta")).toBeLessThan(response.body.indexOf("event: result"));
+    expect(response.body).toContain('"message":"First live tokens"');
+  });
+
   it("accepts a photo and voice message, transcribes audio, and keeps binary data out of history", async () => {
     let lastChat: ChatRequest | undefined;
     let transcriptionMimeType = "";

@@ -109,7 +109,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(39)).toBe("VERIFIED_EXISTING");
       expect(status.get(40)).toBe("VERIFIED_EXISTING");
       expect(status.get(41)).toBe("VERIFIED_EXISTING");
-      expect(status.get(42)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(42)).toBe("VERIFIED_EXISTING");
       expect(status.get(43)).toBe("VERIFIED_EXISTING");
     });
 
@@ -327,7 +327,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(221)).toBe("NOT_IMPLEMENTED");
       expect(status.get(222)).toBe("NOT_IMPLEMENTED");
       expect(status.get(223)).toBe("PARTIALLY_IMPLEMENTED");
-      expect(status.get(224)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(224)).toBe("VERIFIED_EXISTING");
       expect(status.get(225)).toBe("NOT_IMPLEMENTED");
     });
 

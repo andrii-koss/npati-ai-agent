@@ -969,7 +969,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Streaming responses",
-    "description": "Chat підтримує streaming response path із cancellation/error handling; Web відображає streamed content без duplicate requests.",
+    "description": "Chat читає upstream OmniRoute SSE, передає впорядковані дельти у WebChat і скасовує provider request після Stop або від'єднання клієнта.",
     "useWhen": [
       "Internal system execution requires Streaming responses"
     ],
@@ -5259,7 +5259,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Response chunking",
-    "description": "Корисно для Telegram/Slack/email-like channels.",
+    "description": "Великі model deltas та готові orchestration-відповіді діляться на bounded Unicode-safe SSE chunks перед доставкою.",
     "useWhen": [
       "Internal system execution requires Response chunking"
     ],

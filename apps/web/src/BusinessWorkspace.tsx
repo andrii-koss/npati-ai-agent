@@ -521,6 +521,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
   const [noMemory, setNoMemory] = useState(false);
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
+  const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
@@ -536,6 +537,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const pageStartPendingRef = useRef(false);
   const progressTimerRef = useRef<number | null>(null);
   const nextProgressRevealRef = useRef(0);
+  const streamControllerRef=useRef<AbortController|null>(null);
   const suggestions = useMemo(
     () => business
       ? ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"]
@@ -576,6 +578,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, [messages, activeTurn]);
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
+    streamControllerRef.current?.abort();
   }, []);
   function drainProgressQueue() {
     const delay = Math.max(0, nextProgressRevealRef.current - Date.now());
@@ -669,7 +672,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    setSending(true); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
+    setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
+    const assistantId=crypto.randomUUID();let receivedDelta=false;
+    const controller=new AbortController();streamControllerRef.current=controller;
     try {
       const result = await streamChat<AgentReply>({
         message,
@@ -677,10 +682,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         attachments: sentAttachments,
         contextType: business ? "business" : "none",
         noMemory: privateRequest,
-      }, enqueueProgress);
+      }, enqueueProgress,{signal:controller.signal,onDelta:(delta)=>{
+        receivedDelta=true;setStreamingResponse(true);
+        setMessages(current=>{const found=current.some(item=>item.id===assistantId);return found?current.map(item=>item.id===assistantId?{...item,content:item.content+delta}:item):[...current,{id:assistantId,role:"assistant",content:delta,createdAt:new Date().toISOString()}];});
+      }});
       setReplyMeta(result);
       if (privateRequest) {
-        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
+        if(!receivedDelta)setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
       } else if (result.conversationId) {
         await loadConversations(result.conversationId);
         navigate(`/c/${result.conversationId}`, { replace: !selected, state: business ? { businessId: business.id } : { neutralChat: true } });
@@ -689,6 +697,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       setProgressComplete(true);
     } catch (reason) {
       const typed = reason as Error & { code?: string };
+      if(typed.name==="AbortError"){setProgressComplete(true);setNotice("");return;}
       setProgressFailed(true);
       setNotice(typed.message);
       if (privateRequest) {
@@ -709,7 +718,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
         setInput(message); setAttachments(sentAttachments);
       }
-    } finally { setSending(false); }
+    } finally { if(streamControllerRef.current===controller)streamControllerRef.current=null;setSending(false);setStreamingResponse(false); }
   }
   async function remember() {
     if (!business || !replyMeta?.memoryCandidate) return;
@@ -733,7 +742,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><PendingMessageAttachments value={message.attachments ?? []} /><ChatMessageContent content={message.content} /></article>
           </Fragment>)}
           {!progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed={false} failed={progressFailed} />}
-          {sending && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           <div ref={streamEndRef} aria-hidden="true" />
           <div className="chat-scroll-spacer" aria-hidden="true" />
         </div>
@@ -747,7 +756,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           </label>
           <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
-          <div><button disabled={sending || (!input.trim() && attachments.length === 0)}>Send →</button></div>
+          <div>{sending?<button type="button" onClick={()=>streamControllerRef.current?.abort()}>Stop</button>:<button disabled={!input.trim() && attachments.length === 0}>Send →</button>}</div>
         </form>
       </div>
     </>

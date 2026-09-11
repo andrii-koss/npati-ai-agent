@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { createHubClient } from "@npati/hub-connector";
 import { InMemoryProvider } from "@npati/memory";
-import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine } from "@npati/omniroute-adapter";
+import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService } from "@npati/web-research";
 import type { AgentReply, HealthResponse } from "@npati/shared";
 import { defaultSkillRegistry } from "@npati/skills";
@@ -49,6 +49,15 @@ import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
+
+function* boundedResponseChunks(value:string,maxCharacters=1_024){
+  for(let offset=0;offset<value.length;){
+    let end=Math.min(value.length,offset+maxCharacters);
+    if(end<value.length&&/[\uD800-\uDBFF]/.test(value[end-1]!))end-=1;
+    if(end<=offset)end=Math.min(value.length,offset+maxCharacters+1);
+    yield value.slice(offset,end);offset=end;
+  }
+}
 
 export interface AppConfig {
   webOrigin?: string;
@@ -407,6 +416,8 @@ export function buildApp(config: AppConfig = {}) {
     attachments: ChatAttachmentInput[] = [],
     progress?: ResearchProgressListener,
     memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
+    onDelta?: (chunk:string)=>void,
+    signal?: AbortSignal,
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
@@ -422,7 +433,7 @@ export function buildApp(config: AppConfig = {}) {
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
     const ai = await getAIContext(auth);
     progress?.({ type: "final_generation_started" });
-    const completion = await aiEngine.chat({
+    const chatRequest:ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
       messages: [
@@ -430,10 +441,18 @@ export function buildApp(config: AppConfig = {}) {
         ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized })) : []),
         { role: "user", content: safePrompt },
       ],
-    });
+      signal,
+    };
+    let content="";
+    if(onDelta){
+      for await(const chunk of aiEngine.stream(chatRequest)){
+        if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
+        content+=chunk;onDelta(chunk);
+      }
+    }else content=(await aiEngine.chat(chatRequest)).content;
     progress?.({ type: "final_generation_completed" });
-    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", completion.content);
-    return { message: completion.content, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive };
+    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
+    return { message: content, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive };
   }
 
   app.register(cors, { origin: config.webOrigin ?? true });
@@ -864,7 +883,9 @@ export function buildApp(config: AppConfig = {}) {
       });
       reply.raw.flushHeaders();
       let sequence = 0;
-      const send = (event: "progress" | "result" | "error", data: unknown) => {
+      const streamController=new AbortController();
+      reply.raw.once("close",()=>{if(!reply.raw.writableEnded)streamController.abort(new Error("Client disconnected"));});
+      const send = (event: "progress" | "delta" | "result" | "error", data: unknown) => {
         if (reply.raw.destroyed) return;
         sequence += 1;
         reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -875,7 +896,7 @@ export function buildApp(config: AppConfig = {}) {
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
         if (resolved.context.contextType === "none") {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy);
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
           progress({ type: "final_generation_started" });
@@ -889,8 +910,10 @@ export function buildApp(config: AppConfig = {}) {
             send("error",{error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
           }else{
             progress({ type: "final_generation_completed" });
+            const message=runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.";
+            for(const delta of boundedResponseChunks(message))send("delta",{delta});
             send("result", {
-              message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
+              message,
               suggestedActions: [],
               activeContext: resolved.context,
               companyRunId: runResult.run.id,
@@ -907,6 +930,7 @@ export function buildApp(config: AppConfig = {}) {
             request.body.attachments,
             memoryPolicy,
           );
+          for(const delta of boundedResponseChunks(result.message))send("delta",{delta});
           send("result", { ...result, activeContext: resolved.context });
         }
       } catch (error) {
