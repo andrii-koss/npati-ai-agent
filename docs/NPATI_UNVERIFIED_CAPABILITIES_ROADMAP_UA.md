@@ -1,12 +1,12 @@
 # NPATI: план закриття незавершених capabilities після чесного аудиту
 
-Оновлено: 2026-09-10. Джерело істини: `packages/shared/src/capability-matrix.ts` після аудиту #1-#306.
+Оновлено: 2026-09-11. Джерело істини: `packages/shared/src/capability-matrix.ts` після аудиту #1-#306.
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 52 пункти.
-- `NOT_IMPLEMENTED`: 123 пункти.
-- Разом у цьому backlog: 175 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 51 пункт.
+- `NOT_IMPLEMENTED`: 122 пункти.
+- Разом у цьому backlog: 173 пункти.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -51,7 +51,7 @@ Verified gate: точні факти з Excel/PDF/DOCX/TXT, hybrid search і rer
 
 ### P0.3 — Runtime reliability, streaming, observability і scale
 
-Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #25 `Cost telemetry headers` (N), #27 `Usage analytics` (P), #29 `Audit trail` (P), #42 `Streaming responses` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #191 `Routing transparency` (P), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #203 `Cache-hit savings telemetry` (N), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #224 `Response chunking` (N), #286 `Company agents pagination + bounded Org Chart` (P), #290 `10 000 concurrent session capacity` (P).
+Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #25 `Cost telemetry headers` (N), #27 `Usage analytics` (P), #29 `Audit trail` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #191 `Routing transparency` (P), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #203 `Cache-hit savings telemetry` (N), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #286 `Company agents pagination + bounded Org Chart` (P), #290 `10 000 concurrent session capacity` (P).
 
 Що реалізувати: Redis admission з tenant fairness/backpressure; справжнє SSE streaming із reconnect/cancel; єдиний immutable Run Trace; provider/model/cost/token/cache telemetry; semantic cache з tenant keys; atomic quota leases; backup/restore drill; cursor-based session search/pruning; сторінкова Org Chart без >100 edge request; distributed 10k connection profile, а не `Map` simulation.
 
@@ -155,7 +155,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 4. ✅ Завершено: централізовані redaction/guardrails #31-#34.
 5. ✅ Завершено: deny-by-default MCP/tool policy #40, #48, #102, route tiers #39, durable human approvals #54 та Exec approvals #49.
 6. ✅ Завершено: один production-шлях Code Mode / isolated Exec закриває #47, #53, #63, #159, #160 і #244 без дублювання runtime.
-7. Завершити SSE streaming/cancellation/response chunking: #42 і #224.
+7. ✅ Завершено: SSE streaming/cancellation/response chunking #42 і #224.
 8. Виправити Org Chart pagination >100: #286.
 9. Реалізувати unified cost/usage/audit trace: #25, #27, #29, #56, #114, #191, #203.
 10. Запустити distributed authenticated 10k session certification і лише після цього закрити #290.
@@ -177,6 +177,10 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 Перед кожним release автоматично порівнювати цей файл із `CAPABILITY_MATRIX`: кожний `PARTIALLY_IMPLEMENTED` або `NOT_IMPLEMENTED` ID має бути рівно в одному епіку; `VERIFIED_EXISTING` не повинен залишатися у backlog. Після зміни статусу обов'язково додати regression expectation і live `/capabilities/inspect` перевірку.
 
 ## Виконано 2026-09-11
+
+- Live strict-auth E2E `node scripts/verify-chat-streaming.mjs` підтверджує, що основний WebChat викликає `/api/chat/stream`, отримує та рендерить відповідь реального підключеного провайдера; перевірочний запит працює у `noMemory` режимі й не забруднює історію.
+- Завершено #42 `Streaming responses` і #224 `Response chunking`: OmniRoute adapter читає справжні Chat Completions та Responses API SSE-дельти, підтримує fallback до початку потоку, timeout/cancellation і не ріже Unicode surrogate pairs. `/chat/stream` передає впорядковані `delta` події, WebChat показує відповідь поступово та має кнопку `Stop`; складні Company/Business результати доставляються bounded частинами без дублювання фінального тексту.
+- #65 і #302 чесно залишені `PARTIALLY_IMPLEMENTED`: production adapter та retrieval wiring існують, але live OmniRoute catalog у поточному середовищі повернув 0 rerank-моделей, а Jina/Cohere/Voyage credential не налаштований.
 
 - Завершено: #47 `Sandboxing`, #49 `Exec approvals`, #53 `Sandbox + host separation`, #63 `Auto reviewer for exec`, #159 `Exec`.
 - Company Agent може отримати `Exec`. JavaScript виконується у новій QuickJS WebAssembly VM з обмеженнями пам'яті, часу та обсягу відповіді, без Node globals, файлової системи хоста, environment, module loader і мережевого API.

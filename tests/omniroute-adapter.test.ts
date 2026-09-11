@@ -104,6 +104,64 @@ describe("OmniRoute adapter", () => {
     );
   });
 
+  it("streams chat-completion deltas from split upstream SSE frames", async () => {
+    const encoder = new TextEncoder();
+    const upstream = [
+      'data: {"choices":[{"delta":{"content":"Hel',
+      'lo "}}]}\n\ndata: {"choices":[{"delta":{"content":"world"}}]}\n\n',
+      "data: [DONE]\n\n",
+    ];
+    const body = new ReadableStream<Uint8Array>({ start(controller) { for (const item of upstream) controller.enqueue(encoder.encode(item)); controller.close(); } });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+
+    const chunks:string[]=[];
+    for await(const chunk of engine.stream({model:"openai/gpt-4o",messages:[{role:"user",content:"Hello"}]}))chunks.push(chunk);
+
+    expect(chunks).toEqual(["Hello ","world"]);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({model:"openai/gpt-4o",stream:true});
+  });
+
+  it("streams Responses API deltas for GPT-5.6 models", async () => {
+    const body='data: {"type":"response.output_text.delta","delta":"Luna"}\n\ndata: {"type":"response.output_text.delta","delta":" works"}\n\ndata: [DONE]\n\n';
+    const fetchMock=vi.fn().mockResolvedValue(new Response(body,{status:200,headers:{"content-type":"text/event-stream"}}));
+    vi.stubGlobal("fetch",fetchMock);
+    const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+
+    const chunks:string[]=[];for await(const chunk of engine.stream({model:"openai/gpt-5.6-luna",messages:[{role:"user",content:"Hello"}]}))chunks.push(chunk);
+
+    expect(chunks).toEqual(["Luna"," works"]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://omniroute:20128/api/v1/responses");
+  });
+
+  it("bounds oversized stream deltas without splitting surrogate pairs", async () => {
+    const source="x".repeat(2_047)+"😀"+"y".repeat(2_100);
+    const body=`data: ${JSON.stringify({choices:[{delta:{content:source}}]})}\n\ndata: [DONE]\n\n`;
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body,{status:200,headers:{"content-type":"text/event-stream"}})));
+    const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+
+    const chunks:string[]=[];for await(const chunk of engine.stream({messages:[{role:"user",content:"Long"}]}))chunks.push(chunk);
+
+    expect(chunks.join("")).toBe(source);
+    expect(chunks.every(chunk=>chunk.length<=2_048)).toBe(true);
+    expect(chunks.some(chunk=>chunk.endsWith("\ud83d"))).toBe(false);
+  });
+
+  it("cancels the upstream provider request when the caller aborts", async () => {
+    const fetchMock=vi.fn((_url:string,init?:RequestInit)=>new Promise<Response>((_resolve,reject)=>{
+      init?.signal?.addEventListener("abort",()=>reject(init.signal?.reason),{once:true});
+    }));
+    vi.stubGlobal("fetch",fetchMock);
+    const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+    const controller=new AbortController();
+    const next=engine.stream({messages:[{role:"user",content:"Cancel"}],signal:controller.signal})[Symbol.asyncIterator]().next();
+
+    controller.abort(new DOMException("Stopped","AbortError"));
+
+    await expect(next).rejects.toMatchObject({name:"AbortError"});
+  });
+
   it("falls back on quota failure and sends the compression policy", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "quota exhausted" } }), { status: 429 }))

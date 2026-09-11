@@ -657,9 +657,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/agent-api.test.ts",
+      "tests/web-chat-stream-client.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 43,
@@ -3399,9 +3401,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/sessions-custom-models-chunking.test.ts"
+      "tests/sessions-custom-models-chunking.test.ts",
+      "tests/omniroute-adapter.test.ts",
+      "tests/agent-api.test.ts",
+      "tests/web-chat-stream-client.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 225,

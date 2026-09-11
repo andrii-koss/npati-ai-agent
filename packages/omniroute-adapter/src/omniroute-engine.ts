@@ -28,6 +28,16 @@ function responsesText(payload: {
     .join("") ?? "";
 }
 
+function* boundedTextChunks(value: string, maxCharacters = 2_048) {
+  for (let offset = 0; offset < value.length;) {
+    let end = Math.min(value.length, offset + maxCharacters);
+    if (end < value.length && /[\uD800-\uDBFF]/.test(value[end - 1]!)) end -= 1;
+    if (end <= offset) end = Math.min(value.length, offset + maxCharacters + 1);
+    yield value.slice(offset, end);
+    offset = end;
+  }
+}
+
 function matchesAscii(data: Uint8Array, offset: number, value: string) {
   if (offset < 0 || offset + value.length > data.length) return false;
   for (let index = 0; index < value.length; index += 1) {
@@ -161,8 +171,66 @@ export class OmniRouteEngine implements AIEngine {
   }
 
   async *stream(request: ChatRequest): AsyncIterable<string> {
-    const result = await this.chat(request);
-    yield result.content;
+    if (!this.baseUrl) throw new Error("OmniRoute is not configured");
+    const models = [request.model ?? "auto", request.fallbackModel]
+      .filter((model): model is string => Boolean(model))
+      .filter((model, index, values) => values.indexOf(model) === index);
+    for (const [index, model] of models.entries()) {
+      const useResponses = requiresResponsesApi(model);
+      const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
+      const responseContent = (content: string | ChatContentPart[]) => Array.isArray(content)
+        ? content.map((part) => part.type === "text"
+          ? { type: "input_text", text: part.text }
+          : { type: "input_image", image_url: part.image_url.url, detail: part.image_url.detail ?? "auto" })
+        : content;
+      const body = useResponses
+        ? { model, input: request.messages.map(({ role, content }) => ({ role, content: responseContent(content) })), stream: true }
+        : { model, messages: request.messages, stream: true };
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: "POST", headers: this.headers(request.compression, request.idempotencyKey), body: JSON.stringify(body),
+        signal: requestSignal(request.signal, request.timeoutMs ?? 120_000),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        if (index < models.length - 1 && (response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500)) continue;
+        throw new Error(`OmniRoute stream failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+      }
+      if (!response.body) throw new Error("OmniRoute stream returned no response body");
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
+        const content = useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "";
+        for (const chunk of boundedTextChunks(content)) yield chunk;
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      const emitLine = function* (line: string) {
+        if (!line.startsWith("data:")) return;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        let payload: any;
+        try { payload = JSON.parse(data); } catch { return; }
+        const delta = useResponses
+          ? payload.type === "response.output_text.delta" ? payload.delta : payload.output_text?.delta
+          : payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.text;
+        if (typeof delta === "string" && delta) yield* boundedTextChunks(delta);
+      };
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          const lines = pending.split(/\r?\n/);
+          pending = lines.pop() ?? "";
+          for (const line of lines) yield* emitLine(line);
+        }
+        pending += decoder.decode();
+        if (pending) yield* emitLine(pending);
+      } finally { reader.releaseLock(); }
+      return;
+    }
   }
 
   async transcribeAudio(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult> {

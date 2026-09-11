@@ -3,6 +3,7 @@ import type { ChatAttachmentInput } from "./ChatAttachments";
 
 type StreamEnvelope<T> =
   | { event: "progress"; data: ChatProgressEvent }
+  | { event: "delta"; data: { delta: string } }
   | { event: "result"; data: T }
   | { event: "error"; data: { error?: { code?: string; message?: string } } };
 
@@ -29,6 +30,7 @@ export async function streamChat<T>(
     ephemeral?: boolean;
   },
   onProgress: (event: ChatProgressEvent) => void,
+  options: { onDelta?: (delta:string)=>void; signal?:AbortSignal } = {},
 ): Promise<T> {
   const token = localStorage.getItem("npati_agent_access_token");
   const headers: Record<string, string> = {
@@ -40,6 +42,7 @@ export async function streamChat<T>(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   if (response.status === 401) {
     window.dispatchEvent(new Event("npati:unauthorized"));
@@ -65,6 +68,7 @@ export async function streamChat<T>(
       const envelope = parseBlock<T>(block);
       if (!envelope) continue;
       if (envelope.event === "progress") onProgress(envelope.data);
+      if (envelope.event === "delta") options.onDelta?.(envelope.data.delta);
       if (envelope.event === "result") result = envelope.data;
       if (envelope.event === "error") {
         const error = new Error(envelope.data.error?.message ?? "The agent stream failed.");
@@ -73,6 +77,13 @@ export async function streamChat<T>(
       }
     }
     if (done) break;
+  }
+  if(buffer.trim()){
+    const envelope=parseBlock<T>(buffer);
+    if(envelope?.event==="progress")onProgress(envelope.data);
+    if(envelope?.event==="delta")options.onDelta?.(envelope.data.delta);
+    if(envelope?.event==="result")result=envelope.data;
+    if(envelope?.event==="error")throw new Error(envelope.data.error?.message??"The agent stream failed.");
   }
   if (result === undefined) throw new Error("The agent stream ended before returning a response.");
   return result;
