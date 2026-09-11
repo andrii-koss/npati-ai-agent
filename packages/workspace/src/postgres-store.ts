@@ -734,7 +734,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const filter = agentIds?.length ? [...new Set(agentIds)] : null;
     return (await this.pool.query<CompanyAgentEdge>(`SELECT ${companyEdgeColumns} FROM company_agent_edges
       WHERE workspace_id=$1 AND company_id=$2
-        AND ($3::text[] IS NULL OR (parent_agent_id=ANY($3::text[]) AND child_agent_id=ANY($3::text[])))
+        AND ($3::text[] IS NULL OR parent_agent_id=ANY($3::text[]) OR child_agent_id=ANY($3::text[]))
       ORDER BY created_at,id`, [context.workspaceId, companyId, filter])).rows;
   }
 

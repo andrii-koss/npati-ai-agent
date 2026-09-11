@@ -163,7 +163,14 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   app.get<{ Params: { companyId: string }; Querystring: { agentIds?: string } }>("/companies/:companyId/agent-edges", async (request, reply) => {
     try {
       const agentIds = request.query.agentIds?.split(",").filter(Boolean);
-      if (agentIds && agentIds.length > 100) throw new Error("At most 100 agent IDs may be requested");
+      if (agentIds && agentIds.length > 100) {
+        return reply.code(400).send({
+          error: {
+            code: "AGENT_EDGE_LIMIT_EXCEEDED",
+            message: "At most 100 agent IDs may be requested",
+          },
+        });
+      }
       return await store.listCompanyAgentEdges(await authorize(auth, request, "workspace:read"), request.params.companyId, agentIds);
     } catch (error) { return errorReply(reply, error); }
   });

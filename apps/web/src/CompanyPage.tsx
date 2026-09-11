@@ -163,6 +163,7 @@ export function CompanyPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [agentCursor, setAgentCursor] = useState<string | null>(null);
+  const [agentsPageLoading, setAgentsPageLoading] = useState(false);
   const [task, setTask] = useState("");
   const [runMode, setRunMode] = useState<"auto" | "single" | "pipeline" | "fusion">("auto");
   const [runDetails, setRunDetails] = useState<RunDetails>();
@@ -217,16 +218,32 @@ export function CompanyPage() {
   }
 
   async function loadOrganization(companyId: string, cursor?: string, append = false, companySnapshot = companies) {
-    const page = await api<AgentPage>(`/companies/${companyId}/agents?limit=60${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-    let nextAgents = append ? [...agents, ...page.agents] : page.agents;
-    const mainId = companySnapshot.find((company) => company.id === companyId)?.mainAgentId;
-    if (mainId && !nextAgents.some((agent) => agent.id === mainId)) {
-      nextAgents = [await api<Agent>(`/companies/${companyId}/agents/${mainId}`), ...nextAgents];
+    if (agentsPageLoading) return;
+    setAgentsPageLoading(true);
+    try {
+      const page = await api<AgentPage>(`/companies/${companyId}/agents?limit=60${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      const mainId = companySnapshot.find((company) => company.id === companyId)?.mainAgentId;
+      let mainAgent: Agent | undefined;
+      const accumulated = append ? [...agents] : [];
+      if (mainId && !accumulated.some((agent) => agent.id === mainId) && !page.agents.some((agent) => agent.id === mainId)) {
+        mainAgent = await api<Agent>(`/companies/${companyId}/agents/${mainId}`);
+      }
+      const pageAgents = mainAgent ? [mainAgent, ...page.agents] : page.agents;
+      const nextAgents = [...new Map([...accumulated, ...pageAgents].map((agent) => [agent.id, agent])).values()];
+      const pageIds = [...new Set(pageAgents.map((agent) => agent.id))];
+      const pageEdges = pageIds.length
+        ? await api<Edge[]>(`/companies/${companyId}/agent-edges?agentIds=${encodeURIComponent(pageIds.join(","))}`)
+        : [];
+      const loadedIds = new Set(nextAgents.map((agent) => agent.id));
+      const nextEdges = [...new Map([...(append ? edges : []), ...pageEdges].map((edge) => [edge.id, edge])).values()].filter(
+        (edge) => loadedIds.has(edge.parentAgentId) && loadedIds.has(edge.childAgentId),
+      );
+      setAgents(nextAgents);
+      setEdges(nextEdges);
+      setAgentCursor(page.pagination.nextCursor);
+    } finally {
+      setAgentsPageLoading(false);
     }
-    nextAgents = [...new Map(nextAgents.map((agent) => [agent.id, agent])).values()];
-    const ids = nextAgents.map((agent) => agent.id).join(",");
-    const nextEdges = ids ? await api<Edge[]>(`/companies/${companyId}/agent-edges?agentIds=${encodeURIComponent(ids)}`) : [];
-    setAgents(nextAgents); setEdges(nextEdges); setAgentCursor(page.pagination.nextCursor);
   }
 
   async function loadAddedModels(showError = false) {
@@ -881,7 +898,15 @@ export function CompanyPage() {
         <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
           <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} models={models} workingAgentIds={workingAgentIds} onSelect={openAgentEditor} />
         </div>
-        {agentCursor && <button className="button-secondary company-load-more" onClick={() => void loadOrganization(selected.id, agentCursor, true)}>Load more agents</button>}
+        {agentCursor && (
+          <button
+            className="button-secondary company-load-more"
+            disabled={agentsPageLoading}
+            onClick={() => void loadOrganization(selected.id, agentCursor, true)}
+          >
+            {agentsPageLoading ? "Loading agents…" : "Load more agents"}
+          </button>
+        )}
       </section>
 
       <section className="company-run-card company-knowledge-card">

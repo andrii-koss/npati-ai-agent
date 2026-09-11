@@ -337,7 +337,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.assertCompany(context, companyId);
     const filter = agentIds?.length ? new Set(agentIds) : null;
     return [...this.companyEdges.values()].filter((edge) => edge.workspaceId === context.workspaceId && edge.companyId === companyId
-      && (!filter || (filter.has(edge.parentAgentId) && filter.has(edge.childAgentId))))
+      && (!filter || filter.has(edge.parentAgentId) || filter.has(edge.childAgentId)))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   }
 

@@ -393,7 +393,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       for (let id = 276; id <= 285; id += 1) {
         expect(status.get(id)).toBe("VERIFIED_EXISTING");
       }
-      expect(status.get(286)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(286)).toBe("VERIFIED_EXISTING");
       expect(status.get(287)).toBe("VERIFIED_EXISTING");
       expect(status.get(288)).toBe("VERIFIED_EXISTING");
     });
