@@ -1,33 +1,30 @@
 {
-  "timestamp": "2026-09-06T07:37:51.391Z",
-  "targetMetrics": {},
-  "results": {
-    "companies": {
-      "total": 100000,
-      "indexTimeMs": 200.1736,
-      "p50Microseconds": 1.2000000000398359,
-      "p95Microseconds": 2.200000000016189,
-      "p99Microseconds": 3.6000000000058208,
-      "sloPassed": true
-    },
-    "agents": {
-      "total": 500000,
-      "populateTimeMs": 1226.3344,
-      "batchLoadTimeMs": 0.11580000000003565,
-      "sloPassed": true
-    },
-    "sessions": {
-      "total": 10000,
-      "creationTimeMs": 5.242600000000039,
-      "memoryDeltaMB": 2.2704620361328125,
-      "sloPassed": true
-    },
-    "streaming": {
-      "total": 10000,
-      "durationMs": 0.439600000000155,
-      "droppedFrames": 0,
-      "sloPassed": true
-    }
+  "schemaVersion": 2,
+  "mode": "distributed-production-certification",
+  "startedAt": "2026-09-11T17:37:08.809Z",
+  "completedAt": "2026-09-11T17:37:33.536Z",
+  "passed": true,
+  "target": 10000,
+  "endpoints": [
+    "http://scale-api-a:3001",
+    "http://scale-api-b:3001"
+  ],
+  "capabilityStatuses": {
+    "192": "VERIFIED_EXISTING",
+    "290": "VERIFIED_EXISTING"
   },
-  "passed": true
+  "metrics": {
+    "connected": 10000,
+    "registered": 10000,
+    "failures": 0,
+    "duplicateStatus": 409,
+    "unauthorizedStatus": 401,
+    "cleanupCount": 0,
+    "durationMs": 24729.88,
+    "connectionP50Ms": 99.21,
+    "connectionP95Ms": 279.31,
+    "connectionP99Ms": 415.07,
+    "heldAcrossHeartbeat": true
+  },
+  "failureSamples": []
 }

@@ -1,183 +1,139 @@
-import { performance } from "perf_hooks";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { createHmac } from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const smoke = process.argv.includes("--smoke");
+const target = Number.parseInt(process.env.NPATI_SCALE_TARGET ?? (smoke ? "200" : "10000"), 10);
+const endpoints = (process.env.NPATI_SCALE_ENDPOINTS ?? "http://127.0.0.1:3101,http://127.0.0.1:3102").split(",").map((value) => value.trim().replace(/\/$/, "")).filter(Boolean);
+const secret = process.env.NPATI_JWT_SECRET ?? "pati-backend-jwt-secret-key-2024-min-32-chars-long";
+const userId = `scale-cert-${Date.now()}`;
+const batchSize = Number.parseInt(process.env.NPATI_SCALE_BATCH_SIZE ?? "250", 10);
+const holdMs = Number.parseInt(process.env.NPATI_SCALE_HOLD_MS ?? (smoke ? "250" : "16000"), 10);
+const connectTimeoutMs = Number.parseInt(process.env.NPATI_SCALE_CONNECT_TIMEOUT_MS ?? "90000", 10);
+const reportPath = path.join(rootDir, "packages", "shared", "src", "scale-certification-report.json");
 
-console.log("==========================================================");
-console.log("  NPATI AGENT — PRODUCTION SCALE & LOAD CERTIFICATION     ");
-console.log("==========================================================");
-
-const benchmarkResults = {
-  timestamp: new Date().toISOString(),
-  targetMetrics: {},
-  results: {},
-  passed: true,
-};
-
-// -------------------------------------------------------------
-// 1. 100,000 Companies Indexing & Lookup Benchmark
-// -------------------------------------------------------------
-console.log("\n[1/4] Certifying 100,000 Company Scale...");
-const NUM_COMPANIES = 100_000;
-const companyIndex = new Map();
-const t0Comp = performance.now();
-
-for (let i = 0; i < NUM_COMPANIES; i++) {
-  const id = `comp_${i.toString(16).padStart(8, "0")}`;
-  companyIndex.set(id, {
-    id,
-    workspaceId: `ws_${i % 500}`,
-    name: `Company ${i}`,
-    revision: 1,
-    status: "active",
-    createdAt: Date.now() - (NUM_COMPANIES - i) * 1000,
-  });
+function token() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ userId, role: "user", iat: now, exp: now + 1800 })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
+  return `${header}.${payload}.${signature}`;
 }
-const compIndexTime = performance.now() - t0Comp;
 
-// Measure 5,000 random lookups
-const SAMPLE_SIZE = 5_000;
+const authorization = `Bearer ${token()}`;
+const connections = [];
 const latencies = [];
-for (let s = 0; s < SAMPLE_SIZE; s++) {
-  const targetId = `comp_${Math.floor(Math.random() * NUM_COMPANIES).toString(16).padStart(8, "0")}`;
-  const t0 = performance.now();
-  const res = companyIndex.get(targetId);
-  const dur = (performance.now() - t0) * 1000; // microseconds
-  if (res) latencies.push(dur);
-}
-latencies.sort((a, b) => a - b);
-const p50 = latencies[Math.floor(latencies.length * 0.50)];
-const p95 = latencies[Math.floor(latencies.length * 0.95)];
-const p99 = latencies[Math.floor(latencies.length * 0.99)];
+const failures = [];
 
-console.log(`  ✓ Indexed ${NUM_COMPANIES.toLocaleString()} companies in ${compIndexTime.toFixed(1)}ms`);
-console.log(`  ✓ Lookup Latency (SLO < 2000µs): p50=${p50.toFixed(1)}µs | p95=${p95.toFixed(1)}µs | p99=${p99.toFixed(1)}µs`);
-
-benchmarkResults.results.companies = {
-  total: NUM_COMPANIES,
-  indexTimeMs: compIndexTime,
-  p50Microseconds: p50,
-  p95Microseconds: p95,
-  p99Microseconds: p99,
-  sloPassed: p95 < 2000,
-};
-
-// -------------------------------------------------------------
-// 2. 500,000 Agent Configs & Batch Loading (No N+1)
-// -------------------------------------------------------------
-console.log("\n[2/4] Certifying 500,000 Company Agent Configurations...");
-const NUM_AGENTS = 500_000;
-const NUM_COMPANIES_FOR_AGENTS = 10_000;
-const agentStore = new Map();
-const agentsByCompany = new Map();
-
-const t0Ag = performance.now();
-for (let i = 0; i < NUM_AGENTS; i++) {
-  const companyId = `comp_${(i % NUM_COMPANIES_FOR_AGENTS).toString(16).padStart(8, "0")}`;
-  const agentId = `agent_${i.toString(16).padStart(8, "0")}`;
-  agentStore.set(agentId, {
-    id: agentId,
-    companyId,
-    name: `Agent ${i}`,
-    role: "Specialist",
-    tools: ["web.search", "browser.web_fetch"],
+function openSession(endpoint, sessionId) {
+  let timeout;
+  return new Promise((resolve) => {
+    const started = performance.now();
+    const request = http.get(`${endpoint}/sessions/${sessionId}/stream`, { headers: { authorization }, agent: false }, (response) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        if (error) { response.destroy(); failures.push({ sessionId, endpoint, error }); }
+        else { connections.push({ request, response, sessionId, endpoint }); latencies.push(performance.now() - started); }
+        resolve();
+      };
+      if (response.statusCode !== 200) return finish(`HTTP ${response.statusCode}`);
+      response.once("data", (chunk) => finish(String(chunk).includes("event: ready") ? undefined : "missing ready event"));
+      response.once("error", (error) => finish(error.message));
+      timeout = setTimeout(() => finish("ready timeout"), connectTimeoutMs);
+    });
+    request.once("error", (error) => { failures.push({ sessionId, endpoint, error: error.message }); resolve(); });
   });
+}
 
-  let list = agentsByCompany.get(companyId);
-  if (!list) {
-    list = [];
-    agentsByCompany.set(companyId, list);
+async function statusRequest(endpoint, sessionId, auth = authorization) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(`${endpoint}/sessions/${sessionId}/stream`, { headers: auth ? { authorization: auth } : {}, agent: false }, (response) => {
+      resolve(response.statusCode ?? 0);
+      response.destroy(); request.destroy();
+    });
+    request.setTimeout(10_000, () => request.destroy(new Error("status request timeout")));
+    request.once("error", reject);
+  });
+}
+
+async function activeCount() {
+  const response = await fetch(`${endpoints[0]}/sessions/active`, { headers: { authorization } });
+  if (!response.ok) throw new Error(`Active-session count returned HTTP ${response.status}`);
+  return (await response.json()).activeSessions;
+}
+
+function percentile(values, fraction) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+}
+
+const startedAt = new Date().toISOString();
+const started = performance.now();
+let registered = 0, duplicateStatus = 0, unauthorizedStatus = 0, cleanupCount = -1, capabilityStatuses = {};
+try {
+  if (!smoke && target !== 10_000) throw new Error("Full certification requires exactly 10,000 sessions. Use --smoke for a smaller diagnostic run.");
+  if (!smoke && endpoints.length < 2) throw new Error("Full certification requires at least two API replica endpoints.");
+  for (let offset = 0; offset < target; offset += batchSize) {
+    const size = Math.min(batchSize, target - offset);
+    await Promise.all(Array.from({ length: size }, (_, index) => {
+      const id = offset + index;
+      return openSession(endpoints[id % endpoints.length], `scale-${userId}-${id.toString().padStart(5, "0")}`);
+    }));
+    if (failures.length) break;
   }
-  list.push(agentId);
+  registered = await activeCount();
+  duplicateStatus = await statusRequest(endpoints[1 % endpoints.length], `scale-${userId}-00000`);
+  unauthorizedStatus = await statusRequest(endpoints[0], `unauth-${userId}-00000`, "");
+  if (holdMs > 0) await new Promise((resolve) => setTimeout(resolve, holdMs));
+} finally {
+  for (const connection of connections) { connection.response.destroy(); connection.request.destroy(); }
+  const inspectorResponse = await fetch(`${endpoints[0]}/capabilities/inspect`, { headers: { authorization } });
+  if (!inspectorResponse.ok) throw new Error(`Capability Inspector returned HTTP ${inspectorResponse.status}`);
+  const inspector = await inspectorResponse.json();
+  for (const item of inspector.capabilities ?? inspector.items ?? []) {
+    const id = item.id ?? item.capability?.id;
+    if (id === 192 || id === 290) capabilityStatuses[id] = item.status ?? item.classification?.status ?? item.effectiveStatus;
+  }
+  const deadline = Date.now() + 20_000;
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    cleanupCount = await activeCount().catch(() => -1);
+  } while (cleanupCount > 0 && Date.now() < deadline);
 }
-const agPopulateTime = performance.now() - t0Ag;
 
-// Batch fetch 50 company agent teams
-const t0Batch = performance.now();
-let loadedCount = 0;
-for (let c = 0; c < 50; c++) {
-  const companyId = `comp_${c.toString(16).padStart(8, "0")}`;
-  const ids = agentsByCompany.get(companyId) || [];
-  loadedCount += ids.length;
-}
-const batchTimeMs = performance.now() - t0Batch;
-
-console.log(`  ✓ Created ${NUM_AGENTS.toLocaleString()} agents across ${NUM_COMPANIES_FOR_AGENTS.toLocaleString()} companies in ${agPopulateTime.toFixed(1)}ms`);
-console.log(`  ✓ Batch load 50 multi-agent teams (${loadedCount} agents) in ${batchTimeMs.toFixed(2)}ms (SLO < 10ms)`);
-
-benchmarkResults.results.agents = {
-  total: NUM_AGENTS,
-  populateTimeMs: agPopulateTime,
-  batchLoadTimeMs: batchTimeMs,
-  sloPassed: batchTimeMs < 10.0,
+const durationMs = performance.now() - started;
+const passed = failures.length === 0 && connections.length === target && registered === target && duplicateStatus === 409 && unauthorizedStatus === 401 && cleanupCount === 0 && capabilityStatuses[192] === "VERIFIED_EXISTING" && capabilityStatuses[290] === "VERIFIED_EXISTING" && (smoke || endpoints.length >= 2);
+const report = {
+  schemaVersion: 2,
+  mode: smoke ? "smoke" : "distributed-production-certification",
+  startedAt,
+  completedAt: new Date().toISOString(),
+  passed,
+  target,
+  endpoints,
+  capabilityStatuses,
+  metrics: {
+    connected: connections.length,
+    registered,
+    failures: failures.length,
+    duplicateStatus,
+    unauthorizedStatus,
+    cleanupCount,
+    durationMs: Number(durationMs.toFixed(2)),
+    connectionP50Ms: Number(percentile(latencies, 0.5).toFixed(2)),
+    connectionP95Ms: Number(percentile(latencies, 0.95).toFixed(2)),
+    connectionP99Ms: Number(percentile(latencies, 0.99).toFixed(2)),
+    heldAcrossHeartbeat: holdMs >= 15_000,
+  },
+  failureSamples: failures.slice(0, 20),
 };
-
-// -------------------------------------------------------------
-// 3. 10,000 Concurrent Active Sessions
-// -------------------------------------------------------------
-console.log("\n[3/4] Certifying 10,000 Concurrent Active Sessions...");
-const NUM_SESSIONS = 10_000;
-const memBefore = process.memoryUsage().heapUsed;
-const t0Sess = performance.now();
-
-const sessions = [];
-for (let i = 0; i < NUM_SESSIONS; i++) {
-  sessions.push({
-    sessionId: `sess_${i.toString(36)}`,
-    workspaceId: `ws_${i % 50}`,
-    companyId: `comp_${i % 100}`,
-    contextType: "company",
-    lastPing: Date.now(),
-  });
-}
-const sessCreationTimeMs = performance.now() - t0Sess;
-const memAfter = process.memoryUsage().heapUsed;
-const memDeltaMB = (memAfter - memBefore) / (1024 * 1024);
-
-console.log(`  ✓ 10,000 Active Sessions Created in ${sessCreationTimeMs.toFixed(2)}ms`);
-console.log(`  ✓ Memory Delta: ${memDeltaMB.toFixed(2)} MB (SLO < 50MB)`);
-
-benchmarkResults.results.sessions = {
-  total: NUM_SESSIONS,
-  creationTimeMs: sessCreationTimeMs,
-  memoryDeltaMB: memDeltaMB,
-  sloPassed: memDeltaMB < 50.0,
-};
-
-// -------------------------------------------------------------
-// 4. 10,000 SSE Streaming Connections with Backpressure
-// -------------------------------------------------------------
-console.log("\n[4/4] Certifying 10,000 SSE Streams with Backpressure...");
-const NUM_STREAMS = 10_000;
-let backpressureHits = 0;
-let completed = 0;
-let droppedFrames = 0;
-
-const t0Streams = performance.now();
-for (let i = 0; i < NUM_STREAMS; i++) {
-  if (i % 15 === 0) backpressureHits++;
-  completed++;
-}
-const sseTimeMs = performance.now() - t0Streams;
-
-console.log(`  ✓ Processed ${completed.toLocaleString()} stream frames in ${sseTimeMs.toFixed(2)}ms`);
-console.log(`  ✓ Frame Drops: ${droppedFrames} (Zero Drops Guaranteed)`);
-
-benchmarkResults.results.streaming = {
-  total: NUM_STREAMS,
-  durationMs: sseTimeMs,
-  droppedFrames,
-  sloPassed: droppedFrames === 0,
-};
-
-console.log("\n==========================================================");
-console.log("  SCALE CERTIFICATION STATUS: CERTIFIED (ALL SLOs MET)    ");
-console.log("==========================================================\n");
-
-const outputPath = path.join(rootDir, "packages", "shared", "src", "scale-certification-report.json");
-fs.writeFileSync(outputPath, JSON.stringify(benchmarkResults, null, 2));
-console.log(`Report written to ${outputPath}`);
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify(report, null, 2));
+if (!passed) process.exitCode = 1;

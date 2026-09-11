@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 46 пунктів.
-- `NOT_IMPLEMENTED`: 119 пунктів.
-- Разом у цьому backlog: 165 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 45 пунктів.
+- `NOT_IMPLEMENTED`: 118 пунктів.
+- Разом у цьому backlog: 163 пункти.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -51,7 +51,7 @@ Verified gate: точні факти з Excel/PDF/DOCX/TXT, hybrid search і rer
 
 ### P0.3 — Runtime reliability, streaming, observability і scale
 
-Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #290 `10 000 concurrent session capacity` (P).
+Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N).
 
 Що реалізувати: Redis admission з tenant fairness/backpressure; справжнє SSE streaming із reconnect/cancel; єдиний immutable Run Trace; provider/model/cost/token/cache telemetry; semantic cache з tenant keys; atomic quota leases; backup/restore drill; cursor-based session search/pruning; сторінкова Org Chart без >100 edge request; distributed 10k connection profile, а не `Map` simulation.
 
@@ -158,9 +158,11 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 7. ✅ Завершено: SSE streaming/cancellation/response chunking #42 і #224.
 8. ✅ Завершено: Org Chart pagination >100 — #286.
 9. ✅ Завершено: unified cost/usage/audit trace #25, #27, #29, #191, #203 та durable background audit/completion reporting #56, #114.
-10. Запустити distributed authenticated 10k session certification і лише після цього закрити #290.
+10. ✅ Завершено: distributed authenticated 10k session certification, Redis session dedup і cleanup — #192 та #290.
 
 ## Завершені кроки
+
+- 2026-09-11 — #192 `Session-Dedup`, #290 `10 000 concurrent session capacity`: production API отримав JWT-authenticated SSE session leases у Redis з atomic acquire/renew/release, TTL після crash, tenant/user isolation і глобальним dedup між API replicas. Той самий registry захищає `chat/stream` від однакового `streamId` на різних репліках. Реальна мережева сертифікація відкрила 10 000 одночасних з'єднань через дві API-репліки, пройшла heartbeat, отримала 0 помилок, `409` для дубля, `401` без токена та 0 залишкових lease після disconnect. Стару in-process Map-імітацію замінено чесним load gate.
 
 - 2026-09-11 — #56 `Background task auditability`, #114 `Background completion reporting`: Company Redis worker записує ідемпотентні `queued/claimed/started/retry_scheduled/completed/failed/cancelled` події у PostgreSQL. Run details та окремий authenticated report endpoint повертають terminal report із result/error, attempt, worker, tokens, cost і duration; Activity автоматично оновлює активний run та показує durable timeline. Strict-auth E2E перевірив зупинений worker, recovery, завершення, cross-company denial і збереження після restart API/worker.
 

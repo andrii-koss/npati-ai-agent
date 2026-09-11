@@ -50,6 +50,8 @@ import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
 import {CostTelemetry} from "./cost-telemetry";
+import { InMemoryActiveSessionRegistry, RedisActiveSessionRegistry, type ActiveSessionLease, type ActiveSessionRegistry } from "./distributed-session-registry";
+import { registerSessionStreamRoutes } from "./session-stream-routes";
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
   for(let offset=0;offset<value.length;){
@@ -111,6 +113,7 @@ export interface AppConfig {
   fileMetadataRepository?: FileMetadataRepository;
   storageProtection?: StorageProtection;
   storageReconcilerOptions?: StorageReconcilerOptions;
+  activeSessionRegistry?: ActiveSessionRegistry;
 }
 
 function inferOnboardingScenario(message: string): OnboardingScenario {
@@ -261,6 +264,8 @@ async function prepareChatAttachments(aiEngine: AIEngine, message: string, attac
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
   const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
+  const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
+  app.addHook("onClose", async () => { await activeSessionRegistry.close(); });
   const aiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
@@ -505,6 +510,7 @@ export function buildApp(config: AppConfig = {}) {
     return reply.send(error);
   });
   registerAuthRoutes(app, { authClient, workspaceStore, authProvider });
+  registerSessionStreamRoutes(app, authProvider, activeSessionRegistry);
   registerAIRoutes(app, marketplace, aiPreferences, authProvider, aiEngine);
   registerRuntimeCompatRoutes(app, aiEngine, authProvider);
   registerWorkspaceRoutes(app, workspaceStore, authProvider, aiPreferences, {
@@ -929,8 +935,11 @@ export function buildApp(config: AppConfig = {}) {
       }
 
       const streamController=new AbortController();
+      let distributedChatLease:ActiveSessionLease|undefined;
       if(streamId){
         if(activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active."}});
+        distributedChatLease=await activeSessionRegistry.acquire(auth.workspaceId,auth.userId,`chat:${streamId}`,45);
+        if(!distributedChatLease)return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active on another API replica."}});
         activeChatStreams.set(streamId,{controller:streamController,workspaceId:auth.workspaceId,userId:auth.userId});
       }
       reply.hijack();
@@ -950,6 +959,7 @@ export function buildApp(config: AppConfig = {}) {
       };
       const heartbeat = setInterval(() => {
         if (!reply.raw.destroyed) reply.raw.write(": heartbeat\n\n");
+        if(distributedChatLease)void activeSessionRegistry.renew(auth.workspaceId,auth.userId,distributedChatLease,45);
       }, 15_000);
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
@@ -1001,6 +1011,7 @@ export function buildApp(config: AppConfig = {}) {
         send("error", { error: { code: error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
         if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
+        if(distributedChatLease)await activeSessionRegistry.release(auth.workspaceId,auth.userId,distributedChatLease).catch(()=>false);
         clearInterval(heartbeat);
         reply.raw.end();
       }
