@@ -54,7 +54,13 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
       if(!guardRoute(ctx,reply))return;
       if (queue) {
         const created = await runtime.create(ctx, request.params.companyId, request.body, key(request));
-        if (created.created || created.run.status === "queued") await queue.enqueue({ context: ctx, companyId: request.params.companyId, runId: created.run.id });
+        if (created.created || created.run.status === "queued") {
+          await runtime.recordBackgroundEvent(ctx, request.params.companyId, created.run.id, {
+            eventKey: "queued", eventType: "queued", runStatus: "queued", attemptCount: created.run.attemptCount,
+            message: "Background run queued for worker processing",
+          });
+          await queue.enqueue({ context: ctx, companyId: request.params.companyId, runId: created.run.id });
+        }
         return reply.code(202).send(await runtime.get(ctx, request.params.companyId, created.run.id));
       }
       const result = await runtime.execute(ctx, request.params.companyId, request.body, key(request));
@@ -76,6 +82,15 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
       const ctx = await context(auth, request, "workspace:read");
       if(!guardRoute(ctx,reply))return;
       return await runtime.get(ctx, request.params.companyId, request.params.runId);
+    } catch (error) { return failure(reply, error); }
+  });
+  app.get<{ Params: { companyId: string; runId: string } }>("/companies/:companyId/runs/:runId/report", async (request, reply) => {
+    try {
+      const ctx = await context(auth, request, "workspace:read");
+      if(!guardRoute(ctx,reply))return;
+      const details = await runtime.get(ctx, request.params.companyId, request.params.runId);
+      if (!details.completionReport) return reply.code(202).send({ report: null, status: details.run.status });
+      return { report: details.completionReport };
     } catch (error) { return failure(reply, error); }
   });
   app.post<{ Params: { companyId: string; runId: string } }>("/companies/:companyId/runs/:runId/cancel", async (request, reply) => {

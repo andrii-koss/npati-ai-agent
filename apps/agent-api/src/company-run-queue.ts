@@ -151,15 +151,41 @@ export class CompanyRunQueueWorker {
         return;
       }
       if (!claimed) { await this.client!.sendCommand(["XACK",STREAM,GROUP,message.id]); return; }
+      const claimedRun = (await this.runtime.get(context, companyId, runId)).run;
+      await this.runtime.recordBackgroundEvent(context, companyId, runId, {
+        eventKey: `attempt:${claimedRun.attemptCount}:claimed`, eventType: "claimed", runStatus: "planning",
+        workerId: consumer, attemptCount: claimedRun.attemptCount, message: "Background worker claimed the run",
+        details: { leaseMs: this.leaseMs },
+      });
       const heartbeat = setInterval(() => void this.store.heartbeatCompanyAgentRun(context, companyId, runId, consumer, this.leaseMs), Math.max(5000, this.leaseMs / 3));
       heartbeat.unref();
       try {
+        await this.runtime.recordBackgroundEvent(context, companyId, runId, {
+          eventKey: `attempt:${claimedRun.attemptCount}:started`, eventType: "started", runStatus: "running",
+          workerId: consumer, attemptCount: claimedRun.attemptCount, message: "Background worker started Company execution",
+        });
         const result = await this.runtime.process(context, companyId, runId);
         const nonRetryable = new Set(["TOOL_FORBIDDEN","APPROVAL_REQUIRED","APPROVAL_INVALID","APPROVAL_ALREADY_USED","APPROVAL_EXPIRED","RUN_CANCELLED","INVALID_DELEGATION_PLAN","CROSS_COMPANY_AGENT_SELECTION","PERMISSION_REVOKED","CONTEXT_DELETED","COMPANY_INACTIVE","MAIN_AGENT_INACTIVE","AGENT_DELETED"]);
         if (result.run.status === "failed" && !nonRetryable.has(result.run.errorCode ?? "")
           && result.run.attemptCount < result.run.maxAttempts) {
           const delay = Math.min(30_000, 1000 * 2 ** Math.max(0, result.run.attemptCount - 1));
-          await this.store.requeueCompanyAgentRun(context, companyId, runId, consumer, delay);
+          if (await this.store.requeueCompanyAgentRun(context, companyId, runId, consumer, delay)) {
+            await this.runtime.recordBackgroundEvent(context, companyId, runId, {
+              eventKey: `attempt:${result.run.attemptCount}:retry`, eventType: "retry_scheduled", runStatus: "queued",
+              workerId: consumer, attemptCount: result.run.attemptCount, message: "Background run scheduled for retry",
+              details: { delayMs: delay, errorCode: result.run.errorCode ?? "RUN_FAILED" },
+            });
+          }
+        } else if (["completed", "failed", "cancelled"].includes(result.run.status)) {
+          const terminalStatus = result.run.status as "completed" | "failed" | "cancelled";
+          await this.runtime.recordBackgroundEvent(context, companyId, runId, {
+            eventKey: `terminal:${terminalStatus}`, eventType: terminalStatus, runStatus: terminalStatus,
+            workerId: consumer, attemptCount: result.run.attemptCount,
+            message: terminalStatus === "completed" ? "Background run completed and completion report is available"
+              : terminalStatus === "cancelled" ? "Background run cancelled" : "Background run failed",
+            details: { errorCode: result.run.errorCode ?? null, totalTokens: result.run.totalTokens ?? 0,
+              totalCost: result.run.totalCost ?? 0, totalDurationMs: result.run.totalDurationMs ?? 0 },
+          });
         }
       } finally {
         clearInterval(heartbeat);

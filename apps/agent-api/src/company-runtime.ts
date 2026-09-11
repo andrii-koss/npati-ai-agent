@@ -356,18 +356,30 @@ export class CompanyDelegationRuntime {
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
   }
 
+  async recordBackgroundEvent(ctx: AuthContext, companyId: string, runId: string, entry: Parameters<WorkspaceStore["appendCompanyAgentRunEvent"]>[3]) {
+    return this.store.appendCompanyAgentRunEvent(ctx, companyId, runId, entry);
+  }
+
   async cancel(ctx: AuthContext, companyId: string, runId: string) {
     const current = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (["completed", "failed", "cancelled"].includes(current.run.status)) return current;
     if (current.run.status === "queued") {
       await this.store.updateCompanyAgentRun(ctx, companyId, runId, { status: "cancelled", cancelRequested: true, errorCode: "RUN_CANCELLED", errorMessage: "Company run was cancelled" });
+      const cancelled = await this.store.getCompanyAgentRun(ctx, companyId, runId);
+      await this.recordBackgroundEvent(ctx, companyId, runId, { eventKey: "cancelled", eventType: "cancelled", runStatus: "cancelled",
+        workerId: cancelled.run.workerId, attemptCount: cancelled.run.attemptCount, message: "Background run cancelled by user",
+        details: { errorCode: "RUN_CANCELLED" } });
       return this.store.getCompanyAgentRun(ctx, companyId, runId);
     }
     await this.store.updateCompanyAgentRun(ctx, companyId, runId, { status: "cancelling", cancelRequested: true });
     this.controllers.get(runId)?.abort();
     if (current.run.omnirouteTaskId && this.ai.cancelA2ATask)
       await this.ai.cancelA2ATask(current.run.omnirouteTaskId).catch(() => undefined);
-    return this.store.getCompanyAgentRun(ctx, companyId, runId);
+    const cancelling = await this.store.getCompanyAgentRun(ctx, companyId, runId);
+    await this.recordBackgroundEvent(ctx, companyId, runId, { eventKey: `attempt:${cancelling.run.attemptCount}:cancelling`,
+      eventType: "cancelled", runStatus: "cancelling", workerId: cancelling.run.workerId,
+      attemptCount: cancelling.run.attemptCount, message: "Cancellation requested for active background run" });
+    return cancelling;
   }
 
   private async recordInference(

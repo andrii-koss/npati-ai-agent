@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -50,6 +50,9 @@ const companyToolAuditColumns = `id, workspace_id AS "workspaceId", company_id A
   agent_id AS "agentId", tool_name AS "toolName", decision, status, input_summary AS "inputSummary",
   error_message AS "errorMessage", latency_ms AS "latencyMs", cost::float, tokens::float,
   reason_code AS "reasonCode", sequence_number AS "sequenceNumber", created_at AS "createdAt", completed_at AS "completedAt"`;
+const companyRunEventColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
+  event_key AS "eventKey", event_type AS "eventType", run_status AS "runStatus", worker_id AS "workerId",
+  attempt_count AS "attemptCount", message, details, created_at AS "createdAt"`;
 
 import migration004 from './migration-004';
 import migration005 from './migration-005';
@@ -65,6 +68,7 @@ import migration014 from './migration-014';
 import migration015 from './migration-015';
 import migration016 from './migration-016';
 import migration017 from './migration-017';
+import migration030 from './migration-030';
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 type StoredUserSetting = import('./types').UserSetting;
 
@@ -151,6 +155,12 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         await client.query('COMMIT');
       } catch (error) { await client.query('ROLLBACK'); throw error; }
       finally { client.release(); }
+    }
+    const backgroundAuditMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='030_company_background_run_events'`);
+    if (!backgroundAuditMigration.rowCount) {
+      const client = await this.pool.connect();
+      try { await client.query('BEGIN'); await client.query(migration030); await client.query(`INSERT INTO schema_migrations(version) VALUES ('030_company_background_run_events') ON CONFLICT DO NOTHING`); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     }
     await this.pool.query("ALTER TABLE company_agent_runs ADD COLUMN IF NOT EXISTS context_snapshot jsonb").catch(() => undefined);
     const fileStorageMigration = await this.pool.query(`SELECT 1 FROM schema_migrations WHERE version='010_central_file_metadata'`);
@@ -832,13 +842,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const result = await this.pool.query<CompanyAgentRun>(`SELECT ${companyRunColumns} FROM company_agent_runs
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4`, [runId, context.workspaceId, companyId, context.userId]);
     if (!result.rows[0]) throw new WorkspaceAccessError("Agent run is not available in this company");
-    const [steps, toolAudit] = await Promise.all([
+    const [steps, toolAudit, backgroundEvents] = await Promise.all([
       this.pool.query<CompanyAgentRunStep>(`SELECT ${companyRunStepColumns} FROM company_agent_run_steps
         WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 ORDER BY step_order,lane,id`, [context.workspaceId, companyId, runId]),
       this.pool.query<CompanyAgentToolAudit>(`SELECT ${companyToolAuditColumns} FROM company_agent_tool_audit
         WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 ORDER BY created_at,id`, [context.workspaceId, companyId, runId]),
+      this.pool.query<CompanyAgentRunEvent>(`SELECT ${companyRunEventColumns} FROM company_agent_run_events
+        WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 ORDER BY created_at,id`, [context.workspaceId, companyId, runId]),
     ]);
-    return { run: result.rows[0], steps: steps.rows, toolAudit: toolAudit.rows };
+    const run = result.rows[0];
+    const completionStatus = run.status === "completed" || run.status === "failed" || run.status === "cancelled" ? run.status : undefined;
+    return { run, steps: steps.rows, toolAudit: toolAudit.rows, backgroundEvents: backgroundEvents.rows,
+      completionReport: completionStatus && run.completedAt ? { runId: run.id, companyId: run.companyId, status: completionStatus,
+        result: run.result, errorCode: run.errorCode, errorMessage: run.errorMessage, workerId: run.workerId,
+        attemptCount: run.attemptCount, totalCost: run.totalCost ?? 0, totalTokens: run.totalTokens ?? 0,
+        totalDurationMs: run.totalDurationMs ?? 0, completedAt: run.completedAt } : undefined };
   }
 
   async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
@@ -903,6 +921,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         entry.status, JSON.stringify(entry.inputSummary ?? {}), entry.errorMessage ?? null, entry.latencyMs ?? null,
         entry.cost ?? null, entry.tokens ?? null, entry.reasonCode ?? null, entry.sequenceNumber ?? null]);
     return result.rows[0]!;
+  }
+
+  async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    const values = [randomUUID(), context.workspaceId, companyId, runId, entry.eventKey, entry.eventType, entry.runStatus,
+      entry.workerId ?? null, entry.attemptCount ?? run.attemptCount, entry.message.slice(0, 1000), JSON.stringify(entry.details ?? {})];
+    const inserted = await this.pool.query<CompanyAgentRunEvent>(`INSERT INTO company_agent_run_events(
+      id,workspace_id,company_id,run_id,event_key,event_type,run_status,worker_id,attempt_count,message,details)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+      ON CONFLICT (run_id,event_key) DO NOTHING RETURNING ${companyRunEventColumns}`, values);
+    if (inserted.rows[0]) return inserted.rows[0];
+    const existing = await this.pool.query<CompanyAgentRunEvent>(`SELECT ${companyRunEventColumns} FROM company_agent_run_events
+      WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 AND event_key=$4`, [context.workspaceId, companyId, runId, entry.eventKey]);
+    if (!existing.rows[0]) throw new Error("Could not append Company background run event");
+    return existing.rows[0];
   }
 
 
