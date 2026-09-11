@@ -2941,12 +2941,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/quota-share-transparency-session-dedup.test.ts",
-      "tests/web-research.test.ts"
+      "tests/distributed-session-registry.test.ts",
+      "tests/session-stream-routes.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 193,
@@ -4466,11 +4466,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/concurrent-session-capacity.test.ts"
+      "tests/distributed-session-registry.test.ts",
+      "tests/session-stream-routes.test.ts",
+      "scripts/run-scale-certification.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 291,

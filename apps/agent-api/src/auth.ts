@@ -56,6 +56,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   private readonly devFallback: LocalDevAuthProvider;
   private readonly allowDevFallback: boolean;
   private readonly initializedWorkspaces = new Set<string>();
+  private readonly initializingWorkspaces = new Map<string, Promise<void>>();
 
   constructor(options: NpatiBackendAuthProviderOptions = {}) {
     this.jwtSecret = options.jwtSecret || process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET;
@@ -95,12 +96,14 @@ export class NpatiBackendAuthProvider implements AuthProvider {
       };
 
       if (this.workspaceStore && !this.initializedWorkspaces.has(workspaceId)) {
-        try {
-          await this.workspaceStore.initialize(authContext);
-          this.initializedWorkspaces.add(workspaceId);
-        } catch {
-          // Workspace may already be initialized or store operates in lazy mode
+        let initializing = this.initializingWorkspaces.get(workspaceId);
+        if (!initializing) {
+          initializing = this.workspaceStore.initialize(authContext)
+            .then(() => { this.initializedWorkspaces.add(workspaceId); }).catch(() => undefined)
+            .finally(() => { this.initializingWorkspaces.delete(workspaceId); });
+          this.initializingWorkspaces.set(workspaceId, initializing);
         }
+        await initializing;
       }
 
       return authContext;
