@@ -47,6 +47,8 @@ import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemer
 import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
+import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
+import {WasmExecSandbox} from "./wasm-exec-sandbox";
 
 export interface AppConfig {
   webOrigin?: string;
@@ -266,7 +268,8 @@ export function buildApp(config: AppConfig = {}) {
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo);
+  const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox());
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -282,11 +285,10 @@ export function buildApp(config: AppConfig = {}) {
         }),
       ]);
       return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
-    } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId));
+    } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo);
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = config.databaseUrl ? new CompanyAutomationsRepository(config.databaseUrl) : undefined;
-  const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
   const integrationsRepo = config.databaseUrl ? new IntegrationsRepository(config.databaseUrl) : undefined;
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
@@ -464,6 +466,7 @@ export function buildApp(config: AppConfig = {}) {
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: automationsRepo });
   if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
+  registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);

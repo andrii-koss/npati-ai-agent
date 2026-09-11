@@ -608,9 +608,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/oauth-tokens-and-route-tiers.test.ts",
-      "tests/pii-and-subagents.test.ts"
+      "tests/pii-and-subagents.test.ts",
+      "tests/production-durable-approvals.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 40,
@@ -623,9 +624,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/oauth-tokens-and-route-tiers.test.ts",
-      "tests/security-auth-vault-scopes.test.ts"
+      "tests/security-auth-vault-scopes.test.ts",
+      "tests/production-mcp-policy.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 41,
@@ -735,9 +737,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/sandboxing-and-format-translation.test.ts"
+      "tests/sandboxing-and-format-translation.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 48,
@@ -750,9 +753,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/group-sessions-and-tool-policy.test.ts",
-      "tests/multi-user-dm-pairing-subagents.test.ts"
+      "tests/multi-user-dm-pairing-subagents.test.ts",
+      "tests/production-mcp-policy.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 49,
@@ -764,9 +768,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "high",
     "testType": "integration",
     "testFiles": [
-      "tests/human-approvals.test.ts"
+      "tests/human-approvals.test.ts",
+      "tests/production-durable-approvals.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 50,
@@ -823,9 +829,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/sandboxing-and-format-translation.test.ts"
+      "tests/sandboxing-and-format-translation.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 54,
@@ -837,9 +844,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/human-approvals.test.ts"
+      "tests/human-approvals.test.ts",
+      "tests/production-durable-approvals.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 55,
@@ -968,9 +976,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/auto-reviewer-and-fts-memory.test.ts",
-      "tests/company-runtime.test.ts"
+      "tests/company-runtime.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 64,
@@ -1585,9 +1594,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/background-jobs-and-mcp-server.test.ts",
       "tests/company-knowledge.test.ts",
-      "tests/storage-protection.test.ts"
+      "tests/storage-protection.test.ts",
+      "tests/production-mcp-policy.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 103,
@@ -2412,9 +2422,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/automation-scheduler.test.ts",
       "tests/human-approvals.test.ts",
       "tests/memory-import-codemode-clawhub.test.ts",
-      "tests/tools-exec-process-search.test.ts"
+      "tests/tools-exec-process-search.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 160,
@@ -2427,9 +2438,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/memory-import-codemode-clawhub.test.ts",
-      "tests/tools-exec-process-search.test.ts"
+      "tests/tools-exec-process-search.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 161,
@@ -3725,9 +3737,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/radar-videogen-remote-cli.test.ts",
       "tests/sandboxing-and-format-translation.test.ts",
       "tests/scoped-memory-and-user-model.test.ts",
-      "tests/web-research.test.ts"
+      "tests/web-research.test.ts",
+      "tests/production-wasm-exec.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 245,

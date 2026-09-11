@@ -5705,6 +5705,45 @@ a {
   min-height: 46px;
 }
 
+.company-approval-box {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.company-approval-box > span:nth-child(2) {
+  flex: 1;
+}
+
+.company-approval-preview {
+  background: #fff;
+  border: 1px solid rgba(210, 54, 55, 0.22);
+  border-radius: 8px;
+  display: block;
+  font-size: 12px;
+  margin-top: 7px;
+  max-width: 720px;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+
+.company-approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.company-approval-actions button {
+  min-height: 40px;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.company-approval-actions button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
 .company-run-result {
   margin-top: 16px;
   border-left: 3px solid #d93438;

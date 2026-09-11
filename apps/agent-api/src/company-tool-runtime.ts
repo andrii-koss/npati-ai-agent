@@ -3,6 +3,9 @@ import type { AuthContext, Company } from "@npati/workspace";
 import type { DefaultWebResearchProvider } from "@npati/web-research";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { McpScopeGuard } from "./mcp-scopes";
+import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
+import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -17,10 +20,20 @@ export interface CompanyMemoryToolRepository {
   deleteMemory(context:AuthContext,companyId:string,id:string):Promise<boolean>;
 }
 
-const SAFE_MCP_TOOLS = new Set([
+export const SAFE_MCP_TOOLS = new Set([
   "omniroute_tool_search", "omniroute_get_health", "omniroute_list_models_catalog",
   "omniroute_agent_skills_list", "omniroute_agent_skills_get", "omniroute_agent_skills_coverage",
 ]);
+
+export function authorizeCompanyMcp(context:AuthContext,name:string){
+  if(!SAFE_MCP_TOOLS.has(name))throw Object.assign(new Error(`MCP tool "${name}" is not permitted for Company Agents`),{status:403,code:"MCP_TOOL_DENIED"});
+  const grantedScopes=context.apiKeyId
+    ? context.permissions.filter(permission=>permission==="*"||permission==="all"||permission.startsWith("mcp:"))
+    : ["mcp:read"];
+  const decision=McpScopeGuard.authorize({toolName:name,action:"read",grantedScopes});
+  if(!decision.granted)throw Object.assign(new Error(decision.reason??"MCP scope denied"),{status:403,code:"MCP_SCOPE_DENIED",requiredScope:decision.requiredScope});
+  return decision;
+}
 
 function text(value: unknown, field: string, max = 2_000) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
@@ -37,6 +50,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly attachmentDirectory?: string,
     private readonly attachmentReader?: { authorize(context: AuthContext, fileId: string): Promise<{ originalFilename: string; mimeType: string; sizeBytes: number } | null> },
     private readonly memoryRepository?: CompanyMemoryToolRepository,
+    private readonly execSandbox?: IsolatedExecSandbox,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -86,11 +100,30 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     if (tool === "mcp") {
       if (!this.ai.mcpCall) throw new Error("OmniRoute MCP runtime is unavailable");
       const name = text(input.name ?? input.toolName, "MCP tool name", 200);
-      if (!SAFE_MCP_TOOLS.has(name)) throw new Error(`MCP tool "${name}" is not permitted for Company Agents`);
+      authorizeCompanyMcp(context,name);
       return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });
     }
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
+    if (tool === "exec") {
+      if (!this.execSandbox) throw new Error("Isolated Exec runtime is not configured");
+      if (company.workspaceId !== context.workspaceId || company.userId !== context.userId) throw new Error("Exec tenant access denied");
+      const canManage = context.permissions.includes("business:manage") || context.permissions.includes("owner") || context.permissions.includes("*");
+      if (!canManage) throw new Error("Exec requires business:manage permission");
+      const language = typeof input.language === "string" ? input.language : "javascript";
+      if (typeof input.code !== "string" || !input.code.trim()) throw new Error("Exec code is required");
+      const code = input.code.trim();
+      const codeMode = new CodeModePolicyController();
+      codeMode.enable();
+      const validation = codeMode.validateExecution(code, language);
+      if (!validation.allowed) throw new Error(`Code Mode blocked execution: ${validation.lintWarnings.join("; ")}`);
+      const result = await this.execSandbox.execute({
+        language,
+        code,
+        timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
+      }, signal);
+      return { ...result, codeMode: true, validationWarnings: validation.lintWarnings };
+    }
     throw new Error(`Tool "${tool}" has no runtime adapter`);
   }
 
