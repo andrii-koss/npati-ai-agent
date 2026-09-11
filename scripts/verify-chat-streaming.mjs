@@ -10,7 +10,7 @@ const conversationResponse=await fetch(apiBase+"/conversations",{method:"POST",h
 const conversation=await conversationResponse.json();
 if(!conversationResponse.ok)throw new Error("Could not create neutral conversation: "+JSON.stringify(conversation));
 
-let browser;
+let browser,businessId;
 try{
   browser=await chromium.launch({channel:"msedge",headless:true});
   const page=await browser.newPage();
@@ -25,8 +25,24 @@ try{
   const payload=outgoing.postDataJSON();
   await page.getByText("STREAM-WEBCHAT-OK",{exact:false}).last().waitFor({timeout:150_000});
   if(payload.contextType!=="none"||payload.noMemory!==true)throw new Error("WebChat sent an incorrect streaming payload: "+JSON.stringify(payload));
-  console.log(JSON.stringify({webChatRenderedStreamedAnswer:true,endpoint:"/api/chat/stream",contextType:payload.contextType,noMemory:payload.noMemory},null,2));
+
+  const businessResponse=await fetch(apiBase+"/businesses",{method:"POST",headers,body:JSON.stringify({name:"Streaming cancellation verification "+Date.now(),businessStage:"operating"})});
+  const business=await businessResponse.json();if(!businessResponse.ok)throw new Error("Could not create cancellation business: "+JSON.stringify(business));businessId=business.id;
+  const businessConversationResponse=await fetch(apiBase+`/businesses/${businessId}/conversations`,{method:"POST",headers,body:JSON.stringify({title:"Cancellation verification"})});
+  const businessConversation=await businessConversationResponse.json();if(!businessConversationResponse.ok)throw new Error("Could not create business conversation: "+JSON.stringify(businessConversation));
+  await page.goto(webBase+"/c/"+businessConversation.id,{waitUntil:"networkidle"});
+  const cancellationRequest=page.waitForRequest(request=>request.url().includes("/api/chat/stream")&&request.method()==="POST");
+  await page.locator("textarea").last().fill("Write a very long plain-text answer of at least 2000 words.");
+  await page.getByRole("button",{name:/Send/}).last().click();await cancellationRequest;
+  const stop=page.getByRole("button",{name:"Stop"}).last();await stop.waitFor();await stop.click();
+  await page.waitForTimeout(6_000);
+  const historyResponse=await fetch(apiBase+`/businesses/${businessId}/conversations/${businessConversation.id}`,{headers});
+  const history=await historyResponse.json();if(!historyResponse.ok)throw new Error("Could not inspect cancellation history: "+JSON.stringify(history));
+  const roles=history.messages.map(message=>message.role);
+  if(roles.includes("assistant"))throw new Error("Stop failed: a late assistant response was persisted: "+JSON.stringify(roles));
+  console.log(JSON.stringify({webChatRenderedStreamedAnswer:true,endpoint:"/api/chat/stream",contextType:payload.contextType,noMemory:payload.noMemory,businessStopCancelledProvider:true,lateAssistantPersisted:false},null,2));
 }finally{
   await browser?.close().catch(()=>undefined);
+  if(businessId)await fetch(apiBase+"/businesses/"+businessId,{method:"DELETE",headers}).catch(()=>undefined);
   await fetch(apiBase+"/conversations/"+conversation.id,{method:"DELETE",headers}).catch(()=>undefined);
 }

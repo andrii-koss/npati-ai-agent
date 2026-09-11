@@ -6,7 +6,7 @@ import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
-import { streamChat } from "./chat-stream";
+import { cancelChatStream, streamChat } from "./chat-stream";
 
 type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -537,7 +537,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const pageStartPendingRef = useRef(false);
   const progressTimerRef = useRef<number | null>(null);
   const nextProgressRevealRef = useRef(0);
-  const streamControllerRef=useRef<AbortController|null>(null);
+  const streamControllerRef=useRef<{controller:AbortController;streamId:string}|null>(null);
   const suggestions = useMemo(
     () => business
       ? ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"]
@@ -578,7 +578,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, [messages, activeTurn]);
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
-    streamControllerRef.current?.abort();
+    streamControllerRef.current?.controller.abort();
   }, []);
   function drainProgressQueue() {
     const delay = Math.max(0, nextProgressRevealRef.current - Date.now());
@@ -674,7 +674,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     resetProgress();
     setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     const assistantId=crypto.randomUUID();let receivedDelta=false;
-    const controller=new AbortController();streamControllerRef.current=controller;
+    const controller=new AbortController(),streamId=crypto.randomUUID();streamControllerRef.current={controller,streamId};
     try {
       const result = await streamChat<AgentReply>({
         message,
@@ -682,6 +682,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         attachments: sentAttachments,
         contextType: business ? "business" : "none",
         noMemory: privateRequest,
+        streamId,
       }, enqueueProgress,{signal:controller.signal,onDelta:(delta)=>{
         receivedDelta=true;setStreamingResponse(true);
         setMessages(current=>{const found=current.some(item=>item.id===assistantId);return found?current.map(item=>item.id===assistantId?{...item,content:item.content+delta}:item):[...current,{id:assistantId,role:"assistant",content:delta,createdAt:new Date().toISOString()}];});
@@ -718,7 +719,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
         setInput(message); setAttachments(sentAttachments);
       }
-    } finally { if(streamControllerRef.current===controller)streamControllerRef.current=null;setSending(false);setStreamingResponse(false); }
+    } finally { if(streamControllerRef.current?.controller===controller)streamControllerRef.current=null;setSending(false);setStreamingResponse(false); }
   }
   async function remember() {
     if (!business || !replyMeta?.memoryCandidate) return;
@@ -756,7 +757,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           </label>
           <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
-          <div>{sending?<button type="button" onClick={()=>streamControllerRef.current?.abort()}>Stop</button>:<button disabled={!input.trim() && attachments.length === 0}>Send →</button>}</div>
+          <div>{sending?<button type="button" onClick={()=>{const active=streamControllerRef.current;if(active)void cancelChatStream(active.streamId).finally(()=>active.controller.abort(new DOMException("Stopped","AbortError")));}}>Stop</button>:<button disabled={!input.trim() && attachments.length === 0}>Send →</button>}</div>
         </form>
       </div>
     </>

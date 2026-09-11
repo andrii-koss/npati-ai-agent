@@ -28,6 +28,7 @@ export async function streamChat<T>(
     companyId?: string;
     noMemory?: boolean;
     ephemeral?: boolean;
+    streamId?:string;
   },
   onProgress: (event: ChatProgressEvent) => void,
   options: { onDelta?: (delta:string)=>void; signal?:AbortSignal } = {},
@@ -87,4 +88,13 @@ export async function streamChat<T>(
   }
   if (result === undefined) throw new Error("The agent stream ended before returning a response.");
   return result;
+}
+
+export async function cancelChatStream(streamId:string){
+  const token=localStorage.getItem("npati_agent_access_token");
+  try{
+    const response=await fetch("/api/chat/streams/"+encodeURIComponent(streamId)+"/cancel",{method:"POST",headers:{...(token?{authorization:`Bearer ${token}`}:{})},keepalive:true});
+    const payload=await response.json().catch(()=>null) as {cancelled?:boolean}|null;
+    return response.ok&&payload?.cancelled===true;
+  }catch{return false;}
 }

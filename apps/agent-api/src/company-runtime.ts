@@ -109,18 +109,18 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto" }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope }, key: string): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, signal });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; approvalId?:string } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; approvalId?:string;signal?:AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
     const controller = new AbortController(), timeout = AbortSignal.timeout(this.timeoutMs);
-    const signal = AbortSignal.any([controller.signal, timeout]);
+    const signal = AbortSignal.any([controller.signal, timeout,...(options.signal?[options.signal]:[])]);
     this.controllers.set(created.run.id, controller);
     try {
       if (!this.ai.a2aSend || !this.ai.ensureCombo || !this.ai.ensureA2AEnabled)
@@ -295,7 +295,7 @@ export class CompanyDelegationRuntime {
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { status: "completed", result: result.content, errorCode:"", errorMessage:"" });
     } catch (error) {
       const current = await this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-      const cancelled = current.run.cancelRequested || controller.signal.aborted, timedOut = !cancelled && timeout.aborted;
+      const cancelled = current.run.cancelRequested || controller.signal.aborted || Boolean(options.signal?.aborted), timedOut = !cancelled && timeout.aborted;
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
         status: cancelled ? "cancelled" : "failed",
         errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : error instanceof SecurityPolicyViolation ? error.code : "RUN_FAILED",

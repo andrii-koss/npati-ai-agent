@@ -659,6 +659,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts",
       "tests/agent-api.test.ts",
+      "tests/company-runtime.test.ts",
       "tests/web-chat-stream-client.test.ts"
     ],
     "status": "VERIFIED_EXISTING"

@@ -238,6 +238,7 @@ async function prepareChatAttachments(aiEngine: AIEngine, message: string, attac
 
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
   const aiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
@@ -330,7 +331,9 @@ export function buildApp(config: AppConfig = {}) {
     progress?: ResearchProgressListener,
     attachments: ChatAttachmentInput[] = [],
     memoryPolicy: NoMemoryEvaluationResult = PerRequestNoMemoryGate.evaluate(),
+    signal?:AbortSignal,
   ) {
+    if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const media = await prepareChatAttachments(aiEngine, message, attachments);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
     let conversation = memoryPolicy.noMemoryActive
@@ -389,6 +392,7 @@ export function buildApp(config: AppConfig = {}) {
           /\b(refresh|analyze again)\b|\u043e\u043d\u043e\u0432\u0438|\u043f\u043e\u0432\u0442\u043e\u0440\u0438\s+\u0430\u043d\u0430\u043b\u0456\u0437/iu.test(message),
           progress,
         );
+        if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
         if (researchJob) {
           await researchBundle?.jobs.update(scope, researchJob.id, {
             status: "completed",
@@ -402,8 +406,10 @@ export function buildApp(config: AppConfig = {}) {
         research = { kind: "web_search" as const, context: "Web research failed safely. Explain the limitation and do not fabricate findings. Error: " + detail, sources: [], degraded: detail };
       }
     }
+    if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     progress?.({ type: "final_generation_started" });
-    const result = await agent.handleBusinessMessage({ message: safePrompt, context, history: memoryPolicy.readAllowed ? existing.messages.map(item=>({...item,content:SecurityPolicyEngine.protectText(item.content).sanitized})) : [], research: research ? SecurityPolicyEngine.protectObject(research) : undefined, images: media.images });
+    const result = await agent.handleBusinessMessage({ message: safePrompt, context, history: memoryPolicy.readAllowed ? existing.messages.map(item=>({...item,content:SecurityPolicyEngine.protectText(item.content).sanitized})) : [], research: research ? SecurityPolicyEngine.protectObject(research) : undefined, images: media.images, signal });
+    if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
     return { ...result, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive };
@@ -608,6 +614,15 @@ export function buildApp(config: AppConfig = {}) {
       request.log.error(error);
       return reply.code(500).send({ error: { code: "RESEARCH_JOB_ERROR", message: "Could not load research job." } });
     }
+  });
+
+  app.post<{Params:{streamId:string}}>("/chat/streams/:streamId/cancel",async(request,reply)=>{
+    const auth=await authProvider.authenticate(request);
+    const active=activeChatStreams.get(request.params.streamId);
+    if(!active)return {cancelled:false};
+    if(active.workspaceId!==auth.workspaceId||active.userId!==auth.userId)return reply.code(403).send({error:{code:"STREAM_FORBIDDEN",message:"This chat stream belongs to another user."}});
+    active.controller.abort(new DOMException("Stopped by user","AbortError"));
+    return {cancelled:true};
   });
 
   app.post<{ Body: {
@@ -843,6 +858,7 @@ export function buildApp(config: AppConfig = {}) {
 
   app.post<{ Body: {
     message?: string;
+    streamId?:string;
     conversationId?: string;
     attachments?: ChatAttachmentInput[];
     contextType?: "none" | "business" | "company";
@@ -853,6 +869,8 @@ export function buildApp(config: AppConfig = {}) {
   } }>("/chat/stream", async (request, reply) => {
     try {
       const auth = await authProvider.authenticate(request);
+      const streamId=request.body.streamId?.trim();
+      if(streamId&&!/^[A-Za-z0-9._:-]{8,100}$/.test(streamId))return reply.code(400).send({error:{code:"INVALID_STREAM_ID",message:"Invalid chat stream identifier."}});
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
       if (connected.overview.connectedProviders === 0) {
@@ -874,6 +892,11 @@ export function buildApp(config: AppConfig = {}) {
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
+      const streamController=new AbortController();
+      if(streamId){
+        if(activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active."}});
+        activeChatStreams.set(streamId,{controller:streamController,workspaceId:auth.workspaceId,userId:auth.userId});
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -883,7 +906,6 @@ export function buildApp(config: AppConfig = {}) {
       });
       reply.raw.flushHeaders();
       let sequence = 0;
-      const streamController=new AbortController();
       reply.raw.once("close",()=>{if(!reply.raw.writableEnded)streamController.abort(new Error("Client disconnected"));});
       const send = (event: "progress" | "delta" | "result" | "error", data: unknown) => {
         if (reply.raw.destroyed) return;
@@ -904,7 +926,8 @@ export function buildApp(config: AppConfig = {}) {
             auth,
             resolved.company!.id,
             { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
-            (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`
+            (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`,
+            streamController.signal,
           );
           if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED"){
             send("error",{error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
@@ -929,6 +952,7 @@ export function buildApp(config: AppConfig = {}) {
             progress,
             request.body.attachments,
             memoryPolicy,
+            streamController.signal,
           );
           for(const delta of boundedResponseChunks(result.message))send("delta",{delta});
           send("result", { ...result, activeContext: resolved.context });
@@ -939,6 +963,7 @@ export function buildApp(config: AppConfig = {}) {
         progress({ type: "final_generation_failed", error: detail });
         send("error", { error: { code: error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
+        if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
         clearInterval(heartbeat);
         reply.raw.end();
       }

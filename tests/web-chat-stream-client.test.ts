@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from "vitest";
-import {streamChat} from "../apps/web/src/chat-stream";
+import {cancelChatStream,streamChat} from "../apps/web/src/chat-stream";
 
 afterEach(()=>vi.unstubAllGlobals());
 
@@ -33,5 +33,14 @@ describe("WebChat SSE client",()=>{
 
     await expect(pending).rejects.toMatchObject({name:"AbortError"});
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it("waits for an authenticated server cancellation acknowledgement",async()=>{
+    vi.stubGlobal("localStorage",{getItem:()=>"secret-token"});
+    const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({cancelled:true}),{status:200,headers:{"content-type":"application/json"}}));
+    vi.stubGlobal("fetch",fetchMock);
+
+    await expect(cancelChatStream("stream-12345678")).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/streams/stream-12345678/cancel",expect.objectContaining({method:"POST",keepalive:true,headers:{authorization:"Bearer secret-token"}}));
   });
 });

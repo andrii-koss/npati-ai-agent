@@ -180,6 +180,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 
 - Live strict-auth E2E `node scripts/verify-chat-streaming.mjs` підтверджує, що основний WebChat викликає `/api/chat/stream`, отримує та рендерить відповідь реального підключеного провайдера; перевірочний запит працює у `noMemory` режимі й не забруднює історію.
 - Завершено #42 `Streaming responses` і #224 `Response chunking`: OmniRoute adapter читає справжні Chat Completions та Responses API SSE-дельти, підтримує fallback до початку потоку, timeout/cancellation і не ріже Unicode surrogate pairs. `/chat/stream` передає впорядковані `delta` події, WebChat показує відповідь поступово та має кнопку `Stop`; складні Company/Business результати доставляються bounded частинами без дублювання фінального тексту.
+- Виправлено cancellation propagation після ручної перевірки: `Stop` тепер перериває не лише browser fetch, а й активний Business model call або Company runtime. Після disconnect assistant result не записується у conversation history, а Company run завершується `RUN_CANCELLED` без результату; це доведено real HTTP disconnect та Company runtime regression tests.
 - #65 і #302 чесно залишені `PARTIALLY_IMPLEMENTED`: production adapter та retrieval wiring існують, але live OmniRoute catalog у поточному середовищі повернув 0 rerank-моделей, а Jina/Cohere/Voyage credential не налаштований.
 
 - Завершено: #47 `Sandboxing`, #49 `Exec approvals`, #53 `Sandbox + host separation`, #63 `Auto reviewer for exec`, #159 `Exec`.
