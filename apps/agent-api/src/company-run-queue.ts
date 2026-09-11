@@ -155,7 +155,7 @@ export class CompanyRunQueueWorker {
       heartbeat.unref();
       try {
         const result = await this.runtime.process(context, companyId, runId);
-        const nonRetryable = new Set(["TOOL_FORBIDDEN","RUN_CANCELLED","INVALID_DELEGATION_PLAN","CROSS_COMPANY_AGENT_SELECTION","PERMISSION_REVOKED","CONTEXT_DELETED","COMPANY_INACTIVE","MAIN_AGENT_INACTIVE","AGENT_DELETED"]);
+        const nonRetryable = new Set(["TOOL_FORBIDDEN","APPROVAL_REQUIRED","APPROVAL_INVALID","APPROVAL_ALREADY_USED","APPROVAL_EXPIRED","RUN_CANCELLED","INVALID_DELEGATION_PLAN","CROSS_COMPANY_AGENT_SELECTION","PERMISSION_REVOKED","CONTEXT_DELETED","COMPANY_INACTIVE","MAIN_AGENT_INACTIVE","AGENT_DELETED"]);
         if (result.run.status === "failed" && !nonRetryable.has(result.run.errorCode ?? "")
           && result.run.attemptCount < result.run.maxAttempts) {
           const delay = Math.min(30_000, 1000 * 2 ** Math.max(0, result.run.attemptCount - 1));

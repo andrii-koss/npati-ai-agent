@@ -339,6 +339,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       }
       catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     }
+    const durableApprovalsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='028_durable_approvals'");
+    if (!durableApprovalsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration028 } = await import("./migration-028");
+        await runMigration028(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('028_durable_approvals') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
@@ -825,8 +837,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       omniroute_task_id=CASE WHEN $5::jsonb ? 'omnirouteTaskId' THEN NULLIF($5::jsonb->>'omnirouteTaskId','') ELSE omniroute_task_id END,
       omniroute_combo_name=CASE WHEN $5::jsonb ? 'omnirouteComboName' THEN NULLIF($5::jsonb->>'omnirouteComboName','') ELSE omniroute_combo_name END,
       result=CASE WHEN $5::jsonb ? 'result' THEN $5::jsonb->>'result' ELSE result END,
-      error_code=CASE WHEN $5::jsonb ? 'errorCode' THEN $5::jsonb->>'errorCode' ELSE error_code END,
-      error_message=CASE WHEN $5::jsonb ? 'errorMessage' THEN $5::jsonb->>'errorMessage' ELSE error_message END,
+      error_code=CASE WHEN $5::jsonb ? 'errorCode' THEN NULLIF($5::jsonb->>'errorCode','') ELSE error_code END,
+      error_message=CASE WHEN $5::jsonb ? 'errorMessage' THEN NULLIF($5::jsonb->>'errorMessage','') ELSE error_message END,
       cancel_requested=CASE WHEN $5::jsonb ? 'cancelRequested' THEN ($5::jsonb->>'cancelRequested')::boolean ELSE cancel_requested END,
       started_at=CASE WHEN ($5::jsonb->>'status') IN ('planning','running') THEN COALESCE(started_at,now()) ELSE started_at END,
       completed_at=CASE WHEN ($5::jsonb->>'status') IN ('completed','failed','cancelled') THEN now() ELSE completed_at END,

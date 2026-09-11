@@ -19,7 +19,7 @@ type AgentPage = { agents: Agent[]; pagination: { limit: number; nextCursor: str
 type KnowledgeDocument = { id:string;fileId:string;filename?:string;mimeType?:string;sizeBytes?:number;status:string;errorMessage?:string;chunkCount:number;createdAt:string };
 type CompanyMemory = { id:string;content:string;source:string;revision?:number;updatedAt:string };
 type RunStep = { agentId: string; status: "selected" | "delegated" | "completed" | "failed" | "cancelled" };
-type RunDetails = { run: { id: string; status: string; mainAgentId?: string; selectedAgentIds?: string[]; executionMode?: string; result?: string; errorMessage?: string }; steps: RunStep[]; toolAudit: unknown[] };
+type RunDetails = { run: { id: string; status: string; mainAgentId?: string; selectedAgentIds?: string[]; executionMode?: string; result?: string; errorCode?: string; errorMessage?: string }; steps: RunStep[]; toolAudit: Array<{ toolName?: string; reasonCode?: string; inputSummary?: Record<string, unknown> }> };
 type RunSummary = RunDetails["run"];
 type CompanyDraft = {
   name: string; businessId: string; website: string; industry: string; description: string;
@@ -51,6 +51,7 @@ const defaultToolOptions: CapabilityItem[] = [
   { id: "mcp", name: "MCP", description: "Use approved MCP tools.", domain: "system", risk: "medium", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
   { id: "files", name: "Files", description: "List and read Company files.", domain: "files", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
   { id: "system.text-to-speech", name: "Text-to-Speech", description: "Generate speech audio with the selected voice.", domain: "system", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
+  { id: "exec", name: "Code Mode / Exec", description: "Validate and run approved JavaScript in an isolated sandbox without host or network access.", domain: "security", risk: "critical", requiresConfirmation: true, requiredPermissions: ["business:manage"], requiredConnections: [] },
 ];
 const emptyCompany: CompanyDraft = { name: "", businessId: "", website: "", industry: "", description: "", productsServices: "", languages: "", brandTone: "", companyInstructions: "", status: "active" };
 const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: [], isActive: true, parentAgentId: "" };
@@ -165,6 +166,7 @@ export function CompanyPage() {
   const [task, setTask] = useState("");
   const [runMode, setRunMode] = useState<"auto" | "single" | "pipeline" | "fusion">("auto");
   const [runDetails, setRunDetails] = useState<RunDetails>();
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [workingAgentIds, setWorkingAgentIds] = useState<Set<string>>(() => new Set());
   const [models, setModels] = useState<Model[]>([]);
@@ -477,6 +479,36 @@ export function CompanyPage() {
       setRunning(remainsActive);
       if (!remainsActive) setWorkingAgentIds(new Set());
     } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : "Company run failed"); }
+  }
+
+  const pendingApprovalId = runDetails?.run.errorCode === "APPROVAL_REQUIRED"
+    ? runDetails.run.errorMessage?.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0]
+    : undefined;
+
+  async function decideRunApproval(decision: "approved" | "rejected") {
+    if (!selected || !runDetails || !pendingApprovalId || approvalBusy) return;
+    setApprovalBusy(true); setNotice("");
+    try {
+      await api(`/companies/${selected.id}/approvals/${pendingApprovalId}/decide`, {
+        method: "POST", body: JSON.stringify({ decision }),
+      });
+      if (decision === "rejected") {
+        setRunDetails((current) => current ? { ...current, run: { ...current.run, errorCode: "APPROVAL_REJECTED", errorMessage: "Execution rejected by the user." } } : current);
+        setNotice("Execution rejected. Nothing was run.");
+        return;
+      }
+      setRunning(true);
+      const resumed = await api<RunDetails>(`/companies/${selected.id}/runs/${runDetails.run.id}/resume`, {
+        method: "POST", body: JSON.stringify({ approvalId: pendingApprovalId }),
+      });
+      setRunDetails(resumed);
+      const remainsActive = !["completed", "failed", "cancelled"].includes(resumed.run.status);
+      setRunning(remainsActive);
+      setNotice(resumed.run.status === "completed" ? "Approved execution completed." : resumed.run.errorMessage ?? `Company run ${resumed.run.status}.`);
+    } catch (error) {
+      setRunning(false);
+      setNotice(error instanceof Error ? error.message : "Could not apply approval decision");
+    } finally { setApprovalBusy(false); }
   }
 
   async function readFileAsBase64(file:File){
@@ -809,6 +841,20 @@ export function CompanyPage() {
               Run status: <strong>{runDetails.run.status}</strong>
               {runDetails.run.errorMessage ? ` — ${runDetails.run.errorMessage}` : ""}
             </span>
+          </div>
+        )}
+
+        {pendingApprovalId && (
+          <div className="company-field-notice-box company-approval-box">
+            <span className="company-notice-bulb" aria-hidden="true">!</span>
+            <span>
+              <strong>Human approval required.</strong> Review the requested Code Mode / Exec action before it runs.
+              <code className="company-approval-preview">{JSON.stringify([...(runDetails?.toolAudit ?? [])].reverse().find((item) => item.reasonCode === "approval_required")?.inputSummary ?? {})}</code>
+            </span>
+            <div className="company-approval-actions">
+              <button type="button" className="button-secondary" disabled={approvalBusy} onClick={() => void decideRunApproval("rejected")}>Reject</button>
+              <button type="button" className="button-primary" disabled={approvalBusy} onClick={() => void decideRunApproval("approved")}>{approvalBusy ? "Applying..." : "Approve & continue"}</button>
+            </div>
           </div>
         )}
 

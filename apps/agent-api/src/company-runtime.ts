@@ -4,12 +4,17 @@ import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Compan
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
 import {SecurityPolicyEngine,SecurityPolicyViolation,type CompanyGuardrailPolicy} from "./security-guardrails";
+import {AutoExecReviewer} from "./auto-exec-reviewer";
 
 const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
 type ToolPlan = { agentId: string; tool: string; input: Record<string, unknown> };
 type Plan = { mode: Mode; agentIds: string[]; reviewerAgentId?: string; toolRequests: ToolPlan[] };
 type MemoryScope = { apiKeyId?: string; sessionId?: string };
+export interface DurableApprovalGateway {
+  requestApproval(ctx:AuthContext,companyId:string,input:{runId:string;agentId:string;toolName:string;riskLevel:"high"|"critical";actionSummary:string;inputPayload:Record<string,unknown>}):Promise<{id:string}>;
+  consumeApproved(ctx:AuthContext,companyId:string,id:string,input:{runId:string;agentId:string;toolName:string;inputPayload:Record<string,unknown>}):Promise<unknown>;
+}
 
 export class CompanyRuntimeError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
@@ -23,7 +28,7 @@ function toolName(value: string) {
   if (key.startsWith("files.")) return "files";
   return ({ "websearch": "web.search", "web.search": "web.search", "webfetch": "web.fetch", "web.fetch": "web.fetch",
     crawler: "web.crawl", "web.crawl": "web.crawl", "text-to-speech": "audio.speech", tts: "audio.speech", "audio.speech": "audio.speech",
-    mcp: "mcp", files: "files", knowledge: "knowledge", "company.memory":"storage.company_memory", "storage.company.memory":"storage.company_memory" } as Record<string, string>)[key] ?? key;
+    mcp: "mcp", files: "files", knowledge: "knowledge", exec: "exec", code: "exec", "company.memory":"storage.company_memory", "storage.company.memory":"storage.company_memory" } as Record<string, string>)[key] ?? key;
 }
 function summary(input: Record<string, unknown>) {
   return SecurityPolicyEngine.redactObject(Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
@@ -93,6 +98,7 @@ export class CompanyDelegationRuntime {
     capabilityResolver?: EffectiveCapabilityResolver,
     riskApprovalService?: RiskApprovalService,
     private readonly guardrailPolicyResolver?: (ctx:AuthContext,companyId:string)=>Promise<CompanyGuardrailPolicy>,
+    private readonly durableApprovals?: DurableApprovalGateway,
   ) {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
@@ -109,7 +115,7 @@ export class CompanyDelegationRuntime {
     return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; approvalId?:string } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
@@ -211,6 +217,7 @@ export class CompanyDelegationRuntime {
             "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
+            'exec (Code Mode): {"language":"javascript","code":"synchronous JavaScript","timeoutMs":2000}. Generate focused, self-contained code and use console.log for output. It is statically validated, has no filesystem, network, process, environment, require or imports, and always requires human approval.',
             options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
             "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
             "Use pipeline for dependent work and fusion for independent parallel perspectives.",
@@ -250,7 +257,7 @@ export class CompanyDelegationRuntime {
         }
         return {...request,input:SecurityPolicyEngine.protectObject(request.input,guardrailPolicy)};
       });
-      const rawEvidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true);
+      const rawEvidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true,options.approvalId);
       const evidence=rawEvidence?protect(rawEvidence):rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
@@ -285,7 +292,7 @@ export class CompanyDelegationRuntime {
           ],
         });
       }
-      await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { status: "completed", result: result.content });
+      await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { status: "completed", result: result.content, errorCode:"", errorMessage:"" });
     } catch (error) {
       const current = await this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
       const cancelled = current.run.cancelRequested || controller.signal.aborted, timedOut = !cancelled && timeout.aborted;
@@ -320,7 +327,7 @@ export class CompanyDelegationRuntime {
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false) {
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false, approvalId?:string) {
     const evidence: string[] = [];
     let sequenceNumber = 1;
     for (const plan of plans.slice(0, 10)) {
@@ -338,7 +345,7 @@ export class CompanyDelegationRuntime {
           { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "Tool is not permitted", reasonCode: "agent_allowlist", sequenceNumber: sequenceNumber++ });
         throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}`, 403);
       }
-      if (tool !== "knowledge") {
+      if (tool !== "knowledge" && tool !== "exec") {
         const check = this.capabilityResolver.canExecute({
           auth: ctx,
           activeContext: { contextType: "company", companyId: company.id, businessId: null },
@@ -351,10 +358,46 @@ export class CompanyDelegationRuntime {
           throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}: ${check.reason}`, 403);
         }
       }
+      if (tool === "exec" && !ctx.permissions.some((permission) => ["business:manage", "owner", "*"].includes(permission))) {
+        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
+          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "Exec requires business:manage permission", reasonCode: "tenant_permissions", sequenceNumber: sequenceNumber++ });
+        throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Exec requires business:manage permission", 403);
+      }
+      if (tool === "exec") {
+        const code = typeof plan.input.code === "string" ? plan.input.code : "";
+        const review = AutoExecReviewer.reviewExecution({ type: "javascript", payload: code });
+        if (review.decision === "BLOCKED") {
+          await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
+            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: review.reasons.join("; "), reasonCode: "auto_exec_reviewer", sequenceNumber: sequenceNumber++ });
+          throw new CompanyRuntimeError("EXEC_REVIEW_BLOCKED", "Exec was blocked by the automatic security reviewer", 403);
+        }
+      }
 
       // Risk & Human Approval Policy Check
-      const toolToAssess = plan.tool.includes(".") ? plan.tool : tool;
+      const operation=typeof plan.input.operation==="string"?plan.input.operation.trim().toLowerCase():"";
+      const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
       if (this.riskApprovalService.requiresApproval(toolToAssess)) {
+        if(this.durableApprovals){
+          if(!approvalId){
+            const cleanPayload={...plan.input};delete cleanPayload._approvalToken;
+            const req=await this.durableApprovals.requestApproval(ctx,company.id,{
+              runId,agentId:agent.id,toolName:toolToAssess,
+              riskLevel:this.riskApprovalService.classifyRisk(toolToAssess)==="critical"?"critical":"high",
+              actionSummary:`${agent.name} requests ${toolToAssess}`,inputPayload:cleanPayload,
+            });
+            await this.store.appendCompanyAgentToolAudit(ctx,company.id,runId,{agentId:agent.id,toolName:toolToAssess,decision:"denied",status:"blocked",
+              inputSummary:summary(cleanPayload),errorMessage:`Human approval required. Approval request ID: ${req.id}`,reasonCode:"approval_required",sequenceNumber:sequenceNumber++});
+            throw new CompanyRuntimeError("APPROVAL_REQUIRED",`Tool "${toolToAssess}" requires human approval. Approval request ID: ${req.id}`,403);
+          }
+          const cleanPayload={...plan.input};delete cleanPayload._approvalToken;
+          try{await this.durableApprovals.consumeApproved(ctx,company.id,approvalId,{runId,agentId:agent.id,toolName:toolToAssess,inputPayload:cleanPayload});}
+          catch(error){
+            const code=(error as any)?.code??"APPROVAL_INVALID";
+            await this.store.appendCompanyAgentToolAudit(ctx,company.id,runId,{agentId:agent.id,toolName:toolToAssess,decision:"denied",status:"blocked",
+              inputSummary:summary(cleanPayload),errorMessage:error instanceof Error?error.message:"Approval denied",reasonCode:String(code).toLowerCase(),sequenceNumber:sequenceNumber++});
+            throw new CompanyRuntimeError(code,error instanceof Error?error.message:"Approval denied",Number((error as any)?.status??409));
+          }
+        } else {
         const token = typeof plan.input._approvalToken === "string" ? plan.input._approvalToken : undefined;
         if (!token) {
           const req = this.riskApprovalService.createApprovalRequest(ctx, company.id, runId, agent.id, toolToAssess, plan.input);
@@ -399,6 +442,7 @@ export class CompanyDelegationRuntime {
             sequenceNumber: sequenceNumber++,
           });
           throw new CompanyRuntimeError("APPROVAL_ALREADY_USED", "Approval token has already been consumed", 409);
+        }
         }
       }
 

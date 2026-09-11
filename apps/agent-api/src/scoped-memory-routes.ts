@@ -36,7 +36,7 @@ export function registerScopedMemoryRoutes(app: FastifyInstance, deps: {
     const context: AuthContext = {
       userId: result.userId,
       workspaceId: result.tenantId,
-      permissions: ["workspace:read", "workspace:write", "business:manage"],
+      permissions: [...new Set(["workspace:read", "workspace:write", "business:manage",...(result.scopes??[])])],
       apiKeyId: result.keyId,
     };
     await deps.store.getCompany(context, result.companyId);

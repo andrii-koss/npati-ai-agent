@@ -808,7 +808,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "API key auth",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "Production MCP виклики вимагають явного API-key scope mcp:read; відсутній scope, відкликаний ключ і cross-tenant контекст блокуються до звернення до OmniRoute.",
     "useWhen": [
       "Internal system execution requires API key auth"
     ],
@@ -1084,7 +1084,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Sandboxing",
-    "description": "Особливо важливо перед coding/browser/email automation.",
+    "description": "Company Agent runtime і Company MCP API працюють deny-by-default: дозволяються лише tools із agent allowlist та безпечного runtime allowlist; невідомі й адміністративні MCP tools блокуються та не виконуються.",
     "useWhen": [
       "Internal system execution requires Sandboxing"
     ],
@@ -2357,7 +2357,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "orchestration",
     "domain": "system",
     "name": "MCP scoped permissions",
-    "description": "Обов’язково для multi-tenant агента.",
+    "description": "MCP permissions застосовуються в реальному multi-tenant Company API: scoped API key, Company ownership, read-only MCP action classification, revocation та safe-tool allowlist.",
     "useWhen": [
       "Internal system execution requires MCP scoped permissions"
     ],

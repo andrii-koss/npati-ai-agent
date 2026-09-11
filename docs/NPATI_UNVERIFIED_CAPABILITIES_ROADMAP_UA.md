@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 57 пунктів.
-- `NOT_IMPLEMENTED`: 130 пунктів.
-- Разом у цьому backlog: 187 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 52 пункти.
+- `NOT_IMPLEMENTED`: 123 пункти.
+- Разом у цьому backlog: 175 пунктів.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -33,7 +33,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 
 Найвищий пріоритет: без цього небезпечно додавати browser, exec, channels і autonomous workflows.
 
-Пункти: #35 `API key auth` (P), #38 `AES-256-GCM at rest` (P), #39 `Route guard tiers` (N), #40 `MCP authorization scopes` (P), #47 `Sandboxing` (N), #48 `Tool allow/deny policy` (P), #49 `Exec approvals` (P), #53 `Sandbox + host separation` (N), #54 `Human approvals` (P), #57 `Moderations` (N), #60 `Vision bridge guardrail` (N), #61 `OIDC dashboard gate` (N), #62 `Scoped remote access tokens` (N), #63 `Auto reviewer for exec` (N), #102 `MCP scoped permissions` (P), #159 `Exec` (N), #160 `Process control` (N), #221 `Device tracking per API key` (N), #244 `Code Mode` (N), #260 `Tenant-scoped AI model/routing preferences` (P).
+Пункти, які ще залишилися: #35 `API key auth` (P), #38 `AES-256-GCM at rest` (P), #57 `Moderations` (N), #60 `Vision bridge guardrail` (N), #61 `OIDC dashboard gate` (N), #62 `Scoped remote access tokens` (N), #221 `Device tracking per API key` (N), #260 `Tenant-scoped AI model/routing preferences` (P).
 
 Що реалізувати: один Effective Policy Engine для API, agent tools, MCP, exec і media; deny-by-default scopes; short-lived scoped tokens; encrypted secret vault із rotation; PII/credential redaction до logs і model calls; isolated container runner без host filesystem/network за замовчуванням; approval lifecycle із TTL, one-time token та audit.
 
@@ -153,8 +153,8 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 2. ✅ Завершено: #67-#69 production memory scope/injection та #82 per-request no-memory.
 3. 🟡 Частково: #70, #71, #75 і #76 завершено одним PostgreSQL hybrid retrieval; #80 очікує live rerank provider.
 4. ✅ Завершено: централізовані redaction/guardrails #31-#34.
-5. Завершити deny-by-default tool/MCP/approval policy: #39, #40, #48, #49, #54, #102.
-6. Додати справжній isolated Exec sandbox: #47, #53, #63, #159, #160 і #244.
+5. ✅ Завершено: deny-by-default MCP/tool policy #40, #48, #102, route tiers #39, durable human approvals #54 та Exec approvals #49.
+6. ✅ Завершено: один production-шлях Code Mode / isolated Exec закриває #47, #53, #63, #159, #160 і #244 без дублювання runtime.
 7. Завершити SSE streaming/cancellation/response chunking: #42 і #224.
 8. Виправити Org Chart pagination >100: #286.
 9. Реалізувати unified cost/usage/audit trace: #25, #27, #29, #56, #114, #191, #203.
@@ -162,6 +162,8 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 
 ## Завершені кроки
 
+- 2026-09-10 — #39 `Route guard tiers`, #54 `Human approvals`: Company runtime API застосовує tenant-bound free/pro/enterprise rate tiers і HTTP 429; high-risk tool створює PostgreSQL approval із TTL та exact payload binding, зупиняє run без retry storm, переживає restart і продовжується через authenticated `/runs/:runId/resume`. Atomic consume блокує replay; Activity tool audit фіксує deny/allow/result. #49 залишається Partial до isolated Exec.
+- 2026-09-10 — #40 `MCP authorization scopes`, #48 `Tool allow/deny policy`, #102 `MCP scoped permissions`: реальний `/company-api/mcp/call` вимагає Company API key із `mcp:read`, перевіряє tenant/company ownership і revocation, а Company MCP runtime дозволяє лише явний read-only safe allowlist. Live OmniRoute MCP E2E підтверджує успішний health call та блокування missing-scope, unsafe-tool і revoked-key запитів.
 - 2026-09-10 — #31 `Prompt-injection guard`, #32 `PII masker`, #33 `Credential masking`, #34 `Custom guardrails`: єдиний SecurityPolicyEngine захищає JSON/SSE/Company API, planning, retrieved documents/memory, tool inputs/results і final model calls; versioned Company policy зберігається у PostgreSQL, має optimistic revision та cleanup. Live E2E підтверджує user/document injection block, PII/credential redaction, custom term, restart recovery і чисті container logs.
 - 2026-09-10 — #67 `Memory scoped by API key`, #68 `Optional sessionId scoping`, #69 `Memory injection`: PostgreSQL-backed scoped memory, deny-by-default API-key scopes, вкладена ізоляція однакового `sessionId` між ключами, idempotent writes, soft delete, cleanup компанії, natural-language FTS retrieval та реальна ін’єкція у Company model call. Strict-auth E2E підтверджує restart recovery, cross-key read/delete denial і `no-memory` bypass.
 - 2026-09-10 — #296 `File delete and orphan cleanup`: єдиний cleanup path, post-delete MinIO verification, pending retry, failed/succeeded audit та strict-auth Docker restart-recovery E2E.
@@ -173,3 +175,12 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 ## Контроль актуальності
 
 Перед кожним release автоматично порівнювати цей файл із `CAPABILITY_MATRIX`: кожний `PARTIALLY_IMPLEMENTED` або `NOT_IMPLEMENTED` ID має бути рівно в одному епіку; `VERIFIED_EXISTING` не повинен залишатися у backlog. Після зміни статусу обов'язково додати regression expectation і live `/capabilities/inspect` перевірку.
+
+## Виконано 2026-09-11
+
+- Завершено: #47 `Sandboxing`, #49 `Exec approvals`, #53 `Sandbox + host separation`, #63 `Auto reviewer for exec`, #159 `Exec`.
+- Company Agent може отримати `Exec`. JavaScript виконується у новій QuickJS WebAssembly VM з обмеженнями пам'яті, часу та обсягу відповіді, без Node globals, файлової системи хоста, environment, module loader і мережевого API.
+- Кожний Exec автоматично перевіряється, вимагає durable human approval з exact payload binding, споживає approval лише один раз і записує результат у Company Run Trace.
+- `tests/production-wasm-exec.test.ts` перевіряє реальне WASM-виконання, ізоляцію хоста/мережі, timeout, блокування reviewer до approval, точну прив'язку approval та replay denial.
+- #160 `Process control` також завершено: кожний execution має ID, реєстр active executions, worker termination за AbortSignal і cleanup після завершення.
+- #244 `Code Mode` завершено через той самий production Exec path: окремий режим у Agent Editor, code validation, обмежений JavaScript runtime та Run Trace — без другого дубльованого executor.

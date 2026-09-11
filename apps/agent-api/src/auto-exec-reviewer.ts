@@ -30,11 +30,19 @@ export class AutoExecReviewer {
     /\bkillall\b/i,
   ];
 
+  private static readonly BLOCKED_JAVASCRIPT = [
+    /\b(?:process|require|module)\b/i,
+    /\b(?:child_process|node:fs|node:net|node:http|node:https|node:dgram|node:worker_threads)\b/i,
+    /\b(?:fetch|websocket|xmlhttprequest)\s*(?:\(|\.)/i,
+    /\b(?:eval|function)\s*\(/i,
+    /\bimport\s*(?:\(|[^;]*\bfrom\b)/i,
+  ];
+
   /**
    * 1. Autonomous Security Reviewer for Tool & Command Execution
    */
   static reviewExecution(params: {
-    type: "shell" | "sql" | "tool";
+    type: "shell" | "sql" | "tool" | "javascript";
     payload: string;
     allowedCommands?: string[];
   }): ExecReviewResult {
@@ -79,6 +87,15 @@ export class AutoExecReviewer {
             reasons,
             reviewedAt: new Date().toISOString(),
           };
+        }
+      }
+    }
+
+    if (params.type === "javascript") {
+      for (const pattern of this.BLOCKED_JAVASCRIPT) {
+        if (pattern.test(payload)) {
+          reasons.push(`SANDBOX_ESCAPE_ATTEMPT: Pattern matched ${pattern.source}`);
+          return { decision: "BLOCKED", riskLevel: "CRITICAL", reasons, reviewedAt: new Date().toISOString() };
         }
       }
     }
