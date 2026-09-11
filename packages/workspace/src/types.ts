@@ -100,7 +100,21 @@ export interface CompanyAgentToolAudit {
   inputSummary: Record<string, unknown>; errorMessage?: string; createdAt: string; completedAt?: string;
   latencyMs?: number; cost?: number; tokens?: number; reasonCode?: string; sequenceNumber?: number;
 }
-export interface CompanyAgentRunDetails { run: CompanyAgentRun; steps: CompanyAgentRunStep[]; toolAudit: CompanyAgentToolAudit[]; }
+export type CompanyAgentRunEventType = "queued" | "claimed" | "started" | "retry_scheduled" | "completed" | "failed" | "cancelled";
+export interface CompanyAgentRunEvent {
+  id: string; workspaceId: string; companyId: string; runId: string; eventKey: string;
+  eventType: CompanyAgentRunEventType; runStatus: CompanyRunStatus; workerId?: string;
+  attemptCount: number; message: string; details: Record<string, unknown>; createdAt: string;
+}
+export interface CompanyAgentCompletionReport {
+  runId: string; companyId: string; status: "completed" | "failed" | "cancelled";
+  result?: string; errorCode?: string; errorMessage?: string; workerId?: string;
+  attemptCount: number; totalCost: number; totalTokens: number; totalDurationMs: number; completedAt: string;
+}
+export interface CompanyAgentRunDetails {
+  run: CompanyAgentRun; steps: CompanyAgentRunStep[]; toolAudit: CompanyAgentToolAudit[];
+  backgroundEvents: CompanyAgentRunEvent[]; completionReport?: CompanyAgentCompletionReport;
+}
 
 export type GoalStatus = "active" | "completed" | "paused" | "cancelled";
 export interface Goal {
@@ -192,6 +206,7 @@ export interface WorkspaceStore {
   updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<Pick<CompanyAgentRun, "status" | "executionMode" | "selectedAgentIds" | "omnirouteTaskId" | "omnirouteComboName" | "result" | "errorCode" | "errorMessage" | "cancelRequested" | "totalCost" | "totalTokens" | "totalDurationMs">>): Promise<CompanyAgentRun>;
   replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>): Promise<CompanyAgentRunStep[]>;
   appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>): Promise<CompanyAgentToolAudit>;
+  appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>): Promise<CompanyAgentRunEvent>;
   claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number): Promise<boolean>;
   heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number): Promise<boolean>;
   requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number): Promise<boolean>;

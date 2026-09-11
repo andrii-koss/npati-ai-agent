@@ -879,11 +879,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "browser",
     "agentCallable": false,
     "risk": "low",
-    "testType": "integration",
+    "testType": "e2e",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/background-run-reporting.test.ts",
+      "scripts/verify-background-reporting.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 57,
@@ -1777,9 +1778,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/background-jobs-and-mcp-server.test.ts"
+      "tests/background-run-reporting.test.ts",
+      "tests/background-jobs-and-context-safety.test.ts",
+      "scripts/verify-background-reporting.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 115,

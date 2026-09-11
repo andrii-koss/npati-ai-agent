@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -16,6 +16,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
   private readonly companyToolAudit = new Map<string, CompanyAgentToolAudit>();
+  private readonly companyRunEvents = new Map<string, CompanyAgentRunEvent>();
   private readonly companyRunRequests = new Map<string, string>();
   private readonly companyCreateRequests = new Map<string, string>();
   private readonly companyAgentCreateRequests = new Map<string, string>();
@@ -411,10 +412,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     if (!run || run.workspaceId !== context.workspaceId || run.companyId !== companyId || run.userId !== context.userId) {
       throw new WorkspaceAccessError("Agent run is not available in this company");
     }
+    const completionStatus = run.status === "completed" || run.status === "failed" || run.status === "cancelled" ? run.status : undefined;
     return {
       run: structuredClone(run),
       steps: [...this.companyRunSteps.values()].filter((step) => step.runId === runId).sort((a, b) => a.stepOrder - b.stepOrder || a.lane - b.lane),
       toolAudit: [...this.companyToolAudit.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      backgroundEvents: [...this.companyRunEvents.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
+      completionReport: completionStatus && run.completedAt ? { runId: run.id, companyId: run.companyId, status: completionStatus,
+        result: run.result, errorCode: run.errorCode, errorMessage: run.errorMessage, workerId: run.workerId,
+        attemptCount: run.attemptCount, totalCost: run.totalCost ?? 0, totalTokens: run.totalTokens ?? 0,
+        totalDurationMs: run.totalDurationMs ?? 0, completedAt: run.completedAt } : undefined,
     };
   }
 
@@ -456,6 +463,18 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const row: CompanyAgentToolAudit = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
       ...entry, createdAt: timestamp, completedAt: terminal ? timestamp : undefined };
     this.companyToolAudit.set(row.id, row);
+    return structuredClone(row);
+  }
+
+  async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) {
+    const { run } = await this.getCompanyAgentRun(context, companyId, runId);
+    const existing = [...this.companyRunEvents.values()].find((item) => item.runId === runId && item.eventKey === entry.eventKey);
+    if (existing) return structuredClone(existing);
+    const row: CompanyAgentRunEvent = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+      eventKey: entry.eventKey, eventType: entry.eventType, runStatus: entry.runStatus, workerId: entry.workerId,
+      attemptCount: entry.attemptCount ?? run.attemptCount, message: entry.message.slice(0, 1000),
+      details: structuredClone(entry.details ?? {}), createdAt: now() };
+    this.companyRunEvents.set(row.id, row);
     return structuredClone(row);
   }
 

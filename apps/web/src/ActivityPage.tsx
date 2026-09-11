@@ -24,6 +24,28 @@ interface RunStep {
   lane?: number;
 }
 
+interface BackgroundRunEvent {
+  id: string;
+  eventType: "queued" | "claimed" | "started" | "retry_scheduled" | "completed" | "failed" | "cancelled";
+  runStatus: string;
+  workerId?: string;
+  attemptCount: number;
+  message: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+interface CompletionReport {
+  runId: string;
+  status: "completed" | "failed" | "cancelled";
+  workerId?: string;
+  attemptCount: number;
+  totalCost: number;
+  totalTokens: number;
+  totalDurationMs: number;
+  completedAt: string;
+}
+
 interface CompanyRun {
   id: string;
   companyId: string;
@@ -57,6 +79,8 @@ export function ActivityPage() {
     run: CompanyRun;
     steps: RunStep[];
     toolAudit: ToolAuditItem[];
+    backgroundEvents: BackgroundRunEvent[];
+    completionReport?: CompletionReport;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -140,21 +164,32 @@ export function ActivityPage() {
   // Fetch run details when selectedRunId changes
   useEffect(() => {
     if (!selectedCompanyId || !selectedRunId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const headers: HeadersInit = {};
     const token = getStoredAuthToken();
     if (token) headers["authorization"] = `Bearer ${token}`;
 
-    fetch(`/api/companies/${selectedCompanyId}/runs/${selectedRunId}`, { headers })
+    const loadDetails = () => fetch(`/api/companies/${selectedCompanyId}/runs/${selectedRunId}`, { headers })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load run details`);
         return (await res.json()) as {
           run: CompanyRun;
           steps: RunStep[];
           toolAudit: ToolAuditItem[];
+          backgroundEvents: BackgroundRunEvent[];
+          completionReport?: CompletionReport;
         };
       })
-      .then((data) => setActiveRunDetails(data))
+      .then((data) => {
+        if (stopped) return;
+        setActiveRunDetails(data);
+        setRuns((previous) => previous.map((run) => run.id === data.run.id ? data.run : run));
+        if (["queued", "planning", "running", "cancelling"].includes(data.run.status)) timer = setTimeout(loadDetails, 1500);
+      })
       .catch(() => {});
+    void loadDetails();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, [selectedCompanyId, selectedRunId]);
 
   // Handle task dispatch
@@ -195,6 +230,8 @@ export function ActivityPage() {
           run: data.run,
           steps: data.steps ?? [],
           toolAudit: data.toolAudit ?? [],
+          backgroundEvents: data.backgroundEvents ?? [],
+          completionReport: data.completionReport,
         });
         setViewMode("trace");
         setTaskPrompt("");
@@ -708,6 +745,40 @@ export function ActivityPage() {
                   </div>
                 )}
 
+                {activeRunDetails.completionReport && (
+                  <div className={`trace-completion-report ${activeRunDetails.completionReport.status}`}>
+                    <div>
+                      <strong>Background Completion Report</strong>
+                      <span>{activeRunDetails.completionReport.status}</span>
+                    </div>
+                    <p>
+                      Attempt {activeRunDetails.completionReport.attemptCount} · {activeRunDetails.completionReport.totalTokens} tokens · ${activeRunDetails.completionReport.totalCost.toFixed(6)} · {(activeRunDetails.completionReport.totalDurationMs / 1000).toFixed(2)}s
+                    </p>
+                  </div>
+                )}
+
+                <div className="trace-section">
+                  <div className="trace-section-header">
+                    <h3>Background Execution Timeline ({activeRunDetails.backgroundEvents?.length ?? 0})</h3>
+                    <small>Durable worker claims, retries and terminal completion events</small>
+                  </div>
+                  <div className="background-event-list">
+                    {(activeRunDetails.backgroundEvents ?? []).map((event) => (
+                      <div key={event.id} className={`background-event-item ${event.eventType}`}>
+                        <span className="background-event-dot" aria-hidden="true" />
+                        <div>
+                          <strong>{event.eventType.replace("_", " ")}</strong>
+                          <p>{event.message}</p>
+                          <small>Attempt {event.attemptCount}{event.workerId ? ` · ${event.workerId}` : ""} · {new Date(event.createdAt).toLocaleTimeString()}</small>
+                        </div>
+                      </div>
+                    ))}
+                    {(!activeRunDetails.backgroundEvents || activeRunDetails.backgroundEvents.length === 0) && (
+                      <div className="trace-empty-notice">This run was executed synchronously; no background worker events were emitted.</div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Agent Delegation Steps */}
                 <div className="trace-section">
                   <div className="trace-section-header">
@@ -790,4 +861,3 @@ export function ActivityPage() {
   </main>
   );
 }
-
