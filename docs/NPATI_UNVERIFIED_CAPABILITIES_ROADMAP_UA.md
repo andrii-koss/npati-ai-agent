@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 51 пункт.
+- `PARTIALLY_IMPLEMENTED`: 50 пунктів.
 - `NOT_IMPLEMENTED`: 122 пункти.
-- Разом у цьому backlog: 173 пункти.
+- Разом у цьому backlog: 172 пункти.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -51,7 +51,7 @@ Verified gate: точні факти з Excel/PDF/DOCX/TXT, hybrid search і rer
 
 ### P0.3 — Runtime reliability, streaming, observability і scale
 
-Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #25 `Cost telemetry headers` (N), #27 `Usage analytics` (P), #29 `Audit trail` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #191 `Routing transparency` (P), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #203 `Cache-hit savings telemetry` (N), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #286 `Company agents pagination + bounded Org Chart` (P), #290 `10 000 concurrent session capacity` (P).
+Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #25 `Cost telemetry headers` (N), #27 `Usage analytics` (P), #29 `Audit trail` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #191 `Routing transparency` (P), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #203 `Cache-hit savings telemetry` (N), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #290 `10 000 concurrent session capacity` (P).
 
 Що реалізувати: Redis admission з tenant fairness/backpressure; справжнє SSE streaming із reconnect/cancel; єдиний immutable Run Trace; provider/model/cost/token/cache telemetry; semantic cache з tenant keys; atomic quota leases; backup/restore drill; cursor-based session search/pruning; сторінкова Org Chart без >100 edge request; distributed 10k connection profile, а не `Map` simulation.
 
@@ -156,11 +156,13 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 5. ✅ Завершено: deny-by-default MCP/tool policy #40, #48, #102, route tiers #39, durable human approvals #54 та Exec approvals #49.
 6. ✅ Завершено: один production-шлях Code Mode / isolated Exec закриває #47, #53, #63, #159, #160 і #244 без дублювання runtime.
 7. ✅ Завершено: SSE streaming/cancellation/response chunking #42 і #224.
-8. Виправити Org Chart pagination >100: #286.
+8. ✅ Завершено: Org Chart pagination >100 — #286.
 9. Реалізувати unified cost/usage/audit trace: #25, #27, #29, #56, #114, #191, #203.
 10. Запустити distributed authenticated 10k session certification і лише після цього закрити #290.
 
 ## Завершені кроки
+
+- 2026-09-11 — #286 `Company agents pagination + bounded Org Chart`: Company UI завантажує агентів сторінками по 60, запитує edges лише для поточної сторінки, дедуплікує агентів/зв'язки та не перевищує серверний ліміт 100 ID. API повертає явний HTTP 400 для завеликого фільтра, а PostgreSQL та in-memory store повертають також міжсторінкові зв'язки. Regression test перевіряє 121 агента, сторінки `60/60/1`, міжсторінковий edge і bounded-запити; strict-auth browser E2E перевіряє завантаження всіх трьох сторінок у `/company`.
 
 - 2026-09-10 — #39 `Route guard tiers`, #54 `Human approvals`: Company runtime API застосовує tenant-bound free/pro/enterprise rate tiers і HTTP 429; high-risk tool створює PostgreSQL approval із TTL та exact payload binding, зупиняє run без retry storm, переживає restart і продовжується через authenticated `/runs/:runId/resume`. Atomic consume блокує replay; Activity tool audit фіксує deny/allow/result. #49 залишається Partial до isolated Exec.
 - 2026-09-10 — #40 `MCP authorization scopes`, #48 `Tool allow/deny policy`, #102 `MCP scoped permissions`: реальний `/company-api/mcp/call` вимагає Company API key із `mcp:read`, перевіряє tenant/company ownership і revocation, а Company MCP runtime дозволяє лише явний read-only safe allowlist. Live OmniRoute MCP E2E підтверджує успішний health call та блокування missing-scope, unsafe-tool і revoked-key запитів.

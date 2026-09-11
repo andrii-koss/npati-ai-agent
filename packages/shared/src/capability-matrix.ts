@@ -4398,11 +4398,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "business",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/company-org-chart-pagination.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 287,
