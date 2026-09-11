@@ -44,7 +44,13 @@ async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key
 describe("Company delegation runtime", () => {
   it("uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency", async () => {
     const combos: OmniRouteComboInput[] = [];
-    const chat = vi.fn(async () => ({ content: "Reviewed final answer", model: "pipeline" }));
+    const chat = vi.fn(async () => ({
+      content: "Reviewed final answer",
+      model: "openai/gpt-4o",
+      usage: { promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedTokens: 80 },
+      telemetry: { requestId: "req-company-telemetry", provider: "openai", routingStrategy: "pipeline", latencyMs: 240,
+        costUsd: 0.0042, costSource: "upstream" as const, cacheHit: true, cacheSavingsUsd: 0.0018, failoverCount: 1 },
+    }));
     const executeTool = vi.fn(async () => ({ results: [{ title: "Verified source" }] }));
     let plan = '{"mode":"pipeline","agentIds":[],"toolRequests":[]}';
     let releasePlan!: () => void;
@@ -81,10 +87,19 @@ describe("Company delegation runtime", () => {
     expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
       combo.config?.maxRetries === 2 && combo.config?.failoverBeforeRetry === true)).toBe(true);
     expect(chat).toHaveBeenCalledWith(expect.objectContaining({ model: expect.stringMatching(/^npati\/p\//) }));
+    expect(completed.headers["x-npati-cost-usd"]).toBe("0.0042");
+    expect(completed.headers["x-npati-tokens-total"]).toBe("150");
+    expect(completed.headers["x-npati-routing-strategy"]).toBe("pipeline");
+    expect(completed.headers["x-npati-cache-hit"]).toBe("true");
+    expect(completed.headers["x-npati-cache-savings-usd"]).toBe("0.0018");
     const details = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` });
-    expect(details.json().run).toMatchObject({ status: "completed", executionMode: "pipeline", result: "Reviewed final answer" });
+    expect(details.json().run).toMatchObject({ status: "completed", executionMode: "pipeline", result: "Reviewed final answer", totalCost: 0.0042, totalTokens: 150 });
     expect(details.json().steps).toHaveLength(3);
-    expect(details.json().toolAudit.map((entry: { status: string }) => entry.status)).toEqual(["requested", "succeeded", "requested", "succeeded"]);
+    expect(details.json().toolAudit.filter((entry: { toolName: string }) => entry.toolName !== "ai.inference").map((entry: { status: string }) => entry.status)).toEqual(["requested", "succeeded", "requested", "succeeded"]);
+    expect(details.json().toolAudit).toEqual(expect.arrayContaining([expect.objectContaining({
+      toolName: "ai.inference", latencyMs: 240, cost: 0.0042, tokens: 150, reasonCode: "routing_decision",
+      inputSummary: expect.objectContaining({ providerId: "openai", modelId: "openai/gpt-4o", cacheHit: true, failoverCount: 1 }),
+    })]));
     active.value = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read", "business:manage"] };
     expect((await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` })).statusCode).toBe(403);
   });
@@ -152,7 +167,7 @@ describe("Company delegation runtime", () => {
     const result=await runtime.execute(ctx,company.id,{task:"Find the refund memory",mode:"single"},"memory-tool-run");
     expect(result.run.status).toBe("completed");
     expect(execute).toHaveBeenCalledWith(ctx,expect.objectContaining({id:company.id}),"storage.company_memory",{operation:"search",query:"refunds"},expect.any(AbortSignal));
-    expect(result.toolAudit).toEqual([
+    expect(result.toolAudit.filter((entry)=>entry.toolName!=="ai.inference")).toEqual([
       expect.objectContaining({toolName:"storage.company_memory",decision:"allowed",status:"requested"}),
       expect.objectContaining({toolName:"storage.company_memory",decision:"allowed",status:"succeeded"}),
     ]);

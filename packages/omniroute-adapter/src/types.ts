@@ -92,6 +92,23 @@ export interface RerankResult { model: string; results: Array<{ index: number; r
 export interface ChatResult {
   content: string;
   model?: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cachedTokens?: number;
+  };
+  telemetry?: {
+    requestId?: string;
+    provider?: string;
+    routingStrategy?: string;
+    latencyMs: number;
+    costUsd?: number;
+    costSource?: "upstream" | "estimated";
+    cacheHit: boolean;
+    cacheSavingsUsd?: number;
+    failoverCount: number;
+  };
 }
 
 export interface OmniRouteResilienceSnapshot {

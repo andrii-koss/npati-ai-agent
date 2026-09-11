@@ -398,11 +398,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/company-runtime.test.ts",
+      "scripts/verify-unified-telemetry.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 26,
@@ -428,9 +430,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/audit-and-usage-analytics.test.ts"
+      "tests/audit-and-usage-analytics.test.ts",
+      "tests/company-runtime.test.ts",
+      "scripts/verify-unified-telemetry.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 28,
@@ -457,9 +461,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/audit-and-usage-analytics.test.ts",
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/company-runtime.test.ts",
+      "scripts/verify-unified-telemetry.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 30,
@@ -2917,11 +2922,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "orchestration",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/quota-share-transparency-session-dedup.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/company-runtime.test.ts",
+      "scripts/verify-unified-telemetry.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 192,
@@ -3087,11 +3094,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
-      "tests/cache-savings-backups-session-search.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/audit-and-usage-analytics.test.ts",
+      "scripts/verify-unified-telemetry.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 204,

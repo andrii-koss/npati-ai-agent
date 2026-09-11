@@ -38,6 +38,41 @@ function* boundedTextChunks(value: string, maxCharacters = 2_048) {
   }
 }
 
+function numericHeader(headers: Headers, ...names: string[]) {
+  for (const name of names) {
+    const value = headers.get(name);
+    if (value != null && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function textHeader(headers: Headers, ...names: string[]) {
+  for (const name of names) {
+    const value = headers.get(name)?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function chatUsage(payload: Record<string, any>) {
+  const usage = payload.usage ?? payload.usageMetadata;
+  if (!usage || typeof usage !== "object") return undefined;
+  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokenCount ?? 0);
+  const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? 0);
+  const totalTokens = Number(usage.total_tokens ?? usage.totalTokenCount ?? promptTokens + completionTokens);
+  const cachedTokens = Number(usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0);
+  if (![promptTokens, completionTokens, totalTokens, cachedTokens].every(Number.isFinite)) return undefined;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    ...(cachedTokens > 0 ? { cachedTokens } : {}),
+  };
+}
+
 function matchesAscii(data: Uint8Array, offset: number, value: string) {
   if (offset < 0 || offset + value.length > data.length) return false;
   for (let index = 0; index < value.length; index += 1) {
@@ -120,6 +155,7 @@ export class OmniRouteEngine implements AIEngine {
       .filter((model): model is string => Boolean(model))
       .filter((model, index, values) => values.indexOf(model) === index);
     let lastError = "OmniRoute chat failed";
+    const startedAt = Date.now();
     for (const [index, model] of models.entries()) {
       const useResponses = requiresResponsesApi(model);
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
@@ -158,6 +194,9 @@ export class OmniRouteEngine implements AIEngine {
       }
       const payload = (await response.json()) as {
         model?: string;
+        provider?: string;
+        usage?: Record<string, unknown>;
+        usageMetadata?: Record<string, unknown>;
         choices?: Array<{ message?: { content?: string } }>;
         output_text?: string;
         output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
@@ -165,6 +204,18 @@ export class OmniRouteEngine implements AIEngine {
       return {
         content: useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "",
         model: payload.model ?? model,
+        usage: chatUsage(payload),
+        telemetry: {
+          requestId: textHeader(response.headers, "x-request-id", "x-omniroute-request-id"),
+          provider: textHeader(response.headers, "x-omniroute-provider", "x-provider") ?? payload.provider,
+          routingStrategy: textHeader(response.headers, "x-omniroute-routing-strategy", "x-routing-strategy") ?? (model === "auto" ? "auto" : "manual"),
+          latencyMs: numericHeader(response.headers, "x-omniroute-latency-ms", "x-response-time-ms") ?? Math.max(0, Date.now() - startedAt),
+          costUsd: numericHeader(response.headers, "x-omniroute-cost-usd", "x-cost-usd"),
+          costSource: numericHeader(response.headers, "x-omniroute-cost-usd", "x-cost-usd") != null ? "upstream" : undefined,
+          cacheHit: textHeader(response.headers, "x-omniroute-cache-hit", "x-cache-hit") === "true" || (chatUsage(payload)?.cachedTokens ?? 0) > 0,
+          cacheSavingsUsd: numericHeader(response.headers, "x-omniroute-cache-savings-usd", "x-cache-savings-usd"),
+          failoverCount: numericHeader(response.headers, "x-omniroute-failover-count", "x-failover-count") ?? index,
+        },
       };
     }
     throw new Error(lastError);

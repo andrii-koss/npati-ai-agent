@@ -192,6 +192,7 @@ export class NpatiAgent {
       message: attachResearchSources(normalizeChatStyle(result.content, "I couldn’t generate a useful response. Please try again."), input.research),
       suggestedActions: skillResult?.suggestedActions ?? [],
       model: result.model ?? input.context.ai.model,
+      telemetry: result.telemetry ? { ...result.telemetry, usage: result.usage } : undefined,
       memoryCandidate: detectMemoryCandidate(message),
       research: input.research ? { used: true, kind: input.research.kind, degraded: input.research.degraded, sources: input.research.sources } : undefined,
     };

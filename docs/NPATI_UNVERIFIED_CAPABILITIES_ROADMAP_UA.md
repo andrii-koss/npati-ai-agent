@@ -4,9 +4,9 @@
 
 ## Поточний стан
 
-- `PARTIALLY_IMPLEMENTED`: 50 пунктів.
-- `NOT_IMPLEMENTED`: 122 пункти.
-- Разом у цьому backlog: 172 пункти.
+- `PARTIALLY_IMPLEMENTED`: 47 пунктів.
+- `NOT_IMPLEMENTED`: 120 пунктів.
+- Разом у цьому backlog: 167 пунктів.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано.
 
@@ -51,7 +51,7 @@ Verified gate: точні факти з Excel/PDF/DOCX/TXT, hybrid search і rer
 
 ### P0.3 — Runtime reliability, streaming, observability і scale
 
-Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #25 `Cost telemetry headers` (N), #27 `Usage analytics` (P), #29 `Audit trail` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #191 `Routing transparency` (P), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #203 `Cache-hit savings telemetry` (N), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #290 `10 000 concurrent session capacity` (P).
+Пункти: #22 `Adaptive admission / queue` (P), #23 `Self-healing Auto-Combo` (P), #44 `Isolated group sessions` (P), #46 `Session tools` (N), #56 `Background task auditability` (N), #114 `Background completion reporting` (P), #124 `Evaluation framework` (N), #176 `Semantic cache` (N), #189 `Atomic RPM rolling leases` (N), #190 `Quota-Share routing` (N), #192 `Session-Dedup` (N), #197 `Compression presets` (P), #198 `Adaptive context budget` (N), #199 `Per-request compression override` (N), #200 `Output Styles` (N), #201 `Compression eval harness` (N), #202 `Cache stats / flush` (P), #205 `Database backups` (N), #207 `Session search` (N), #208 `Session pruning` (N), #290 `10 000 concurrent session capacity` (P).
 
 Що реалізувати: Redis admission з tenant fairness/backpressure; справжнє SSE streaming із reconnect/cancel; єдиний immutable Run Trace; provider/model/cost/token/cache telemetry; semantic cache з tenant keys; atomic quota leases; backup/restore drill; cursor-based session search/pruning; сторінкова Org Chart без >100 edge request; distributed 10k connection profile, а не `Map` simulation.
 
@@ -157,10 +157,12 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 6. ✅ Завершено: один production-шлях Code Mode / isolated Exec закриває #47, #53, #63, #159, #160 і #244 без дублювання runtime.
 7. ✅ Завершено: SSE streaming/cancellation/response chunking #42 і #224.
 8. ✅ Завершено: Org Chart pagination >100 — #286.
-9. Реалізувати unified cost/usage/audit trace: #25, #27, #29, #56, #114, #191, #203.
+9. 🟡 Частково завершено: unified AI inference cost/usage/audit/routing/cache trace #25, #27, #29, #191, #203. Durable background audit/reporting #56 і #114 залишаються.
 10. Запустити distributed authenticated 10k session certification і лише після цього закрити #290.
 
 ## Завершені кроки
+
+- 2026-09-11 — #25 `Cost telemetry headers`, #27 `Usage analytics`, #29 `Audit trail`, #191 `Routing transparency`, #203 `Cache-hit savings telemetry`: один production inference trace нормалізує usage та upstream headers, записує модель/провайдера/стратегію/токени/cost/latency/cache/failover у PostgreSQL, повертає `X-NPATI-*` headers і показує незмінні `ai.inference` події у Run Trace. Якщо провайдер не повертає ціну, використовується явно позначена оцінка; cache savings не вигадуються. Strict-auth Docker E2E перевірив реальний Company run, analytics/audit і збереження після restart. #56 та #114 лишаються незавершеними до durable background reporting.
 
 - 2026-09-11 — #286 `Company agents pagination + bounded Org Chart`: Company UI завантажує агентів сторінками по 60, запитує edges лише для поточної сторінки, дедуплікує агентів/зв'язки та не перевищує серверний ліміт 100 ID. API повертає явний HTTP 400 для завеликого фільтра, а PostgreSQL та in-memory store повертають також міжсторінкові зв'язки. Regression test перевіряє 121 агента, сторінки `60/60/1`, міжсторінковий edge і bounded-запити; strict-auth browser E2E перевіряє завантаження всіх трьох сторінок у `/company`.
 

@@ -40,14 +40,16 @@ const companyRunColumns = `id, workspace_id AS "workspaceId", company_id AS "com
   result, error_code AS "errorCode", error_message AS "errorMessage", cancel_requested AS "cancelRequested",
   worker_id AS "workerId", lease_expires_at AS "leaseExpiresAt", last_heartbeat_at AS "lastHeartbeatAt",
   attempt_count AS "attemptCount", max_attempts AS "maxAttempts", next_attempt_at AS "nextAttemptAt",
-  context_snapshot AS "contextSnapshot",
+  context_snapshot AS "contextSnapshot", total_cost::float AS "totalCost", total_tokens::float AS "totalTokens",
+  total_duration_ms AS "totalDurationMs",
   created_at AS "createdAt", started_at AS "startedAt", completed_at AS "completedAt", updated_at AS "updatedAt"`;
 const companyRunStepColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
   agent_id AS "agentId", step_order AS "stepOrder", lane, role, status, model_id AS "modelId",
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 const companyToolAuditColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
   agent_id AS "agentId", tool_name AS "toolName", decision, status, input_summary AS "inputSummary",
-  error_message AS "errorMessage", created_at AS "createdAt", completed_at AS "completedAt"`;
+  error_message AS "errorMessage", latency_ms AS "latencyMs", cost::float, tokens::float,
+  reason_code AS "reasonCode", sequence_number AS "sequenceNumber", created_at AS "createdAt", completed_at AS "completedAt"`;
 
 import migration004 from './migration-004';
 import migration005 from './migration-005';
@@ -347,6 +349,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration028 } = await import("./migration-028");
         await runMigration028(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('028_durable_approvals') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const unifiedTelemetryMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='029_unified_telemetry'");
+    if (!unifiedTelemetryMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration029 } = await import("./migration-029");
+        await runMigration029(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('029_unified_telemetry') ON CONFLICT DO NOTHING");
         await client.query('COMMIT');
       }
       catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
@@ -840,6 +854,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       error_code=CASE WHEN $5::jsonb ? 'errorCode' THEN NULLIF($5::jsonb->>'errorCode','') ELSE error_code END,
       error_message=CASE WHEN $5::jsonb ? 'errorMessage' THEN NULLIF($5::jsonb->>'errorMessage','') ELSE error_message END,
       cancel_requested=CASE WHEN $5::jsonb ? 'cancelRequested' THEN ($5::jsonb->>'cancelRequested')::boolean ELSE cancel_requested END,
+      total_cost=CASE WHEN $5::jsonb ? 'totalCost' THEN ($5::jsonb->>'totalCost')::numeric ELSE total_cost END,
+      total_tokens=CASE WHEN $5::jsonb ? 'totalTokens' THEN ($5::jsonb->>'totalTokens')::bigint ELSE total_tokens END,
+      total_duration_ms=CASE WHEN $5::jsonb ? 'totalDurationMs' THEN ($5::jsonb->>'totalDurationMs')::int ELSE total_duration_ms END,
       started_at=CASE WHEN ($5::jsonb->>'status') IN ('planning','running') THEN COALESCE(started_at,now()) ELSE started_at END,
       completed_at=CASE WHEN ($5::jsonb->>'status') IN ('completed','failed','cancelled') THEN now() ELSE completed_at END,
       updated_at=now()
@@ -878,11 +895,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     await this.getCompanyAgentRun(context, companyId, runId);
     await this.getCompanyAgent(context, companyId, entry.agentId);
     const result = await this.pool.query<CompanyAgentToolAudit>(`INSERT INTO company_agent_tool_audit(
-      id,workspace_id,company_id,run_id,agent_id,tool_name,decision,status,input_summary,error_message,completed_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,CASE WHEN $8 IN ('succeeded','failed','blocked') THEN now() END)
+      id,workspace_id,company_id,run_id,agent_id,tool_name,decision,status,input_summary,error_message,
+      latency_ms,cost,tokens,reason_code,sequence_number,completed_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,CASE WHEN $8 IN ('succeeded','failed','blocked') THEN now() END)
       RETURNING ${companyToolAuditColumns}`,
       [randomUUID(), context.workspaceId, companyId, runId, entry.agentId, entry.toolName, entry.decision,
-        entry.status, JSON.stringify(entry.inputSummary ?? {}), entry.errorMessage ?? null]);
+        entry.status, JSON.stringify(entry.inputSummary ?? {}), entry.errorMessage ?? null, entry.latencyMs ?? null,
+        entry.cost ?? null, entry.tokens ?? null, entry.reasonCode ?? null, entry.sequenceNumber ?? null]);
     return result.rows[0]!;
   }
 

@@ -162,7 +162,11 @@ describe("PHASE 6: Risk, Approval and Destructive Action Policy", () => {
       expect(result.run.status).toBe("completed");
       expect(executeTool).toHaveBeenCalled();
       // Audit records both requested and succeeded
-      expect(result.toolAudit.map((a: any) => a.status)).toEqual(["requested", "succeeded"]);
+      expect(result.toolAudit.filter((a: any) => a.toolName !== "ai.inference").map((a: any) => a.status)).toEqual([
+        "requested",
+        "succeeded",
+      ]);
+      expect(result.toolAudit.some((a: any) => a.toolName === "ai.inference" && a.status === "succeeded")).toBe(true);
     });
 
     it("invalidates approval and blocks execution if the payload was modified (tampering protection)", async () => {

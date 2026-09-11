@@ -1,7 +1,7 @@
 import { WorkspaceAccessError, type CompanyRunMode } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthProvider } from "./auth";
-import { CompanyDelegationRuntime } from "./company-runtime";
+import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import type { CompanyRunQueueProducer } from "./company-run-queue";
 import {RouteGuardTiers} from "./route-guard-tiers";
 
@@ -31,6 +31,9 @@ function runtimeStatus(code?: string) {
   if (code === "OMNIROUTE_ORCHESTRATION_UNAVAILABLE" || code === "OMNIROUTE_COMBOS_UNAVAILABLE") return 503;
   return 200;
 }
+function applyTelemetry(reply: FastifyReply, result: Awaited<ReturnType<CompanyDelegationRuntime["get"]>>) {
+  for (const [name, value] of Object.entries(companyRunTelemetryHeaders(result))) reply.header(name, value);
+}
 
 export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: CompanyDelegationRuntime, auth: AuthProvider, queue?: CompanyRunQueueProducer,routeGuard=new RouteGuardTiers()) {
   function guardRoute(ctx:{workspaceId:string;userId:string;permissions:string[];apiKeyId?:string},reply:FastifyReply){
@@ -55,6 +58,7 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
         return reply.code(202).send(await runtime.get(ctx, request.params.companyId, created.run.id));
       }
       const result = await runtime.execute(ctx, request.params.companyId, request.body, key(request));
+      applyTelemetry(reply, result);
       return reply.code(runtimeStatus(result.run.errorCode)).send(result);
     } catch (error) { return failure(reply, error); }
   });
@@ -93,6 +97,7 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
         const ctx=await context(auth,request,"business:manage");
         if(!guardRoute(ctx,reply))return;
         const result=await runtime.process(ctx,request.params.companyId,request.params.runId,{approvalId:request.body.approvalId});
+        applyTelemetry(reply,result);
         return reply.code(runtimeStatus(result.run.errorCode)).send(result);
       }catch(error){return failure(reply,error);}
     },

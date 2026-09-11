@@ -26,6 +26,14 @@ export interface UsageMetricEntry {
   completionTokens: number;
   costUsd: number;
   latencyMs: number;
+  requestId?: string | null;
+  providerId?: string | null;
+  routingStrategy?: string | null;
+  cacheHit: boolean;
+  cachedTokens: number;
+  cacheSavingsUsd: number;
+  failoverCount: number;
+  costSource: "upstream" | "estimated";
   createdAt: string;
 }
 
@@ -36,6 +44,10 @@ export interface UsageAnalyticsSummary {
   totalTokens: number;
   totalCostUsd: number;
   averageLatencyMs: number;
+  totalCachedTokens: number;
+  totalCacheSavingsUsd: number;
+  cacheHits: number;
+  totalFailovers: number;
   byModel: Record<string, { requests: number; costUsd: number; tokens: number }>;
 }
 
@@ -114,17 +126,29 @@ export class AuditRepository {
       completionTokens: number;
       costUsd: number;
       latencyMs: number;
+      requestId?: string;
+      providerId?: string;
+      routingStrategy?: string;
+      cacheHit?: boolean;
+      cachedTokens?: number;
+      cacheSavingsUsd?: number;
+      failoverCount?: number;
+      costSource?: "upstream" | "estimated";
     }
   ): Promise<UsageMetricEntry> {
     const id = randomUUID();
     const result = await this.pool.query<UsageMetricEntry>(
       `INSERT INTO company_usage_metrics(
-        id, workspace_id, company_id, agent_id, model_id, prompt_tokens, completion_tokens, cost_usd, latency_ms
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        id, workspace_id, company_id, agent_id, model_id, prompt_tokens, completion_tokens, cost_usd, latency_ms,
+        request_id, provider_id, routing_strategy, cache_hit, cached_tokens, cache_savings_usd, failover_count, cost_source
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING
         id, workspace_id AS "workspaceId", company_id AS "companyId", agent_id AS "agentId",
         model_id AS "modelId", prompt_tokens AS "promptTokens", completion_tokens AS "completionTokens",
-        cost_usd::float AS "costUsd", latency_ms AS "latencyMs", created_at AS "createdAt"`,
+        cost_usd::float AS "costUsd", latency_ms AS "latencyMs", request_id AS "requestId",
+        provider_id AS "providerId", routing_strategy AS "routingStrategy", cache_hit AS "cacheHit",
+        cached_tokens::float AS "cachedTokens", cache_savings_usd::float AS "cacheSavingsUsd",
+        failover_count AS "failoverCount", cost_source AS "costSource", created_at AS "createdAt"`,
       [
         id,
         ctx.workspaceId,
@@ -135,6 +159,14 @@ export class AuditRepository {
         metric.completionTokens,
         metric.costUsd,
         metric.latencyMs,
+        metric.requestId ?? null,
+        metric.providerId ?? null,
+        metric.routingStrategy ?? null,
+        metric.cacheHit ?? false,
+        metric.cachedTokens ?? 0,
+        metric.cacheSavingsUsd ?? 0,
+        metric.failoverCount ?? 0,
+        metric.costSource ?? "estimated",
       ]
     );
     return result.rows[0]!;
@@ -151,6 +183,10 @@ export class AuditRepository {
       total_completion_tokens: string;
       total_cost_usd: string;
       avg_latency_ms: string;
+      total_cached_tokens: string;
+      total_cache_savings_usd: string;
+      cache_hits: string;
+      total_failovers: string;
     }>(
       `SELECT
         model_id,
@@ -158,7 +194,11 @@ export class AuditRepository {
         SUM(prompt_tokens) AS total_prompt_tokens,
         SUM(completion_tokens) AS total_completion_tokens,
         SUM(cost_usd) AS total_cost_usd,
-        AVG(latency_ms) AS avg_latency_ms
+        AVG(latency_ms) AS avg_latency_ms,
+        SUM(cached_tokens) AS total_cached_tokens,
+        SUM(cache_savings_usd) AS total_cache_savings_usd,
+        COUNT(*) FILTER (WHERE cache_hit) AS cache_hits,
+        SUM(failover_count) AS total_failovers
       FROM company_usage_metrics
       WHERE workspace_id = $1 AND company_id = $2
       GROUP BY model_id`,
@@ -170,6 +210,10 @@ export class AuditRepository {
     let totalCompletionTokens = 0;
     let totalCostUsd = 0;
     let sumLatency = 0;
+    let totalCachedTokens = 0;
+    let totalCacheSavingsUsd = 0;
+    let cacheHits = 0;
+    let totalFailovers = 0;
     const byModel: Record<string, { requests: number; costUsd: number; tokens: number }> = {};
 
     for (const row of result.rows) {
@@ -178,12 +222,18 @@ export class AuditRepository {
       const cTokens = parseInt(row.total_completion_tokens, 10) || 0;
       const cost = parseFloat(row.total_cost_usd) || 0;
       const latency = parseFloat(row.avg_latency_ms) || 0;
+      const cachedTokens = parseInt(row.total_cached_tokens, 10) || 0;
+      const cacheSavingsUsd = parseFloat(row.total_cache_savings_usd) || 0;
 
       totalRequests += requests;
       totalPromptTokens += pTokens;
       totalCompletionTokens += cTokens;
       totalCostUsd += cost;
       sumLatency += latency * requests;
+      totalCachedTokens += cachedTokens;
+      totalCacheSavingsUsd += cacheSavingsUsd;
+      cacheHits += parseInt(row.cache_hits, 10) || 0;
+      totalFailovers += parseInt(row.total_failovers, 10) || 0;
 
       byModel[row.model_id] = {
         requests,
@@ -199,6 +249,10 @@ export class AuditRepository {
       totalTokens: totalPromptTokens + totalCompletionTokens,
       totalCostUsd: Number(totalCostUsd.toFixed(4)),
       averageLatencyMs: totalRequests > 0 ? Math.round(sumLatency / totalRequests) : 0,
+      totalCachedTokens,
+      totalCacheSavingsUsd: Number(totalCacheSavingsUsd.toFixed(6)),
+      cacheHits,
+      totalFailovers,
       byModel,
     };
   }
