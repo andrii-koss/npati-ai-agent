@@ -138,10 +138,14 @@ export class PiiMasker {
   }
 }
 
+import { ContentModerationEngine, type ModerationResult } from "./multimodal-inference-engine";
+import { VisionBridgeGuardrail, type VisualInspectionResult } from "./security-guardrails-and-tokens";
+
 export interface CompanyGuardrailPolicy {
   blockPromptInjection: boolean;
   redactPii: boolean;
   redactCredentials: boolean;
+  enableModeration: boolean;
   customBlockedTerms: string[];
   maxInputCharacters: number;
 }
@@ -150,61 +154,110 @@ export const DEFAULT_GUARDRAIL_POLICY: CompanyGuardrailPolicy = {
   blockPromptInjection: true,
   redactPii: true,
   redactCredentials: true,
+  enableModeration: true,
   customBlockedTerms: [],
   maxInputCharacters: 100_000,
 };
 
 export class SecurityPolicyViolation extends Error {
-  readonly status=400;
-  readonly code="SECURITY_GUARDRAIL_BLOCKED";
-  constructor(public readonly reasonCode:string,message:string){super(message);}
+  readonly status = 400;
+  readonly code = "SECURITY_GUARDRAIL_BLOCKED";
+  constructor(public readonly reasonCode: string, message: string) { super(message); }
 }
 
 export class SecurityPolicyEngine {
-  static normalize(policy?:Partial<CompanyGuardrailPolicy>):CompanyGuardrailPolicy {
+  static normalize(policy?: Partial<CompanyGuardrailPolicy>): CompanyGuardrailPolicy {
     return {
-      blockPromptInjection:policy?.blockPromptInjection??DEFAULT_GUARDRAIL_POLICY.blockPromptInjection,
-      redactPii:policy?.redactPii??DEFAULT_GUARDRAIL_POLICY.redactPii,
-      redactCredentials:policy?.redactCredentials??DEFAULT_GUARDRAIL_POLICY.redactCredentials,
-      customBlockedTerms:[...new Set((policy?.customBlockedTerms??[]).map(term=>term.trim()).filter(Boolean))].slice(0,100),
-      maxInputCharacters:Math.min(1_000_000,Math.max(1_000,policy?.maxInputCharacters??DEFAULT_GUARDRAIL_POLICY.maxInputCharacters)),
+      blockPromptInjection: policy?.blockPromptInjection ?? DEFAULT_GUARDRAIL_POLICY.blockPromptInjection,
+      redactPii: policy?.redactPii ?? DEFAULT_GUARDRAIL_POLICY.redactPii,
+      redactCredentials: policy?.redactCredentials ?? DEFAULT_GUARDRAIL_POLICY.redactCredentials,
+      enableModeration: policy?.enableModeration ?? DEFAULT_GUARDRAIL_POLICY.enableModeration,
+      customBlockedTerms: [...new Set((policy?.customBlockedTerms ?? []).map((term) => term.trim()).filter(Boolean))].slice(0, 100),
+      maxInputCharacters: Math.min(1_000_000, Math.max(1_000, policy?.maxInputCharacters ?? DEFAULT_GUARDRAIL_POLICY.maxInputCharacters)),
     };
   }
 
-  static protectText(text:string,policy?:Partial<CompanyGuardrailPolicy>){
-    const effective=this.normalize(policy);
-    if(text.length>effective.maxInputCharacters)throw new SecurityPolicyViolation("input_too_large","Input exceeds the configured guardrail limit.");
-    if(effective.blockPromptInjection){
-      const analysis=PromptInjectionGuard.analyze(text);
-      if(!analysis.safe)throw new SecurityPolicyViolation("prompt_injection",PROMPT_INJECTION_USER_MESSAGE);
-    }
-    const lowered=text.toLocaleLowerCase();
-    if(effective.customBlockedTerms.some(term=>lowered.includes(term.toLocaleLowerCase())))
-      throw new SecurityPolicyViolation("custom_blocked_term","Input violates a Company custom guardrail.");
-    let sanitized=text;
-    if(effective.redactCredentials)sanitized=CredentialMasker.mask(sanitized);
-    if(effective.redactPii)sanitized=PiiMasker.mask(sanitized);
-    return {sanitized,policy:effective,redacted:sanitized!==text};
+  static moderateText(text: string): ModerationResult {
+    return ContentModerationEngine.moderateText(text);
   }
 
-  static redactText(text:string,policy?:Partial<CompanyGuardrailPolicy>){
-    const effective=this.normalize(policy);
-    let sanitized=text;
-    if(effective.redactCredentials)sanitized=CredentialMasker.mask(sanitized);
-    if(effective.redactPii)sanitized=PiiMasker.mask(sanitized);
+  static protectText(text: string, policy?: Partial<CompanyGuardrailPolicy>) {
+    const effective = this.normalize(policy);
+    if (text.length > effective.maxInputCharacters) {
+      throw new SecurityPolicyViolation("input_too_large", "Input exceeds the configured guardrail limit.");
+    }
+
+    if (effective.enableModeration) {
+      const moderation = ContentModerationEngine.moderateText(text);
+      if (moderation.flagged) {
+        const violations = moderation.detectedViolations.join(", ");
+        if (moderation.categories.promptInjection && effective.blockPromptInjection) {
+          throw new SecurityPolicyViolation("prompt_injection", PROMPT_INJECTION_USER_MESSAGE);
+        }
+        if (moderation.categories.violence || moderation.categories.selfHarm || moderation.categories.hate) {
+          throw new SecurityPolicyViolation("content_moderation_flagged", `Input violates content moderation policy: ${violations}`);
+        }
+      }
+    }
+
+    if (effective.blockPromptInjection) {
+      const analysis = PromptInjectionGuard.analyze(text);
+      if (!analysis.safe) throw new SecurityPolicyViolation("prompt_injection", PROMPT_INJECTION_USER_MESSAGE);
+    }
+
+    const lowered = text.toLocaleLowerCase();
+    if (effective.customBlockedTerms.some((term) => lowered.includes(term.toLocaleLowerCase()))) {
+      throw new SecurityPolicyViolation("custom_blocked_term", "Input violates a Company custom guardrail.");
+    }
+
+    let sanitized = text;
+    if (effective.redactCredentials) sanitized = CredentialMasker.mask(sanitized);
+    if (effective.redactPii) sanitized = PiiMasker.mask(sanitized);
+    return { sanitized, policy: effective, redacted: sanitized !== text };
+  }
+
+  static protectVisualInput(
+    imageContent: Buffer | string,
+    extractedOcrText?: string,
+    policy?: Partial<CompanyGuardrailPolicy>
+  ): { isSafe: boolean; violations: string[]; scrubbedExif: boolean; sanitizedText?: string } {
+    const inspection = VisionBridgeGuardrail.inspectVisualInput(imageContent, extractedOcrText);
+    if (!inspection.isSafe) {
+      throw new SecurityPolicyViolation(
+        "visual_prompt_injection",
+        `Visual security violation detected: ${inspection.violations.join(", ")}`
+      );
+    }
+    let sanitizedText = extractedOcrText;
+    if (sanitizedText) {
+      sanitizedText = this.protectText(sanitizedText, policy).sanitized;
+    }
+    return {
+      isSafe: true,
+      violations: [],
+      scrubbedExif: inspection.scrubbedExif,
+      sanitizedText,
+    };
+  }
+
+  static redactText(text: string, policy?: Partial<CompanyGuardrailPolicy>) {
+    const effective = this.normalize(policy);
+    let sanitized = text;
+    if (effective.redactCredentials) sanitized = CredentialMasker.mask(sanitized);
+    if (effective.redactPii) sanitized = PiiMasker.mask(sanitized);
     return sanitized;
   }
 
-  static redactObject<T>(value:T,policy?:Partial<CompanyGuardrailPolicy>):T {
-    const credentials=CredentialMasker.maskObject(value);
+  static redactObject<T>(value: T, policy?: Partial<CompanyGuardrailPolicy>): T {
+    const credentials = CredentialMasker.maskObject(value);
     return PiiMasker.maskObject(credentials);
   }
 
-  static protectObject<T>(value:T,policy?:Partial<CompanyGuardrailPolicy>):T {
-    if(typeof value==="string")return this.protectText(value,policy).sanitized as T;
-    if(Array.isArray(value))return value.map(item=>this.protectObject(item,policy)) as T;
-    if(value&&typeof value==="object"){
-      return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,this.protectObject(item,policy)])) as T;
+  static protectObject<T>(value: T, policy?: Partial<CompanyGuardrailPolicy>): T {
+    if (typeof value === "string") return this.protectText(value, policy).sanitized as T;
+    if (Array.isArray(value)) return value.map((item) => this.protectObject(item, policy)) as T;
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.protectObject(item, policy)])) as T;
     }
     return value;
   }

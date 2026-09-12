@@ -20,6 +20,25 @@ export interface CreatedApiKey extends CompanyApiKey {
   rawToken: string;
 }
 
+export interface ApiKeyDeviceRecord {
+  id: string;
+  keyId: string;
+  deviceId: string;
+  ip: string;
+  userAgent: string;
+  platform: string;
+  requestsCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface DeviceAccessInput {
+  ip?: string;
+  userAgent?: string;
+  platform?: string;
+  deviceId?: string;
+}
+
 export interface ApiKeyAuthResult {
   authenticated: boolean;
   companyId?: string;
@@ -29,10 +48,30 @@ export interface ApiKeyAuthResult {
   keyName?: string;
   userId?: string;
   error?: string;
+  device?: {
+    deviceId: string;
+    totalDevicesForKey: number;
+    isAnomalous: boolean;
+  };
+}
+
+export const API_KEY_SCOPES = [
+  "workspace:read", "workspace:write", "business:manage", "chat:use",
+  "mcp:read", "mcp:execute", "agent:exec", "*",
+] as const;
+
+export type ApiKeyScope = typeof API_KEY_SCOPES[number];
+
+export function normalizeApiKeyScopes(scopes?: string[]): ApiKeyScope[] {
+  const requested = scopes?.length ? [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))] : ["workspace:read"];
+  const invalid = requested.filter((scope) => !(API_KEY_SCOPES as readonly string[]).includes(scope));
+  if (invalid.length) throw Object.assign(new Error(`Unsupported API key scope: ${invalid.join(", ")}`), { status: 400, code: "INVALID_API_KEY_SCOPE" });
+  return requested as ApiKeyScope[];
 }
 
 export class ApiKeysRepository {
   private readonly inMemoryKeys = new Map<string, any>();
+  private readonly inMemoryDevices = new Map<string, Map<string, ApiKeyDeviceRecord>>();
   private readonly vault: CryptoVault;
 
   constructor(private readonly pool?: Pool, vault?: CryptoVault) {
@@ -56,7 +95,7 @@ export class ApiKeysRepository {
     const rawToken = `npati_live_${entropy}`;
     const keyPrefix = rawToken.slice(0, 16);
     const keyHash = this.hashToken(rawToken);
-    const scopes = params.scopes && params.scopes.length > 0 ? params.scopes : ["*"];
+    const scopes = normalizeApiKeyScopes(params.scopes);
     
     let expiresAt: Date | null = null;
     if (params.expiresInDays && params.expiresInDays > 0) {
@@ -153,13 +192,17 @@ export class ApiKeysRepository {
     return false;
   }
 
-  async authenticate(rawToken: string): Promise<ApiKeyAuthResult> {
+  async authenticate(rawToken: string, deviceInput?: DeviceAccessInput): Promise<ApiKeyAuthResult> {
     if (!rawToken || !rawToken.startsWith("npati_live_")) {
       return { authenticated: false, error: "INVALID_TOKEN_FORMAT" };
     }
 
     const keyHash = this.hashToken(rawToken);
     const now = new Date();
+    const ip = deviceInput?.ip || "127.0.0.1";
+    const userAgent = deviceInput?.userAgent || "unknown-agent";
+    const platform = deviceInput?.platform || "unknown";
+    const deviceId = deviceInput?.deviceId || `${ip}_${Buffer.from(userAgent).toString("base64url").slice(0, 12)}`;
 
     if (this.pool) {
       const res = await this.pool.query(
@@ -179,12 +222,32 @@ export class ApiKeysRepository {
       if (key.revokedAt) {
         return { authenticated: false, error: "API_KEY_REVOKED" };
       }
-      if (key.expiresAt && new Date(key.expiresAt) < now) {
+      if (key.expiresAt && new Date(key.expiresAt).getTime() <= now.getTime()) {
         return { authenticated: false, error: "API_KEY_EXPIRED" };
       }
 
-      // Update last_used_at asynchronously
+      // Update last_used_at
       this.pool.query(`UPDATE company_api_keys SET last_used_at = $1 WHERE id = $2`, [now, key.id]).catch(() => {});
+
+      // Record device access
+      let totalDevices = 1;
+      try {
+        const deviceRecordId = randomUUID();
+        await this.pool.query(
+          `INSERT INTO company_api_key_devices (id, key_id, device_id, ip, user_agent, platform, requests_count, first_seen_at, last_seen_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $7)
+           ON CONFLICT (key_id, device_id)
+           DO UPDATE SET requests_count = company_api_key_devices.requests_count + 1, last_seen_at = $7, ip = $4`,
+          [deviceRecordId, key.id, deviceId, ip, userAgent, platform, now]
+        );
+        const countRes = await this.pool.query(
+          `SELECT count(DISTINCT device_id)::int as count FROM company_api_key_devices WHERE key_id = $1`,
+          [key.id]
+        );
+        totalDevices = countRes.rows[0]?.count ?? 1;
+      } catch {}
+
+      const isAnomalous = totalDevices > 5;
 
       return {
         authenticated: true,
@@ -194,6 +257,11 @@ export class ApiKeysRepository {
         keyId: key.id,
         keyName: key.name,
         userId: key.userId,
+        device: {
+          deviceId,
+          totalDevicesForKey: totalDevices,
+          isAnomalous,
+        },
       };
     }
 
@@ -204,11 +272,39 @@ export class ApiKeysRepository {
     if (match.revokedAt) {
       return { authenticated: false, error: "API_KEY_REVOKED" };
     }
-    if (match.expiresAt && new Date(match.expiresAt) < now) {
+    if (match.expiresAt && new Date(match.expiresAt).getTime() <= now.getTime()) {
       return { authenticated: false, error: "API_KEY_EXPIRED" };
     }
 
     match.lastUsedAt = now.toISOString();
+
+    // In-memory device tracking
+    let devMap = this.inMemoryDevices.get(match.id);
+    if (!devMap) {
+      devMap = new Map();
+      this.inMemoryDevices.set(match.id, devMap);
+    }
+    const existingDev = devMap.get(deviceId);
+    if (existingDev) {
+      existingDev.requestsCount++;
+      existingDev.lastSeenAt = now.toISOString();
+      existingDev.ip = ip;
+    } else {
+      devMap.set(deviceId, {
+        id: randomUUID(),
+        keyId: match.id,
+        deviceId,
+        ip,
+        userAgent,
+        platform,
+        requestsCount: 1,
+        firstSeenAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+      });
+    }
+    const totalDevices = devMap.size;
+    const isAnomalous = totalDevices > 5;
+
     return {
       authenticated: true,
       companyId: match.companyId,
@@ -217,6 +313,77 @@ export class ApiKeysRepository {
       keyId: match.id,
       keyName: match.name,
       userId: match.ownerUserId,
+      device: {
+        deviceId,
+        totalDevicesForKey: totalDevices,
+        isAnomalous,
+      },
     };
+  }
+
+  async listDevices(
+    keyId: string,
+    companyId: string,
+    tenantId: string
+  ): Promise<{ devices: ApiKeyDeviceRecord[]; totalDevices: number; isAnomalous: boolean }> {
+    if (this.pool) {
+      const verifyKey = await this.pool.query(
+        `SELECT id FROM company_api_keys WHERE id = $1 AND company_id = $2 AND tenant_id = $3`,
+        [keyId, companyId, tenantId]
+      );
+      if (verifyKey.rows.length === 0) {
+        throw new Error("KEY_NOT_FOUND");
+      }
+
+      const res = await this.pool.query(
+        `SELECT id, key_id AS "keyId", device_id AS "deviceId", ip, user_agent AS "userAgent",
+                platform, requests_count AS "requestsCount", first_seen_at AS "firstSeenAt",
+                last_seen_at AS "lastSeenAt"
+         FROM company_api_key_devices
+         WHERE key_id = $1
+         ORDER BY last_seen_at DESC`,
+        [keyId]
+      );
+      const devices = res.rows;
+      return {
+        devices,
+        totalDevices: devices.length,
+        isAnomalous: devices.length > 5,
+      };
+    }
+
+    const key = this.inMemoryKeys.get(keyId);
+    if (!key || key.companyId !== companyId || key.tenantId !== tenantId) {
+      throw new Error("KEY_NOT_FOUND");
+    }
+    const devices = Array.from(this.inMemoryDevices.get(keyId)?.values() ?? []);
+    return {
+      devices,
+      totalDevices: devices.length,
+      isAnomalous: devices.length > 5,
+    };
+  }
+
+  async rotateSecret(keyId: string, newVaultOrKey: CryptoVault | string): Promise<boolean> {
+    const newVault = typeof newVaultOrKey === "string" ? new CryptoVault(newVaultOrKey) : newVaultOrKey;
+    if (this.pool) {
+      const res = await this.pool.query(
+        `SELECT id, encrypted_secret AS "encryptedSecret" FROM company_api_keys WHERE id = $1`,
+        [keyId]
+      );
+      if (res.rows.length === 0 || !res.rows[0].encryptedSecret) return false;
+      const reencrypted = this.vault.rotate(res.rows[0].encryptedSecret, newVault);
+      await this.pool.query(
+        `UPDATE company_api_keys SET encrypted_secret = $1, updated_at = NOW() WHERE id = $2`,
+        [reencrypted, keyId]
+      );
+      return true;
+    }
+
+    const key = this.inMemoryKeys.get(keyId);
+    if (!key || !key.encryptedSecret) return false;
+    key.encryptedSecret = this.vault.rotate(key.encryptedSecret, newVault);
+    key.updatedAt = new Date().toISOString();
+    return true;
   }
 }

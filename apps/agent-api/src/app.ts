@@ -23,6 +23,10 @@ import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeQueue } from "./company-knowledge-queue";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
+import { registerReliabilityAndOperationsRoutes } from "./reliability-and-operations-routes";
+import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
+import { registerMultimodalRoutes } from "./multimodal-routes";
+import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
 import { CompanyApprovalsRepository } from "./approvals-repository";
@@ -52,6 +56,8 @@ import {WasmExecSandbox} from "./wasm-exec-sandbox";
 import {CostTelemetry} from "./cost-telemetry";
 import { InMemoryActiveSessionRegistry, RedisActiveSessionRegistry, type ActiveSessionLease, type ActiveSessionRegistry } from "./distributed-session-registry";
 import { registerSessionStreamRoutes } from "./session-stream-routes";
+import { ContextCompactor } from "./context-compactor";
+import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
   for(let offset=0;offset<value.length;){
@@ -294,11 +300,13 @@ export function buildApp(config: AppConfig = {}) {
   const npatiBackendUrl = config.npatiBackendUrl ?? process.env.NPATI_BACKEND_URL;
   const npatiJwtSecret = config.npatiJwtSecret ?? process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET;
   const authClient = config.authClient ?? (npatiBackendUrl ? createNpatiAuthClient(npatiBackendUrl) : undefined);
+  const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const authProvider = config.authProvider ?? new NpatiBackendAuthProvider({
     jwtSecret: npatiJwtSecret,
     authClient,
     workspaceStore,
     allowDevFallback: config.strictAuth ? false : (process.env.NODE_ENV === "test"),
+    apiKeysRepository: apiKeysRepo,
   });
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
@@ -326,9 +334,8 @@ export function buildApp(config: AppConfig = {}) {
     } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo,auditRepo);
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
-  const automationsRepo = config.databaseUrl ? new CompanyAutomationsRepository(config.databaseUrl) : undefined;
-  const integrationsRepo = config.databaseUrl ? new IntegrationsRepository(config.databaseUrl) : undefined;
-  const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
+  const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
+  const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
     const automaticModel = preferences.routing.automaticModel;
@@ -536,6 +543,10 @@ export function buildApp(config: AppConfig = {}) {
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
+  registerReliabilityAndOperationsRoutes(app, authProvider, workspaceStore);
+  registerBrowserAutomationRoutes(app, authProvider);
+  registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage });
+  registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
   app.addHook("onClose", async () => { storageReconciler?.stop(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
@@ -664,6 +675,55 @@ export function buildApp(config: AppConfig = {}) {
     return {cancelled:true};
   });
 
+  // Context Compaction API (#72)
+  app.post<{
+    Body: {
+      messages?: Array<{ role: string; content: string }>;
+      conversationId?: string;
+      keepRecentTurns?: number;
+      maxMessages?: number;
+      maxEstimatedTokens?: number;
+    };
+  }>("/chat/compact", async (request, reply) => {
+    try {
+      const auth = await authProvider.authenticate(request);
+      let messages = request.body?.messages;
+      if ((!messages || !messages.length) && request.body?.conversationId) {
+        try {
+          const conv = await workspaceStore.getNeutralConversation(auth, request.body.conversationId);
+          if (conv?.messages) {
+            messages = conv.messages.map((m: any) => ({ role: m.role, content: m.content }));
+          }
+        } catch {
+          // not neutral conversation
+        }
+      }
+      if (!messages || !Array.isArray(messages)) {
+        return reply.code(400).send({
+          error: { code: "MESSAGES_REQUIRED", message: "messages array or valid conversationId is required" }
+        });
+      }
+
+      const result = ContextCompactor.compact(
+        messages,
+        request.body.keepRecentTurns ?? 4
+      );
+
+      return reply.code(200).send({
+        compacted: result.compacted,
+        summary: result.summary,
+        flushedMemories: result.flushedMemories,
+        preservedMessages: result.preservedMessages,
+        originalCount: result.originalCount,
+        preservedCount: result.preservedMessages.length,
+      });
+    } catch (error) {
+      return reply.code(400).send({
+        error: { code: "COMPACT_ERROR", message: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
   app.post<{ Body: {
     message?: string;
     conversationId?: string;
@@ -756,6 +816,21 @@ export function buildApp(config: AppConfig = {}) {
         );
         for (const [name, value] of Object.entries(companyRunTelemetryHeaders(runResult))) reply.header(name, value);
         if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED")return reply.code(400).send({error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
+
+        // Automatic Memory Extraction for company context (#78)
+        if (!memoryPolicy.noMemoryActive && knowledgeRepo && prompt) {
+          void AutomaticMemoryExtractor.autoExtractAndPersist({
+            auth,
+            companyId: company.id,
+            repo: knowledgeRepo,
+            messages: [
+              { role: "user", content: prompt },
+              ...(runResult.run.result ? [{ role: "assistant", content: runResult.run.result }] : []),
+            ],
+            noMemory: false,
+          }).catch(() => undefined);
+        }
+
         return {
           message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
           suggestedActions: [],

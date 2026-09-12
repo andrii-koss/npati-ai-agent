@@ -658,3 +658,6 @@ export class RoutingStrategiesManager {
     }
   }
 }
+
+export const RoutingStrategyEngine = RoutingStrategiesManager;
+export type RoutingStrategyEngine = RoutingStrategiesManager;

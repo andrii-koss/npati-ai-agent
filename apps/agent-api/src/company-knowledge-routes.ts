@@ -8,6 +8,8 @@ import type { FileMetadataRepository } from "./file-metadata";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import type { CompanyKnowledgeQueue } from "./company-knowledge-queue";
 import { cleanupStoredFileObject } from "./file-cleanup";
+import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
+import { MemoryRerankEngine, type DecayingMemoryItem, type MemoryDecayType } from "./advanced-memory-management";
 const allowed=new Set(["application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","application/vnd.ms-excel","application/x-excel","application/excel","application/x-msexcel","application/msword","text/plain","text/markdown","text/csv","text/tab-separated-values","application/json","application/xml","text/xml"]);
 function resolveMime(filename:string,mime:string):string{
  const raw=(mime||"").toLowerCase().split(";")[0]!.trim();
@@ -41,5 +43,69 @@ export function registerCompanyKnowledgeRoutes(app:FastifyInstance,deps:{auth:Au
  app.post<{Params:{companyId:string};Body:{content:string;source?:string}}>("/companies/:companyId/knowledge/memory",async(r,reply)=>{try{const c=await ctx(auth,r,"business:manage");await store.getCompany(c,r.params.companyId);if(!r.body.content?.trim())throw Error("Memory content is required");return reply.code(201).send(await repo.addMemory(c,r.params.companyId,r.body.content,r.body.source));}catch(e){return err(reply,e);}});
  app.put<{Params:{companyId:string;memoryId:string};Body:{content:string}}>("/companies/:companyId/knowledge/memory/:memoryId",async(r,reply)=>{try{const c=await ctx(auth,r,"business:manage");await store.getCompany(c,r.params.companyId);if(!r.body.content?.trim())throw Error("Memory content is required");return reply.code(200).send(await repo.updateMemory(c,r.params.companyId,r.params.memoryId,r.body.content));}catch(e){return err(reply,e);}});
  app.delete<{Params:{companyId:string;memoryId:string}}>("/companies/:companyId/knowledge/memory/:memoryId",async(r,reply)=>{try{const c=await ctx(auth,r,"business:manage");if(!await repo.deleteMemory(c,r.params.companyId,r.params.memoryId))throw Object.assign(Error("Company memory not found"),{status:404});return reply.code(204).send();}catch(e){return err(reply,e);}});
- app.post<{Params:{companyId:string};Body:{query:string;limit?:number}}>("/companies/:companyId/knowledge/retrieve",async(r,reply)=>{try{const c=await ctx(auth,r,"workspace:read");await store.getCompany(c,r.params.companyId);return {chunks:await processor.retrieve(c,r.params.companyId,r.body.query,Math.min(12,Math.max(1,r.body.limit??6))),memories:await repo.memories(c,r.params.companyId)};}catch(e){return err(reply,e);}});
+  app.post<{Params:{companyId:string};Body:{query:string;limit?:number}}>("/companies/:companyId/knowledge/retrieve",async(r,reply)=>{
+    try{
+      const c=await ctx(auth,r,"workspace:read");
+      await store.getCompany(c,r.params.companyId);
+      const limit=Math.min(20,Math.max(1,r.body.limit??6));
+      const context=await processor.retrieveContext(c,r.params.companyId,r.body.query,limit);
+      return {chunks:context.chunks,memories:context.memories};
+    }catch(e){return err(reply,e);}
+  });
+  app.post<{Params:{companyId:string};Body:{text?:string;messages?:Array<{role:string;content:string}>;noMemory?:boolean;persist?:boolean}}>("/companies/:companyId/knowledge/memory/extract",async(r,reply)=>{
+    try{
+      const c=await ctx(auth,r,"business:manage");
+      await store.getCompany(c,r.params.companyId);
+      const messages=r.body.messages&&r.body.messages.length>0
+        ? r.body.messages
+        : r.body.text
+        ? [{role:"user",content:r.body.text}]
+        : [];
+      if(!messages.length)return reply.code(400).send({error:{code:"INPUT_REQUIRED",message:"text or messages array is required for extraction"}});
+      const noMemory=r.body.noMemory===true||r.headers["x-no-memory"]==="true";
+      const shouldPersist=r.body.persist!==false&&!noMemory;
+      if(shouldPersist){
+        const persisted=await AutomaticMemoryExtractor.autoExtractAndPersist({
+          auth:c,
+          companyId:r.params.companyId,
+          repo,
+          messages,
+          noMemory,
+        });
+        return reply.code(200).send({persisted,count:persisted.length,noMemory});
+      }
+      const extracted=AutomaticMemoryExtractor.extractFacts(messages);
+      return reply.code(200).send({extracted:noMemory?[]:extracted,count:noMemory?0:extracted.length,noMemory});
+    }catch(e){return err(reply,e);}
+  });
+  app.post<{Params:{companyId:string};Body:{query:string;memories?:DecayingMemoryItem[];topK?:number;minFinalScore?:number}}>("/companies/:companyId/knowledge/memory/rerank",async(r,reply)=>{
+    try{
+      const c=await ctx(auth,r,"workspace:read");
+      await store.getCompany(c,r.params.companyId);
+      const query=r.body.query;
+      if(!query||typeof query!=="string")return reply.code(400).send({error:{code:"QUERY_REQUIRED",message:"query string is required for memory rerank"}});
+      let candidates:DecayingMemoryItem[]=[];
+      if(Array.isArray(r.body.memories)&&r.body.memories.length>0){
+        candidates=r.body.memories;
+      }else{
+        let existing=await repo.searchMemories(c,r.params.companyId,query,30);
+        if(!existing.length){
+          existing=await repo.memories(c,r.params.companyId);
+        }
+        candidates=existing.map((m)=>({
+          id:m.id,
+          type:(m.metadata?.type as MemoryDecayType)||(m.source==="ephemeral"?"ephemeral":m.source==="rule"?"project_rule":"operational"),
+          title:(m.metadata?.title as string)||m.content.slice(0,40),
+          content:m.content,
+          baseWeight:typeof m.metadata?.weight==="number"?m.metadata.weight:1.0,
+          createdAt:m.createdAt,
+        }));
+      }
+      const result=MemoryRerankEngine.rerankMemories(query,candidates,{
+        topK:r.body.topK??10,
+        minFinalScore:r.body.minFinalScore??0.05,
+      });
+      return reply.code(200).send({query,rankedMemories:result.rankedMemories,totalEvaluated:result.totalEvaluated});
+    }catch(e){return err(reply,e);}
+  });
 }

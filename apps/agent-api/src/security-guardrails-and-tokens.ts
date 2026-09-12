@@ -1,4 +1,4 @@
-import { randomUUID, createHmac, createHash } from "node:crypto";
+import { randomUUID, createHmac, createHash, createPublicKey, timingSafeEqual, verify as verifySignature, type JsonWebKey as CryptoJsonWebKey } from "node:crypto";
 
 export interface VisualInspectionResult {
   isSafe: boolean;
@@ -11,7 +11,7 @@ export interface VisualInspectionResult {
 export interface OidcClaims {
   sub: string;
   iss: string;
-  aud: string;
+  aud: string | string[];
   exp: number;
   email: string;
   name?: string;
@@ -23,6 +23,14 @@ export interface OidcVerificationResult {
   isValid: boolean;
   claims?: OidcClaims;
   error?: string;
+}
+
+export interface OidcVerificationConfig {
+  expectedIssuer: string;
+  expectedAudience: string;
+  jwksUri?: string;
+  sharedSecret?: string;
+  allowedAlgorithms?: ReadonlyArray<"RS256" | "RS384" | "RS512" | "HS256">;
 }
 
 export interface RemoteAccessToken {
@@ -79,72 +87,72 @@ export class VisionBridgeGuardrail {
 }
 
 export class OidcDashboardGate {
-  /**
-   * 2. OIDC Dashboard Gate: Verifies OpenID Connect ID Tokens for dashboard login
-   */
-  static verifyOidcToken(
-    jwtToken: string,
-    config: { expectedIssuer: string; expectedAudience: string }
-  ): OidcVerificationResult {
+  private static readonly jwksCache = new Map<string, { expiresAt: number; keys: CryptoJsonWebKey[] }>();
+
+  static async verifyOidcToken(jwtToken: string, config: OidcVerificationConfig): Promise<OidcVerificationResult> {
     try {
       const parts = jwtToken.split(".");
-      if (parts.length !== 3) {
-        return { isValid: false, error: "MALFORMED_JWT: Token must have 3 segments." };
+      if (parts.length !== 3) return { isValid: false, error: "MALFORMED_JWT: Token must have 3 segments." };
+
+      const header = JSON.parse(Buffer.from(parts[0]!, "base64url").toString("utf8")) as { alg?: string; kid?: string };
+      const allowedAlgorithms = config.allowedAlgorithms ?? ["RS256"];
+      if (!header.alg || header.alg === "none" || !allowedAlgorithms.includes(header.alg as any)) {
+        return { isValid: false, error: `UNSUPPORTED_ALGORITHM: '${header.alg || "missing"}'.` };
       }
 
-      const payloadJson = Buffer.from(parts[1]!, "base64url").toString("utf8");
-      const claims: OidcClaims = JSON.parse(payloadJson);
+      const signingInput = Buffer.from(`${parts[0]}.${parts[1]}`);
+      const signature = Buffer.from(parts[2]!, "base64url");
+      let signatureValid = false;
+      if (header.alg === "HS256") {
+        if (!config.sharedSecret) return { isValid: false, error: "OIDC_SHARED_SECRET_REQUIRED" };
+        const expected = createHmac("sha256", config.sharedSecret).update(signingInput).digest();
+        signatureValid = signature.length === expected.length && timingSafeEqual(signature, expected);
+      } else {
+        if (!header.kid) return { isValid: false, error: "OIDC_KID_REQUIRED" };
+        const jwksUri = config.jwksUri || `${config.expectedIssuer.replace(/\/$/, "")}/.well-known/jwks.json`;
+        const keys = await this.loadJwks(jwksUri);
+        const jwk = keys.find((candidate: any) => candidate.kid === header.kid && (!candidate.alg || candidate.alg === header.alg));
+        if (!jwk) return { isValid: false, error: "OIDC_SIGNING_KEY_NOT_FOUND" };
+        const algorithm = header.alg === "RS256" ? "RSA-SHA256" : header.alg === "RS384" ? "RSA-SHA384" : "RSA-SHA512";
+        signatureValid = verifySignature(algorithm, signingInput, createPublicKey({ key: jwk, format: "jwk" }), signature);
+      }
+      if (!signatureValid) return { isValid: false, error: "INVALID_SIGNATURE: OIDC token signature verification failed." };
 
-      // Check Expiration
+      const claims = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as OidcClaims;
       const nowSec = Math.floor(Date.now() / 1000);
-      if (claims.exp && claims.exp < nowSec) {
-        return { isValid: false, error: "TOKEN_EXPIRED: OIDC token has expired." };
-      }
-
-      // Check Issuer
-      if (claims.iss !== config.expectedIssuer) {
-        return {
-          isValid: false,
-          error: `INVALID_ISSUER: Expected '${config.expectedIssuer}', got '${claims.iss}'.`,
-        };
-      }
-
-      // Check Audience
-      if (claims.aud !== config.expectedAudience) {
-        return {
-          isValid: false,
-          error: `INVALID_AUDIENCE: Expected '${config.expectedAudience}', got '${claims.aud}'.`,
-        };
-      }
-
+      if (!claims.exp || claims.exp <= nowSec) return { isValid: false, error: "TOKEN_EXPIRED: OIDC token has expired." };
+      if (claims.iss !== config.expectedIssuer) return { isValid: false, error: `INVALID_ISSUER: Expected '${config.expectedIssuer}'.` };
+      const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+      if (!audiences.includes(config.expectedAudience)) return { isValid: false, error: `INVALID_AUDIENCE: Expected '${config.expectedAudience}'.` };
+      if (!claims.sub) return { isValid: false, error: "SUBJECT_REQUIRED: OIDC token has no subject." };
       return { isValid: true, claims };
     } catch (err: any) {
       return { isValid: false, error: `VERIFICATION_FAILED: ${err.message}` };
     }
   }
 
-  /**
-   * Helper to create mock test tokens
-   */
+  private static async loadJwks(jwksUri: string): Promise<CryptoJsonWebKey[]> {
+    const cached = this.jwksCache.get(jwksUri);
+    if (cached && cached.expiresAt > Date.now()) return cached.keys;
+    const response = await fetch(jwksUri, { signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) throw new Error(`JWKS_FETCH_FAILED: HTTP ${response.status}`);
+    const body = await response.json() as { keys?: CryptoJsonWebKey[] };
+    if (!Array.isArray(body.keys) || body.keys.length === 0) throw new Error("JWKS_EMPTY");
+    this.jwksCache.set(jwksUri, { keys: body.keys, expiresAt: Date.now() + 5 * 60_000 });
+    return body.keys;
+  }
+
   static createMockOidcToken(claims: Partial<OidcClaims>, secret = "oidc_test_secret"): string {
     const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-    const payload = Buffer.from(
-      JSON.stringify({
-        sub: claims.sub || "user-123",
-        iss: claims.iss || "https://auth.npati.ai",
-        aud: claims.aud || "npati-dashboard",
-        exp: claims.exp || Math.floor(Date.now() / 1000) + 3600,
-        email: claims.email || "admin@npati.ai",
-        tenantId: claims.tenantId || "comp-admin-1",
-        roles: claims.roles || ["admin"],
-      })
-    ).toString("base64url");
-
+    const payload = Buffer.from(JSON.stringify({
+      sub: claims.sub || "user-123", iss: claims.iss || "https://auth.npati.ai",
+      aud: claims.aud || "npati-dashboard", exp: claims.exp || Math.floor(Date.now() / 1000) + 3600,
+      email: claims.email || "admin@npati.ai", tenantId: claims.tenantId || "comp-admin-1", roles: claims.roles || ["admin"],
+    })).toString("base64url");
     const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
     return `${header}.${payload}.${signature}`;
   }
 }
-
 export class ScopedRemoteAccessTokenManager {
   private readonly secretKey: string;
 

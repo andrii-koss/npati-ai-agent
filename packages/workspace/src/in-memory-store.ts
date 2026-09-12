@@ -140,6 +140,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
 
   private assertCompany(context: AuthContext, companyId: string) {
+    if (context.companyId && context.companyId !== companyId) throw new WorkspaceAccessError("API key is not valid for this company");
     const company = this.companies.get(companyId);
     if (!company || company.workspaceId !== context.workspaceId || company.userId !== context.userId) {
       throw new WorkspaceAccessError("Company is not available to this user");
@@ -151,7 +152,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     await this.ensure(context);
     const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
     const rows = [...this.companies.values()]
-      .filter((company) => company.workspaceId === context.workspaceId && company.userId === context.userId)
+      .filter((company) => company.workspaceId === context.workspaceId && company.userId === context.userId && (!context.companyId || company.id === context.companyId))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .filter((company) => !after || company.createdAt > after.createdAt || (company.createdAt === after.createdAt && company.id > after.id));
     const items = rows.slice(0, limit), last = items.at(-1);
@@ -161,6 +162,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async getCompany(context: AuthContext, companyId: string) { return this.assertCompany(context, companyId); }
 
   async createCompany(context: AuthContext, input: CompanyInput, idempotencyKey: string) {
+    if (context.companyId) throw new WorkspaceAccessError("Company-scoped API keys cannot create companies");
     await this.ensure(context);
     const requestKey = `${context.workspaceId}:${context.userId}:${idempotencyKey}`;
     const existingId = this.companyCreateRequests.get(requestKey);

@@ -57,9 +57,22 @@ export class ContentModerationEngine {
     /disregard safety guidelines/i,
   ];
 
-  private static readonly HARMFUL_PATTERNS = [
-    /\b(kill|harm|destroy)\s+(myself|yourself|all)\b/i,
-    /\b(create|manufacture)\s+(bomb|explosive|malware)\b/i,
+  private static readonly VIOLENCE_PATTERNS = [
+    /\b(create|manufacture|build|make)\b.*\b(bomb|explosive|malware|weapon|chemical weapon)\b/i,
+    /\b(mass shooting|terrorist attack|assassinate|genocide)\b/i,
+    /\b(kill|murder|harm|destroy|shoot)\b.*\b(people|innocent|all|everyone|myself|yourself)\b/i,
+  ];
+
+  private static readonly SELF_HARM_PATTERNS = [
+    /\b(suicide|kill myself|end my life|slit my wrists|self-harm)\b/i,
+  ];
+
+  private static readonly HATE_PATTERNS = [
+    /\b(hate speech|kill all jews|kill all muslims|kill all christians|white supremacy)\b/i,
+  ];
+
+  private static readonly SEXUAL_PATTERNS = [
+    /\b(child sexual|child porn|csam|non-consensual sexual content)\b/i,
   ];
 
   /**
@@ -85,12 +98,38 @@ export class ContentModerationEngine {
       }
     }
 
-    // Check Harmful Content
-    for (const pattern of this.HARMFUL_PATTERNS) {
+    // Check Violence
+    for (const pattern of this.VIOLENCE_PATTERNS) {
       if (pattern.test(textLower)) {
-        violenceScore = 0.92;
-        selfHarmScore = 0.88;
-        detectedViolations.push("violence/harm");
+        violenceScore = 0.96;
+        detectedViolations.push("violence");
+        break;
+      }
+    }
+
+    // Check Self-Harm
+    for (const pattern of this.SELF_HARM_PATTERNS) {
+      if (pattern.test(textLower)) {
+        selfHarmScore = 0.94;
+        detectedViolations.push("self_harm");
+        break;
+      }
+    }
+
+    // Check Hate
+    for (const pattern of this.HATE_PATTERNS) {
+      if (pattern.test(textLower)) {
+        hateScore = 0.93;
+        detectedViolations.push("hate");
+        break;
+      }
+    }
+
+    // Check Sexual
+    for (const pattern of this.SEXUAL_PATTERNS) {
+      if (pattern.test(textLower)) {
+        sexualScore = 0.95;
+        detectedViolations.push("sexual");
         break;
       }
     }

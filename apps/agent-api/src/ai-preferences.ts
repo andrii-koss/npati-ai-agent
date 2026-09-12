@@ -90,8 +90,16 @@ export class AIPreferencesStore {
 
   async get(scope: AuthContext): Promise<AIPreferences> {
     const stored = await this.workspace.getUserSetting(scope, SETTINGS_KEY);
-    if (stored) return normalize(stored.value);
-    if (scope.workspaceId !== 'dev-workspace' || scope.userId !== 'dev-user') {
+    if (stored) {
+      const normalized = normalize(stored.value);
+      if (normalized.addedModels.length > 0 || (scope.workspaceId === 'dev-workspace' && scope.userId === 'dev-user')) {
+        return normalized;
+      }
+    }
+    if (scope.workspaceId === 'dev-workspace' && scope.userId === 'dev-user') {
+      const migrated = await this.migrateLegacyLocalPreferences(scope);
+      if (migrated) return normalize(migrated.value);
+    } else if (scope.userId === 'dev-user' || scope.workspaceId === 'dev-workspace' || scope.workspaceId === 'workspace:dev-user') {
       const fallbackScope: AuthContext = {
         workspaceId: 'dev-workspace',
         userId: 'dev-user',
@@ -99,35 +107,49 @@ export class AIPreferencesStore {
         permissions: ['workspace:read', 'workspace:write', 'business:manage', 'chat:use'],
       };
       const devStored = await this.workspace.getUserSetting(fallbackScope, SETTINGS_KEY);
-      if (devStored) return normalize(devStored.value);
+      if (devStored) {
+        const fallbackNormalized = normalize(devStored.value);
+        if (fallbackNormalized.addedModels.length > 0) {
+          return fallbackNormalized;
+        }
+      }
+      const migrated = await this.migrateLegacyLocalPreferences(fallbackScope);
+      if (migrated) return normalize(migrated.value);
     }
-    return normalize((await this.migrateLegacyLocalPreferences(scope))?.value);
+    return stored ? normalize(stored.value) : initialPreferences();
   }
 
   private async update(scope: AuthContext, operation: (current: AIPreferences) => AIPreferences | Promise<AIPreferences>) {
     for (let attempt = 0; attempt < MAX_CONCURRENT_UPDATE_RETRIES; attempt += 1) {
       let stored = await this.workspace.getUserSetting(scope, SETTINGS_KEY);
-      let writeScope = scope;
-      if (!stored && (scope.workspaceId !== 'dev-workspace' || scope.userId !== 'dev-user')) {
+      if ((!stored || normalize(stored.value).addedModels.length === 0) &&
+          (scope.userId === 'dev-user' || scope.workspaceId === 'dev-workspace' || scope.workspaceId === 'workspace:dev-user')) {
         const fallbackScope: AuthContext = {
           workspaceId: 'dev-workspace',
           userId: 'dev-user',
           externalSubject: 'local:dev-user',
           permissions: ['workspace:read', 'workspace:write', 'business:manage', 'chat:use'],
         };
-        const fallbackStored = await this.workspace.getUserSetting(fallbackScope, SETTINGS_KEY);
-        // The fallback is a template for this user; its revision belongs to the dev scope.
-        if (fallbackStored) {
-          stored = fallbackStored;
-          writeScope = fallbackScope;
+        const devStored = await this.workspace.getUserSetting(fallbackScope, SETTINGS_KEY);
+        if (devStored && normalize(devStored.value).addedModels.length > 0) {
+          stored = devStored;
         }
       }
-      stored ??= await this.migrateLegacyLocalPreferences(scope);
-      const current = normalize(stored?.value);
+      if (!stored && scope.workspaceId === 'dev-workspace' && scope.userId === 'dev-user') {
+        stored = await this.migrateLegacyLocalPreferences(scope);
+      }
+      const current = stored ? normalize(stored.value) : initialPreferences();
       const next = await operation(current);
-      if (JSON.stringify(next) === JSON.stringify(current)) return current;
-      const written = await this.workspace.setUserSetting(writeScope, SETTINGS_KEY, next, stored?.revision ?? 0);
-      if (written) return normalize(written.value);
+      if (stored && JSON.stringify(next) === JSON.stringify(current)) return current;
+      const written = await this.workspace.setUserSetting(scope, SETTINGS_KEY, next, stored?.revision ?? 0);
+      if (written) {
+        if (scope.userId === 'dev-user' && scope.workspaceId !== 'dev-workspace') {
+          const mirrorScope: AuthContext = { ...scope, workspaceId: 'dev-workspace' };
+          const mirrorStored = await this.workspace.getUserSetting(mirrorScope, SETTINGS_KEY);
+          await this.workspace.setUserSetting(mirrorScope, SETTINGS_KEY, next, mirrorStored?.revision ?? 0).catch(() => undefined);
+        }
+        return normalize(written.value);
+      }
     }
     throw new Error('AI preferences changed concurrently; retry the request');
   }
