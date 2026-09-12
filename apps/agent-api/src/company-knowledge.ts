@@ -10,11 +10,13 @@ import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ObjectStorage } from "./object-storage";
 import { NPATI_BUCKETS, objectKey } from "./object-storage";
 import type { FileMetadataRepository, StoredFile } from "./file-metadata";
+import { ResilientRerankPipeline } from "./resilient-inference-pipeline";
+import { MemoryRerankEngine, type DecayingMemoryItem, type MemoryDecayType } from "./advanced-memory-management";
 
 export type KnowledgeStatus="uploaded"|"processing"|"ready"|"failed"|"deleted";
 export interface KnowledgeDocument { id:string; workspaceId:string; companyId:string; userId:string; fileId:string; status:KnowledgeStatus; errorMessage?:string; chunkCount:number; embeddingModel?:string; attemptCount:number; createdAt:string; updatedAt:string; file?:StoredFile; filename?:string; sizeBytes?:number; mimeType?:string; }
 export interface CompanyMemory { id:string;workspaceId:string;companyId:string;userId:string;content:string;source:string;metadata:Record<string,unknown>;revision:number;createdAt:string;updatedAt:string; }
-export interface KnowledgeCandidate { id:string;content:string;score:number;vectorScore:number;keywordScore:number; }
+export interface KnowledgeCandidate { id:string;content:string;score:number;vectorScore:number;keywordScore:number;rerankScore?:number; }
 const docCols='d.id,d.workspace_id AS "workspaceId",d.company_id AS "companyId",d.user_id AS "userId",d.file_id AS "fileId",d.status,d.error_message AS "errorMessage",d.chunk_count AS "chunkCount",d.embedding_model AS "embeddingModel",d.attempt_count AS "attemptCount",d.created_at AS "createdAt",d.updated_at AS "updatedAt",f.original_filename AS "filename",f.size_bytes AS "sizeBytes",f.mime_type AS "mimeType"';
 const docColsRaw='id,workspace_id AS "workspaceId",company_id AS "companyId",user_id AS "userId",file_id AS "fileId",status,error_message AS "errorMessage",chunk_count AS "chunkCount",embedding_model AS "embeddingModel",attempt_count AS "attemptCount",created_at AS "createdAt",updated_at AS "updatedAt"';
 const memCols='id,workspace_id AS "workspaceId",company_id AS "companyId",user_id AS "userId",content,source,metadata,revision,created_at AS "createdAt",updated_at AS "updatedAt"';
@@ -99,6 +101,64 @@ export class CompanyKnowledgeProcessor {
    await this.repo.complete(doc,parts.map((content,i)=>({content,hash:createHash('sha256').update(content).digest('hex'),embedding:vectors[i]!})),embeddingModel);
   }catch(e){await this.repo.fail(id,e instanceof Error?e.message:String(e));throw e;}
  }
- async retrieve(ctx:AuthContext,companyId:string,query:string,limit=6){let embedding:number[]|undefined;if(this.ai.embed)try{embedding=(await this.ai.embed({input:[query]})).vectors[0];}catch{embedding=undefined;}const candidates=await this.repo.hybridCandidates(ctx,companyId,query,embedding,Math.max(limit*4,12));if(!candidates.length)return[];if(!this.ai.rerank)return candidates.slice(0,limit);try{const ranked=await this.ai.rerank({query,documents:candidates.map(c=>c.content),topN:limit});return ranked.results.map(r=>candidates[r.index]).filter((item): item is KnowledgeCandidate=>Boolean(item));}catch{return candidates.slice(0,limit);}}
- async retrieveContext(ctx:AuthContext,companyId:string,query:string,limit=6){const [chunks,memories]=await Promise.all([this.retrieve(ctx,companyId,query,limit),this.repo.searchMemories(ctx,companyId,query,Math.max(limit,12))]);return {chunks,memories};}
+  async retrieve(ctx:AuthContext,companyId:string,query:string,limit=6){
+    let embedding:number[]|undefined;
+    if(this.ai.embed)try{embedding=(await this.ai.embed({input:[query]})).vectors[0];}catch{embedding=undefined;}
+    const candidates=await this.repo.hybridCandidates(ctx,companyId,query,embedding,Math.max(limit*4,12));
+    if(!candidates.length)return[];
+    if(this.ai.rerank){
+      try{
+        const ranked=await this.ai.rerank({query,documents:candidates.map(c=>c.content),topN:limit});
+        return ranked.results.map(r=>{
+          const item=candidates[r.index];
+          if(item)item.rerankScore=r.relevanceScore;
+          return item;
+        }).filter((item): item is KnowledgeCandidate=>Boolean(item));
+      }catch{
+        // Fallback to resilient rerank pipeline
+      }
+    }
+    try{
+      const rerankCandidates=candidates.map((c,idx)=>({id:c.id,text:c.content,metadata:{originalIndex:idx}}));
+      const localRerank=await ResilientRerankPipeline.rerank(query,rerankCandidates,{topK:limit});
+      return localRerank.items.map(item=>{
+        const origIdx=(item.metadata?.originalIndex as number)??candidates.findIndex(c=>c.id===item.id);
+        const cand=candidates[origIdx]??candidates.find(c=>c.id===item.id);
+        if(cand)cand.rerankScore=item.score;
+        return cand;
+      }).filter((item): item is KnowledgeCandidate=>Boolean(item));
+    }catch{
+      return candidates.slice(0,limit);
+    }
+  }
+  async retrieveContext(ctx:AuthContext,companyId:string,query:string,limit=6){
+    let [chunks,rawMemories]=await Promise.all([
+      this.retrieve(ctx,companyId,query,limit),
+      this.repo.searchMemories(ctx,companyId,query,Math.max(limit*2,12))
+    ]);
+    if(!rawMemories.length){
+      rawMemories=await this.repo.memories(ctx,companyId);
+    }
+    const decayingItems:DecayingMemoryItem[]=rawMemories.map(m=>({
+      id:m.id,
+      type:(m.metadata?.type as MemoryDecayType)||(m.source==="ephemeral"?"ephemeral":m.source==="rule"?"project_rule":"operational"),
+      title:(m.metadata?.title as string)||m.content.slice(0,40),
+      content:m.content,
+      baseWeight:typeof m.metadata?.weight==="number"?m.metadata.weight:1.0,
+      createdAt:m.createdAt,
+    }));
+    const reranked=MemoryRerankEngine.rerankMemories(query,decayingItems,{topK:limit});
+    const memMap=new Map(rawMemories.map(m=>[m.id,m]));
+    const memories=reranked.rankedMemories.map(rm=>{
+      const original=memMap.get(rm.id);
+      return {
+        ...(original??{id:rm.id,workspaceId:ctx.workspaceId,companyId,userId:ctx.userId,content:rm.content,source:"manual",metadata:{},revision:1,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}),
+        rerankScore:rm.rerankScore,
+        effectiveWeight:rm.effectiveWeight,
+        finalScore:rm.finalScore,
+        rank:rm.rank,
+      };
+    });
+    return {chunks,memories};
+  }
 }

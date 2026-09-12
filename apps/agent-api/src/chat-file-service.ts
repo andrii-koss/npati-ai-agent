@@ -7,6 +7,7 @@ import type { FileCategory, FileMetadataRepository, StoredFile } from "./file-me
 import { NPATI_BUCKETS, objectKey, objectKeySegment as segment, type ObjectStorage } from "./object-storage";
 import type { StorageProtection } from "./storage-protection";
 import { cleanupStoredFileObject } from "./file-cleanup";
+import { SecurityPolicyEngine } from "./security-guardrails";
 
 export interface PersistableAttachment {
   clientId?: string;
@@ -35,6 +36,9 @@ export class ChatFileService {
     await this.protection?.consume(context,"upload",attachments.length);
     const saved: Array<{ id: string; kind: FileCategory; name: string; transcript?: string }> = [];
     for (const item of attachments) {
+      if (item.kind === "image") {
+        SecurityPolicyEngine.protectVisualInput(item.data, item.transcript);
+      }
       const id = uuid(item.clientId);
       const checksum = createHash("sha256").update(item.data).digest("hex");
       const key = objectKey(["workspace",segment(context.workspaceId),"user",segment(context.userId),"chats",segment(chatId),item.kind,id]);

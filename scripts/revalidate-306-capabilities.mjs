@@ -36,6 +36,15 @@ const classification = {
 };
 
 for (const cap of matrix) {
+  if (cap.status === "NOT_IMPLEMENTED") {
+    classification["not implemented"].push(cap);
+    continue;
+  }
+  if (cap.status === "PARTIALLY_IMPLEMENTED") {
+    classification["partially implemented"].push(cap);
+    continue;
+  }
+
   // Check tests
   const hasTests = cap.testFiles && cap.testFiles.length > 0;
   const testsExist = hasTests && cap.testFiles.every((f) => fs.existsSync(path.join(rootDir, f)));

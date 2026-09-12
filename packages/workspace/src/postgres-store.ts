@@ -375,6 +375,30 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       }
       catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     }
+    const apiKeyDevicesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='031_api_key_devices'");
+    if (!apiKeyDevicesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration031 } = await import("./migration-031");
+        await runMigration031(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('031_api_key_devices') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
+    const apiKeyHardeningMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='032_api_key_auth_hardening'");
+    if (!apiKeyHardeningMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration032 } = await import("./migration-032");
+        await runMigration032(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('032_api_key_auth_hardening') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
@@ -523,6 +547,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
 
   private async assertCompany(context: AuthContext, companyId: string) {
+    if (context.companyId && context.companyId !== companyId) throw new WorkspaceAccessError("API key is not valid for this company");
     await this.assertMember(context);
     const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3`, [companyId, context.workspaceId, context.userId]);
     if (!result.rowCount) throw new WorkspaceAccessError("Company is not available to this user");
@@ -533,8 +558,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     await this.assertMember(context);
     const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
     const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
-      WHERE workspace_id=$1 AND user_id=$2 AND ($3::timestamptz IS NULL OR (created_at,id) > ($3::timestamptz,$4::text))
-      ORDER BY created_at,id LIMIT $5`, [context.workspaceId, context.userId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
+      WHERE workspace_id=$1 AND user_id=$2 AND ($3::text IS NULL OR id=$3)
+        AND ($4::timestamptz IS NULL OR (created_at,id) > ($4::timestamptz,$5::text))
+      ORDER BY created_at,id LIMIT $6`, [context.workspaceId, context.userId, context.companyId ?? null, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
     const items = result.rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }
@@ -542,6 +568,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async getCompany(context: AuthContext, companyId: string) { return this.assertCompany(context, companyId); }
 
   async createCompany(context: AuthContext, input: CompanyInput, idempotencyKey: string) {
+    if (context.companyId) throw new WorkspaceAccessError("Company-scoped API keys cannot create companies");
     await this.assertMember(context);
     const name = input.name?.trim();
     if (!name) throw new Error("Company name is required");

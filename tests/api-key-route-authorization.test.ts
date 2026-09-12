@@ -26,7 +26,7 @@ describe("Company API key route authorization", () => {
         const res=await app.inject({method,url:method==="DELETE"?url+"/unknown":url,headers:{"x-tenant-id":a.workspaceId},...(method==="POST"?{payload:{name:"untrusted"}}:{})});
         expect(res.statusCode).toBe(401);
       }
-      const created=await app.inject({method:"POST",url,headers:{authorization:"Bearer a","x-tenant-id":b.workspaceId},payload:{name:"test",scopes:["read"]}});
+      const created=await app.inject({method:"POST",url,headers:{authorization:"Bearer a","x-tenant-id":b.workspaceId},payload:{name:"test",scopes:["workspace:read"]}});
       expect(created.statusCode).toBe(201);
       expect(created.json().key.tenantId).toBe(a.workspaceId);
       const keyId=created.json().key.id;

@@ -21,6 +21,7 @@ export interface RerankResultItem {
   id: string;
   text: string;
   relevanceScore: number; // 0.0 to 1.0
+  score: number; // Alias for relevanceScore
   rank: number;
   metadata?: Record<string, unknown>;
 }
@@ -109,23 +110,28 @@ export class ResilientRerankPipeline {
     const minScore = options.minScore ?? 0.0;
     const provider = options.provider ?? "cohere";
 
+    const STOP_WORDS = new Set(["and", "the", "for", "with", "that", "this", "from", "are", "can", "how", "what", "where", "when", "who", "why", "which", "into", "also", "then", "або", "для", "під", "над", "при", "про", "але", "щоб", "якщо"]);
+    const rawTerms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+    const qTerms = rawTerms.filter((t) => !STOP_WORDS.has(t));
+    const effectiveTerms = qTerms.length > 0 ? qTerms : rawTerms;
+
     const scored: RerankResultItem[] = candidates.map((c) => {
-      const qTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-      const textLower = c.text.toLowerCase();
+      const textClean = c.text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ");
       let matchCount = 0;
 
-      for (const term of qTerms) {
-        if (textLower.includes(term)) matchCount++;
+      for (const term of effectiveTerms) {
+        if (textClean.includes(term)) matchCount++;
       }
 
       // Base heuristic relevance score
-      const matchRatio = qTerms.length > 0 ? matchCount / qTerms.length : 0.5;
+      const matchRatio = effectiveTerms.length > 0 ? matchCount / effectiveTerms.length : 0.5;
       const score = Number(Math.min(0.99, Math.max(0.1, matchRatio * 0.8 + 0.15)).toFixed(4));
 
       return {
         id: c.id,
         text: c.text,
         relevanceScore: score,
+        score,
         rank: 0,
         metadata: c.metadata,
       };

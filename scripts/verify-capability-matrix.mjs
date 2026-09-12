@@ -27,7 +27,7 @@ if (matrix.length !== 306) {
   console.error(`❌ Expected exactly 306 capabilities, found ${matrix.length}`);
   process.exit(1);
 }
-console.log(`✓ Total Capabilities: ${matrix.length}/306 verified`);
+console.log(`✓ Catalog entries validated: ${matrix.length}/306`);
 
 // 2. Continuous IDs 1 to 306
 const idSet = new Set();
@@ -113,5 +113,5 @@ for (const [status, count] of Object.entries(statuses)) {
 }
 
 console.log("==========================================================");
-console.log("  CAPABILITY AUDIT MATRIX VERIFICATION: ALL CHECKS PASSED  ");
+console.log("  CAPABILITY MATRIX INTEGRITY CHECKS PASSED  ");
 console.log("==========================================================\n");

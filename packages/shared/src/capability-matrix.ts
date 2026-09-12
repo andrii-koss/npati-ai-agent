@@ -357,7 +357,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "unit",
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts",
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -371,7 +372,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/admission-queue-and-conversation-memory.test.ts"
+      "tests/admission-queue-and-conversation-memory.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -552,9 +554,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "critical",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/security-auth-vault-scopes.test.ts",
+      "tests/production-p01-security.test.ts",
+      "scripts/verify-production-api-key-auth.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 36,
@@ -598,7 +603,9 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/security-auth-vault-scopes.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -697,7 +704,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/group-sessions-and-tool-policy.test.ts"
+      "tests/group-sessions-and-tool-policy.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -731,7 +739,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/group-sessions-and-tool-policy.test.ts",
       "tests/multi-user-dm-pairing-subagents.test.ts",
-      "tests/workspace-store.test.ts"
+      "tests/workspace-store.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -896,7 +905,9 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/telemetry-cache-compaction.test.ts",
+      "tests/multimodal-inference-and-moderation.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -913,7 +924,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/a2a-capabilities-eval-and-dlq.test.ts",
       "tests/agent-api.test.ts",
       "tests/modality-bridge-image-editing-browser.test.ts",
-      "tests/multimodal-inference-and-moderation.test.ts"
+      "tests/multimodal-inference-and-moderation.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -928,7 +940,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/modality-bridge-image-editing-browser.test.ts",
-      "tests/multimodal-inference-and-moderation.test.ts"
+      "tests/multimodal-inference-and-moderation.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -942,7 +955,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
+      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -956,9 +970,11 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
+      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
+      "tests/production-p01-security.test.ts",
+      "scripts/verify-production-oidc.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 62,
@@ -970,7 +986,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "critical",
     "testType": "unit",
     "testFiles": [
-      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts"
+      "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1001,7 +1018,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "unit",
     "testFiles": [
       "tests/inference-and-memory-injection.test.ts",
-      "tests/omniroute-embeddings-resilience.test.ts"
+      "tests/omniroute-embeddings-resilience.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1017,7 +1035,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/company-knowledge-hub-e2e.test.ts",
       "tests/inference-and-memory-injection.test.ts",
-      "tests/memory-decay-rerank-and-journal.test.ts"
+      "tests/memory-decay-rerank-and-journal.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1125,7 +1144,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "unit",
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts",
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/telemetry-cache-compaction.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1215,7 +1235,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1246,7 +1267,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/company-knowledge.test.ts",
       "tests/inference-and-memory-injection.test.ts",
       "tests/memory-decay-rerank-and-journal.test.ts",
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1464,7 +1486,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/quota-share-transparency-session-dedup.test.ts",
-      "tests/routing-strategies.test.ts"
+      "tests/routing-strategies.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1479,7 +1502,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/compression-presets-adaptive-budget.test.ts",
-      "tests/routing-strategies.test.ts"
+      "tests/routing-strategies.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1494,7 +1518,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/quota-share-transparency-session-dedup.test.ts",
-      "tests/routing-strategies.test.ts"
+      "tests/routing-strategies.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1508,7 +1533,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/auto-offline-lkgp-and-a2a.test.ts"
+      "tests/auto-offline-lkgp-and-a2a.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1619,7 +1645,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/auto-offline-lkgp-and-a2a.test.ts",
-      "tests/pii-and-subagents.test.ts"
+      "tests/pii-and-subagents.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1633,7 +1660,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1647,7 +1675,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1661,7 +1690,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/a2a-smart-conductor.test.ts"
+      "tests/a2a-smart-conductor.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1750,7 +1780,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1764,7 +1795,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/multi-agent-messaging.test.ts"
+      "tests/multi-agent-messaging.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1871,7 +1903,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1885,7 +1918,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1899,7 +1933,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1913,7 +1948,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1927,7 +1963,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "high",
     "testType": "unit",
     "testFiles": [
-      "tests/a2a-capabilities-eval-and-dlq.test.ts"
+      "tests/a2a-capabilities-eval-and-dlq.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1941,7 +1978,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/telemetry-cache-compaction.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1969,7 +2007,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/swarm-audio-translation-video.test.ts"
+      "tests/swarm-audio-translation-video.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -1984,7 +2023,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "unit",
     "testFiles": [
       "tests/integrations-and-security.test.ts",
-      "tests/webhooks-documents-and-plugins.test.ts"
+      "tests/webhooks-documents-and-plugins.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -1998,7 +2038,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/automation-scheduler.test.ts"
+      "tests/automation-scheduler.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2012,7 +2053,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2026,7 +2068,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2056,7 +2099,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/a2a-smart-conductor.test.ts",
       "tests/automation-flows-and-email.test.ts",
-      "tests/company-runtime.test.ts"
+      "tests/company-runtime.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2070,7 +2114,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/automation-flows-and-email.test.ts"
+      "tests/automation-flows-and-email.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2084,7 +2129,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/integrations-and-security.test.ts"
+      "tests/integrations-and-security.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2098,7 +2144,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/automation-flows-and-email.test.ts"
+      "tests/automation-flows-and-email.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2112,7 +2159,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/a2a-capabilities-eval-and-dlq.test.ts"
+      "tests/a2a-capabilities-eval-and-dlq.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2126,7 +2174,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/automation-reminders-heartbeat-hooks.test.ts"
+      "tests/automation-reminders-heartbeat-hooks.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2158,7 +2207,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/automation-reminders-heartbeat-hooks.test.ts",
       "tests/background-jobs-and-mcp-server.test.ts",
       "tests/channel-docking-and-hooks.test.ts",
-      "tests/webhooks-documents-and-plugins.test.ts"
+      "tests/webhooks-documents-and-plugins.test.ts",
+      "tests/production-p13-automations.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2172,7 +2222,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/omniroute-adapter.test.ts"
+      "tests/omniroute-adapter.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2188,7 +2239,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/a2a-quota-discovery-and-cost.test.ts",
       "tests/omniroute-adapter.test.ts",
-      "tests/webhooks-documents-and-plugins.test.ts"
+      "tests/webhooks-documents-and-plugins.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2202,7 +2254,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/modality-bridge-image-editing-browser.test.ts"
+      "tests/modality-bridge-image-editing-browser.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -2230,7 +2283,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/modality-bridge-image-editing-browser.test.ts"
+      "tests/modality-bridge-image-editing-browser.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2258,7 +2312,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/swarm-audio-translation-video.test.ts"
+      "tests/swarm-audio-translation-video.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2272,7 +2327,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/swarm-audio-translation-video.test.ts"
+      "tests/swarm-audio-translation-video.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2286,7 +2342,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/modality-bridge-image-editing-browser.test.ts"
+      "tests/modality-bridge-image-editing-browser.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2301,7 +2358,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/browser-tab-click-drag-automation.test.ts",
-      "tests/tools-exec-process-search.test.ts"
+      "tests/tools-exec-process-search.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2315,7 +2373,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "high",
     "testType": "integration",
     "testFiles": [
-      "tests/browser-tab-click-drag-automation.test.ts"
+      "tests/browser-tab-click-drag-automation.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2329,7 +2388,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/browser-tab-click-drag-automation.test.ts"
+      "tests/browser-tab-click-drag-automation.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2343,7 +2403,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2357,7 +2418,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/browser-dom-screenshot-and-pdf.test.ts"
+      "tests/browser-dom-screenshot-and-pdf.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2372,7 +2434,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/browser-dom-screenshot-and-pdf.test.ts",
-      "tests/tools-exec-process-search.test.ts"
+      "tests/tools-exec-process-search.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2386,7 +2449,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/browser-downloads-multiprofile-cdp.test.ts"
+      "tests/browser-downloads-multiprofile-cdp.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2401,7 +2465,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/browser-downloads-multiprofile-cdp.test.ts",
-      "tests/modality-bridge-image-editing-browser.test.ts"
+      "tests/modality-bridge-image-editing-browser.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2415,7 +2480,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/browser-downloads-multiprofile-cdp.test.ts"
+      "tests/browser-downloads-multiprofile-cdp.test.ts",
+      "tests/production-p11-browser-automation.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2701,7 +2767,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/telemetry-cache-compaction.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2723,7 +2790,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/company-runtime.test.ts",
       "tests/group-sessions-and-tool-policy.test.ts",
       "tests/multi-user-dm-pairing-subagents.test.ts",
-      "tests/workspace-store.test.ts"
+      "tests/workspace-store.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2737,7 +2805,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/fill-first-weighted-round-robin.test.ts"
+      "tests/fill-first-weighted-round-robin.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2751,7 +2820,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/fill-first-weighted-round-robin.test.ts"
+      "tests/fill-first-weighted-round-robin.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2765,7 +2835,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/fill-first-weighted-round-robin.test.ts"
+      "tests/fill-first-weighted-round-robin.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2779,7 +2850,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/p2c-least-used-random-routing.test.ts"
+      "tests/p2c-least-used-random-routing.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2793,7 +2865,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/p2c-least-used-random-routing.test.ts"
+      "tests/p2c-least-used-random-routing.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2811,7 +2884,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/p2c-least-used-random-routing.test.ts",
       "tests/pgvector-benchmark.test.ts",
       "tests/storage-protection.test.ts",
-      "tests/strict-random-headroom-reset-window.test.ts"
+      "tests/strict-random-headroom-reset-window.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2827,7 +2901,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-groups-and-mentions.test.ts",
       "tests/p2c-least-used-random-routing.test.ts",
-      "tests/strict-random-headroom-reset-window.test.ts"
+      "tests/strict-random-headroom-reset-window.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2842,7 +2917,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/compression-lite-tool-headroom.test.ts",
-      "tests/strict-random-headroom-reset-window.test.ts"
+      "tests/strict-random-headroom-reset-window.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2857,7 +2933,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "integration",
     "testFiles": [
       "tests/reset-aware-context-relay-rolling-leases.test.ts",
-      "tests/strict-random-headroom-reset-window.test.ts"
+      "tests/strict-random-headroom-reset-window.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2871,7 +2948,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/reset-aware-context-relay-rolling-leases.test.ts"
+      "tests/reset-aware-context-relay-rolling-leases.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2885,7 +2963,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/reset-aware-context-relay-rolling-leases.test.ts"
+      "tests/reset-aware-context-relay-rolling-leases.test.ts",
+      "tests/production-p14-orchestration-a2a.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2899,7 +2978,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/reset-aware-context-relay-rolling-leases.test.ts"
+      "tests/reset-aware-context-relay-rolling-leases.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -2913,7 +2993,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/quota-share-transparency-session-dedup.test.ts"
+      "tests/quota-share-transparency-session-dedup.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3014,7 +3095,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/compression-presets-adaptive-budget.test.ts"
+      "tests/compression-presets-adaptive-budget.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3028,7 +3110,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/compression-presets-adaptive-budget.test.ts"
+      "tests/compression-presets-adaptive-budget.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3042,7 +3125,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/compression-presets-adaptive-budget.test.ts"
+      "tests/compression-presets-adaptive-budget.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3056,7 +3140,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/output-styles-eval-and-cache.test.ts"
+      "tests/output-styles-eval-and-cache.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3070,7 +3155,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "high",
     "testType": "unit",
     "testFiles": [
-      "tests/output-styles-eval-and-cache.test.ts"
+      "tests/output-styles-eval-and-cache.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3085,7 +3171,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testType": "unit",
     "testFiles": [
       "tests/output-styles-eval-and-cache.test.ts",
-      "tests/telemetry-cache-compaction.test.ts"
+      "tests/telemetry-cache-compaction.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3130,7 +3217,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/cache-savings-backups-session-search.test.ts"
+      "tests/cache-savings-backups-session-search.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3164,7 +3252,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-user-dm-pairing-subagents.test.ts",
       "tests/scoped-memory-and-user-model.test.ts",
       "tests/web-research.test.ts",
-      "tests/workspace-store.test.ts"
+      "tests/workspace-store.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3178,7 +3267,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/sessions-custom-models-chunking.test.ts"
+      "tests/sessions-custom-models-chunking.test.ts",
+      "tests/production-p03-reliability-scale.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3367,7 +3457,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "critical",
     "testType": "unit",
     "testFiles": [
-      "tests/qdrant-quantization-device-tracking.test.ts"
+      "tests/qdrant-quantization-device-tracking.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3577,7 +3668,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/radar-videogen-remote-cli.test.ts"
+      "tests/radar-videogen-remote-cli.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3784,7 +3876,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/radar-videogen-remote-cli.test.ts"
+      "tests/radar-videogen-remote-cli.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3798,7 +3891,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/voice-music-and-calls.test.ts"
+      "tests/voice-music-and-calls.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3812,7 +3906,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/voice-music-and-calls.test.ts"
+      "tests/voice-music-and-calls.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3828,7 +3923,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/agent-api.test.ts",
       "tests/omniroute-adapter.test.ts",
-      "tests/voice-music-and-calls.test.ts"
+      "tests/voice-music-and-calls.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "NOT_IMPLEMENTED"
   },
@@ -3899,7 +3995,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/mobile-chat-voice-camera.test.ts"
+      "tests/mobile-chat-voice-camera.test.ts",
+      "tests/production-p12-multimodal.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -3983,7 +4080,9 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "integration",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/ai-preferences.test.ts",
+      "tests/production-p01-security.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },
@@ -4666,7 +4765,8 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "low",
     "testType": "unit",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/capability-registry.test.ts",
+      "tests/production-p02-knowledge-memory.test.ts"
     ],
     "status": "PARTIALLY_IMPLEMENTED"
   },

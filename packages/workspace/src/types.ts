@@ -4,6 +4,7 @@ export interface AuthContext {
   workspaceId: string;
   permissions: string[];
   apiKeyId?: string;
+  companyId?: string;
 }
 
 export type BusinessStage = "idea" | "starting" | "operating" | "growing" | "scaling";

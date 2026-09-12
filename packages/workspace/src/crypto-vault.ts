@@ -87,6 +87,16 @@ export class CryptoVault {
     const jsonStr = this.decrypt(encryptedString);
     return JSON.parse(jsonStr) as T;
   }
+
+  /**
+   * Re-encrypts payload using a new master key or new vault instance.
+   * Ensures seamless zero-downtime key rotation.
+   */
+  rotate(encryptedString: string, newVaultOrKey: CryptoVault | string): string {
+    const plaintext = this.decrypt(encryptedString);
+    const targetVault = typeof newVaultOrKey === "string" ? new CryptoVault(newVaultOrKey) : newVaultOrKey;
+    return targetVault.encrypt(plaintext);
+  }
 }
 
 export const defaultVault = new CryptoVault();

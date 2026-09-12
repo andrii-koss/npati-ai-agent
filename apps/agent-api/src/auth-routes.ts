@@ -3,6 +3,7 @@ import type { NpatiAuthClient } from "@npati/hub-connector";
 import type { WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import { AuthenticationError, createMockNpatiJwt } from "./auth";
+import { OidcDashboardGate } from "./security-guardrails-and-tokens";
 
 export interface AuthRoutesOptions {
   authClient?: NpatiAuthClient;
@@ -355,12 +356,74 @@ export function registerAuthRoutes(
     }
   };
 
+  const handleOidcLogin = async (
+    request: FastifyRequest<{ Body: { idToken?: string; token?: string } }>,
+    reply: FastifyReply
+  ) => {
+    const rawToken = request.body?.idToken || request.body?.token;
+    if (!rawToken) {
+      return reply.code(400).send({
+        success: false,
+        error: { code: "OIDC_TOKEN_REQUIRED", message: "OIDC ID token is required." },
+      });
+    }
+
+    const config = {
+      expectedIssuer: process.env.OIDC_ISSUER || "https://auth.npati.ai",
+      expectedAudience: process.env.OIDC_AUDIENCE || "npati-dashboard",
+      jwksUri: process.env.OIDC_JWKS_URI,
+      sharedSecret: process.env.OIDC_SHARED_SECRET,
+      allowedAlgorithms: process.env.OIDC_SHARED_SECRET ? (["RS256", "HS256"] as const) : (["RS256"] as const),
+    };
+
+    const verification = await OidcDashboardGate.verifyOidcToken(rawToken, config);
+    if (!verification.isValid || !verification.claims) {
+      return reply.code(401).send({
+        success: false,
+        error: { code: "INVALID_OIDC_TOKEN", message: verification.error || "OIDC verification failed." },
+      });
+    }
+
+    const claims = verification.claims;
+    const userId = claims.sub || claims.email;
+    const email = claims.email;
+    const role = claims.roles?.includes("admin") || claims.roles?.includes("superadmin") ? "admin" : "user";
+    const tenantId = claims.tenantId || `comp-${userId}`;
+
+    const accessToken = createMockNpatiJwt({
+      userId,
+      email,
+      role,
+      source: "oidc",
+    });
+
+    return reply.code(200).send({
+      success: true,
+      authenticated: true,
+      user: {
+        id: userId,
+        email,
+        name: claims.name || email,
+        role,
+        tenantId,
+      },
+      tokens: {
+        accessToken,
+        tokenType: "Bearer",
+        expiresIn: 3600,
+      },
+    });
+  };
+
   // Register on both /auth/* and /api/auth/* for direct and proxied calls
   app.post("/auth/register", handleRegister);
   app.post("/api/auth/register", handleRegister);
 
   app.post("/auth/login", handleLogin);
   app.post("/api/auth/login", handleLogin);
+
+  app.post("/auth/oidc/login", handleOidcLogin);
+  app.post("/api/auth/oidc/login", handleOidcLogin);
 
   app.post("/auth/refresh", handleRefresh);
   app.post("/api/auth/refresh", handleRefresh);

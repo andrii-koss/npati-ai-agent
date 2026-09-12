@@ -1,3 +1,5 @@
+import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
+
 export interface CompactionResult {
   compacted: boolean;
   summary?: string;
@@ -41,6 +43,14 @@ export class ContextCompactor {
             flushed.push(item);
           }
         }
+      }
+    }
+
+    // Also run structured extractor
+    const extracted = AutomaticMemoryExtractor.extractFacts(messages);
+    for (const fact of extracted) {
+      if (!flushed.includes(fact.content)) {
+        flushed.push(fact.content);
       }
     }
 
