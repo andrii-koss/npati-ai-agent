@@ -255,7 +255,7 @@ export function BusinessPage() {
     }
   }
 
-  if (loading) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo={editBusinessId ? "/settings/business" : "/settings"} /><div className="workspace-loading">Loading business workspace…</div></main>;
+  if (loading && editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo="/settings/business" /></main>;
   if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
 
   if (creatingManually) {

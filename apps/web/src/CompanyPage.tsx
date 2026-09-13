@@ -597,10 +597,12 @@ export function CompanyPage() {
     && /saved|uploaded|queued|added|updated|deleted|completed/i.test(notice)
     && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied/i.test(notice);
 
-  if (companiesLoading) return <main className="company-page company-refined company-initial-state" aria-busy="true">
-    <span className="company-initial-spinner" aria-hidden="true" />
-    <strong>Loading your AI Company…</strong>
-  </main>;
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
 
   if (companiesLoadError) return <main className="company-page company-refined company-initial-state">
     <strong>Could not load your AI Company</strong>
