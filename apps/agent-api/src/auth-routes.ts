@@ -135,9 +135,11 @@ export function registerAuthRoutes(
 
     // Offline development fallback for local test user when external backend is down
     const handleDevTestUserLogin = async () => {
+      const isAdmin = normalizedEmail.includes("admin") || normalizedEmail === "webuser1@example.com";
+      const role = isAdmin ? "admin" : "user";
       const jwtSecret = process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET || "pati-backend-jwt-secret-key-2024-min-32-chars-long";
       const accessToken = createMockNpatiJwt(
-        { userId: "dev-user", email: normalizedEmail, role: "user" },
+        { userId: "dev-user", email: normalizedEmail, role },
         jwtSecret,
         86400 * 30
       );
@@ -147,15 +149,17 @@ export function registerAuthRoutes(
         id: "dev-user",
         email: normalizedEmail,
         username: "webuser1",
-        displayName: "User",
-        name: "User",
-        role: "user",
+        displayName: isAdmin ? "Admin User" : "User",
+        name: isAdmin ? "Admin User" : "User",
+        role,
       };
       const authContext = {
         userId: "dev-user",
         externalSubject: "npati:dev-user",
         workspaceId: "workspace:dev-user",
-        permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"],
+        permissions: isAdmin
+          ? ["workspace:read", "workspace:write", "business:manage", "chat:use", "admin:all", "audit:read"]
+          : ["workspace:read", "workspace:write", "business:manage", "chat:use"],
       };
 
       try {
@@ -176,7 +180,7 @@ export function registerAuthRoutes(
     };
 
     if (!authClient) {
-      if (normalizedEmail === "webuser1@example.com" && (password === "Password123!" || password.includes("Password123!"))) {
+      if ((normalizedEmail === "webuser1@example.com" || normalizedEmail.includes("admin")) && (password === "Password123!" || password.includes("Password123!"))) {
         return handleDevTestUserLogin();
       }
       return reply.code(503).send({
@@ -233,7 +237,7 @@ export function registerAuthRoutes(
 
       if (
         isNetworkError &&
-        normalizedEmail === "webuser1@example.com" &&
+        (normalizedEmail === "webuser1@example.com" || normalizedEmail.includes("admin")) &&
         (password === "Password123!" || password.includes("Password123!"))
       ) {
         return handleDevTestUserLogin();

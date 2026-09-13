@@ -65,6 +65,10 @@ export class MusicGenerationEngine {
   getTrack(trackId: string): MusicTrack | undefined {
     return this.tracks.get(trackId);
   }
+
+  listTracks(): MusicTrack[] {
+    return Array.from(this.tracks.values());
+  }
 }
 
 export class RealtimeSpeechEngine {
@@ -131,6 +135,14 @@ export class RealtimeSpeechEngine {
   getSession(sessionId: string): RealtimeSpeechSession | undefined {
     return this.sessions.get(sessionId);
   }
+
+  listSessions(): RealtimeSpeechSession[] {
+    return Array.from(this.sessions.values());
+  }
+
+  clearSessions(): void {
+    this.sessions.clear();
+  }
 }
 
 export class VoiceCallManager {
@@ -171,5 +183,13 @@ export class VoiceCallManager {
 
   getCall(callId: string): VoiceCallRecord | undefined {
     return this.calls.get(callId);
+  }
+
+  listCalls(): VoiceCallRecord[] {
+    return Array.from(this.calls.values());
+  }
+
+  clearCalls(): void {
+    this.calls.clear();
   }
 }

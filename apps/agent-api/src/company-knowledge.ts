@@ -145,7 +145,7 @@ export class CompanyKnowledgeProcessor {
       title:(m.metadata?.title as string)||m.content.slice(0,40),
       content:m.content,
       baseWeight:typeof m.metadata?.weight==="number"?m.metadata.weight:1.0,
-      createdAt:m.createdAt,
+      createdAt:m.createdAt??new Date().toISOString(),
     }));
     const reranked=MemoryRerankEngine.rerankMemories(query,decayingItems,{topK:limit});
     const memMap=new Map(rawMemories.map(m=>[m.id,m]));

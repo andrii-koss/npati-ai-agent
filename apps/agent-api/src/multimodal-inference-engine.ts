@@ -47,18 +47,19 @@ export interface OcrExtractionResult {
     imageSizeBytes: number;
     processedAt: string;
   };
+  moderation?: ModerationResult;
 }
 
 export class ContentModerationEngine {
   private static readonly INJECTION_PATTERNS = [
-    /ignore (all )?previous instructions/i,
+    /ignore (all )?(previous|prior|system) (instructions|directives|rules|prompts)/i,
     /you are now in developer mode/i,
     /bypass system safeguards/i,
-    /disregard safety guidelines/i,
+    /disregard (all )?(safety|system) (guidelines|rules|instructions)/i,
   ];
 
   private static readonly VIOLENCE_PATTERNS = [
-    /\b(create|manufacture|build|make)\b.*\b(bomb|explosive|malware|weapon|chemical weapon)\b/i,
+    /\b(create|manufacture|build|make|synthesize)\b.*\b(bomb|explosive|malware|weapon|chemical weapon|warfare)\b/i,
     /\b(mass shooting|terrorist attack|assassinate|genocide)\b/i,
     /\b(kill|murder|harm|destroy|shoot)\b.*\b(people|innocent|all|everyone|myself|yourself)\b/i,
   ];
@@ -160,6 +161,8 @@ export class ContentModerationEngine {
 }
 
 export class ImageGenerationEngine {
+  private static readonly VALID_SIZES = new Set(["1024x1024", "512x512", "1792x1024", "1024x1792"]);
+
   /**
    * 2. Resilient AI Image Generation Client
    */
@@ -168,6 +171,13 @@ export class ImageGenerationEngine {
     customGenerator?: (p: ImageGenerationParams) => Promise<string>
   ): Promise<GeneratedImageResult> {
     const size = params.size || "1024x1024";
+    if (!this.VALID_SIZES.has(size)) {
+      throw Object.assign(new Error(`INVALID_SIZE: Unsupported image size '${size}'. Valid sizes: ${Array.from(this.VALID_SIZES).join(", ")}`), {
+        status: 400,
+        code: "INVALID_SIZE",
+      });
+    }
+
     const provider = params.provider || "dall-e-3";
     const [widthStr, heightStr] = size.split("x");
     const width = parseInt(widthStr || "1024", 10);
@@ -218,16 +228,24 @@ export class OcrTextExtractor {
     const fullText = lines.join("\n");
     const wordCount = fullText.split(/\s+/).filter(Boolean).length;
 
+    let detectedLanguage = options.language;
+    if (!detectedLanguage) {
+      detectedLanguage = /[а-яА-ЯіїєґІЇЄҐ]/i.test(fullText) ? "uk-UA" : "en-US";
+    }
+
+    const moderation = ContentModerationEngine.moderateText(fullText);
+
     return {
       fullText,
       lines,
       confidence: lines.length > 0 ? 0.96 : 0.0,
-      detectedLanguage: options.language || "uk-UA, en-US",
+      detectedLanguage,
       wordCount,
       metadata: {
         imageSizeBytes: sizeBytes,
         processedAt: new Date().toISOString(),
       },
+      moderation: moderation.flagged ? moderation : undefined,
     };
   }
 }

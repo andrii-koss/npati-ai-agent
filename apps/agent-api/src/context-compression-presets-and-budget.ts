@@ -80,7 +80,32 @@ export const COMPRESSION_PRESETS: Record<CompressionPresetName, CompressionPrese
   },
 };
 
+export function getModelContextLimit(modelId?: string): number {
+  if (!modelId) return 128_000;
+  const m = modelId.toLowerCase();
+  if (m.includes("gemini-1.5") || m.includes("gemini-2") || m.includes("gemini-flash") || m.includes("gemini-pro")) {
+    return 1_000_000;
+  }
+  if (m.includes("claude-3") || m.includes("claude-2") || m.includes("sonnet") || m.includes("opus")) {
+    return 200_000;
+  }
+  if (m.includes("gpt-4o") || m.includes("gpt-4-turbo") || m.includes("o1") || m.includes("o3")) {
+    return 128_000;
+  }
+  if (m.includes("gpt-4-32k")) {
+    return 32_768;
+  }
+  if (m.includes("gpt-4") || m.includes("gpt-3.5-turbo")) {
+    return 16_384;
+  }
+  return 128_000;
+}
+
 export class CompressionPresetManager {
+  static getAvailablePresets(): CompressionPresetConfig[] {
+    return Object.values(COMPRESSION_PRESETS);
+  }
+
   /**
    * 1. Compression Presets: Applies pre-configured compression profiles
    */
@@ -121,6 +146,23 @@ export class CompressionPresetManager {
       tokensSaved: Math.max(0, initialTokens - finalTokens),
     };
   }
+
+  static applyPresetToMessages(
+    messages: Array<{ role: string; content: string }>,
+    presetName: CompressionPresetName = "balanced"
+  ): {
+    compressedMessages: Array<{ role: string; content: string }>;
+    preset: CompressionPresetName;
+    tokensSaved: number;
+  } {
+    let totalSaved = 0;
+    const compressedMessages = messages.map((m) => {
+      const res = CompressionPresetManager.applyPreset(m.content, presetName);
+      totalSaved += res.tokensSaved;
+      return { role: m.role, content: res.compressedText };
+    });
+    return { compressedMessages, preset: presetName, tokensSaved: totalSaved };
+  }
 }
 
 export class AdaptiveContextBudgetManager {
@@ -129,17 +171,24 @@ export class AdaptiveContextBudgetManager {
    */
   static evaluateBudget(
     currentTokens: number,
-    maxContextTokens = 128_000
+    maxContextTokens?: number,
+    modelId?: string
   ): AdaptiveBudgetResolution {
-    const ratio = currentTokens / maxContextTokens;
+    const effectiveMaxTokens =
+      maxContextTokens && maxContextTokens > 0
+        ? maxContextTokens
+        : getModelContextLimit(modelId);
+
+    const safeTokens = Math.max(0, currentTokens);
+    const ratio = effectiveMaxTokens > 0 ? safeTokens / effectiveMaxTokens : 1.0;
 
     if (ratio < 0.6) {
       return {
-        currentTokens,
-        maxContextTokens,
+        currentTokens: safeTokens,
+        maxContextTokens: effectiveMaxTokens,
         utilizationRatio: Number(ratio.toFixed(2)),
         suggestedPreset: "none",
-        targetBudgetTokens: currentTokens,
+        targetBudgetTokens: safeTokens,
         actionRequired: false,
         reason: `Context usage is healthy (${Math.round(ratio * 100)}% of limit). No compression required.`,
       };
@@ -147,22 +196,22 @@ export class AdaptiveContextBudgetManager {
 
     if (ratio < 0.8) {
       return {
-        currentTokens,
-        maxContextTokens,
+        currentTokens: safeTokens,
+        maxContextTokens: effectiveMaxTokens,
         utilizationRatio: Number(ratio.toFixed(2)),
         suggestedPreset: "balanced",
-        targetBudgetTokens: Math.floor(maxContextTokens * 0.55),
+        targetBudgetTokens: Math.floor(effectiveMaxTokens * 0.55),
         actionRequired: true,
         reason: `Approaching context threshold (${Math.round(ratio * 100)}%). Applying 'balanced' compression.`,
       };
     }
 
     return {
-      currentTokens,
-      maxContextTokens,
+      currentTokens: safeTokens,
+      maxContextTokens: effectiveMaxTokens,
       utilizationRatio: Number(ratio.toFixed(2)),
       suggestedPreset: "extreme",
-      targetBudgetTokens: Math.floor(maxContextTokens * 0.65),
+      targetBudgetTokens: Math.floor(effectiveMaxTokens * 0.65),
       actionRequired: true,
       reason: `Critical context usage (${Math.round(ratio * 100)}%). Applying 'extreme' compression to prevent overflow.`,
     };

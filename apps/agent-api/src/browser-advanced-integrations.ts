@@ -24,6 +24,7 @@ export interface BrowserInstance {
 }
 
 export interface CdpAttachmentResult {
+  sessionId: string;
   connected: boolean;
   host: string;
   port: number;
@@ -78,9 +79,22 @@ export class BrowserDownloadManager {
     return this.downloads.get(downloadId) || null;
   }
 
-  listDownloads(tabId?: string): BrowserDownloadItem[] {
-    const all = Array.from(this.downloads.values());
-    return tabId ? all.filter((d) => d.tabId === tabId) : all;
+  deleteDownload(downloadId: string): boolean {
+    return this.downloads.delete(downloadId);
+  }
+
+  listDownloads(filter?: { tabId?: string; status?: string } | string): BrowserDownloadItem[] {
+    let all = Array.from(this.downloads.values());
+    if (typeof filter === "string") {
+      return all.filter((d) => d.tabId === filter);
+    }
+    if (filter?.tabId) {
+      all = all.filter((d) => d.tabId === filter.tabId);
+    }
+    if (filter?.status) {
+      all = all.filter((d) => d.status === filter.status);
+    }
+    return all;
   }
 }
 
@@ -111,6 +125,10 @@ export class MultiProfileBrowserManager {
     return instance;
   }
 
+  getInstance(instanceId: string): BrowserInstance | null {
+    return this.instances.get(instanceId) || null;
+  }
+
   releaseInstance(instanceId: string): boolean {
     return this.instances.delete(instanceId);
   }
@@ -118,9 +136,15 @@ export class MultiProfileBrowserManager {
   listActiveInstances(): BrowserInstance[] {
     return Array.from(this.instances.values());
   }
+
+  listInstancesForProfile(profileId: string): BrowserInstance[] {
+    return Array.from(this.instances.values()).filter((inst) => inst.profileId === profileId);
+  }
 }
 
 export class RealChromeCdpAttacher {
+  private static readonly activeSessions = new Map<string, CdpAttachmentResult>();
+
   /**
    * 3. Attach Real Chrome: Connects to running Chrome via CDP port
    */
@@ -129,6 +153,10 @@ export class RealChromeCdpAttacher {
     port = 9222,
     customPingFn?: (host: string, port: number) => Promise<boolean>
   ): Promise<CdpAttachmentResult> {
+    if (!port || port < 1 || port > 65535 || !Number.isInteger(port)) {
+      throw new Error(`INVALID_PORT: Port must be an integer between 1 and 65535, received ${port}`);
+    }
+
     let reachable = true;
     if (customPingFn) {
       reachable = await customPingFn(host, port);
@@ -138,14 +166,35 @@ export class RealChromeCdpAttacher {
       throw new Error(`CDP_CONNECTION_FAILED: Cannot connect to Chrome at ${host}:${port}`);
     }
 
-    return {
+    const sessionId = `cdp_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const result: CdpAttachmentResult = {
+      sessionId,
       connected: true,
       host,
       port,
       browserVersion: "Chrome/128.0.6613.120",
-      webSocketDebuggerUrl: `ws://${host}:${port}/devtools/browser/npati-cdp-session-1`,
+      webSocketDebuggerUrl: `ws://${host}:${port}/devtools/browser/${sessionId}`,
       activePagesCount: 3,
       attachedAt: new Date().toISOString(),
     };
+
+    this.activeSessions.set(sessionId, result);
+    return result;
+  }
+
+  static getAttachment(sessionId: string): CdpAttachmentResult | undefined {
+    return this.activeSessions.get(sessionId);
+  }
+
+  static listAttachments(): CdpAttachmentResult[] {
+    return Array.from(this.activeSessions.values());
+  }
+
+  static detach(sessionId: string): boolean {
+    return this.activeSessions.delete(sessionId);
+  }
+
+  static clearAll(): void {
+    this.activeSessions.clear();
   }
 }

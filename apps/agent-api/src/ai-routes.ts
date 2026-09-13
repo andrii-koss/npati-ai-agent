@@ -18,28 +18,8 @@ function sendError(reply: FastifyReply, error: unknown) {
 
 class AIAccessError extends Error { readonly code = "AI_ACCESS_DENIED"; readonly statusCode = 403; }
 
-const FALLBACK_DEV_SCOPE: AuthContext = {
-  workspaceId: "dev-workspace",
-  userId: "dev-user",
-  externalSubject: "local:dev-user",
-  permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"],
-};
-
-async function optionalAuthorize(auth: AuthProvider, request: FastifyRequest): Promise<AuthContext | null> {
-  try {
-    return await auth.authenticate(request);
-  } catch {
-    return null;
-  }
-}
-
 async function authorize(auth: AuthProvider, request: FastifyRequest, permission: "workspace:read" | "workspace:write" | "chat:use"): Promise<AuthContext> {
-  let scope: AuthContext | null = null;
-  if (!request.headers.authorization && !request.headers["x-api-key"] && !request.headers["x-npati-api-key"] && !request.headers["x-oidc-token"]) {
-    scope = FALLBACK_DEV_SCOPE;
-  } else {
-    scope = await auth.authenticate(request);
-  }
+  const scope = await auth.authenticate(request);
   if (!scope.permissions.includes(permission) && !scope.permissions.includes("*") && !scope.permissions.includes("admin:all")) {
     throw new AIAccessError(`Missing permission: ${permission}`);
   }
@@ -226,7 +206,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
 
   app.get<{ Querystring: Record<string, string | undefined> }>("/ai/marketplace", async (request, reply) => {
     try {
-      const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+      const scope = await authorize(auth, request, "workspace:read");
       const stored = await preferences.get(scope);
       const query: MarketplaceQuery = {
         tab: request.query.tab as MarketplaceQuery["tab"],
@@ -331,7 +311,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   });
 
   app.get("/ai/models/added", async (request) => {
-    const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+    const scope = await authorize(auth, request, "workspace:read");
     return (await preferences.get(scope)).addedModels;
   });
 
@@ -365,7 +345,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   });
 
   app.get("/ai/routing", async (request) => {
-    const scope = (await optionalAuthorize(auth, request)) ?? FALLBACK_DEV_SCOPE;
+    const scope = await authorize(auth, request, "workspace:read");
     return (await preferences.get(scope)).routing;
   });
   app.put<{ Body: {

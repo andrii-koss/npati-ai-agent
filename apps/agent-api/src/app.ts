@@ -23,7 +23,9 @@ import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeQueue } from "./company-knowledge-queue";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
-import { registerReliabilityAndOperationsRoutes } from "./reliability-and-operations-routes";
+import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
+import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
+import { AdmissionError, type PriorityTier } from "./resilience-admission-queue";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
 import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
@@ -272,15 +274,19 @@ export function buildApp(config: AppConfig = {}) {
   const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
   const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
   app.addHook("onClose", async () => { await activeSessionRegistry.close(); });
-  const aiEngine = config.aiEngine ?? new OmniRouteEngine({
+  const baseAiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
     transcriptionModel: config.omnirouteTranscriptionModel,
     ttsModel: config.omnirouteTtsModel,
     embeddingModel: config.omnirouteEmbeddingModel, rerankModel: config.omnirouteRerankModel,
   });
-  const researchBundle = aiEngine instanceof OmniRouteEngine && config.crawlerBaseUrl
-    ? createWebResearch(aiEngine, config.crawlerBaseUrl)
+  const aiEngine = createProductionResilientAIEngine(baseAiEngine, {
+    queue: globalAdmissionQueue,
+    defaultTier: "pro",
+  });
+  const researchBundle = baseAiEngine instanceof OmniRouteEngine && config.crawlerBaseUrl
+    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl)
     : undefined;
   const webResearch = config.webResearch ?? researchBundle?.service;
   const marketplace = config.marketplace ?? new OmniRouteMarketplace({
@@ -349,6 +355,8 @@ export function buildApp(config: AppConfig = {}) {
       compression: preferences.routing.compression,
     };
   };
+  const priorityTierFor = (auth: AuthContext): PriorityTier => auth.permissions.includes("admin:all") ? "enterprise" : auth.permissions.includes("workspace:write") ? "pro" : "free";
+  const admissionFor = (auth: AuthContext) => ({ tenantId: auth.workspaceId, tier: priorityTierFor(auth), queueTimeoutMs: 30_000 });
   const contextBuilder = new ContextBuilder({
     store: workspaceStore,
     hub,
@@ -393,6 +401,7 @@ export function buildApp(config: AppConfig = {}) {
       conversation = await workspaceStore.updateConversation(auth, businessId, conversation.id, conversationTitle(media.prompt));
     }
     let context = SecurityPolicyEngine.protectObject(await contextBuilder.build(auth, businessId, safePrompt, { includeMemory: memoryPolicy.readAllowed }));
+    context = { ...context, ai: { ...context.ai, admission: admissionFor(auth) } };
     if (media.images.length > 0) {
       const preferences = await aiPreferences.get(auth);
       const visionModel = config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
@@ -473,9 +482,10 @@ export function buildApp(config: AppConfig = {}) {
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
     const ai = await getAIContext(auth);
     progress?.({ type: "final_generation_started" });
-    const chatRequest:ChatRequest = {
+    const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
+      admission: admissionFor(auth),
       messages: [
         { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
         ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized })) : []),
@@ -626,6 +636,7 @@ export function buildApp(config: AppConfig = {}) {
         .header("cache-control","private, no-store").header("x-content-type-options","nosniff").send(opened.stream);
     } catch (error) {
       if (error instanceof StorageRateLimitError) return reply.header("retry-after",String(Math.ceil(error.retryAfterMs/1000))).code(429).send({error:{code:error.code,message:error.message}});
+      if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))).code(429).send({ error: { code: error.code, message: error.message } });
       if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
       return reply.code(404).send();
     }
@@ -796,7 +807,7 @@ export function buildApp(config: AppConfig = {}) {
         if (!prompt && !request.body.attachments?.length) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
-        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy);
+        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined);
         applyChatTelemetryHeaders(reply, result);
         return { ...result, activeContext: resolved.context };
       }
@@ -967,6 +978,7 @@ export function buildApp(config: AppConfig = {}) {
         return reply.code(403).send({ error: { code: error.code, message: error.message } });
       }
       if (error instanceof StorageRateLimitError) return reply.header("retry-after",String(Math.ceil(error.retryAfterMs/1000))).code(429).send({error:{code:error.code,message:error.message}});
+      if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))).code(429).send({ error: { code: error.code, message: error.message } });
       request.log.error(error);
       const message = publicChatError(error);
       return reply.code(502).send({ error: { code: "AGENT_UNAVAILABLE", message } });
@@ -1081,9 +1093,10 @@ export function buildApp(config: AppConfig = {}) {
         }
       } catch (error) {
         request.log.error(error);
-        const detail = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? error.message : publicChatError(error);
+        const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError;
+        const detail = expected ? error.message : publicChatError(error);
         progress({ type: "final_generation_failed", error: detail });
-        send("error", { error: { code: error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
+        send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
         if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
         if(distributedChatLease)await activeSessionRegistry.release(auth.workspaceId,auth.userId,distributedChatLease).catch(()=>false);

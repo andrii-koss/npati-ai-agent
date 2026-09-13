@@ -117,6 +117,18 @@ export class MobileVoiceAudioAdapter {
     }
     return session;
   }
+
+  getSession(deviceId: string): MobileVoiceSession | undefined {
+    return this.sessions.get(deviceId);
+  }
+
+  listSessions(): MobileVoiceSession[] {
+    return Array.from(this.sessions.values());
+  }
+
+  clearSessions(): void {
+    this.sessions.clear();
+  }
 }
 
 export class CameraAccessController {

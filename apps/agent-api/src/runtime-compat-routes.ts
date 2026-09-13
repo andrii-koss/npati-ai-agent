@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AIEngine, SpeechAudioFormat } from "@npati/omniroute-adapter";
 import { AuthenticationError, type AuthProvider } from "./auth";
+import { AdmissionError, type PriorityTier } from "./resilience-admission-queue";
 
 type OllamaMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function ollamaError(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: error.message });
+  if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1_000)))).code(error.code === "ADMISSION_CANCELLED" ? 499 : 429).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Runtime request failed";
   const status = /required|invalid|empty/i.test(message) ? 400 : 502;
   return reply.code(status).send({ error: message });
@@ -16,6 +18,11 @@ async function authorize(auth: AuthProvider, request: FastifyRequest) {
   const scope = await auth.authenticate(request);
   if (!scope.permissions.includes("chat:use")) throw new AuthenticationError("Missing permission: chat:use", 403, "FORBIDDEN");
   return scope;
+}
+
+function admissionFor(scope: Awaited<ReturnType<AuthProvider["authenticate"]>>) {
+  const tier: PriorityTier = scope.permissions.includes("admin:all") ? "enterprise" : scope.permissions.includes("workspace:write") ? "pro" : "free";
+  return { tenantId: scope.workspaceId, tier, queueTimeoutMs: 30_000 };
 }
 
 function digest(model: string) {
@@ -57,11 +64,11 @@ export function registerRuntimeCompatRoutes(app: FastifyInstance, ai: AIEngine, 
 
   app.post<{ Body: { model?: string; prompt?: string; system?: string; stream?: boolean } }>("/api/generate", async (request, reply) => {
     try {
-      await authorize(auth, request);
+      const scope = await authorize(auth, request);
       const model = request.body.model?.trim();
       const prompt = request.body.prompt?.trim();
       if (!model || !prompt) return reply.code(400).send({ error: "model and prompt are required" });
-      const result = await ai.chat({ model, messages: [
+      const result = await ai.chat({ model, admission: admissionFor(scope), messages: [
         ...(request.body.system?.trim() ? [{ role: "system" as const, content: request.body.system.trim() }] : []),
         { role: "user", content: prompt },
       ] });
@@ -72,13 +79,13 @@ export function registerRuntimeCompatRoutes(app: FastifyInstance, ai: AIEngine, 
 
   app.post<{ Body: { model?: string; messages?: OllamaMessage[]; stream?: boolean } }>("/api/chat", async (request, reply) => {
     try {
-      await authorize(auth, request);
+      const scope = await authorize(auth, request);
       const model = request.body.model?.trim();
       const messages = Array.isArray(request.body.messages)
         ? request.body.messages.filter((item) => item && ["system", "user", "assistant"].includes(item.role) && typeof item.content === "string")
         : [];
       if (!model || messages.length === 0) return reply.code(400).send({ error: "model and messages are required" });
-      const result = await ai.chat({ model, messages });
+      const result = await ai.chat({ model, messages, admission: admissionFor(scope) });
       const payload = ollamaPayload(result.model ?? model, result.content, true);
       return request.body.stream === false ? payload : reply.type("application/x-ndjson").send(`${JSON.stringify(payload)}\n`);
     } catch (error) { return ollamaError(reply, error); }

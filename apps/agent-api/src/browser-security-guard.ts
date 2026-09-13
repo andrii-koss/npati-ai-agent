@@ -49,9 +49,9 @@ const INTERNAL_HOSTNAMES = new Set([
 ]);
 
 const DANGEROUS_ACTION_SELECTORS = [
-  /\b(delete|remove|drop|wipe|purge|destroy)\b/i,
-  /\b(pay|payment|checkout|buy|purchase|transfer|send-money)\b/i,
-  /\b(grant-admin|elevate|sudo|disable-mfa|reset-credentials)\b/i,
+  /(?:^|[^a-zA-Z0-9])(delete|remove|drop|wipe|purge|destroy)(?:[^a-zA-Z0-9]|$)/i,
+  /(?:^|[^a-zA-Z0-9])(pay|payment|checkout|buy|purchase|transfer|send[-_]?money)(?:[^a-zA-Z0-9]|$)/i,
+  /(?:^|[^a-zA-Z0-9])(grant[-_]?admin|elevate|sudo|disable[-_]?mfa|reset[-_]?credentials)(?:[^a-zA-Z0-9]|$)/i,
 ];
 
 export class BrowserSecurityGuard {
@@ -181,7 +181,8 @@ export class BrowserSecurityGuard {
    * 3. High-Risk Action Guardrails
    */
   static checkActionRisk(action: string, selector: string): ActionRiskEvaluation {
-    if (action !== "click" && action !== "submit") {
+    const guardedActions = new Set(["click", "submit", "type", "drag_and_drop", "select_option"]);
+    if (!guardedActions.has(action)) {
       return { highRisk: false, requiresApproval: false };
     }
 

@@ -354,13 +354,15 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts",
       "tests/omniroute-adapter.test.ts",
-      "tests/production-p03-reliability-scale.test.ts"
+      "tests/production-p03-reliability-scale.test.ts",
+      "tests/production-admission-self-healing.test.ts",
+      "scripts/verify-production-admission-self-healing.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 23,
@@ -370,12 +372,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "integration",
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts",
-      "tests/production-p03-reliability-scale.test.ts"
+      "tests/production-p03-reliability-scale.test.ts",
+      "tests/production-admission-self-healing.test.ts",
+      "scripts/verify-production-admission-self-healing.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 24,
@@ -742,7 +746,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/workspace-store.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 47,
@@ -927,7 +931,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multimodal-inference-and-moderation.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 59,
@@ -1966,7 +1970,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/a2a-capabilities-eval-and-dlq.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 125,
@@ -2225,7 +2229,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-adapter.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 142,
@@ -2345,7 +2349,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/modality-bridge-image-editing-browser.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 150,
@@ -2361,7 +2365,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/tools-exec-process-search.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 151,
@@ -2376,7 +2380,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-tab-click-drag-automation.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 152,
@@ -2391,7 +2395,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-tab-click-drag-automation.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 153,
@@ -2406,7 +2410,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/capability-registry.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 154,
@@ -2452,7 +2456,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-downloads-multiprofile-cdp.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 157,
@@ -2468,7 +2472,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/modality-bridge-image-editing-browser.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 158,
@@ -2770,7 +2774,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/telemetry-cache-compaction.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 177,
@@ -2981,7 +2985,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/reset-aware-context-relay-rolling-leases.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 190,
@@ -2996,7 +3000,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/quota-share-transparency-session-dedup.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 191,
@@ -3113,7 +3117,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-presets-adaptive-budget.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 199,
@@ -3128,7 +3132,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/compression-presets-adaptive-budget.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 200,
@@ -3143,7 +3147,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/output-styles-eval-and-cache.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 201,
@@ -3158,7 +3162,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/output-styles-eval-and-cache.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 202,
@@ -3255,7 +3259,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/workspace-store.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 208,
@@ -3270,7 +3274,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/sessions-custom-models-chunking.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 209,
@@ -3894,7 +3898,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/voice-music-and-calls.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "NOT_IMPLEMENTED"
   },
   {
     "id": 248,
@@ -3921,8 +3925,6 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "risk": "medium",
     "testType": "integration",
     "testFiles": [
-      "tests/agent-api.test.ts",
-      "tests/omniroute-adapter.test.ts",
       "tests/voice-music-and-calls.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],

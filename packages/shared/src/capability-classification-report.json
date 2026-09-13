@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-12T12:38:13.121Z",
+  "timestamp": "2026-09-13T05:55:52.605Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -7,9 +7,9 @@
     "implemented but missing UI": 0,
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
-    "partially implemented": 44,
-    "not implemented": 117,
-    "not applicable/runtime-only": 138
+    "partially implemented": 59,
+    "not implemented": 100,
+    "not applicable/runtime-only": 140
   },
   "items": {
     "implemented and verified": [
@@ -137,37 +137,6 @@
     "implemented but missing tests": [],
     "partially implemented": [
       {
-        "id": 22,
-        "capabilityId": "system.adaptive_admission_queue",
-        "name": "Adaptive admission / queue",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/admission-queue-and-conversation-memory.test.ts",
-          "tests/omniroute-adapter.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
-        "id": 23,
-        "capabilityId": "system.self-healing_auto-combo",
-        "name": "Self-healing Auto-Combo",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/admission-queue-and-conversation-memory.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
         "id": 38,
         "capabilityId": "security.aes-256-gcm_at_rest",
         "name": "AES-256-GCM at rest",
@@ -199,6 +168,23 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
+        "id": 46,
+        "capabilityId": "system.session_tools",
+        "name": "Session tools",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/group-sessions-and-tool-policy.test.ts",
+          "tests/multi-user-dm-pairing-subagents.test.ts",
+          "tests/workspace-store.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
         "id": 50,
         "capabilityId": "communications.dm_allowlists_pairing",
         "name": "DM allowlists & pairing",
@@ -209,6 +195,24 @@
         "testType": "integration",
         "testFiles": [
           "tests/omniroute-adapter.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 58,
+        "capabilityId": "system.image_generation",
+        "name": "Image generation",
+        "type": "tool",
+        "domain": "system",
+        "agentCallable": true,
+        "risk": "low",
+        "testType": "integration",
+        "testFiles": [
+          "tests/a2a-capabilities-eval-and-dlq.test.ts",
+          "tests/agent-api.test.ts",
+          "tests/modality-bridge-image-editing-browser.test.ts",
+          "tests/multimodal-inference-and-moderation.test.ts",
+          "tests/production-p12-multimodal.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
       },
@@ -309,6 +313,21 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
+        "id": 124,
+        "capabilityId": "system.evaluation_framework",
+        "name": "Evaluation framework",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "high",
+        "testType": "unit",
+        "testFiles": [
+          "tests/a2a-capabilities-eval-and-dlq.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
         "id": 128,
         "capabilityId": "system.webhooks",
         "name": "Webhooks",
@@ -387,21 +406,6 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
-        "id": 141,
-        "capabilityId": "communications.image_understanding",
-        "name": "Image understanding",
-        "type": "tool",
-        "domain": "communications",
-        "agentCallable": true,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/omniroute-adapter.test.ts",
-          "tests/production-p12-multimodal.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
         "id": 142,
         "capabilityId": "files.document_inputoutput",
         "name": "Document input/output",
@@ -430,6 +434,113 @@
         "testFiles": [
           "tests/modality-bridge-image-editing-browser.test.ts",
           "tests/production-p12-multimodal.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 149,
+        "capabilityId": "browser.managed_browser_profile",
+        "name": "Managed browser profile",
+        "type": "runtime",
+        "domain": "browser",
+        "agentCallable": false,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/modality-bridge-image-editing-browser.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 150,
+        "capabilityId": "browser.browser_tab_control",
+        "name": "Browser tab control",
+        "type": "tool",
+        "domain": "browser",
+        "agentCallable": true,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/browser-tab-click-drag-automation.test.ts",
+          "tests/tools-exec-process-search.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 151,
+        "capabilityId": "browser.browser_clicktype",
+        "name": "Browser click/type",
+        "type": "tool",
+        "domain": "browser",
+        "agentCallable": true,
+        "risk": "high",
+        "testType": "integration",
+        "testFiles": [
+          "tests/browser-tab-click-drag-automation.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 152,
+        "capabilityId": "browser.browser_dragselect",
+        "name": "Browser drag/select",
+        "type": "runtime",
+        "domain": "browser",
+        "agentCallable": false,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/browser-tab-click-drag-automation.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 153,
+        "capabilityId": "browser.browser_snapshots",
+        "name": "Browser snapshots",
+        "type": "runtime",
+        "domain": "browser",
+        "agentCallable": false,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/capability-registry.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 156,
+        "capabilityId": "browser.browser_downloads",
+        "name": "Browser downloads",
+        "type": "tool",
+        "domain": "browser",
+        "agentCallable": true,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/browser-downloads-multiprofile-cdp.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 157,
+        "capabilityId": "browser.multi-profile_browser",
+        "name": "Multi-profile browser",
+        "type": "runtime",
+        "domain": "browser",
+        "agentCallable": false,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/browser-downloads-multiprofile-cdp.test.ts",
+          "tests/modality-bridge-image-editing-browser.test.ts",
+          "tests/production-p11-browser-automation.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
       },
@@ -506,6 +617,51 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
+        "id": 176,
+        "capabilityId": "system.semantic_cache",
+        "name": "Semantic cache",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/telemetry-cache-compaction.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 189,
+        "capabilityId": "system.atomic_rpm_rolling_leases",
+        "name": "Atomic RPM rolling leases",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/reset-aware-context-relay-rolling-leases.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 190,
+        "capabilityId": "security.quota-share_routing",
+        "name": "Quota-Share routing",
+        "type": "runtime",
+        "domain": "security",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/quota-share-transparency-session-dedup.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
         "id": 197,
         "capabilityId": "system.compression_presets",
         "name": "Compression presets",
@@ -516,6 +672,66 @@
         "testType": "unit",
         "testFiles": [
           "tests/compression-presets-adaptive-budget.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 198,
+        "capabilityId": "system.adaptive_context_budget",
+        "name": "Adaptive context budget",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/compression-presets-adaptive-budget.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 199,
+        "capabilityId": "system.per-request_compression_override",
+        "name": "Per-request compression override",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/compression-presets-adaptive-budget.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 200,
+        "capabilityId": "system.output_styles",
+        "name": "Output Styles",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/output-styles-eval-and-cache.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 201,
+        "capabilityId": "system.compression_eval_harness",
+        "name": "Compression eval harness",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "high",
+        "testType": "unit",
+        "testFiles": [
+          "tests/output-styles-eval-and-cache.test.ts",
           "tests/production-p03-reliability-scale.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
@@ -532,6 +748,42 @@
         "testFiles": [
           "tests/output-styles-eval-and-cache.test.ts",
           "tests/telemetry-cache-compaction.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 207,
+        "capabilityId": "research.session_search",
+        "name": "Session search",
+        "type": "runtime",
+        "domain": "research",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/cache-savings-backups-session-search.test.ts",
+          "tests/group-sessions-and-tool-policy.test.ts",
+          "tests/mobile-chat-voice-camera.test.ts",
+          "tests/multi-user-dm-pairing-subagents.test.ts",
+          "tests/scoped-memory-and-user-model.test.ts",
+          "tests/web-research.test.ts",
+          "tests/workspace-store.test.ts",
+          "tests/production-p03-reliability-scale.test.ts"
+        ],
+        "status": "PARTIALLY_IMPLEMENTED"
+      },
+      {
+        "id": 208,
+        "capabilityId": "system.session_pruning",
+        "name": "Session pruning",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/sessions-custom-models-chunking.test.ts",
           "tests/production-p03-reliability-scale.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
@@ -757,21 +1009,6 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
-        "id": 247,
-        "capabilityId": "communications.music_generation",
-        "name": "Music generation",
-        "type": "tool",
-        "domain": "communications",
-        "agentCallable": true,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/voice-music-and-calls.test.ts",
-          "tests/production-p12-multimodal.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
         "id": 253,
         "capabilityId": "system.mobile_chat",
         "name": "Mobile chat",
@@ -849,23 +1086,6 @@
     ],
     "not implemented": [
       {
-        "id": 46,
-        "capabilityId": "system.session_tools",
-        "name": "Session tools",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/group-sessions-and-tool-policy.test.ts",
-          "tests/multi-user-dm-pairing-subagents.test.ts",
-          "tests/workspace-store.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 55,
         "capabilityId": "communications.channel_sender_authorization",
         "name": "Channel sender authorization",
@@ -892,24 +1112,6 @@
           "tests/telemetry-cache-compaction.test.ts",
           "tests/multimodal-inference-and-moderation.test.ts",
           "tests/production-p01-security.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 58,
-        "capabilityId": "system.image_generation",
-        "name": "Image generation",
-        "type": "tool",
-        "domain": "system",
-        "agentCallable": true,
-        "risk": "low",
-        "testType": "integration",
-        "testFiles": [
-          "tests/a2a-capabilities-eval-and-dlq.test.ts",
-          "tests/agent-api.test.ts",
-          "tests/modality-bridge-image-editing-browser.test.ts",
-          "tests/multimodal-inference-and-moderation.test.ts",
-          "tests/production-p12-multimodal.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -1318,21 +1520,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 124,
-        "capabilityId": "system.evaluation_framework",
-        "name": "Evaluation framework",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "high",
-        "testType": "unit",
-        "testFiles": [
-          "tests/a2a-capabilities-eval-and-dlq.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 125,
         "capabilityId": "system.nested_sub-agents",
         "name": "Nested sub-agents",
@@ -1456,6 +1643,21 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
+        "id": 141,
+        "capabilityId": "communications.image_understanding",
+        "name": "Image understanding",
+        "type": "tool",
+        "domain": "communications",
+        "agentCallable": true,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/omniroute-adapter.test.ts",
+          "tests/production-p12-multimodal.test.ts"
+        ],
+        "status": "NOT_IMPLEMENTED"
+      },
+      {
         "id": 145,
         "capabilityId": "communications.image_generationediting",
         "name": "Image generation/editing",
@@ -1501,82 +1703,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 149,
-        "capabilityId": "browser.managed_browser_profile",
-        "name": "Managed browser profile",
-        "type": "runtime",
-        "domain": "browser",
-        "agentCallable": false,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/modality-bridge-image-editing-browser.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 150,
-        "capabilityId": "browser.browser_tab_control",
-        "name": "Browser tab control",
-        "type": "tool",
-        "domain": "browser",
-        "agentCallable": true,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/browser-tab-click-drag-automation.test.ts",
-          "tests/tools-exec-process-search.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 151,
-        "capabilityId": "browser.browser_clicktype",
-        "name": "Browser click/type",
-        "type": "tool",
-        "domain": "browser",
-        "agentCallable": true,
-        "risk": "high",
-        "testType": "integration",
-        "testFiles": [
-          "tests/browser-tab-click-drag-automation.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 152,
-        "capabilityId": "browser.browser_dragselect",
-        "name": "Browser drag/select",
-        "type": "runtime",
-        "domain": "browser",
-        "agentCallable": false,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/browser-tab-click-drag-automation.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 153,
-        "capabilityId": "browser.browser_snapshots",
-        "name": "Browser snapshots",
-        "type": "runtime",
-        "domain": "browser",
-        "agentCallable": false,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/capability-registry.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 154,
         "capabilityId": "browser.browser_screenshots",
         "name": "Browser screenshots",
@@ -1603,37 +1729,6 @@
         "testFiles": [
           "tests/browser-dom-screenshot-and-pdf.test.ts",
           "tests/tools-exec-process-search.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 156,
-        "capabilityId": "browser.browser_downloads",
-        "name": "Browser downloads",
-        "type": "tool",
-        "domain": "browser",
-        "agentCallable": true,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/browser-downloads-multiprofile-cdp.test.ts",
-          "tests/production-p11-browser-automation.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 157,
-        "capabilityId": "browser.multi-profile_browser",
-        "name": "Multi-profile browser",
-        "type": "runtime",
-        "domain": "browser",
-        "agentCallable": false,
-        "risk": "medium",
-        "testType": "integration",
-        "testFiles": [
-          "tests/browser-downloads-multiprofile-cdp.test.ts",
-          "tests/modality-bridge-image-editing-browser.test.ts",
           "tests/production-p11-browser-automation.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
@@ -1800,21 +1895,6 @@
         "testType": "integration",
         "testFiles": [
           "tests/acp-harnesses-and-drivers.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 176,
-        "capabilityId": "system.semantic_cache",
-        "name": "Semantic cache",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/telemetry-cache-compaction.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -2015,36 +2095,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 189,
-        "capabilityId": "system.atomic_rpm_rolling_leases",
-        "name": "Atomic RPM rolling leases",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/reset-aware-context-relay-rolling-leases.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 190,
-        "capabilityId": "security.quota-share_routing",
-        "name": "Quota-Share routing",
-        "type": "runtime",
-        "domain": "security",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/quota-share-transparency-session-dedup.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 194,
         "capabilityId": "system.relevance",
         "name": "Relevance",
@@ -2087,66 +2137,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 198,
-        "capabilityId": "system.adaptive_context_budget",
-        "name": "Adaptive context budget",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/compression-presets-adaptive-budget.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 199,
-        "capabilityId": "system.per-request_compression_override",
-        "name": "Per-request compression override",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/compression-presets-adaptive-budget.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 200,
-        "capabilityId": "system.output_styles",
-        "name": "Output Styles",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/output-styles-eval-and-cache.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 201,
-        "capabilityId": "system.compression_eval_harness",
-        "name": "Compression eval harness",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "high",
-        "testType": "unit",
-        "testFiles": [
-          "tests/output-styles-eval-and-cache.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 205,
         "capabilityId": "browser.database_backups",
         "name": "Database backups",
@@ -2157,42 +2147,6 @@
         "testType": "unit",
         "testFiles": [
           "tests/cache-savings-backups-session-search.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 207,
-        "capabilityId": "research.session_search",
-        "name": "Session search",
-        "type": "runtime",
-        "domain": "research",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/cache-savings-backups-session-search.test.ts",
-          "tests/group-sessions-and-tool-policy.test.ts",
-          "tests/mobile-chat-voice-camera.test.ts",
-          "tests/multi-user-dm-pairing-subagents.test.ts",
-          "tests/scoped-memory-and-user-model.test.ts",
-          "tests/web-research.test.ts",
-          "tests/workspace-store.test.ts",
-          "tests/production-p03-reliability-scale.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 208,
-        "capabilityId": "system.session_pruning",
-        "name": "Session pruning",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/sessions-custom-models-chunking.test.ts",
           "tests/production-p03-reliability-scale.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
@@ -2493,6 +2447,21 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
+        "id": 247,
+        "capabilityId": "communications.music_generation",
+        "name": "Music generation",
+        "type": "tool",
+        "domain": "communications",
+        "agentCallable": true,
+        "risk": "medium",
+        "testType": "integration",
+        "testFiles": [
+          "tests/voice-music-and-calls.test.ts",
+          "tests/production-p12-multimodal.test.ts"
+        ],
+        "status": "NOT_IMPLEMENTED"
+      },
+      {
         "id": 248,
         "capabilityId": "communications.talk_realtime_speech",
         "name": "Talk / realtime speech",
@@ -2517,8 +2486,6 @@
         "risk": "medium",
         "testType": "integration",
         "testFiles": [
-          "tests/agent-api.test.ts",
-          "tests/omniroute-adapter.test.ts",
           "tests/voice-music-and-calls.test.ts",
           "tests/production-p12-multimodal.test.ts"
         ],
@@ -2897,6 +2864,41 @@
         "testType": "unit",
         "testFiles": [
           "tests/circuit-breaker-and-retry.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 22,
+        "capabilityId": "system.adaptive_admission_queue",
+        "name": "Adaptive admission / queue",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "integration",
+        "testFiles": [
+          "tests/admission-queue-and-conversation-memory.test.ts",
+          "tests/omniroute-adapter.test.ts",
+          "tests/production-p03-reliability-scale.test.ts",
+          "tests/production-admission-self-healing.test.ts",
+          "scripts/verify-production-admission-self-healing.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 23,
+        "capabilityId": "system.self-healing_auto-combo",
+        "name": "Self-healing Auto-Combo",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "integration",
+        "testFiles": [
+          "tests/admission-queue-and-conversation-memory.test.ts",
+          "tests/production-p03-reliability-scale.test.ts",
+          "tests/production-admission-self-healing.test.ts",
+          "scripts/verify-production-admission-self-healing.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },

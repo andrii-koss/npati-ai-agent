@@ -24,6 +24,29 @@ describe("Quota-Share Router (QuotaShareRouter)", () => {
     expect(satEnterprise.admitted).toBe(true);
     expect(satEnterprise.reason).toContain("guaranteed quota share");
   });
+
+  it("handles pro tier thresholds and inspects tenant shares", () => {
+    const router = new QuotaShareRouter();
+    router.setTenantShare("tenant-pro", "pro", 30);
+
+    expect(router.getTenantShare("tenant-pro")).toEqual({
+      tenantId: "tenant-pro",
+      tier: "pro",
+      allocatedSharePercent: 30,
+      activeRequests: 0,
+    });
+    expect(router.getAllShares().length).toBe(1);
+
+    // At 90% saturation (between 80% and 95%), pro is admitted
+    const admit90 = router.isAdmitted("tenant-pro", 90, 100);
+    expect(admit90.admitted).toBe(true);
+    expect(admit90.reason).toContain("Pro tenant admitted below 95% saturation");
+
+    // At 97% saturation (>95%), pro is throttled
+    const throttle97 = router.isAdmitted("tenant-pro", 97, 100);
+    expect(throttle97.admitted).toBe(false);
+    expect(throttle97.reason).toContain("throttled to preserve fair share");
+  });
 });
 
 describe("Routing Transparency Logger (RoutingTransparencyLogger)", () => {

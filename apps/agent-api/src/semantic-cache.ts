@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export interface CacheEntry<T = unknown> {
   key: string;
+  scopeKey: string;
   normalizedQuery: string;
   data: T;
   expiresAt: number;
@@ -12,6 +13,7 @@ export interface SemanticCacheStats {
   hits: number;
   misses: number;
   size: number;
+  entriesCount: number;
   hitRatio: number;
 }
 
@@ -35,6 +37,19 @@ export class SemanticCache<T = unknown> {
 
   private hashKey(normalized: string, scopeKey = ""): string {
     return createHash("sha256").update(`${scopeKey}:${normalized}`).digest("hex");
+  }
+
+  has(query: string, scopeKey = ""): boolean {
+    const normalized = this.normalize(query);
+    if (!normalized) return false;
+    const key = this.hashKey(normalized, scopeKey);
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
   }
 
   get(query: string, scopeKey = ""): T | null {
@@ -73,6 +88,7 @@ export class SemanticCache<T = unknown> {
     const key = this.hashKey(normalized, scopeKey);
     this.cache.set(key, {
       key,
+      scopeKey,
       normalizedQuery: normalized,
       data,
       expiresAt: Date.now() + ttlMs,
@@ -89,7 +105,7 @@ export class SemanticCache<T = unknown> {
     }
 
     for (const [key, entry] of this.cache.entries()) {
-      if (key.startsWith(createHash("sha256").update(`${scopeKey}:`).digest("hex").slice(0, 8))) {
+      if (entry.scopeKey === scopeKey || entry.scopeKey.startsWith(`${scopeKey}:`)) {
         this.cache.delete(key);
         deleted++;
       }
@@ -103,6 +119,7 @@ export class SemanticCache<T = unknown> {
       hits: this.totalHits,
       misses: this.totalMisses,
       size: this.cache.size,
+      entriesCount: this.cache.size,
       hitRatio: total > 0 ? Number((this.totalHits / total).toFixed(3)) : 0,
     };
   }

@@ -509,7 +509,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Adaptive admission / queue",
-    "description": "Native adaptive admission і request queue виявлені та їх runtime/config доступні через GET /ai/resilience. Live OmniRoute зараз повідомляє adaptiveAdmission.mode=shadow, тому enforcement не позначено завершеним.",
+    "description": "Production admission queue обмежує глобальну й per-tenant паралельність для реальних AI chat/generate/Company запитів, пріоритезує системні та платні рівні, скидає надлишкове навантаження через HTTP 429 і надає захищену runtime-телеметрію.",
     "useWhen": [
       "Internal system execution requires Adaptive admission / queue"
     ],
@@ -532,7 +532,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Self-healing Auto-Combo",
-    "description": "Native comboCooldownWait увімкнений; Company створює idempotent priority/pipeline/fusion combos з failover-before-retry. Повний live self-healing fault-injection ще не підтверджений.",
+    "description": "Production AI engine автоматично переходить від недоступної основної моделі до налаштованого fallback лише для retryable 404/408/409/429/5xx, quota, timeout і network failures; auth 401/403 не приховуються. Failover відображається в routing/cost telemetry.",
     "useWhen": [
       "Internal system execution requires Self-healing Auto-Combo"
     ],

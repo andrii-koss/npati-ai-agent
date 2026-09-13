@@ -26,6 +26,7 @@ export class DocumentIoManager {
       format = "markdown";
     } else if (ext === "json" || mimeType?.includes("json")) {
       format = "json";
+      tables = this.parseJsonTables(rawText);
     } else if (ext === "csv" || mimeType?.includes("csv")) {
       format = "csv";
       tables = this.parseCsvTables(rawText);
@@ -57,13 +58,47 @@ export class DocumentIoManager {
     const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length === 0) return [];
 
-    const parseLine = (line: string) =>
-      line.split(",").map((c) => c.trim().replace(/^["']|["']$/g, ""));
+    const parseLine = (line: string) => {
+      const result: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim().replace(/^["']|["']$/g, ""));
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim().replace(/^["']|["']$/g, ""));
+      return result;
+    };
 
     const headers = parseLine(lines[0]!);
     const rows = lines.slice(1).map(parseLine);
 
     return [{ headers, rows }];
+  }
+
+  /**
+   * Parse JSON string to extract structured table if array of objects
+   */
+  private static parseJsonTables(jsonText: string): Array<{ headers: string[]; rows: string[][] }> | undefined {
+    try {
+      const parsed = JSON.parse(jsonText);
+      const array = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed?.rows) ? parsed.rows : null;
+      if (!array || array.length === 0 || typeof array[0] !== "object") {
+        return undefined;
+      }
+      const headers = Object.keys(array[0]);
+      const rows = array.map((item: Record<string, unknown>) => headers.map((h) => String(item[h] ?? "")));
+      return [{ headers, rows }];
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -79,9 +114,10 @@ export class DocumentIoManager {
         if (data.title) parts.push(`# ${data.title}\n`);
         if (data.text) parts.push(data.text);
         if (data.table) {
-          const headersLine = `| ${data.table.headers.join(" | ")} |`;
+          const escapeMd = (str: string) => str.replace(/\|/g, "\\|");
+          const headersLine = `| ${data.table.headers.map(escapeMd).join(" | ")} |`;
           const sepLine = `| ${data.table.headers.map(() => "---").join(" | ")} |`;
-          const rowsLines = data.table.rows.map((r) => `| ${r.join(" | ")} |`).join("\n");
+          const rowsLines = data.table.rows.map((r) => `| ${r.map(escapeMd).join(" | ")} |`).join("\n");
           parts.push(`\n${headersLine}\n${sepLine}\n${rowsLines}`);
         }
         return parts.join("\n");
@@ -89,9 +125,15 @@ export class DocumentIoManager {
 
       case "csv": {
         if (!data.table) return data.text || "";
+        const escapeCsv = (val: string) => {
+          if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+            return `"${val.replace(/"/g, '""')}"`;
+          }
+          return val;
+        };
         const lines = [
-          data.table.headers.join(","),
-          ...data.table.rows.map((r) => r.join(",")),
+          data.table.headers.map(escapeCsv).join(","),
+          ...data.table.rows.map((r) => r.map(escapeCsv).join(",")),
         ];
         return lines.join("\n");
       }
@@ -100,8 +142,10 @@ export class DocumentIoManager {
         return JSON.stringify(data, null, 2);
 
       case "text":
-      default:
         return [data.title, data.text].filter(Boolean).join("\n\n");
+
+      default:
+        throw new Error(`UNSUPPORTED_FORMAT: Format '${format}' is not supported.`);
     }
   }
 }

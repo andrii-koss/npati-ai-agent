@@ -1,5 +1,19 @@
 export type OutputStyleType = "concise" | "bulleted" | "minimal-json" | "executive";
 
+export interface OutputStyleDescriptor {
+  id: OutputStyleType;
+  name: string;
+  description: string;
+  instruction: string;
+  expectedTokenSavingsPercent: number;
+}
+
+export interface CompressionEvalOptions {
+  minReductionPercent?: number;
+  minEntityRetentionRate?: number;
+  minSemanticOverlapScore?: number;
+}
+
 export interface CompressionEvalReport {
   originalLength: number;
   compressedLength: number;
@@ -8,6 +22,8 @@ export interface CompressionEvalReport {
   semanticOverlapScore: number; // 0.0 - 1.0
   passedValidation: boolean;
   notes: string;
+  entitiesRetainedCount?: number;
+  totalEntitiesCount?: number;
 }
 
 export interface CacheStatistics {
@@ -31,8 +47,61 @@ export class OutputStyleModifier {
       "Output style: Executive briefing. Exactly 1 summary paragraph (max 3 sentences) followed by high-priority Action Items.",
   };
 
+  private static readonly STYLE_DESCRIPTORS: Record<OutputStyleType, { name: string; description: string; expectedSavings: number }> = {
+    concise: {
+      name: "Ultra Concise",
+      description: "Direct answers in 2-3 dense sentences, stripping conversational filler and pleasantries.",
+      expectedSavings: 45,
+    },
+    bulleted: {
+      name: "Bulleted Key Points",
+      description: "Findings presented as punchy, high-signal bulleted list items with bold takeaways.",
+      expectedSavings: 35,
+    },
+    "minimal-json": {
+      name: "Compact JSON Only",
+      description: "Strictly valid minimal JSON without markdown wrappers or decorative whitespace.",
+      expectedSavings: 50,
+    },
+    executive: {
+      name: "Executive Briefing",
+      description: "Single-paragraph summary followed directly by prioritized action items.",
+      expectedSavings: 40,
+    },
+  };
+
   /**
-   * 1. Output Styles: Injects formatting and compression constraints to trim generated tokens
+   * Returns list of all available output style descriptors with instructions and expected savings
+   */
+  static getAvailableStyles(): OutputStyleDescriptor[] {
+    return (Object.keys(this.STYLE_INSTRUCTIONS) as OutputStyleType[]).map((id) => {
+      const meta = this.STYLE_DESCRIPTORS[id];
+      return {
+        id,
+        name: meta.name,
+        description: meta.description,
+        instruction: this.STYLE_INSTRUCTIONS[id],
+        expectedTokenSavingsPercent: meta.expectedSavings,
+      };
+    });
+  }
+
+  /**
+   * Checks whether the given string is a valid OutputStyleType
+   */
+  static isValidStyle(style: unknown): style is OutputStyleType {
+    return typeof style === "string" && style in this.STYLE_INSTRUCTIONS;
+  }
+
+  /**
+   * Retrieves the raw instruction for a style
+   */
+  static getInstruction(style: OutputStyleType): string {
+    return this.STYLE_INSTRUCTIONS[style] || "";
+  }
+
+  /**
+   * Injects formatting and compression constraints to trim generated tokens in message history
    */
   static applyOutputStyle(
     messages: Array<{ role: string; content: string }>,
@@ -55,13 +124,30 @@ export class OutputStyleModifier {
 
     return modified;
   }
+
+  /**
+   * Injects style instructions into a single prompt string
+   */
+  static applyOutputStyleToPrompt(prompt: string, style: OutputStyleType): string {
+    const instruction = this.STYLE_INSTRUCTIONS[style];
+    if (!instruction) return prompt;
+    return `${instruction}\n\n${prompt}`;
+  }
 }
 
 export class CompressionEvalHarness {
   /**
-   * 2. Compression Eval Harness: Measures compression ratio, entity retention, and semantic fidelity
+   * Measures compression ratio, entity retention, and semantic fidelity for raw text
    */
-  static evaluate(original: string, compressed: string): CompressionEvalReport {
+  static evaluate(
+    original: string,
+    compressed: string,
+    options?: CompressionEvalOptions
+  ): CompressionEvalReport {
+    const minReduction = options?.minReductionPercent ?? 10;
+    const minRetention = options?.minEntityRetentionRate ?? 0.4;
+    const minSemanticOverlap = options?.minSemanticOverlapScore ?? 0.2;
+
     const originalLength = original.length;
     const compressedLength = compressed.length;
 
@@ -99,7 +185,10 @@ export class CompressionEvalHarness {
     const semanticOverlapScore =
       union > 0 ? Number((intersection / union).toFixed(2)) : 1.0;
 
-    const passedValidation = reductionPercent >= 10 && entityRetentionRate >= 0.4;
+    const passedValidation =
+      reductionPercent >= minReduction &&
+      entityRetentionRate >= minRetention &&
+      semanticOverlapScore >= minSemanticOverlap;
 
     return {
       originalLength,
@@ -108,10 +197,25 @@ export class CompressionEvalHarness {
       entityRetentionRate,
       semanticOverlapScore,
       passedValidation,
+      entitiesRetainedCount: retainedCount,
+      totalEntitiesCount: origTokens.size,
       notes: passedValidation
         ? `Passed evaluation: ${reductionPercent}% reduction with ${(entityRetentionRate * 100).toFixed(0)}% key entities retained.`
-        : `Failed evaluation: insufficient reduction or entity loss.`,
+        : `Failed evaluation: reduction (${reductionPercent}% vs min ${minReduction}%), retention (${entityRetentionRate} vs min ${minRetention}), or semantic overlap (${semanticOverlapScore} vs min ${minSemanticOverlap}).`,
     };
+  }
+
+  /**
+   * Evaluates compression across structured message arrays
+   */
+  static evaluateMessages(
+    originalMessages: Array<{ role: string; content: string }>,
+    compressedMessages: Array<{ role: string; content: string }>,
+    options?: CompressionEvalOptions
+  ): CompressionEvalReport {
+    const origText = originalMessages.map((m) => `${m.role}: ${m.content}`).join("\n");
+    const compText = compressedMessages.map((m) => `${m.role}: ${m.content}`).join("\n");
+    return this.evaluate(origText, compText, options);
   }
 }
 
@@ -121,13 +225,16 @@ export class CacheManagementService {
   private misses = 0;
 
   /**
-   * 3. Cache Stats / Flush: Redis/in-memory cache monitoring and selective flushing
+   * Sets a cache key with serialized byte estimate
    */
   set(key: string, value: unknown): void {
     const sizeBytes = JSON.stringify(value).length;
     this.store.set(key, { value, sizeBytes });
   }
 
+  /**
+   * Retrieves a cache key, updating hit/miss statistics
+   */
   get(key: string): unknown | undefined {
     const entry = this.store.get(key);
     if (entry) {
@@ -138,6 +245,32 @@ export class CacheManagementService {
     return undefined;
   }
 
+  /**
+   * Checks whether a cache key exists without affecting hit/miss statistics
+   */
+  has(key: string): boolean {
+    return this.store.has(key);
+  }
+
+  /**
+   * Removes a single cache key
+   */
+  delete(key: string): boolean {
+    return this.store.delete(key);
+  }
+
+  /**
+   * Clears all entries and resets metrics
+   */
+  clear(): void {
+    this.store.clear();
+    this.hits = 0;
+    this.misses = 0;
+  }
+
+  /**
+   * Returns cache metrics optionally scoped by tenant
+   */
   getStats(tenantId?: string): CacheStatistics {
     const prefix = tenantId ? `${tenantId}:` : "";
     let count = 0;
@@ -163,6 +296,9 @@ export class CacheManagementService {
     };
   }
 
+  /**
+   * Flushes cache entries by tenant and/or prefix
+   */
   flush(options?: { tenantId?: string; prefix?: string }): {
     flushedCount: number;
     remainingKeys: number;

@@ -31,8 +31,15 @@ export interface CompanyGroupSession {
 
 export class GroupSessionManager {
   private readonly inMemorySessions = new Map<string, CompanyGroupSession>();
+  private pool?: Pool;
 
-  constructor(private readonly pool?: Pool) {}
+  constructor(pool?: Pool) {
+    this.pool = pool;
+  }
+
+  setPool(pool?: Pool) {
+    this.pool = pool;
+  }
 
   async createSession(params: {
     companyId: string;

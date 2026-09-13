@@ -84,6 +84,24 @@ export class SessionPruningManager {
       },
     };
   }
+
+  static pruneForTenant(
+    sessions: PrunableSession[],
+    tenantId: string,
+    options: {
+      maxInactiveDays?: number;
+      maxMessagesPerSession?: number;
+      archiveBeforeDelete?: boolean;
+    } = {}
+  ): { activeSessions: PrunableSession[]; result: PruneResult } {
+    const tenantSessions = sessions.filter((s) => s.tenantId === tenantId);
+    const otherSessions = sessions.filter((s) => s.tenantId !== tenantId);
+    const pruned = this.prune(tenantSessions, options);
+    return {
+      activeSessions: [...otherSessions, ...pruned.activeSessions],
+      result: pruned.result,
+    };
+  }
 }
 
 export class CustomModelRegistry {

@@ -1,16 +1,16 @@
 # NPATI: план закриття незавершених capabilities після чесного аудиту
 
-Оновлено: 2026-09-12. Джерело істини: `packages/shared/src/capability-matrix.ts` після аудиту #1-#306.
+Оновлено: 2026-09-13. Джерело істини: `packages/shared/src/capability-matrix.ts` після аудиту #1-#306.
 
 ## Поточний стан
 
-- `VERIFIED_EXISTING`: 145 пункти.
-- `PARTIALLY_IMPLEMENTED`: 44 пунктів.
-- `NOT_IMPLEMENTED`: 117 пунктів.
-- Разом незавершених: 161 пункти. Масове підвищення 94 статусів відкликано після повторного аудиту.
+- `VERIFIED_EXISTING`: 147 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 59 пунктів.
+- `NOT_IMPLEMENTED`: 100 пунктів.
+- Разом незавершених: 159 пунктів.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені або позначені як закриті.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано, `V` — верифіковано.
-> Повторний аудит 2026-09-12: попередні заяви про повне закриття P0.1–P1.4 відкликані. Статус повертається у `VERIFIED_EXISTING` лише після реального негативного/позитивного Docker E2E. Повторно сертифіковано #35 API key auth і #61 OIDC dashboard gate.
+> Повторний аудит 2026-09-13: unit-тест окремого helper або синтетичної відповіді не є production-сертифікацією. `Verified` потребує реального runtime wiring та live Docker E2E там, де capability взаємодіє з мережею, БД, браузером, файлами або зовнішнім провайдером.
 
 ## Коли пункт можна чесно змінити на Verified
 
@@ -52,7 +52,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 
 ### P0.2 — Company Knowledge і довготривала пам'ять агента [ПОВЕРНУТО В РОБОТУ]
 
-**Статус:** 6 з 6 capabilities повністю реалізовані та перевірені (157 VERIFIED_EXISTING, 38 PARTIALLY_IMPLEMENTED, 111 NOT_IMPLEMENTED).
+**Статус після повторного аудиту:** 0 з 6 capabilities повністю сертифіковані; 4 залишаються `PARTIALLY_IMPLEMENTED`, 2 — `NOT_IMPLEMENTED`.
 
 Пункти блоку:
 - **#64 `storage.embeddings`**: `PARTIALLY_IMPLEMENTED` — генерація векторних ембеддингів через `POST /ai/embeddings`, deterministic fallback з L2-нормалізацією на одиничну сферу (sum of squares ≈ 1.0) для cosine distance у PostgreSQL pgvector (`<=>`).
@@ -65,89 +65,89 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p02-knowledge-memory.test.ts` (13/13 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 157 VERIFIED_EXISTING).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
 - Live Docker E2E: `scripts/verify-production-p02-knowledge-memory.mjs` (7/7 live tests passed на реальному Docker API: embeddings, rerank, context compact, memory extract, memory rerank, company retrieve, capabilities inspect).
 
-### P0.3 — Runtime reliability, streaming, observability і scale [ПОВЕРНУТО В РОБОТУ]
+### P0.3 — Runtime reliability, streaming, observability і scale [#22 І #23 ЧЕСНО ЗАКРИТО]
 
 **Пункти:**
-- **#22 `system.adaptive_admission_queue`**: `PARTIALLY_IMPLEMENTED` — `AdaptiveAdmissionQueue` підтримує чергування з пріоритетами (`critical-orchestration`, `enterprise`, `pro`, `free`), обмеження паралельності та захисний shedding при піковому навантаженні. Ендпоінт: `POST /queue/admission`.
-- **#23 `system.self-healing_auto-combo`**: `PARTIALLY_IMPLEMENTED` — `SelfHealingAutoCombo` з автоматичним failover на вторинні моделі при отриманні 503/помилок від основного провайдера з фіксацією `wasHealed` та історії спроб. Ендпоінт: `POST /queue/healing`.
-- **#44 `system.isolated_group_sessions`**: `PARTIALLY_IMPLEMENTED` — `GroupSessionManager` із повною мульти-тенант та компанійною ізоляцією, контролем учасників та сесійним станом. Ендпоінти: `POST /group-sessions`, `GET /group-sessions/:id`.
-- **#46 `system.session_tools`**: `NOT_IMPLEMENTED` — `SessionToolRegistry` для динамічного підключення/відключення інструментів до сесії з політиками доступу та TTL. Ендпоінт: `POST /group-sessions/:id/tools`.
-- **#124 `system.evaluation_framework`**: `NOT_IMPLEMENTED` — `AgentEvaluationFramework` для оцінки формату відповідей (JSON), виконання інструкцій (required terms) та перевірки безпеки (forbidden keywords/safety). Ендпоінт: `POST /evaluation/evaluate`.
-- **#176 `system.semantic_cache`**: `NOT_IMPLEMENTED` — `CacheManagementService` для нормалізації запитів, кешування семантичних відповідей та автоматичного TTL-експірейшну з підтримкою tenant scoping.
-- **#189 `system.atomic_rpm_rolling_leases`**: `NOT_IMPLEMENTED` — `AtomicRpmLeaseManager` із потокобезпечним атомарним ковзним вікном лімітів RPM на провайдера, виділенням та звільненням лізів. Ендпоінт: `POST /leases/rolling`.
-- **#190 `security.quota-share_routing`**: `NOT_IMPLEMENTED` — `QuotaShareRouter` для гарантованого розподілу квот між enterprise/pro/starter тенантами при насиченні кластера. Ендпоінт: `POST /routing/quota-share`.
-- **#197 `system.compression_presets`**: `PARTIALLY_IMPLEMENTED` — `CompressionPresetManager` із пресетами `balanced`, `extreme`, `code-safe`, збереженням блоків коду та критичних фактів. Ендпоінт: `POST /compression/apply`.
-- **#198 `system.adaptive_context_budget`**: `NOT_IMPLEMENTED` — `AdaptiveContextBudgetManager` для динамічного розрахунку бюджету токенів залежно від коефіцієнта заповнення контекстного вікна моделі.
-- **#199 `system.per-request_compression_override`**: `NOT_IMPLEMENTED` — `PerRequestCompressionOverrideManager` із підтримкою заголовків `x-npati-compression` та body-опцій (bypass/force preset).
-- **#200 `system.output_styles`**: `NOT_IMPLEMENTED` — `OutputStyleModifier` для інжекції стилів (`concise`, `bulleted`, `minimal-json`, `executive`) у запити для скорочення кількості згенерованих вихідних токенів. Ендпоінт: `POST /styles/apply`.
-- **#201 `system.compression_eval_harness`**: `NOT_IMPLEMENTED` — `CompressionEvalHarness` для точного вимірювання відсотка скорочення токенів (`reductionPercent`) та збереження ключових сутностей (`entityRetentionRate`).
-- **#202 `system.cache_stats_flush`**: `PARTIALLY_IMPLEMENTED` — метрики хітів, промахів і пам'яті кешу та глобальний або tenant-scoped скид кешу. Ендпоінти: `GET /cache/stats`, `POST /cache/flush`.
-- **#205 `browser.database_backups`**: `NOT_IMPLEMENTED` — `DatabaseBackupManager` для створення знімків БД, розрахунку SHA-256 контрольних сум та автоматичного restore drill тестування цілісності. Ендпоінти: `POST /admin/backups`, `GET /admin/backups`, `POST /admin/backups/:snapshotId/verify`.
-- **#207 `research.session_search`**: `NOT_IMPLEMENTED` — `SessionSearchEngine` для індексації та ранжованого пошуку по історії багаторазових діалогів та повідомлень. Ендпоінти: `POST /sessions/index`, `GET /sessions/search`.
-- **#208 `system.session_pruning`**: `NOT_IMPLEMENTED` — `SessionPruningManager` для очищення застарілих сесій, архівування перед видаленням та обрізки довгих діалогів за retention policy. Ендпоінт: `POST /sessions/prune`.
+- **#22 `system.adaptive_admission_queue`**: `VERIFIED_EXISTING` — production admission queue реально обгортає спільний `AIEngine`: `/chat`, `/chat/stream`, `/api/chat`, `/api/generate` та Company Agent. Є глобальна й per-tenant паралельність, пріоритети (`critical-orchestration`, `enterprise`, `pro`, `free`), queue timeout, cancellation, bounded queue, free-tier shedding і HTTP 429 з `Retry-After`. Рівень визначається сервером з auth scope, а не недовіреним заголовком клієнта. Захищена телеметрія: `GET /runtime/admission`; `/queue/status` залишено як сумісний alias.
+- **#23 `system.self-healing_auto-combo`**: `VERIFIED_EXISTING` — реальний production `AIEngine` виконує primary → configured fallback/`auto` для retryable 404/408/409/429/5xx, quota, timeout і network failures, не приховуючи 401/403. Для non-stream і stream fallback не дублює вже виданий текст; cancellation передається провайдеру. Результат містить `routingStrategy: "self-healing-fallback"` і `failoverCount`; конфігурація fallback ізольована між tenant і зберігається після restart.
+- **#44 `system.isolated_group_sessions`**: `PARTIALLY_IMPLEMENTED` — є CRUD і persistence сесій, але немає реального group-agent виконання у chat orchestration.
+- **#46 `system.session_tools`**: `PARTIALLY_IMPLEMENTED` — є registry API, але session tools не застосовуються у фактичному tool execution.
+- **#124 `system.evaluation_framework`**: `PARTIALLY_IMPLEMENTED` — evaluation helper працює, але немає production E2E на реальних agent runs і persisted evaluation results.
+- **#176 `system.semantic_cache`**: `PARTIALLY_IMPLEMENTED` — є process-local semantic cache API, але він не підключений до production AI inference path.
+- **#189 `system.atomic_rpm_rolling_leases`**: `PARTIALLY_IMPLEMENTED` — лізи атомарні лише в одному Node process, без Redis/PostgreSQL і без provider routing integration.
+- **#190 `security.quota-share_routing`**: `PARTIALLY_IMPLEMENTED` — decision endpoint існує, але quota-share не керує production AI router.
+- **#197 `system.compression_presets`**: `PARTIALLY_IMPLEMENTED` — compression helper працює окремо, але не вбудований у реальний chat context pipeline.
+- **#198 `system.adaptive_context_budget`**: `PARTIALLY_IMPLEMENTED` — budget evaluator є окремим endpoint, але не керує production context assembly.
+- **#199 `system.per-request_compression_override`**: `PARTIALLY_IMPLEMENTED` — override resolver існує, але заголовок не застосовується у production chat requests.
+- **#200 `system.output_styles`**: `PARTIALLY_IMPLEMENTED` — style helper існує, але вибраний стиль не застосовується до реальної відповіді агента.
+- **#201 `system.compression_eval_harness`**: `PARTIALLY_IMPLEMENTED` — метрики compression helper обчислюються, але немає production corpus, regression dataset і Docker quality gate.
+- **#202 `system.cache_stats_flush`**: `PARTIALLY_IMPLEMENTED` — stats та flush охоплюють demo process-local caches, а не реальний provider/agent cache.
+- **#205 `browser.database_backups`**: `NOT_IMPLEMENTED` — snapshot створюється з переданого simulatedContent і не є backup PostgreSQL.
+- **#207 `research.session_search`**: `PARTIALLY_IMPLEMENTED` — є ручний in-memory index API, але chat sessions автоматично не індексуються.
+- **#208 `system.session_pruning`**: `PARTIALLY_IMPLEMENTED` — prune обробляє переданий масив, а не видаляє persisted sessions за retention policy.
 
 **Тести та runtime-верифікація:**
-- Unit/Integration: `tests/production-p03-reliability-scale.test.ts` (17/17 passed).
+- Unit/Integration для #22/#23: `tests/production-admission-self-healing.test.ts` (5/5 passed: capacity, priority, timeout/cancel, 503 fallback, no fallback on 401, streaming safety) та повязані P0.3 regression suites.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 174 VERIFIED_EXISTING, 33 PARTIALLY_IMPLEMENTED, 99 NOT_IMPLEMENTED).
-- Live Docker E2E: `scripts/verify-production-p03-reliability-scale.mjs` (11/11 live checks passed на реальному Docker API: auth, cache stats/flush, backups create/list/verify, session index/search/prune, evaluation framework, compression presets/budget/eval, output styles, adaptive queue & self-healing, atomic rpm leases & quota routing, group sessions & dynamic tools, capabilities inspect).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
+- Live Docker E2E для #22/#23: `scripts/verify-production-admission-self-healing.mjs` — auth guard, реальний primary HTTP 503 → fallback, `failoverCount=1`, bounded burst з HTTP 429, runtime metrics, tenant isolation і повторна перевірка після restart (усі перевірки passed).
 
-### P1.1 — Browser automation [ПОВЕРНУТО В РОБОТУ — СИМУЛЯЦІЇ]
+### P1.1 — Browser automation [ПОВЕРНУТО В РОБОТУ — production browser не реалізовано]
 
 Пункти:
-- **#149 `browser.managed_browser_profile`**: `NOT_IMPLEMENTED` — `ManagedBrowserProfileService` для ізольованого створення, читання та видалення захищених профілів браузера з userAgent, viewport і proxyUrl. Ендпоінти: `POST /browser/profiles`, `GET /browser/profiles/:id`, `DELETE /browser/profiles/:id`.
-- **#150 `browser.browser_tab_control`**: `NOT_IMPLEMENTED` — `BrowserTabController` для створення та життєвого циклу вкладок, переходу за URL, перемикання активної вкладки та закриття. Ендпоінти: `POST /browser/tabs`, `GET /browser/tabs`, `POST /browser/tabs/:tabId/navigate`, `POST /browser/tabs/:tabId/switch`, `DELETE /browser/tabs/:tabId`.
-- **#151 `browser.browser_clicktype`**: `NOT_IMPLEMENTED` — `BrowserClickTypeEngine` для кліків, введення тексту та відправки форм із валідацією селекторів та блокуванням деструктивних дій без явного схвалення. Ендпоінт: `POST /browser/tabs/:tabId/actions` (`action: click|type|submit`).
-- **#152 `browser.browser_dragselect`**: `NOT_IMPLEMENTED` — `BrowserDragSelectEngine` для операцій перетягування (drag and drop), вибору пунктів списків (select option) та скролінгу елементів. Ендпоінт: `POST /browser/tabs/:tabId/actions` (`action: drag_and_drop|select_option|scroll`).
-- **#153 `browser.browser_snapshots`**: `NOT_IMPLEMENTED` — `BrowserDomSnapshotEngine` для отримання оптимізованого для LLM очищеного DOM-дерева (`cleanTree`), індексації інтерактивних елементів та розрахунку токенів. Ендпоінт: `GET /browser/tabs/:tabId/snapshot`.
-- **#154 `browser.browser_screenshots`**: `NOT_IMPLEMENTED` — `BrowserScreenshotEngine` для повносторінкового та viewport-скріншотингу сторінок браузера з генерацією base64. Ендпоінт: `POST /browser/tabs/:tabId/screenshot`.
-- **#155 `browser.browser_pdf_capture`**: `NOT_IMPLEMENTED` — `BrowserPdfCaptureEngine` для експорту сторінки в PDF з налаштуваннями орієнтації, фону та розрахунком розміру. Ендпоінт: `POST /browser/tabs/:tabId/pdf`.
-- **#156 `browser.browser_downloads`**: `NOT_IMPLEMENTED` — `BrowserDownloadManager` з інтегрованим карантином `BrowserSecurityGuard.validateDownload()`, що блокує небезпечні розширення (`.exe`, `.bat`, `.sh`, `.vbs`, `.cmd`, `.msi`, `.dll`). Ендпоінти: `POST /browser/downloads`, `GET /browser/downloads`.
-- **#157 `browser.multi-profile_browser`**: `NOT_IMPLEMENTED` — `MultiProfileBrowserManager` для запуску та відстеження ізольованих інстансів браузера під різними профілями, проксі та в режимі інкогніто. Ендпоінти: `POST /browser/instances`, `GET /browser/instances`, `DELETE /browser/instances/:id`.
-- **#158 `browser.attach_real_chrome`**: `NOT_IMPLEMENTED` — `RealChromeCdpAttacher` для підключення до запущеного екземпляра Google Chrome через Chrome DevTools Protocol (CDP). Ендпоінт: `POST /browser/cdp/attach`.
+- **#149 `browser.managed_browser_profile`**: `PARTIALLY_IMPLEMENTED` — є in-memory registry профілів, але профіль не запускає ізольований браузер.
+- **#150 `browser.browser_tab_control`**: `PARTIALLY_IMPLEMENTED` — є in-memory модель вкладок, але немає керування Chrome/CDP.
+- **#151 `browser.browser_clicktype`**: `PARTIALLY_IMPLEMENTED` — policy guard працює, але click/type не виконується у DOM браузера.
+- **#152 `browser.browser_dragselect`**: `PARTIALLY_IMPLEMENTED` — policy guard працює, але drag/select не виконується у браузері.
+- **#153 `browser.browser_snapshots`**: `PARTIALLY_IMPLEMENTED` — парситься переданий HTML, а не snapshot живої browser page.
+- **#154 `browser.browser_screenshots`**: `NOT_IMPLEMENTED` — повертається base64 службового рядка, а не PNG/JPEG screenshot.
+- **#155 `browser.browser_pdf_capture`**: `NOT_IMPLEMENTED` — повертається текстовий placeholder, а не валідний browser-rendered PDF.
+- **#156 `browser.browser_downloads`**: `PARTIALLY_IMPLEMENTED` — ведеться лише metadata download, файл реально не завантажується.
+- **#157 `browser.multi-profile_browser`**: `PARTIALLY_IMPLEMENTED` — ведеться metadata instance, реальний browser process не запускається.
+- **#158 `browser.attach_real_chrome`**: `NOT_IMPLEMENTED` — CDP session і browser version вигадуються, WebSocket connection не створюється.
+
+**Блок P1.1 не завершено:** наявні API-каркаси та guardrails, але немає реального Playwright/CDP browser runtime.
 
 **Безпекові механізми (Security Guardrails):**
-- **SSRF Guard**: `BrowserSecurityGuard.validateUrl()` блокує хмарні метадані (`169.254.169.254`), приватні підмережі (RFC 1918), loopback адреси, внутрішні сервіси Docker (`postgres`, `redis`, `omniroute`, `minio`, `npati-agent-api`) та небезпечні схеми (`file://`, `data://`, `javascript://`).
+- **SSRF Guard**: `BrowserSecurityGuard.validateUrl()` блокує хмарні метадані (`169.254.169.254`), приватні підмережі (RFC 1918), loopback адреси, внутрішні сервіси Docker (`postgres`, `redis`, `omniroute`, `minio`, `npati-agent-api`) та небезпечні схеми (`file://`, `data://`, `javascript://`). Для CDP дозволено лише localhost при явному дозволі, хмарні метадані блокуються безумовно.
 - **Download Quarantine**: блокування завантаження виконуваних та потенційно шкідливих файлів із поверненням статусу `quarantined` та HTTP 403 `DOWNLOAD_QUARANTINED`.
-- **Destructive Action Risk Guard**: `BrowserSecurityGuard.checkActionRisk()` вимагає явного `approved: true` для дій із селекторами видалення, оплати або скидання налаштувань.
+- **Destructive Action Risk Guard**: `BrowserSecurityGuard.checkActionRisk()` вимагає явного `approved: true` для дій із селекторами видалення, оплати або скидання налаштувань у кліках, введенні, drag-and-drop та виборі опцій.
 
-**Тести та runtime-верифікація:**
-- Unit/Integration: `tests/production-p11-browser-automation.test.ts` (13/13 passed).
+**Аудит #149-#158:**
+- Наявні старі unit-тести перевіряють лише API-каркаси та guardrails. Реального Playwright/CDP production E2E немає; вони не є доказом `Verified`.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 184 VERIFIED_EXISTING, 33 PARTIALLY_IMPLEMENTED, 89 NOT_IMPLEMENTED).
-- Live Docker E2E: `scripts/verify-production-p11-browser-automation.mjs` (11/11 live checks passed на реальному Docker API: auth, profiles, instances, tabs lifecycle, SSRF block, click/type/drag/select, DOM snapshot, screenshot, PDF capture, download quarantine, CDP attach, capabilities inspect).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
 
-### P1.2 — Multimodal tools [ПОВЕРНУТО В РОБОТУ — СИМУЛЯЦІЇ]
+### P1.2 — Multimodal Tools [ПОВЕРНУТО В РОБОТУ — synthetic adapters не сертифіковані]
 
 Пункти:
-- **#58 `system.image_generation`**: `NOT_IMPLEMENTED` — єдиний клієнт генерації зображень `ImageGenerationEngine` через Fastify Media Tool Gateway з вибором провайдера (`dall-e-3`, `flux`, `recraft`, `sdxl`), розрахунком розмірів та модерацією контенту через `ContentModerationEngine`. Ендпоінт: `POST /media/images/generate`.
-- **#59 `system.ocr`**: `NOT_IMPLEMENTED` — оптичне розпізнавання тексту `OcrTextExtractor` для вилучення структурованих рядків, розрахунку слів, оцінки точності (`confidence > 0.9`) та детекції мови. Ендпоінт: `POST /media/ocr`.
-- **#141 `communications.image_understanding`**: `PARTIALLY_IMPLEMENTED` — візуальний аналіз зображень, виявлення об'єктів з координатами bounding box, визначення сцени та відповіді на візуальні запитання. Ендпоінт: `POST /media/images/understand`.
-- **#142 `files.document_inputoutput`**: `PARTIALLY_IMPLEMENTED` — `DocumentIoManager` для парсингу документів різних форматів (Markdown, CSV, JSON, Text, PDF, DOCX) із автоматичним вилученням таблиць та генерації структурованих звітів. Ендпоінти: `POST /media/documents/parse`, `POST /media/documents/generate`.
-- **#143 `system.modality_bridge`**: `PARTIALLY_IMPLEMENTED` — `ModalityBridgeEngine` для динамічної адаптації медіавходів: автоматичне перетворення зображень в OCR-текст для моделей без підтримки vision (`transcoded_image_to_ocr_text`) та пряма передача нативних vision-вкладень (`pass_native_vision`) для мультимодальних моделей. Ендпоінт: `POST /media/bridge`.
-- **#145 `communications.image_generationediting`**: `NOT_IMPLEMENTED` — `ImageEditingEngine` для редагування та модифікації зображень: inpainting із маскою, outpainting, перенесення стилю та видалення фону. Ендпоінт: `POST /media/images/edit`.
-- **#147 `communications.audio_translation`**: `NOT_IMPLEMENTED` — `AudioTranslationEngine` для транскрибування та перекладу аудіозаписів між мовами (зокрема українська ➔ англійська) з високою точністю. Ендпоінт: `POST /media/audio/translate`.
-- **#148 `communications.video_understanding`**: `NOT_IMPLEMENTED` — `VideoUnderstandingEngine` для темпорального аналізу відеокадрів із заданим FPS, виявлення динамічних сцен та відповідей на запитання щодо візуального відеоряду. Ендпоінт: `POST /media/video/understand`.
-- **#235 `system.video_generation`**: `PARTIALLY_IMPLEMENTED` — єдиний сервіс генерації відео `VideoGenerationPipeline` з підтримкою провайдерів (`runway-gen-3`, `luma-dream-machine`, `sora`), контролем тривалості та резолюції (720p, 1080p, 4k). Ендпоінти: `POST /media/video/generate`, `GET /media/video/jobs/:jobId`, `POST /media/video/jobs/:jobId/cancel`.
-- **#246 `communications.video_generation`**: `PARTIALLY_IMPLEMENTED` — комунікаційний клієнт генерації відео поверх єдиного Video Pipeline без дублювання рушіїв.
-- **#247 `communications.music_generation`**: `PARTIALLY_IMPLEMENTED` — `MusicGenerationEngine` для синтезу музичних треків із заданими жанром (`synthwave`, `ambient`, `techno`), темпом BPM і тривалістю. Ендпоінт: `POST /media/music/generate`.
-- **#248 `communications.talk_realtime_speech`**: `NOT_IMPLEMENTED` — `RealtimeSpeechEngine` для двосторонньої аудіокомунікації: детекція активності голосу (VAD), стани прослуховування/мовлення, генерація аудіовідповідей агента та обробка перебивання користувачем. Ендпоінти: `POST /media/speech/session/start`, `POST /media/speech/session/chunk`, `POST /media/speech/session/end`.
-- **#249 `communications.voice_call`**: `NOT_IMPLEMENTED` — `VoiceCallManager` для здійснення телефонних дзвінків, валідації міжнародного формату номера, фіксації тривалості та збереження резюме розмови. Ендпоінти: `POST /media/calls/dial`, `POST /media/calls/:callId/complete`, `GET /media/calls/:callId`.
-- **#254 `communications.mobile_voice`**: `PARTIALLY_IMPLEMENTED` — `MobileVoiceAudioAdapter` для керування push-to-talk сесіями мобільного застосунку, буферизації аудіофреймів у форматі Opus та завершення сесії. Ендпоінти: `POST /media/mobile-voice/session/start`, `POST /media/mobile-voice/session/frame`, `POST /media/mobile-voice/session/stop`.
+- **#58 `system.image_generation`**: `PARTIALLY_IMPLEMENTED` — є API-каркас і валідація, але provider не підключений, типовий результат є вигаданим URL.
+- **#59 `system.ocr`**: `NOT_IMPLEMENTED` — код читає буфер як UTF-8 текст і не виконує OCR пікселів зображення.
+- **#141 `communications.image_understanding`**: `NOT_IMPLEMENTED` — аналіз і detected objects жорстко задані та не залежать від зображення.
+- **#142 `files.document_inputoutput`**: `PARTIALLY_IMPLEMENTED` — text, CSV і JSON працюють, але PDF/DOCX лише декодуються як UTF-8 без справжнього parser.
+- **#143 `system.modality_bridge`**: `PARTIALLY_IMPLEMENTED` — bridge-каркас є, але він залежить від нереалізованих OCR та multimodal provider adapters.
+- **#145 `communications.image_generationediting`**: `NOT_IMPLEMENTED` — редагування не створює файл, а повертає вигаданий storage URL.
+- **#147 `communications.audio_translation`**: `NOT_IMPLEMENTED` — переклад є фіксованим текстом без STT або translation provider.
+- **#148 `communications.video_understanding`**: `NOT_IMPLEMENTED` — сцени та відповідь жорстко задані, відео не завантажується і не аналізується.
+- **#235 `system.video_generation`**: `PARTIALLY_IMPLEMENTED` — є job lifecycle, але video provider не викликається і повертається вигаданий CDN URL.
+- **#246 `communications.video_generation`**: `PARTIALLY_IMPLEMENTED` — використовує той самий незавершений video job scaffold без media artifact.
+- **#247 `communications.music_generation`**: `NOT_IMPLEMENTED` — audio не генерується, повертається вигаданий CDN URL.
+- **#248 `communications.talk_realtime_speech`**: `NOT_IMPLEMENTED` — обробляється simulatedUserSpeech і числовий розмір аудіо без realtime audio transport/provider.
+- **#249 `communications.voice_call`**: `NOT_IMPLEMENTED` — створюється лише in-memory call record, SIP/Twilio дзвінок не виконується.
+- **#254 `communications.mobile_voice`**: `PARTIALLY_IMPLEMENTED` — audio frames лише рахуються in-memory, немає mobile transport, STT/TTS або codec pipeline.
 
 **Провайдерна валідація та помилки:**
 - Ендпоінт `GET /media/providers` повертає каталог доступних генераторів та рушіїв.
 - Непідтримувані провайдери повертають явні статус-коди 400 (`UNSUPPORTED_PROVIDER`, `UNSUPPORTED_VIDEO_ENGINE`, `UNSUPPORTED_OPERATION`) без використання фіктивних synthetic results.
 - Вхідні промпти підлягають автоматичній модерації через `ContentModerationEngine` із блокуванням prompt injection і шкідливого контенту (код `CONTENT_MODERATION_FLAGGED`).
 
-**Тести та runtime-верифікація:**
-- Unit/Integration: `tests/production-p12-multimodal.test.ts` (22/22 passed).
+**Аудит блоку P1.2:**
+- Старі unit-тести перевіряють validation і synthetic adapters. До підключення реальних media providers та перевірки артефактів це не production certification.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 209 VERIFIED_EXISTING, 21 PARTIALLY_IMPLEMENTED, 76 NOT_IMPLEMENTED).
-- Live Docker E2E: `scripts/verify-production-p12-multimodal.mjs` (15/15 live checks passed на реальному Docker API: auth guards, provider discovery, image generation & unsupported provider rejection, image inpainting, image understanding, OCR extraction, document parse/generate, modality bridge transcoder, audio translation, video understanding, video generation pipeline, music generation, realtime speech VAD/interruption, voice call dialing/completion, mobile voice Opus framing, capabilities inspect).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
 
 ### P1.3 — Automations, triggers і durable tasks [ПОВЕРНУТО В РОБОТУ]
 
@@ -167,7 +167,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p13-automations.test.ts` (12/12 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 195 VERIFIED_EXISTING, 28 PARTIALLY_IMPLEMENTED, 83 NOT_IMPLEMENTED).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
 - Live Docker E2E: `scripts/verify-production-p13-automations.mjs` (12/12 live checks passed на реальному Docker API: auth guards, webhooks registration & public ingress, automations scheduler & cron jobs, background ledger, task flow multi-step execution, standing orders evaluation, IMAP inbound email conversion, webhook retries & DLQ replay, one-shot reminders scheduling/due queue, lifecycle hooks priority emission, capability inspect).
 
 ### P1.4 — Multi-agent, MCP та A2A control plane [ПОВЕРНУТО В РОБОТУ]
@@ -210,7 +210,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p14-orchestration-a2a.test.ts` (28/28 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 verified, 237 VERIFIED_EXISTING, 19 PARTIALLY_IMPLEMENTED, 50 NOT_IMPLEMENTED).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 147 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 100 `NOT_IMPLEMENTED`).
 - Revalidation Audit: `node scripts/revalidate-306-capabilities.mjs` (306/306 verified).
 - Upgrade Gate: `node scripts/upgrade-gate.mjs` (5/5 checks green).
 - Live Docker E2E: `scripts/verify-production-p14-orchestration-a2a.mjs` (18/18 live checks passed на реальному Docker API: auth guards, 16-strategy catalog, strategy resolution, invalid strategy rejection, LKGP record/resolve, A2A v0.3 envelope create/validate/response, smart routing, health registry/report, OmniConductor DAG workflow execution, quota management & limit enforcement, provider discovery, cost analysis tree rollup, list capabilities, agent send & inbox delivery ack, context isolation & copy-on-write fork & explicit merge, nested sub-agents with depth/cycle protection & cancellation propagation, swarm routines with dynamic intent handoff).
@@ -288,7 +288,7 @@ Verified gate: реальні iOS/Android/macOS/Linux builds, pair/revoke/re-pai
 
 ## Журнал попередніх змін (не є доказом поточного статусу)
 
-- 2026-09-12 — **P1.1 Browser automation (#149-#158)**: Реалізовано повний стек браузерної автоматизації з жорсткими безпековими механізмами `BrowserSecurityGuard` (SSRF блокування IP метаданих, приватних підмереж, loopback адрес, контейнерів docker та `file://` протоколів; карантин небезпечних файлів з розширеннями `.exe`, `.bat`, `.sh`, `.vbs`, `.cmd`, `.msi`, `.dll`; Risk Approval Guard для деструктивних дій `delete/drop/pay`). Забезпечено endpoints для ізольованих профілів (#149 `Managed browser profile`), мульти-інстансів (#157 `Multi-profile browser`), життєвого циклу вкладок (#150 `Browser tab control`), кліків/введення (#151 `Browser click/type`), drag & drop та вибору селекторів (#152 `Browser drag/select`), токен-ефективних знімків DOM (`cleanTree` #153 `Browser snapshots`), повносторінкових скріншотів (#154 `Browser screenshots`), захоплення PDF (#155 `Browser PDF capture`), завантаження з карантином (#156 `Browser downloads`) та прямого підключення до Google Chrome через CDP (#158 `Attach real Chrome`). Пройдено 13 unit/integration тестів (`tests/production-p11-browser-automation.test.ts`), оновлено Release Gate (34 тести) та підтверджено 11/11 live E2E сценаріїв у реальному Docker контейнері `npati-agent-api` (`scripts/verify-production-p11-browser-automation.mjs`). Статус у матриці: 184 VERIFIED_EXISTING (+10), 33 PARTIALLY_IMPLEMENTED, 89 NOT_IMPLEMENTED (-10).
+- 2026-09-13 — **Відкликання хибної P1.1 browser-сертифікації:** повторний аудит довів, що endpoints керують in-memory metadata та synthetic payloads, а не реальним Playwright/CDP браузером. #149-#153 і #156-#157 повернено в `PARTIALLY_IMPLEMENTED`; #154, #155 і #158 — у `NOT_IMPLEMENTED`. Старі unit/E2E сценарії не є доказом production browser runtime.
 
 - 2026-09-11 — #192 `Session-Dedup`, #290 `10 000 concurrent session capacity`: production API отримав JWT-authenticated SSE session leases у Redis з atomic acquire/renew/release, TTL після crash, tenant/user isolation і глобальним dedup між API replicas. Той самий registry захищає `chat/stream` від однакового `streamId` на різних репліках. Реальна мережева сертифікація відкрила 10 000 одночасних з'єднань через дві API-репліки, пройшла heartbeat, отримала 0 помилок, `409` для дубля, `401` без токена та 0 залишкових lease після disconnect. Стару in-process Map-імітацію замінено чесним load gate.
 

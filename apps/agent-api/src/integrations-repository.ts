@@ -161,6 +161,26 @@ export class IntegrationsRepository {
     return this.memoryWebhooks.delete(id);
   }
 
+  async getWebhook(ctx: AuthContext, companyId: string, id: string): Promise<CompanyWebhook | null> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyWebhook>(
+        `SELECT ${webhookCols} FROM company_webhooks WHERE id = $1 AND workspace_id = $2 AND company_id = $3 AND user_id = $4`,
+        [id, ctx.workspaceId, companyId, ctx.userId]
+      );
+      return result.rows[0] || null;
+    }
+
+    const item = this.memoryWebhooks.get(id);
+    if (!item || item.workspaceId !== ctx.workspaceId || item.companyId !== companyId || item.userId !== ctx.userId) {
+      return null;
+    }
+    return item;
+  }
+
+  clearWebhooks(): void {
+    this.memoryWebhooks.clear();
+  }
+
   // MCP Servers
   async listMcpServers(ctx: AuthContext, companyId: string): Promise<CompanyMcpServer[]> {
     if (this.pool) {

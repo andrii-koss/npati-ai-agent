@@ -12,6 +12,11 @@ export interface ChatRequest {
   signal?: AbortSignal;
   timeoutMs?: number;
   idempotencyKey?: string;
+  admission?: {
+    tier?: "critical-orchestration" | "enterprise" | "pro" | "free";
+    tenantId?: string;
+    queueTimeoutMs?: number;
+  };
 }
 
 export interface A2AMessageRequest {

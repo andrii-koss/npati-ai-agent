@@ -35,10 +35,41 @@ describe("Cost Telemetry, Semantic Cache & Context Compaction", () => {
       // Query with different casing and punctuation should hit the cache
       const cached = cache.get("what is the price of product a", "comp-1");
       expect(cached).toBe("Product A costs $100");
+      expect(cache.has("what is the price of product a?", "comp-1")).toBe(true);
 
       const stats = cache.stats();
       expect(stats.hits).toBe(1);
       expect(stats.hitRatio).toBe(1.0);
+    });
+
+    it("maintains strict tenant isolation across identical queries", () => {
+      const cache = new SemanticCache<string>(60_000);
+
+      cache.set("What is my secret token?", "token-tenant-1", "tenant-1");
+      cache.set("What is my secret token?", "token-tenant-2", "tenant-2");
+
+      expect(cache.get("what is my secret token", "tenant-1")).toBe("token-tenant-1");
+      expect(cache.get("what is my secret token", "tenant-2")).toBe("token-tenant-2");
+      expect(cache.get("what is my secret token", "tenant-3")).toBeNull();
+    });
+
+    it("invalidates only scoped tenant entries leaving other tenants intact", () => {
+      const cache = new SemanticCache<string>(60_000);
+
+      cache.set("query 1", "answer 1", "tenant-alpha");
+      cache.set("query 2", "answer 2", "tenant-alpha");
+      cache.set("query 1", "answer beta", "tenant-beta");
+
+      expect(cache.stats().size).toBe(3);
+
+      const deletedAlpha = cache.invalidate("tenant-alpha");
+      expect(deletedAlpha).toBe(2);
+
+      expect(cache.get("query 1", "tenant-alpha")).toBeNull();
+      expect(cache.get("query 2", "tenant-alpha")).toBeNull();
+      // Tenant beta must still be intact!
+      expect(cache.get("query 1", "tenant-beta")).toBe("answer beta");
+      expect(cache.stats().size).toBe(1);
     });
 
     it("expires entries after TTL", async () => {

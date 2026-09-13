@@ -4,9 +4,22 @@ import type { AuthProvider } from "./auth";
 import type { IntegrationsRepository } from "./integrations-repository";
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
 
+function hasPermission(scope: any, permission: string): boolean {
+  if (!scope || !Array.isArray(scope.permissions)) return false;
+  if (scope.permissions.includes("*") || scope.permissions.includes("admin:all") || scope.permissions.includes("owner")) return true;
+  if (scope.permissions.includes(permission)) return true;
+  if (permission === "workspace:read") {
+    return scope.permissions.includes("workspace:read") || scope.permissions.includes("workspace:write") || scope.permissions.includes("business:manage");
+  }
+  if (permission === "business:manage") {
+    return scope.permissions.includes("business:manage") || scope.permissions.includes("workspace:write");
+  }
+  return false;
+}
+
 async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace:read" | "business:manage") {
   const c = await auth.authenticate(r);
-  if (!c.permissions.includes(permission)) throw new WorkspaceAccessError("Missing permission: " + permission);
+  if (!hasPermission(c, permission)) throw new WorkspaceAccessError("Missing permission: " + permission);
   return c;
 }
 
@@ -14,7 +27,7 @@ function err(reply: any, e: unknown) {
   const status = Number((e as any)?.status ?? (e instanceof WorkspaceAccessError ? 403 : 400));
   return reply.code(status).send({
     error: {
-      code: status === 404 ? "NOT_FOUND" : "INTEGRATION_ERROR",
+      code: (e as any)?.code || (status === 404 ? "NOT_FOUND" : status === 403 ? "FORBIDDEN" : "INTEGRATION_ERROR"),
       message: e instanceof Error ? e.message : String(e),
     },
   });
@@ -43,6 +56,23 @@ export function registerIntegrationsRoutes(
     }
   });
 
+  app.get<{ Params: { companyId: string; webhookId: string } }>(
+    "/companies/:companyId/webhooks/:webhookId",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "workspace:read");
+        await store.getCompany(c, r.params.companyId);
+        const webhook = await repo.getWebhook(c, r.params.companyId, r.params.webhookId);
+        if (!webhook) {
+          return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
+        }
+        return reply.code(200).send({ webhook });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
+
   app.post<{
     Params: { companyId: string };
     Body: { name: string; promptTemplate: string; agentId?: string };
@@ -50,9 +80,28 @@ export function registerIntegrationsRoutes(
     try {
       const c = await ctx(auth, r, "business:manage");
       await store.getCompany(c, r.params.companyId);
-      PromptInjectionGuard.assertSafe(r.body.promptTemplate);
-      const created = await repo.createWebhook(c, r.params.companyId, r.body);
-      return reply.code(201).send(created);
+      const { name, promptTemplate, agentId } = r.body || {};
+
+      if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 200) {
+        throw Object.assign(new Error("name is required and must be a string up to 200 characters."), {
+          status: 400,
+          code: "MISSING_PARAMETERS",
+        });
+      }
+      if (!promptTemplate || typeof promptTemplate !== "string" || promptTemplate.trim().length === 0) {
+        throw Object.assign(new Error("promptTemplate is required."), {
+          status: 400,
+          code: "MISSING_PARAMETERS",
+        });
+      }
+
+      PromptInjectionGuard.assertSafe(promptTemplate);
+      const created = await repo.createWebhook(c, r.params.companyId, {
+        name: name.trim(),
+        promptTemplate: promptTemplate.trim(),
+        agentId: agentId || undefined,
+      });
+      return reply.code(201).send({ webhook: created, ...created });
     } catch (e) {
       return err(reply, e);
     }
@@ -63,7 +112,10 @@ export function registerIntegrationsRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "business:manage");
-        await repo.deleteWebhook(c, r.params.companyId, r.params.webhookId);
+        const deleted = await repo.deleteWebhook(c, r.params.companyId, r.params.webhookId);
+        if (!deleted) {
+          return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
+        }
         return reply.code(204).send();
       } catch (e) {
         return err(reply, e);
@@ -79,7 +131,7 @@ export function registerIntegrationsRoutes(
     try {
       const webhook = await repo.getWebhookBySecret(r.params.secret);
       if (!webhook) {
-        return reply.code(404).send({ error: { code: "INVALID_WEBHOOK_SECRET", message: "Webhook not found or inactive" } });
+        return reply.code(404).send({ error: { code: "INVALID_WEBHOOK_SECRET", message: "Webhook not found or inactive." } });
       }
 
       const rawPayload = JSON.stringify(r.body || {});

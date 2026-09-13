@@ -49,8 +49,26 @@ describe("Atomic RPM Rolling Lease Manager", () => {
     expect(l3.reason).toContain("RPM limit exceeded");
 
     // Release l1 (3 tokens freed)
-    manager.releaseLease(l1.leaseId!);
+    const released = manager.releaseLease(l1.leaseId!);
+    expect(released).toBe(true);
     const l4 = manager.acquireLease({ provider: "anthropic", maxRpm: 5, tokens: 2 });
     expect(l4.granted).toBe(true);
+  });
+
+  it("filters active leases by provider and cleans up expired leases automatically", async () => {
+    const manager = new AtomicRpmLeaseManager(50); // 50ms window
+
+    const l1 = manager.acquireLease({ provider: "openai", maxRpm: 10, tokens: 4 });
+    const l2 = manager.acquireLease({ provider: "anthropic", maxRpm: 10, tokens: 2 });
+
+    expect(manager.getActiveLeases().length).toBe(2);
+    expect(manager.getActiveLeases("openai").length).toBe(1);
+    expect(manager.getActiveLeases("anthropic").length).toBe(1);
+    expect(manager.getActiveLeases("google").length).toBe(0);
+
+    // Wait for expiration
+    await new Promise((r) => setTimeout(r, 60));
+    expect(manager.cleanupExpired()).toBe(2);
+    expect(manager.getActiveLeases().length).toBe(0);
   });
 });

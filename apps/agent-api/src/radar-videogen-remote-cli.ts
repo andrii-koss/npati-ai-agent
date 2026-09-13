@@ -12,9 +12,9 @@ export interface VideoGenerationJob {
   jobId: string;
   prompt: string;
   durationSeconds: number;
-  resolution: "720p" | "1080p";
+  resolution: "720p" | "1080p" | "4k";
   engine: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "cancelled";
   videoUrl?: string;
   createdAt: string;
 }
@@ -94,7 +94,7 @@ export class VideoGenerationPipeline {
   createJob(params: {
     prompt: string;
     durationSeconds?: number;
-    resolution?: "720p" | "1080p";
+    resolution?: "720p" | "1080p" | "4k";
     engine?: string;
   }): VideoGenerationJob {
     const jobId = `vid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -120,8 +120,20 @@ export class VideoGenerationPipeline {
     return job;
   }
 
+  cancelJob(jobId: string): VideoGenerationJob {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error(`Video job ${jobId} not found.`);
+
+    job.status = "cancelled";
+    return job;
+  }
+
   getJob(jobId: string): VideoGenerationJob | undefined {
     return this.jobs.get(jobId);
+  }
+
+  listJobs(): VideoGenerationJob[] {
+    return Array.from(this.jobs.values());
   }
 }
 

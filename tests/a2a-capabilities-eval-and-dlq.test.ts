@@ -60,6 +60,52 @@ describe("Agent Evaluation Framework (AgentEvaluationFramework)", () => {
     expect(result.metrics.formatCompliance).toBe(0.0);
     expect(result.metrics.instructionFollowing).toBe(0.0);
   });
+
+  it("enforces negative boundaries (disallowedSubstrings) and required schema keys", () => {
+    const outputWithViolation = JSON.stringify({
+      summary: "System architecture overview",
+      notes: "Contains confidential and secret_token in text",
+    });
+
+    const failedResult = AgentEvaluationFramework.evaluate(
+      "Provide architecture overview",
+      outputWithViolation,
+      {
+        checkJsonFormat: true,
+        requiredKeys: ["summary", "status"], // status is missing
+        requiredSubstrings: ["architecture"],
+        disallowedSubstrings: ["confidential", "secret_token"],
+      }
+    );
+
+    expect(failedResult.passed).toBe(false);
+    expect(failedResult.metrics.boundaryAdherence).toBe(0.0);
+    expect(failedResult.metrics.formatCompliance).toBe(0.5); // 1 of 2 keys
+    expect(failedResult.notes.some((n) => n.includes("BOUNDARY_VIOLATION"))).toBe(true);
+    expect(failedResult.notes.some((n) => n.includes("SCHEMA_KEY_MISSING"))).toBe(true);
+
+    const cleanOutput = JSON.stringify({
+      summary: "System architecture overview",
+      status: "ready",
+    });
+
+    const passedResult = AgentEvaluationFramework.evaluate(
+      "Provide architecture overview",
+      cleanOutput,
+      {
+        checkJsonFormat: true,
+        requiredKeys: ["summary", "status"],
+        requiredSubstrings: ["architecture"],
+        disallowedSubstrings: ["confidential", "secret_token"],
+        minScore: 0.8,
+      }
+    );
+
+    expect(passedResult.passed).toBe(true);
+    expect(passedResult.metrics.boundaryAdherence).toBe(1.0);
+    expect(passedResult.metrics.formatCompliance).toBe(1.0);
+    expect(passedResult.overallScore).toBeGreaterThanOrEqual(0.8);
+  });
 });
 
 describe("Webhook Retry & DLQ Engine (WebhookRetryDeliveryEngine)", () => {
