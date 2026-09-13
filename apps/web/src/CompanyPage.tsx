@@ -1082,7 +1082,7 @@ export function CompanyPage() {
             <label><span>Brand Tone</span><input value={companyForm.brandTone} onChange={(event) => setCompanyForm({ ...companyForm, brandTone: event.target.value })} /></label></div>
             <label><span>Company Instructions</span><textarea rows={5} value={companyForm.companyInstructions} onChange={(event) => setCompanyForm({ ...companyForm, companyInstructions: event.target.value })} /></label>
           </section>
-          <footer>{editingCompany && <button type="button" className="danger-button" onClick={() => void deleteCompany()}>Delete Company</button>}<span /><button type="button" onClick={() => setCompanyEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving&" : "Save Company"}</button></footer>
+          <footer>{editingCompany && <button type="button" className="danger-button" onClick={() => void deleteCompany()}>Delete Company</button>}<span /><button type="button" className="button-secondary" onClick={() => setCompanyEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving…" : "Save Company"}</button></footer>
         </form>
       </aside>
     </div>}
@@ -1158,7 +1158,7 @@ export function CompanyPage() {
             <label className="company-switch"><input type="checkbox" checked={agentForm.isActive} onChange={(event) => setAgentForm({ ...agentForm, isActive: event.target.checked })} /><span>Agent active</span></label>
             {editingAgent && <button type="button" className="button-secondary" onClick={() => void setMainAgent(editingAgent.id)}>Set as Main Agent</button>}
           </section>
-          <footer>{editingAgent && <button type="button" className="danger-button" onClick={() => void deleteAgent()}>Delete Agent</button>}<span /><button type="button" onClick={() => setAgentEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving&" : "Save Agent"}</button></footer>
+          <footer>{editingAgent && <button type="button" className="danger-button" onClick={() => void deleteAgent()}>Delete Agent</button>}<span /><button type="button" className="button-secondary" onClick={() => setAgentEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving…" : "Save Agent"}</button></footer>
         </form>
       </aside>
     </div>}
