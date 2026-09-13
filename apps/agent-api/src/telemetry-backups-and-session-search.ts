@@ -142,12 +142,48 @@ export class DatabaseBackupManager {
 
     const computed = createHash("sha256").update(testContent).digest("hex");
     const isValid = computed === snap.checksumSha256;
-    if (isValid) snap.status = "verified";
+    if (isValid) {
+      snap.status = "verified";
+    } else {
+      snap.status = "failed";
+    }
     return isValid;
   }
 
-  listSnapshots(): BackupSnapshot[] {
-    return Array.from(this.snapshots.values());
+  verifySnapshotDetails(
+    snapshotId: string,
+    testContent: string
+  ): { verified: boolean; expectedChecksum?: string; actualChecksum?: string; snapshot?: BackupSnapshot } {
+    const snap = this.snapshots.get(snapshotId);
+    if (!snap) return { verified: false };
+
+    const computed = createHash("sha256").update(testContent).digest("hex");
+    const isValid = computed === snap.checksumSha256;
+    if (isValid) {
+      snap.status = "verified";
+    } else {
+      snap.status = "failed";
+    }
+    return {
+      verified: isValid,
+      expectedChecksum: snap.checksumSha256,
+      actualChecksum: computed,
+      snapshot: snap,
+    };
+  }
+
+  getSnapshot(snapshotId: string): BackupSnapshot | undefined {
+    return this.snapshots.get(snapshotId);
+  }
+
+  deleteSnapshot(snapshotId: string): boolean {
+    return this.snapshots.delete(snapshotId);
+  }
+
+  listSnapshots(databaseName?: string): BackupSnapshot[] {
+    const list = Array.from(this.snapshots.values());
+    if (!databaseName) return list;
+    return list.filter((s) => s.databaseName === databaseName);
   }
 
   pruneExpired(): number {
@@ -171,6 +207,27 @@ export class SessionSearchEngine {
    */
   indexSession(session: SessionDocument): void {
     this.documents.set(session.sessionId, session);
+  }
+
+  getSession(sessionId: string): SessionDocument | undefined {
+    return this.documents.get(sessionId);
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.documents.has(sessionId);
+  }
+
+  deleteSession(sessionId: string): boolean {
+    return this.documents.delete(sessionId);
+  }
+
+  count(tenantId?: string): number {
+    if (!tenantId) return this.documents.size;
+    let c = 0;
+    for (const doc of this.documents.values()) {
+      if (doc.tenantId === tenantId) c++;
+    }
+    return c;
   }
 
   search(

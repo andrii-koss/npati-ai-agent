@@ -27,26 +27,28 @@ describe("OIDC Dashboard Gate (OidcDashboardGate)", () => {
   const config = {
     expectedIssuer: "https://auth.npati.ai",
     expectedAudience: "npati-dashboard",
+    allowedAlgorithms: ["HS256"] as const,
+    sharedSecret: "oidc_test_secret",
   };
 
-  it("verifies valid OIDC ID tokens and extracts claims", () => {
+  it("verifies valid OIDC ID tokens and extracts claims", async () => {
     const token = OidcDashboardGate.createMockOidcToken({
       email: "security-lead@npati.ai",
       roles: ["superadmin"],
     });
 
-    const verification = OidcDashboardGate.verifyOidcToken(token, config);
+    const verification = await OidcDashboardGate.verifyOidcToken(token, config);
     expect(verification.isValid).toBe(true);
     expect(verification.claims?.email).toBe("security-lead@npati.ai");
     expect(verification.claims?.roles).toContain("superadmin");
   });
 
-  it("rejects expired OIDC tokens", () => {
+  it("rejects expired OIDC tokens", async () => {
     const expiredToken = OidcDashboardGate.createMockOidcToken({
       exp: Math.floor(Date.now() / 1000) - 100, // Expired in the past
     });
 
-    const verification = OidcDashboardGate.verifyOidcToken(expiredToken, config);
+    const verification = await OidcDashboardGate.verifyOidcToken(expiredToken, config);
     expect(verification.isValid).toBe(false);
     expect(verification.error).toContain("TOKEN_EXPIRED");
   });

@@ -303,7 +303,7 @@ export class CompanyDelegationRuntime {
       if ((await this.store.getCompanyAgentRun(ctx, companyId, created.run.id)).run.cancelRequested)
         throw new DOMException("Cancelled", "AbortError");
       let result = await this.ai.chat({
-        model: execution.model, signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:final`,
+        model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
         messages: [
           { role: "system", content: protect(instruction(company, main, true, !options.noMemory)) },
           { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
@@ -314,7 +314,7 @@ export class CompanyDelegationRuntime {
       totalTokens += measured.totalTokens;
       if (knowledgeContext) {
         result = await this.ai.chat({
-          model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, idempotencyKey: `${created.run.id}:grounded-final`,
+          model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
             { role: "system", content: protect(instruction(company, main, true, !options.noMemory) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user.") },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },

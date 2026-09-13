@@ -127,13 +127,15 @@ export class NpatiBackendAuthProvider implements AuthProvider {
         permissions.push("workspace:read", "workspace:write", "business:manage", "chat:use", "mcp:read", "mcp:execute", "agent:exec");
       } else {
         for (const s of rawScopes) {
-          if (s === "chat:use" || s === "chat:read" || s === "chat") permissions.push("chat:use");
+          if (s === "chat:use" || s === "chat:write" || s === "chat:read" || s === "chat") permissions.push("chat:use");
           if (s === "workspace:read") permissions.push("workspace:read");
           if (s === "workspace:write") permissions.push("workspace:write");
           if (s === "business:manage") permissions.push("business:manage");
           if (s === "mcp:read") permissions.push("mcp:read");
           if (s === "mcp:execute") permissions.push("mcp:execute");
           if (s === "agent:exec") permissions.push("agent:exec");
+          if (s === "memory:read") permissions.push("memory:read");
+          if (s === "memory:write") permissions.push("memory:write");
         }
       }
 
@@ -170,13 +172,15 @@ export class NpatiBackendAuthProvider implements AuthProvider {
         permissions.push("workspace:read", "workspace:write", "business:manage", "chat:use", "mcp:read", "mcp:execute", "agent:exec");
       } else {
         for (const s of rawScopes) {
-          if (s === "chat:use" || s === "chat") permissions.push("chat:use");
+          if (s === "chat:use" || s === "chat:write" || s === "chat") permissions.push("chat:use");
           if (s === "workspace:read") permissions.push("workspace:read");
           if (s === "workspace:write") permissions.push("workspace:write");
           if (s === "business:manage") permissions.push("business:manage");
           if (s === "mcp:read") permissions.push("mcp:read");
           if (s === "mcp:execute") permissions.push("mcp:execute");
           if (s === "agent:exec") permissions.push("agent:exec");
+          if (s === "memory:read") permissions.push("memory:read");
+          if (s === "memory:write") permissions.push("memory:write");
           if (s === "tools:read") permissions.push("tools:read", "workspace:read");
         }
       }

@@ -17,7 +17,7 @@ import {
 } from "../apps/agent-api/src/browser-advanced-integrations";
 import { BrowserSecurityGuard } from "../apps/agent-api/src/browser-security-guard";
 
-describe("P1.1 Production Suite: Browser Automation", () => {
+describe("Browser automation scaffold and guardrail contracts (not production certification)", () => {
   // 1. #149 Managed Browser Profile
   describe("#149 Managed Browser Profile (browser.managed_browser_profile)", () => {
     it("creates isolated profiles with encrypted cookies, viewport, and cleanup", () => {
@@ -189,7 +189,7 @@ describe("P1.1 Production Suite: Browser Automation", () => {
 
   // 7. #155 Browser PDF Capture
   describe("#155 Browser PDF Capture (browser.browser_pdf_capture)", () => {
-    it("exports browser view to valid PDF binary structure", () => {
+    it("returns the current PDF descriptor scaffold", () => {
       const pdf = BrowserPdfCaptureEngine.capturePdf("tab-456", { landscape: true, printBackground: true });
       expect(pdf.pdfId).toBeDefined();
       expect(pdf.pageCount).toBe(2);
@@ -197,7 +197,7 @@ describe("P1.1 Production Suite: Browser Automation", () => {
 
       const decoded = Buffer.from(pdf.pdfBase64, "base64").toString("utf-8");
       expect(decoded).toContain("%PDF-1.4");
-      expect(decoded).toContain("LANDSCAPE_true");
+      expect(decoded).toContain("/Landscape true");
     });
   });
 

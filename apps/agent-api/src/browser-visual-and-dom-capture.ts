@@ -40,12 +40,13 @@ export class BrowserDomSnapshotEngine {
    */
   static captureSnapshot(
     rawHtml: string,
-    options: { pruneScripts?: boolean } = {}
+    options: { pruneScripts?: boolean; maxInteractiveNodes?: number } = {}
   ): DomSnapshotResult {
     let cleaned = rawHtml;
 
     if (options.pruneScripts ?? true) {
       cleaned = cleaned
+        .replace(/<!--[\s\S]*?-->/g, "")
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
         .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
         .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "");
@@ -54,8 +55,8 @@ export class BrowserDomSnapshotEngine {
     const interactiveNodes: InteractiveDomNode[] = [];
     let counter = 1;
 
-    // Detect button and input elements
-    const elementRegex = /<(button|input|a|select)\b([^>]*)>([\s\S]*?)<\/\1>|<(input)\b([^>]*)\/?>/gi;
+    // Detect button, input, a, select, textarea elements
+    const elementRegex = /<(button|input|a|select|textarea)\b([^>]*)>([\s\S]*?)<\/\1>|<(input)\b([^>]*)\/?>/gi;
     let match: RegExpExecArray | null;
     while ((match = elementRegex.exec(cleaned)) !== null) {
       const tag = match[1] || match[4] || "interactive";
@@ -66,13 +67,24 @@ export class BrowserDomSnapshotEngine {
       const id = idMatch ? idMatch[1]! : `elem_${counter++}`;
       const selector = idMatch ? `#${id}` : `${tag}[node-id='${id}']`;
 
+      const roleMatch = /role=["']([^"']+)["']/i.exec(attrs);
+      const placeholderMatch = /placeholder=["']([^"']+)["']/i.exec(attrs);
+      const ariaLabelMatch = /aria-label=["']([^"']+)["']/i.exec(attrs);
+
+      const label = text || ariaLabelMatch?.[1] || placeholderMatch?.[1] || (tag === "input" ? "Input Field" : "Interactive Element");
+
       interactiveNodes.push({
         id,
         tag,
-        text: text || "Submit / Input",
+        role: roleMatch ? roleMatch[1] : undefined,
+        text: label,
         selector,
         isInteractive: true,
       });
+
+      if (options.maxInteractiveNodes && interactiveNodes.length >= options.maxInteractiveNodes) {
+        break;
+      }
     }
 
     const cleanTree = interactiveNodes
@@ -96,23 +108,45 @@ export class BrowserScreenshotEngine {
    */
   static capture(
     tabId: string,
-    options: { fullPage?: boolean; format?: "png" | "jpeg"; quality?: number } = {}
+    options: {
+      fullPage?: boolean;
+      format?: "png" | "jpeg";
+      quality?: number;
+      clip?: { x: number; y: number; width: number; height: number };
+    } = {}
   ): ScreenshotResult {
-    const format = options.format || "png";
+    const format = options.format === "jpeg" ? "jpeg" : "png";
+    const quality = options.quality ? Math.min(100, Math.max(1, options.quality)) : (format === "jpeg" ? 80 : 100);
     const screenshotId = `ss_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const mockImageBase64 = Buffer.from(`NPATI_SCREENSHOT_BINARY_${screenshotId}`).toString(
-      "base64"
-    );
+
+    let dimensions = options.fullPage
+      ? { width: 1280, height: 2400 }
+      : { width: 1280, height: 800 };
+
+    if (options.clip) {
+      dimensions = { width: options.clip.width, height: options.clip.height };
+    }
+
+    const payloadDescriptor = `NPATI_SCREENSHOT_BINARY_${screenshotId}_${dimensions.width}x${dimensions.height}_Q${quality}`;
+    const base64Data = Buffer.from(payloadDescriptor).toString("base64");
 
     return {
       screenshotId,
       tabId,
-      base64Data: mockImageBase64,
+      base64Data,
       mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
-      dimensions: options.fullPage ? { width: 1280, height: 2400 } : { width: 1280, height: 800 },
+      dimensions,
       capturedAt: new Date().toISOString(),
     };
   }
+}
+
+export interface PdfCaptureOptions {
+  landscape?: boolean;
+  printBackground?: boolean;
+  scale?: number;
+  paperFormat?: "A4" | "Letter" | "Legal";
+  pageRanges?: string;
 }
 
 export class BrowserPdfCaptureEngine {
@@ -121,18 +155,32 @@ export class BrowserPdfCaptureEngine {
    */
   static capturePdf(
     tabId: string,
-    options: { landscape?: boolean; printBackground?: boolean } = {}
+    options: PdfCaptureOptions = {}
   ): PdfCaptureResult {
     const pdfId = `pdf_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const mockPdfBinary = Buffer.from(
-      `%PDF-1.4 NPATI_BROWSER_PAGE_EXPORT_${pdfId}_LANDSCAPE_${options.landscape ?? false}`
-    );
+    const format = options.paperFormat || "A4";
+    const landscape = options.landscape ?? false;
+    const printBackground = options.printBackground ?? true;
+    const scale = options.scale ?? 1.0;
+
+    let pageCount = 2;
+    if (options.pageRanges) {
+      const match = /(\d+)(?:-(\d+))?/.exec(options.pageRanges);
+      if (match) {
+        const start = parseInt(match[1]!, 10);
+        const end = match[2] ? parseInt(match[2]!, 10) : start;
+        pageCount = Math.max(1, end - start + 1);
+      }
+    }
+
+    const payloadDescriptor = `%PDF-1.4\n%NPATI_EXPORT_${pdfId}\n/Format /${format}\n/Landscape ${landscape}\n/PrintBackground ${printBackground}\n/Scale ${scale}\n/Pages ${pageCount}\n%%EOF`;
+    const mockPdfBinary = Buffer.from(payloadDescriptor);
 
     return {
       pdfId,
       tabId,
       pdfBase64: mockPdfBinary.toString("base64"),
-      pageCount: 2,
+      pageCount,
       fileSizeBytes: mockPdfBinary.length,
       generatedAt: new Date().toISOString(),
     };

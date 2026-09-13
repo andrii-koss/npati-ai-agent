@@ -45,6 +45,14 @@ export class QuotaShareRouter {
     });
   }
 
+  getTenantShare(tenantId: string): TenantQuotaShare | undefined {
+    return this.shares.get(tenantId);
+  }
+
+  getAllShares(): TenantQuotaShare[] {
+    return Array.from(this.shares.values());
+  }
+
   isAdmitted(
     tenantId: string,
     currentGlobalRpm: number,

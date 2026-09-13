@@ -33,6 +33,29 @@ describe("Compression Preset Manager (Compression Presets)", () => {
     expect(codeSafe.preset).toBe("code-safe");
     expect(codeSafe.compressedText).toContain("```bash\n    npm run build && npm start\n    ```");
   });
+
+  it("lists all available compression presets with descriptions and target ratios", () => {
+    const presets = CompressionPresetManager.getAvailablePresets();
+    expect(presets.length).toBe(5);
+    const names = presets.map((p) => p.name);
+    expect(names).toContain("minimal");
+    expect(names).toContain("balanced");
+    expect(names).toContain("extreme");
+    expect(names).toContain("code-safe");
+    expect(names).toContain("rag-optimized");
+  });
+
+  it("compresses conversation messages array preserving roles and structure", () => {
+    const messages = [
+      { role: "system", content: "You are an assistant. Please note that you must always be helpful." },
+      { role: "user", content: "Can you help deploy?" },
+    ];
+    const res = CompressionPresetManager.applyPresetToMessages(messages, "balanced");
+    expect(res.compressedMessages.length).toBe(2);
+    expect(res.compressedMessages[0].role).toBe("system");
+    expect(res.compressedMessages[0].content).not.toContain("Please note that");
+    expect(res.tokensSaved).toBeGreaterThan(0);
+  });
 });
 
 describe("Adaptive Context Budget Manager (Adaptive Context Budget)", () => {
@@ -51,6 +74,26 @@ describe("Adaptive Context Budget Manager (Adaptive Context Budget)", () => {
     const critical = AdaptiveContextBudgetManager.evaluateBudget(90_000, 100_000);
     expect(critical.actionRequired).toBe(true);
     expect(critical.suggestedPreset).toBe("extreme");
+  });
+
+  it("resolves model-aware context limits dynamically", () => {
+    // 150k tokens on Gemini (1M context limit) -> healthy (15%), no action required
+    const geminiRes = AdaptiveContextBudgetManager.evaluateBudget(150_000, undefined, "google/gemini-2.5-flash");
+    expect(geminiRes.maxContextTokens).toBe(1_000_000);
+    expect(geminiRes.actionRequired).toBe(false);
+    expect(geminiRes.suggestedPreset).toBe("none");
+
+    // 150k tokens on Claude (200k context limit) -> 75% -> balanced compression
+    const claudeRes = AdaptiveContextBudgetManager.evaluateBudget(150_000, undefined, "anthropic/claude-3-7-sonnet");
+    expect(claudeRes.maxContextTokens).toBe(200_000);
+    expect(claudeRes.actionRequired).toBe(true);
+    expect(claudeRes.suggestedPreset).toBe("balanced");
+
+    // 110k tokens on GPT-4o (128k context limit) -> 86% -> extreme compression
+    const gptRes = AdaptiveContextBudgetManager.evaluateBudget(110_000, undefined, "openai/gpt-4o");
+    expect(gptRes.maxContextTokens).toBe(128_000);
+    expect(gptRes.actionRequired).toBe(true);
+    expect(gptRes.suggestedPreset).toBe("extreme");
   });
 });
 

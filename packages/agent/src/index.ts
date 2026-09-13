@@ -12,6 +12,7 @@ export interface AgentAIContext {
   model: string;
   fallbackModel?: string;
   compression: "stacked" | "off";
+  admission?: import("@npati/omniroute-adapter").ChatRequest["admission"];
 }
 
 function aiRoute(ai: AgentAIContext) {
@@ -19,6 +20,7 @@ function aiRoute(ai: AgentAIContext) {
     model: ai.model,
     fallbackModel: ai.fallbackModel,
     compression: ai.compression === "stacked" ? "default" as const : "off" as const,
+    admission: ai.admission,
   };
 }
 

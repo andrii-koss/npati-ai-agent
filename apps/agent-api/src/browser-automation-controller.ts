@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { BrowserSecurityGuard } from "./browser-security-guard";
 
 export interface BrowserTab {
   tabId: string;
@@ -7,6 +8,8 @@ export interface BrowserTab {
   isActive: boolean;
   history: string[];
   createdAt: string;
+  profileId?: string;
+  tenantId?: string;
 }
 
 export interface ElementActionResult {
@@ -22,11 +25,24 @@ export class BrowserTabController {
   private activeTabId: string | null = null;
 
   /**
-   * 1. Browser Tab Control: Multi-tab creation, navigation, and switching
+   * 1. Browser Tab Control: Multi-tab creation, navigation, and switching with SSRF protection
    */
-  openTab(url = "about:blank", title = "New Tab"): BrowserTab {
+  openTab(
+    url = "about:blank",
+    title = "New Tab",
+    options: { profileId?: string; tenantId?: string; allowLocalhost?: boolean } = {}
+  ): BrowserTab {
+    if (url !== "about:blank") {
+      const validation = BrowserSecurityGuard.validateUrl(url, {
+        allowLocalhost: options.allowLocalhost,
+      });
+      if (!validation.allowed) {
+        throw new Error(`SSRF_BLOCKED: ${validation.reason}`);
+      }
+    }
+
     const tabId = `tab_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-    
+
     // Deactivate current active tab
     if (this.activeTabId && this.tabs.has(this.activeTabId)) {
       this.tabs.get(this.activeTabId)!.isActive = false;
@@ -39,6 +55,8 @@ export class BrowserTabController {
       isActive: true,
       history: [url],
       createdAt: new Date().toISOString(),
+      profileId: options.profileId,
+      tenantId: options.tenantId,
     };
 
     this.tabs.set(tabId, tab);
@@ -78,9 +96,23 @@ export class BrowserTabController {
     return true;
   }
 
-  navigateTab(tabId: string, url: string, title?: string): boolean {
+  navigateTab(
+    tabId: string,
+    url: string,
+    title?: string,
+    options: { allowLocalhost?: boolean } = {}
+  ): boolean {
     const tab = this.tabs.get(tabId);
     if (!tab) return false;
+
+    if (url !== "about:blank") {
+      const validation = BrowserSecurityGuard.validateUrl(url, {
+        allowLocalhost: options.allowLocalhost,
+      });
+      if (!validation.allowed) {
+        throw new Error(`SSRF_BLOCKED: ${validation.reason}`);
+      }
+    }
 
     tab.url = url;
     if (title) tab.title = title;
@@ -88,8 +120,14 @@ export class BrowserTabController {
     return true;
   }
 
-  listTabs(): BrowserTab[] {
-    return Array.from(this.tabs.values());
+  getTab(tabId: string): BrowserTab | null {
+    return this.tabs.get(tabId) || null;
+  }
+
+  listTabs(tenantId?: string): BrowserTab[] {
+    const all = Array.from(this.tabs.values());
+    if (!tenantId) return all;
+    return all.filter((t) => !t.tenantId || t.tenantId === tenantId);
   }
 
   getActiveTab(): BrowserTab | null {
@@ -99,13 +137,18 @@ export class BrowserTabController {
 
 export class BrowserClickTypeEngine {
   /**
-   * 2. Browser Click & Type: Interacts with DOM inputs and buttons
+   * 2. Browser Click & Type: Interacts with DOM inputs and buttons with Destructive Action Risk Guard
    */
   static click(
     tab: BrowserTab,
     selector: string,
-    options: { button?: "left" | "right"; clickCount?: number } = {}
+    options: { button?: "left" | "right"; clickCount?: number; approved?: boolean } = {}
   ): ElementActionResult {
+    const risk = BrowserSecurityGuard.checkActionRisk("click", selector);
+    if (risk.highRisk && !options.approved) {
+      throw new Error(`APPROVAL_REQUIRED: ${risk.reason}`);
+    }
+
     return {
       success: true,
       action: "click",
@@ -114,6 +157,8 @@ export class BrowserClickTypeEngine {
         tabId: tab.tabId,
         button: options.button || "left",
         clickCount: options.clickCount || 1,
+        highRisk: risk.highRisk,
+        approved: Boolean(options.approved),
       },
       timestamp: new Date().toISOString(),
     };
@@ -123,8 +168,13 @@ export class BrowserClickTypeEngine {
     tab: BrowserTab,
     selector: string,
     text: string,
-    options: { clearFirst?: boolean } = {}
+    options: { clearFirst?: boolean; approved?: boolean } = {}
   ): ElementActionResult {
+    const risk = BrowserSecurityGuard.checkActionRisk("type", selector);
+    if (risk.highRisk && !options.approved) {
+      throw new Error(`APPROVAL_REQUIRED: ${risk.reason}`);
+    }
+
     return {
       success: true,
       action: "type",
@@ -134,17 +184,32 @@ export class BrowserClickTypeEngine {
         typedText: text,
         charactersCount: text.length,
         clearFirst: options.clearFirst ?? true,
+        highRisk: risk.highRisk,
+        approved: Boolean(options.approved),
       },
       timestamp: new Date().toISOString(),
     };
   }
 
-  static submit(tab: BrowserTab, formSelector: string): ElementActionResult {
+  static submit(
+    tab: BrowserTab,
+    formSelector: string,
+    options: { approved?: boolean } = {}
+  ): ElementActionResult {
+    const risk = BrowserSecurityGuard.checkActionRisk("submit", formSelector);
+    if (risk.highRisk && !options.approved) {
+      throw new Error(`APPROVAL_REQUIRED: ${risk.reason}`);
+    }
+
     return {
       success: true,
       action: "submit",
       selector: formSelector,
-      details: { tabId: tab.tabId },
+      details: {
+        tabId: tab.tabId,
+        highRisk: risk.highRisk,
+        approved: Boolean(options.approved),
+      },
       timestamp: new Date().toISOString(),
     };
   }
@@ -157,8 +222,18 @@ export class BrowserDragSelectEngine {
   static dragAndDrop(
     tab: BrowserTab,
     sourceSelector: string,
-    targetSelector: string
+    targetSelector: string,
+    options: { approved?: boolean } = {}
   ): ElementActionResult {
+    const sourceRisk = BrowserSecurityGuard.checkActionRisk("drag_and_drop", sourceSelector);
+    const targetRisk = BrowserSecurityGuard.checkActionRisk("drag_and_drop", targetSelector);
+    const highRisk = sourceRisk.highRisk || targetRisk.highRisk;
+
+    if (highRisk && !options.approved) {
+      const reason = sourceRisk.highRisk ? sourceRisk.reason : targetRisk.reason;
+      throw new Error(`APPROVAL_REQUIRED: ${reason}`);
+    }
+
     return {
       success: true,
       action: "drag_and_drop",
@@ -167,6 +242,8 @@ export class BrowserDragSelectEngine {
         tabId: tab.tabId,
         source: sourceSelector,
         target: targetSelector,
+        highRisk,
+        approved: Boolean(options.approved),
       },
       timestamp: new Date().toISOString(),
     };
@@ -175,8 +252,18 @@ export class BrowserDragSelectEngine {
   static selectOption(
     tab: BrowserTab,
     selectSelector: string,
-    optionValue: string
+    optionValue: string,
+    options: { approved?: boolean } = {}
   ): ElementActionResult {
+    const selectorRisk = BrowserSecurityGuard.checkActionRisk("select_option", selectSelector);
+    const valueRisk = BrowserSecurityGuard.checkActionRisk("select_option", optionValue);
+    const highRisk = selectorRisk.highRisk || valueRisk.highRisk;
+
+    if (highRisk && !options.approved) {
+      const reason = selectorRisk.highRisk ? selectorRisk.reason : valueRisk.reason;
+      throw new Error(`APPROVAL_REQUIRED: ${reason}`);
+    }
+
     return {
       success: true,
       action: "select_option",
@@ -184,6 +271,8 @@ export class BrowserDragSelectEngine {
       details: {
         tabId: tab.tabId,
         selectedOption: optionValue,
+        highRisk,
+        approved: Boolean(options.approved),
       },
       timestamp: new Date().toISOString(),
     };
@@ -191,15 +280,19 @@ export class BrowserDragSelectEngine {
 
   static scroll(
     tab: BrowserTab,
-    options: { x?: number; y?: number; toSelector?: string }
+    options: { x?: number; y?: number; toSelector?: string } = {}
   ): ElementActionResult {
+    const x = typeof options.x === "number" ? options.x : 0;
+    const y = typeof options.y === "number" ? options.y : 0;
+    const selector = options.toSelector || "window";
+
     return {
       success: true,
       action: "scroll",
-      selector: options.toSelector || "body",
+      selector,
       details: {
         tabId: tab.tabId,
-        scrollOffset: { x: options.x ?? 0, y: options.y ?? 0 },
+        scrollOffset: { x, y },
       },
       timestamp: new Date().toISOString(),
     };

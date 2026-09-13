@@ -28,6 +28,6 @@ describe("Company Knowledge processing",()=>{
   const repo={hybridCandidates:vi.fn().mockResolvedValue([{id:"a",content:"A",score:.5,vectorScore:.5,keywordScore:0},{id:"b",content:"B",score:.4,vectorScore:.4,keywordScore:0}])};
   const ai={embed:vi.fn().mockResolvedValue({model:"embed",vectors:[[1,0]]}),rerank:vi.fn().mockResolvedValue({model:"rerank",results:[{index:1,relevanceScore:.9}]})};
   const result=await new CompanyKnowledgeProcessor(repo as any,{} as any,{} as any,ai as any).retrieve(ctx,"company","query",1);
-  expect(result).toEqual([{id:"b",content:"B",score:.4,vectorScore:.4,keywordScore:0}]);
+  expect(result).toEqual([{id:"b",content:"B",score:.4,vectorScore:.4,keywordScore:0,rerankScore:.9}]);
  });
 });
