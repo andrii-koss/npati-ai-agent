@@ -1147,13 +1147,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
       "tests/admission-queue-and-conversation-memory.test.ts",
       "tests/telemetry-cache-compaction.test.ts",
-      "tests/production-p02-knowledge-memory.test.ts"
+      "tests/production-p02-knowledge-memory.test.ts",
+      "scripts/verify-production-p02-knowledge-memory.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 73,
@@ -1239,12 +1240,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
       "tests/capability-registry.test.ts",
-      "tests/production-p02-knowledge-memory.test.ts"
+      "tests/production-p02-knowledge-memory.test.ts",
+      "scripts/verify-production-p02-knowledge-memory.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 79,

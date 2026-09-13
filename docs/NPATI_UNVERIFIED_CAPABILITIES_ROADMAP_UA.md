@@ -52,23 +52,23 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 - Live Docker E2E для #61: `scripts/verify-production-oidc.mjs` (5/5: valid signature, tampered claims, wrong issuer, expired token, `alg=none`). Старий агрегований P0.1 script не є доказом для інших 7 пунктів.
 - Live Docker E2E для #57/#60: реальний `/ai/moderations` підтвердив `omni-moderation-latest` і provider scores; `/media/images/understand` підтвердив sanitization та `400 VISUAL_PROMPT_INJECTION`. #60 лишається Partial через відсутність production OCR із пікселів.
 
-### P0.2 — Company Knowledge і довготривала пам'ять агента [ПОВЕРНУТО В РОБОТУ]
+### P0.2 — Company Knowledge і довготривала пам'ять агента [#72 І #78 ЧЕСНО ЗАКРИТО]
 
-**Статус після реалізації:** 1 з 6 capabilities сертифікована; 3 залишаються `PARTIALLY_IMPLEMENTED`, 2 — `NOT_IMPLEMENTED`.
+**Статус після реалізації:** 3 з 6 capabilities сертифіковано; 2 залишаються `PARTIALLY_IMPLEMENTED`, 1 — `NOT_IMPLEMENTED`.
 
 Пункти блоку:
 - **#64 `storage.embeddings`**: `VERIFIED_EXISTING` — `POST /ai/embeddings` використовує справжній OmniRoute `/api/v1/embeddings`, перевіряє кількість, finite values та однакову dimensionality, нормалізує вектори для pgvector і працює fail-closed без synthetic production fallback. Live Docker: `openai/text-embedding-3-small`, 1536-d, L2 norm ≈ 1.0.
-- **#65 `ai.rerank`**: `PARTIALLY_IMPLEMENTED` — семантичний cross-encoder reranking через `POST /ai/rerank` із фільтрацією за stop words, обчисленням relevance score, thresholding (`minScore`) та `topN`.
-- **#72 `system.context_compaction`**: `PARTIALLY_IMPLEMENTED` — інтелектуальне стиснення діалогу через `POST /chat/compact` та `ContextCompactor`: вилучення ключових фактів (`extractMemoriesToFlush`) перед компактизацією, структурований roll-up summary старших реплік та збереження останніх turn-ів інтактними.
-- **#78 `storage.automatic_memory_extraction`**: `NOT_IMPLEMENTED` — `AutomaticMemoryExtractor` та `POST /companies/:companyId/knowledge/memory/extract`: багатокатегорійне вилучення фактів (`preference`, `business_policy`, `technical_detail`, `contact`) з оцінкою впевненості (confidence) та provenance; Jaccard token deduplication; автоматичний виклик у фоні при завершенні діалогу агента; суворе дотримання режиму приватності `noMemory`.
-- **#80 `storage.memory_rerank`**: `NOT_IMPLEMENTED` — `MemoryRerankEngine` та `POST /companies/:companyId/knowledge/memory/rerank`: комбінований rerank на базі часового згасання ваги (typed half-life decay: `ephemeral` 24h, `operational` 7d, `project_rule` 60d, `immutable` ∞) та збігу пошукових термінів запиту; інтеграція у `CompanyKnowledgeProcessor.retrieveContext`.
-- **#302 `storage.omniroute_rerank_integration`**: `PARTIALLY_IMPLEMENTED` — безперебійна інтеграція OmniRoute `/api/v1/rerank` у `ai-routes.ts` та `CompanyKnowledgeProcessor.retrieve` з прозорим fallback на локальний `ResilientRerankPipeline` при відсутності активної rerank-моделі у зовнішньому роутері.
+- **#65 `ai.rerank`**: `PARTIALLY_IMPLEMENTED` — production `POST /ai/rerank` викликає лише справжній OmniRoute rerank adapter, валідовує `topN`/`minScore` і працює fail-closed. Live catalog не має активної rerank-моделі, тому повертається явний `503 RERANK_UNAVAILABLE`; локальний lexical heuristic більше не видається за cross-encoder.
+- **#72 `system.context_compaction`**: `VERIFIED_EXISTING` — model-backed hierarchical compaction підключено до production neutral і business chat. Старі репліки стискає реальна вибрана модель, останні 6 реплік лишаються без змін; при помилці summarizer повна історія зберігається без втрат. Результат містить `contextCompaction` telemetry.
+- **#78 `storage.automatic_memory_extraction`**: `VERIFIED_EXISTING` — після company chat JSON і SSE сервер очікує завершення extraction та PostgreSQL persistence перед фінальною відповіддю. Зберігаються лише явні факти користувача з confidence/provenance metadata, працюють deduplication, audit trail та суворий `noMemory`; відповіді моделі не можуть стати пам’яттю.
+- **#80 `storage.memory_rerank`**: `NOT_IMPLEMENTED` — наявний `MemoryRerankEngine` і endpoint виконують лише детерміноване temporal/lexical сортування кандидатів. Це корисний diagnostic scaffold, але не повноцінний semantic/model rerank; тому пункт не сертифіковано.
+- **#302 `storage.omniroute_rerank_integration`**: `PARTIALLY_IMPLEMENTED` — один adapter path підключений до API та Company Knowledge. За відсутності live rerank-моделі Company Knowledge чесно лишається на PostgreSQL hybrid ordering без synthetic rerank score.
 
 **Тести та runtime-верифікація:**
-- Unit/Integration: `tests/production-p02-knowledge-memory.test.ts` (13/13 passed).
+- Unit/Integration: `tests/production-p02-knowledge-memory.test.ts` (14/14 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
-- Live Docker E2E: `scripts/verify-production-p02-knowledge-memory.mjs` (7/7 live tests passed на реальному Docker API: embeddings, rerank, context compact, memory extract, memory rerank, company retrieve, capabilities inspect).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 155 `VERIFIED_EXISTING`, 56 `PARTIALLY_IMPLEMENTED`, 95 `NOT_IMPLEMENTED`).
+- Live Docker E2E: `scripts/verify-production-p02-knowledge-memory.mjs` перевіряє real OmniRoute embeddings, чесний rerank fail-closed, model-backed compaction усередині `/chat`, awaited automatic memory у JSON/SSE, `noMemory`, PostgreSQL persistence та очищення ізольованих test data.
 
 ### P0.3 — Runtime reliability, streaming, observability і scale [#22 І #23 ЧЕСНО ЗАКРИТО]
 

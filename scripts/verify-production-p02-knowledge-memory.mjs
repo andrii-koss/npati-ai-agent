@@ -45,6 +45,12 @@ async function api(path, method = "GET", body = undefined, customHeaders = {}) {
   return { status: res.status, ok: res.ok, data: json };
 }
 
+// Remove only stale companies created by previous interrupted executions of this script.
+const staleCompanyPage = await api("/companies?limit=100");
+for (const stale of staleCompanyPage.data?.companies ?? []) {
+  if (/^P02 Memory (?:Test Corp|E2E )/.test(stale.name)) await api(`/companies/${stale.id}`, "DELETE");
+}
+
 // 2. #64 Embeddings API
 console.log("\n[2/7] Verifying #64 Embeddings API (/ai/embeddings)...");
 const embedRes = await api("/ai/embeddings", "POST", {
@@ -137,19 +143,28 @@ if (productionCompact.data.contextCompaction.preservedCount !== 6) {
 console.log("✓ #72 model-backed compaction ran inside production /chat and preserved six recent turns");
 // 5. #78 Automatic Memory Extraction
 console.log("\n[5/7] Verifying #78 automatic extraction in production company chat...");
-const overviewRes = await api("/overview");
-const companies = overviewRes.data.companies ?? [];
-let companyId = companies[0]?.id;
-if (!companyId) {
-  const createComp = await api("/companies", "POST", { name: "P02 Memory Test Corp" });
-  if (!createComp.ok || !createComp.data?.id) throw new Error(`Could not create test company: ${JSON.stringify(createComp.data)}`);
-  companyId = createComp.data.id;
-}
-const uniqueCode = `AUTO-MEM-${Date.now()}`;
+const modelLibrary = await api("/ai/models/added");
+const connectedModelId = Array.isArray(modelLibrary.data) ? modelLibrary.data.find((model) => model.id)?.id : undefined;
+if (!connectedModelId) throw new Error("P0.2 company E2E requires at least one model in NPATI My Models");
+const createComp = await api("/companies", "POST", { name: `P02 Memory E2E ${Date.now()}` });
+if (!createComp.ok || !createComp.data?.id) throw new Error(`Could not create isolated test company: ${JSON.stringify(createComp.data)}`);
+let company = createComp.data;
+const agentRes = await api(`/companies/${company.id}/agents`, "POST", {
+  name: "P02 Main Agent",
+  role: "Main test agent",
+  modelId: connectedModelId,
+  tools: [],
+  isActive: true,
+});
+if (!agentRes.ok || !agentRes.data?.id) throw new Error(`Could not create a main agent for E2E: ${JSON.stringify(agentRes.data)}`);
+const mainRes = await api(`/companies/${company.id}/main-agent`, "PUT", { agentId: agentRes.data.id, expectedRevision: company.revision });
+if (!mainRes.ok) throw new Error(`Could not select E2E main agent: ${JSON.stringify(mainRes.data)}`);
+company = mainRes.data;
+const companyId = company.id;const uniqueCode = `AUTO-MEM-${Date.now()}`;
 const automaticChat = await api("/chat", "POST", {
   contextType: "company",
   companyId,
-  message: `Remember that our escalation code is ${uniqueCode}.`,
+  message: `Our escalation code is ${uniqueCode}. Confirm it briefly.`,
 });
 if (!automaticChat.ok) throw new Error(`Company chat failed: ${JSON.stringify(automaticChat.data)}`);
 if (automaticChat.data?.automaticMemory?.status !== "completed" || automaticChat.data.automaticMemory.persistedCount < 1) {
@@ -164,7 +179,7 @@ const privateChat = await api("/chat", "POST", {
   contextType: "company",
   companyId,
   noMemory: true,
-  message: `Remember that our escalation code is ${privateCode}.`,
+  message: `Our escalation code is ${privateCode}. Confirm it briefly.`,
 }, { "x-no-memory": "true" });
 if (!privateChat.ok || privateChat.data?.automaticMemory?.status !== "skipped") {
   throw new Error(`noMemory company chat did not explicitly skip extraction: ${JSON.stringify(privateChat.data)}`);
@@ -177,7 +192,7 @@ const streamCode = `STREAM-MEM-${Date.now()}`;
 const streamResponse = await fetch(`${base}/chat/stream`, {
   method: "POST",
   headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": `idem-stream-${Date.now()}` },
-  body: JSON.stringify({ contextType: "company", companyId, streamId: `p02-${Date.now()}`, message: `Remember that our escalation code is ${streamCode}.` }),
+  body: JSON.stringify({ contextType: "company", companyId, streamId: `p02-${Date.now()}`, message: `Our escalation code is ${streamCode}. Confirm it briefly.` }),
 });
 const streamBody = await streamResponse.text();
 const resultLine = streamBody.split("\n").find((line, index, lines) => line.startsWith("data:") && lines[index - 1]?.startsWith("event: result"));
@@ -191,7 +206,7 @@ if (!memoryAfterStream.data.memories?.some((memory) => memory.content.includes(s
 }
 console.log("✓ #78 JSON and SSE company chats await durable PostgreSQL persistence; noMemory suppression verified");
 // 6. #80 Memory Rerank API & Knowledge Retrieval
-console.log("\n[6/7] Verifying #80 Memory Rerank & Knowledge Retrieval (/companies/:companyId/knowledge/retrieve & memory/rerank)...");
+console.log("\n[6/7] Exercising the #80 diagnostic scaffold (not certification)...");
 const memoryRerankRes = await api(`/companies/${companyId}/knowledge/memory/rerank`, "POST", {
   query: "який контакт і бюджет компанії?",
   topK: 5,
@@ -208,7 +223,7 @@ const topMem = memoryRerankRes.data.rankedMemories[0];
 if (!topMem.rerankScore || !topMem.finalScore || !topMem.rank) {
   throw new Error(`Ranked memory missing score fields: ${JSON.stringify(topMem)}`);
 }
-console.log(`✓ #80 Memory Rerank scored memories with temporal decay + query relevance: top score=${topMem.finalScore}, rank=${topMem.rank}`);
+console.log(`✓ #80 diagnostic temporal/lexical ordering executed: top score=${topMem.finalScore}, rank=${topMem.rank}; status remains NOT_IMPLEMENTED`);
 
 // Test retrieve endpoint returns reranked context
 const retrieveRes = await api(`/companies/${companyId}/knowledge/retrieve`, "POST", {
@@ -220,6 +235,11 @@ if (!retrieveRes.ok || !Array.isArray(retrieveRes.data.memories)) {
 }
 console.log(`✓ /companies/:companyId/knowledge/retrieve returned context with ${retrieveRes.data.memories.length} reranked memories`);
 
+const cleanupCompany = await api(`/companies/${companyId}`, "DELETE");
+if (!cleanupCompany.ok && cleanupCompany.status !== 204) {
+  throw new Error(`Could not clean up isolated P02 test company: ${JSON.stringify(cleanupCompany.data)}`);
+}
+
 // 7. Developer Capabilities Inspector Verification
 console.log("\n[7/7] Verifying Developer Capabilities Inspector on live server...");
 const inspectRes = await api("/capabilities/inspect");
@@ -230,8 +250,8 @@ if (!inspectRes.ok) {
 const p02Capabilities = [
   { id: 64, name: "storage.embeddings", expected: "VERIFIED_EXISTING" },
   { id: 65, name: "ai.rerank", expected: "PARTIALLY_IMPLEMENTED" },
-  { id: 72, name: "system.context_compaction", expected: "PARTIALLY_IMPLEMENTED" },
-  { id: 78, name: "storage.automatic_memory_extraction", expected: "NOT_IMPLEMENTED" },
+  { id: 72, name: "system.context_compaction", expected: "VERIFIED_EXISTING" },
+  { id: 78, name: "storage.automatic_memory_extraction", expected: "VERIFIED_EXISTING" },
   { id: 80, name: "storage.memory_rerank", expected: "NOT_IMPLEMENTED" },
   { id: 302, name: "storage.omniroute_rerank_integration", expected: "PARTIALLY_IMPLEMENTED" },
 ];

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-13T12:15:04.891Z",
+  "timestamp": "2026-09-13T18:50:41.898Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -7,9 +7,9 @@
     "implemented but missing UI": 0,
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
-    "partially implemented": 57,
-    "not implemented": 96,
-    "not applicable/runtime-only": 146
+    "partially implemented": 56,
+    "not implemented": 95,
+    "not applicable/runtime-only": 148
   },
   "items": {
     "implemented and verified": [
@@ -228,22 +228,6 @@
           "tests/company-knowledge-hub-e2e.test.ts",
           "tests/inference-and-memory-injection.test.ts",
           "tests/memory-decay-rerank-and-journal.test.ts",
-          "tests/production-p02-knowledge-memory.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
-        "id": 72,
-        "capabilityId": "system.context_compaction",
-        "name": "Context compaction",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/admission-queue-and-conversation-memory.test.ts",
-          "tests/telemetry-cache-compaction.test.ts",
           "tests/production-p02-knowledge-memory.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
@@ -1123,21 +1107,6 @@
         "testType": "unit",
         "testFiles": [
           "tests/capability-registry.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 78,
-        "capabilityId": "storage.automatic_memory_extraction",
-        "name": "Automatic memory extraction",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/capability-registry.test.ts",
-          "tests/production-p02-knowledge-memory.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -3441,6 +3410,23 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 72,
+        "capabilityId": "system.context_compaction",
+        "name": "Context compaction",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/admission-queue-and-conversation-memory.test.ts",
+          "tests/telemetry-cache-compaction.test.ts",
+          "tests/production-p02-knowledge-memory.test.ts",
+          "scripts/verify-production-p02-knowledge-memory.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 75,
         "capabilityId": "research.semantic_memory_search",
         "name": "Semantic memory search",
@@ -3469,6 +3455,22 @@
           "tests/company-hybrid-retrieval.test.ts",
           "tests/company-knowledge.test.ts",
           "scripts/verify-company-hybrid-retrieval.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 78,
+        "capabilityId": "storage.automatic_memory_extraction",
+        "name": "Automatic memory extraction",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/capability-registry.test.ts",
+          "tests/production-p02-knowledge-memory.test.ts",
+          "scripts/verify-production-p02-knowledge-memory.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },
