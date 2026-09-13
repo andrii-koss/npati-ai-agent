@@ -364,6 +364,45 @@ export function buildApp(config: AppConfig = {}) {
     getAIContext,
   });
 
+  async function persistAutomaticCompanyMemory(
+    auth: AuthContext,
+    companyId: string,
+    runId: string,
+    prompt: string,
+    runStatus: string,
+    noMemory: boolean,
+  ) {
+    if (noMemory || !knowledgeRepo || !prompt.trim() || runStatus !== "completed") {
+      return { status: "skipped" as const, persistedCount: 0 };
+    }
+    try {
+      const persisted = await AutomaticMemoryExtractor.autoExtractAndPersist({
+        auth,
+        companyId,
+        repo: knowledgeRepo,
+        messages: [{ role: "user", content: prompt }],
+      });
+      await auditRepo?.log(auth, companyId, {
+        action: "company_memory.auto_extract",
+        category: "agent",
+        resourceType: "company_agent_run",
+        resourceId: runId,
+        details: { persistedCount: persisted.length, memoryIds: persisted.map((memory) => memory.id) },
+      });
+      return { status: "completed" as const, persistedCount: persisted.length, memoryIds: persisted.map((memory) => memory.id) };
+    } catch (error) {
+      app.log.warn({ err: error, companyId, runId }, "Automatic company memory extraction failed");
+      await auditRepo?.log(auth, companyId, {
+        action: "company_memory.auto_extract_failed",
+        category: "agent",
+        resourceType: "company_agent_run",
+        resourceId: runId,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      }).catch(() => undefined);
+      return { status: "failed" as const, persistedCount: 0, error: "Automatic memory could not be persisted." };
+    }
+  }
+
   async function runBusinessMessage(
     auth: AuthContext,
     businessId: string,
@@ -450,12 +489,30 @@ export function buildApp(config: AppConfig = {}) {
       }
     }
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
+    const protectedHistory = memoryPolicy.readAllowed
+      ? existing.messages.map((item) => ({ ...item, content: SecurityPolicyEngine.protectText(item.content).sanitized }))
+      : [];
+    const compaction = await ContextCompactor.compactWithModel({
+      ai: aiEngine,
+      model: context.ai.model,
+      fallbackModel: context.ai.fallbackModel,
+      messages: protectedHistory,
+      signal,
+    });
     progress?.({ type: "final_generation_started" });
-    const result = await agent.handleBusinessMessage({ message: safePrompt, context, history: memoryPolicy.readAllowed ? existing.messages.map(item=>({...item,content:SecurityPolicyEngine.protectText(item.content).sanitized})) : [], research: research ? SecurityPolicyEngine.protectObject(research) : undefined, images: media.images, signal });
+    const result = await agent.handleBusinessMessage({
+      message: safePrompt,
+      context,
+      history: compaction.preservedMessages as typeof existing.messages,
+      contextSummary: compaction.compacted ? compaction.summary : undefined,
+      research: research ? SecurityPolicyEngine.protectObject(research) : undefined,
+      images: media.images,
+      signal,
+    });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive };
+    return { ...result, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason } };
   }
 
   async function runNeutralMessage(
@@ -481,6 +538,16 @@ export function buildApp(config: AppConfig = {}) {
     }
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
     const ai = await getAIContext(auth);
+    const protectedHistory = memoryPolicy.readAllowed
+      ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized }))
+      : [];
+    const compaction = await ContextCompactor.compactWithModel({
+      ai: aiEngine,
+      model: ai.model,
+      fallbackModel: ai.fallbackModel,
+      messages: protectedHistory,
+      signal,
+    });
     progress?.({ type: "final_generation_started" });
     const chatRequest: ChatRequest = {
       model: ai.model,
@@ -488,7 +555,8 @@ export function buildApp(config: AppConfig = {}) {
       admission: admissionFor(auth),
       messages: [
         { role: "system", content: "You are NPATI Agent, a helpful, precise AI assistant. Answer general questions directly and factually without referencing any specific business or company data." },
-        ...(memoryPolicy.readAllowed ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized })) : []),
+        ...(compaction.compacted && compaction.summary ? [{ role: "system" as const, content: compaction.summary }] : []),
+        ...compaction.preservedMessages.map((item) => ({ role: item.role as "user" | "assistant" | "system", content: item.content })),
         { role: "user", content: safePrompt },
       ],
       signal,
@@ -513,6 +581,7 @@ export function buildApp(config: AppConfig = {}) {
       telemetry: chatResult?.telemetry ? { ...chatResult.telemetry, usage: chatResult.usage } : undefined,
       conversationId: conversation?.id,
       noMemory: memoryPolicy.noMemoryActive,
+      contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason },
     };
   }
 
@@ -828,25 +897,21 @@ export function buildApp(config: AppConfig = {}) {
         for (const [name, value] of Object.entries(companyRunTelemetryHeaders(runResult))) reply.header(name, value);
         if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED")return reply.code(400).send({error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
 
-        // Automatic Memory Extraction for company context (#78)
-        if (!memoryPolicy.noMemoryActive && knowledgeRepo && prompt) {
-          void AutomaticMemoryExtractor.autoExtractAndPersist({
-            auth,
-            companyId: company.id,
-            repo: knowledgeRepo,
-            messages: [
-              { role: "user", content: prompt },
-              ...(runResult.run.result ? [{ role: "assistant", content: runResult.run.result }] : []),
-            ],
-            noMemory: false,
-          }).catch(() => undefined);
-        }
+        const automaticMemory = await persistAutomaticCompanyMemory(
+          auth,
+          company.id,
+          runResult.run.id,
+          prompt || "",
+          runResult.run.status,
+          memoryPolicy.noMemoryActive,
+        );
 
         return {
           message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
           suggestedActions: [],
           activeContext: resolved.context,
           companyRunId: runResult.run.id,
+          automaticMemory,
         };
       }
 
@@ -1066,14 +1131,23 @@ export function buildApp(config: AppConfig = {}) {
             send("error",{error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
           }else{
             progress({ type: "final_generation_completed" });
-            const message=runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.";
-            for(const delta of boundedResponseChunks(message))send("delta",{delta});
-            send("result", {
+            const automaticMemory = await persistAutomaticCompanyMemory(
+              auth,
+              resolved.company!.id,
+              runResult.run.id,
               message,
+              runResult.run.status,
+              memoryPolicy.noMemoryActive,
+            );
+            const responseMessage=runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.";
+            for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
+            send("result", {
+              message: responseMessage,
               suggestedActions: [],
               activeContext: resolved.context,
               companyRunId: runResult.run.id,
               telemetry: companyRunTelemetryHeaders(runResult),
+              automaticMemory,
             });
           }
         } else {

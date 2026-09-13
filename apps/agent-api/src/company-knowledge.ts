@@ -10,7 +10,6 @@ import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ObjectStorage } from "./object-storage";
 import { NPATI_BUCKETS, objectKey } from "./object-storage";
 import type { FileMetadataRepository, StoredFile } from "./file-metadata";
-import { ResilientRerankPipeline } from "./resilient-inference-pipeline";
 import { MemoryRerankEngine, type DecayingMemoryItem, type MemoryDecayType } from "./advanced-memory-management";
 
 export type KnowledgeStatus="uploaded"|"processing"|"ready"|"failed"|"deleted";
@@ -48,7 +47,7 @@ export class CompanyKnowledgeRepository {
  async memories(ctx:AuthContext,companyId:string){return (await this.pool.query<CompanyMemory>(`SELECT ${memCols} FROM company_memories WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 100`,[ctx.workspaceId,companyId,ctx.userId])).rows;}
  async getMemory(ctx:AuthContext,companyId:string,id:string){const r=await this.pool.query<CompanyMemory>(`SELECT ${memCols} FROM company_memories WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND deleted_at IS NULL`,[id,ctx.workspaceId,companyId,ctx.userId]);if(!r.rows[0])throw Object.assign(Error("Company memory not found"),{status:404});return r.rows[0];}
  async searchMemories(ctx:AuthContext,companyId:string,query:string,limit=20){return (await this.pool.query<CompanyMemory>(`WITH q AS (SELECT websearch_to_tsquery('simple',$4) AS value) SELECT ${memCols},ts_rank_cd(to_tsvector('simple',content),q.value) AS relevance FROM company_memories CROSS JOIN q WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND deleted_at IS NULL AND (q.value @@ to_tsvector('simple',content) OR content ILIKE '%'||$4||'%') ORDER BY relevance DESC,updated_at DESC LIMIT $5`,[ctx.workspaceId,companyId,ctx.userId,query.trim(),Math.min(100,Math.max(1,limit))])).rows;}
- async addMemory(ctx:AuthContext,companyId:string,content:string,source='manual'){return (await this.pool.query<CompanyMemory>(`INSERT INTO company_memories(id,workspace_id,company_id,user_id,content,source) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${memCols}`,[randomUUID(),ctx.workspaceId,companyId,ctx.userId,content.trim(),source])).rows[0]!;}
+ async addMemory(ctx:AuthContext,companyId:string,content:string,source='manual',metadata:Record<string,unknown>={}){return (await this.pool.query<CompanyMemory>(`INSERT INTO company_memories(id,workspace_id,company_id,user_id,content,source,metadata) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING ${memCols}`,[randomUUID(),ctx.workspaceId,companyId,ctx.userId,content.trim(),source,JSON.stringify(metadata)])).rows[0]!;}
  async updateMemory(ctx:AuthContext,companyId:string,id:string,content:string){const r=await this.pool.query<CompanyMemory>(`UPDATE company_memories SET content=$5,revision=revision+1,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND deleted_at IS NULL RETURNING ${memCols}`,[id,ctx.workspaceId,companyId,ctx.userId,content.trim()]);if(!r.rows[0])throw Object.assign(Error("Company memory not found"),{status:404});return r.rows[0];}
  async deleteMemory(ctx:AuthContext,companyId:string,id:string){const r=await this.pool.query("UPDATE company_memories SET deleted_at=COALESCE(deleted_at,now()),updated_at=now() WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND deleted_at IS NULL",[id,ctx.workspaceId,companyId,ctx.userId]);return Boolean(r.rowCount);}
  async purgeCompany(ctx:AuthContext,companyId:string){const client=await this.pool.connect();try{await client.query("BEGIN");await client.query("DELETE FROM company_knowledge_documents WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("DELETE FROM company_memories WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
@@ -115,21 +114,10 @@ export class CompanyKnowledgeProcessor {
           return item;
         }).filter((item): item is KnowledgeCandidate=>Boolean(item));
       }catch{
-        // Fallback to resilient rerank pipeline
+        // Hybrid SQL ranking remains available, but it must not be reported as cross-encoder reranking.
       }
     }
-    try{
-      const rerankCandidates=candidates.map((c,idx)=>({id:c.id,text:c.content,metadata:{originalIndex:idx}}));
-      const localRerank=await ResilientRerankPipeline.rerank(query,rerankCandidates,{topK:limit});
-      return localRerank.items.map(item=>{
-        const origIdx=(item.metadata?.originalIndex as number)??candidates.findIndex(c=>c.id===item.id);
-        const cand=candidates[origIdx]??candidates.find(c=>c.id===item.id);
-        if(cand)cand.rerankScore=item.score;
-        return cand;
-      }).filter((item): item is KnowledgeCandidate=>Boolean(item));
-    }catch{
-      return candidates.slice(0,limit);
-    }
+    return candidates.slice(0,limit);
   }
   async retrieveContext(ctx:AuthContext,companyId:string,query:string,limit=6){
     let [chunks,rawMemories]=await Promise.all([

@@ -4,7 +4,7 @@ import type { AuthContext } from "@npati/workspace";
 import { OmniRouteError, type AIEngine, type MarketplaceQuery, type OmniRouteMarketplace, type ProviderAuthType, type ProviderFreeStatus } from "@npati/omniroute-adapter";
 import { AIPreferencesStore, type AICompressionMode, type AIMode } from "./ai-preferences";
 import type { AuthProvider } from "./auth";
-import { ResilientEmbeddingPipeline, ResilientRerankPipeline, type RerankCandidate } from "./resilient-inference-pipeline";
+import { ResilientEmbeddingPipeline } from "./resilient-inference-pipeline";
 
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof OmniRouteError) {
@@ -128,56 +128,24 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
         return reply.code(400).send({ error: { code: "DOCUMENTS_REQUIRED", message: "documents array is required and cannot be empty" } });
       }
 
-      let resultModel = model || "omniroute-rerank-v1";
-      const candidates: RerankCandidate[] = documents.map((doc, idx) => ({
-        id: `doc_${idx}`,
-        text: doc,
-        metadata: { originalIndex: idx },
-      }));
-
-      let results: Array<{ index: number; document: string; relevanceScore: number; rank: number }> = [];
-
-      // 1. Try OmniRoute rerank endpoint (#302)
-      let omniRouteSucceeded = false;
-      if (ai.rerank) {
-        try {
-          const omniRes = await ai.rerank({
-            query,
-            documents,
-            model,
-            topN,
-          });
-          resultModel = omniRes.model;
-          results = omniRes.results.map((r, rankIdx) => ({
-            index: r.index,
-            document: documents[r.index] ?? "",
-            relevanceScore: r.relevanceScore,
-            rank: rankIdx + 1,
-          }));
-          omniRouteSucceeded = true;
-        } catch {
-          omniRouteSucceeded = false;
+      if (!ai.rerank) throw Object.assign(new Error("Production rerank provider is unavailable."), { status: 503, code: "RERANK_UNAVAILABLE" });
+      let omniRes: Awaited<ReturnType<NonNullable<AIEngine["rerank"]>>>;
+      try {
+        omniRes = await ai.rerank({ query, documents, model, topN });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/no configured|unavailable|not exposed|no rerank model/i.test(message)) {
+          throw Object.assign(new Error("No configured production rerank model is available."), { status: 503, code: "RERANK_UNAVAILABLE" });
         }
+        throw error;
       }
-
-      // 2. Seamless Failover to Resilient Cross-Encoder Pipeline if OmniRoute fails or is not available
-      if (!omniRouteSucceeded) {
-        const localRerank = await ResilientRerankPipeline.rerank(query, candidates, {
-          topK: topN,
-          minScore: minScore ?? 0.0,
-          provider: "local-cross-encoder-resilient",
-        });
-        resultModel = "local-cross-encoder-resilient";
-        results = localRerank.items.map((item, rankIdx) => {
-          const origIdx = (item.metadata?.originalIndex as number) ?? parseInt(item.id.replace("doc_", ""), 10);
-          return {
-            index: origIdx,
-            document: item.text,
-            relevanceScore: item.relevanceScore,
-            rank: rankIdx + 1,
-          };
-        });
-      }
+      const resultModel = omniRes.model;
+      let results = omniRes.results.map((result, rankIndex) => ({
+        index: result.index,
+        document: documents[result.index] ?? "",
+        relevanceScore: result.relevanceScore,
+        rank: rankIndex + 1,
+      }));
 
       // Apply minScore threshold if specified
       if (typeof minScore === "number" && minScore > 0) {

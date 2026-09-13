@@ -148,6 +148,10 @@ describe("AI inference routes fail closed", () => {
     const moderation = await app.inject({ method: "POST", url: "/ai/moderations", payload: { input: "moderate this" } });
     expect(moderation.statusCode).toBe(503);
     expect(moderation.json().error.code).toBe("MODERATION_UNAVAILABLE");
+
+    const rerank = await app.inject({ method: "POST", url: "/ai/rerank", payload: { query: "refund", documents: ["refund policy"] } });
+    expect(rerank.statusCode).toBe(503);
+    expect(rerank.json().error.code).toBe("RERANK_UNAVAILABLE");
     await app.close();
   });
 });

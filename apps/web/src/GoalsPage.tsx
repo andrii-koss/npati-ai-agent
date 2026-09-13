@@ -444,9 +444,7 @@ export function GoalsPage() {
       </div>
 
       {/* Main Content Area */}
-      {loading ? (
-        <div className="workspace-notice">Loading business goals & milestones...</div>
-      ) : goals.length === 0 ? (
+      {goals.length === 0 ? (
         <div className="automations-empty-card goals-empty-card">
           <div className="automations-empty-icon">🎯</div>
           <h3>No Goals Configured Yet</h3>

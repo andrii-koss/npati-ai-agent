@@ -425,9 +425,7 @@ export function AutomationsPage() {
         </div>
       </div>
 
-      {loading ? (
-        <div className="workspace-notice">Loading automations & schedules...</div>
-      ) : automations.length === 0 ? (
+      {automations.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⏱️</div>
           <h3>No Automations Configured</h3>
