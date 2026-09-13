@@ -877,7 +877,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "AES-256-GCM at rest",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "AES-256-GCM with unique salt and IV plus authenticated tag; production requires an explicit 32+ character key and encrypted API-key secrets support rotation.",
     "useWhen": [
       "Internal system execution requires AES-256-GCM at rest"
     ],
@@ -1437,7 +1437,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "security",
     "name": "Scoped remote access tokens",
-    "description": "Використати для service-to-service доступу.",
+    "description": "Short-lived HMAC-signed service tokens bound to tenant, company, scopes and optional IP allowlist; TTL and delegated scopes are enforced fail-closed.",
     "useWhen": [
       "Internal system execution requires Scoped remote access tokens"
     ],
@@ -5190,7 +5190,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Device tracking per API key",
-    "description": "Корисно для SaaS контролю вартості, надійності та аудиту.",
+    "description": "Atomically records devices and request counts for each Company API key in PostgreSQL, isolates telemetry by tenant/company/key, and flags use by more than five devices.",
     "useWhen": [
       "Internal system execution requires Device tracking per API key"
     ],
@@ -6155,7 +6155,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Tenant-scoped AI model/routing preferences",
-    "description": "PostgreSQL workspace_user_settings; auth scope у AI API/chat context; optimistic CAS + idempotent no-op; глобальний JSON видалено.",
+    "description": "PostgreSQL workspace_user_settings with strict workspace and user scope, optimistic CAS and restart persistence; legacy dev import is limited to the exact local dev scope without fallback or mirroring.",
     "useWhen": [
       "Internal system execution requires Tenant-scoped AI model/routing preferences"
     ],

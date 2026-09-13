@@ -35,6 +35,7 @@ export interface OidcVerificationConfig {
 
 export interface RemoteAccessToken {
   tokenId: string;
+  tenantId: string;
   companyId: string;
   userId: string;
   scopes: string[];
@@ -156,14 +157,23 @@ export class OidcDashboardGate {
 export class ScopedRemoteAccessTokenManager {
   private readonly secretKey: string;
 
-  constructor(secretKey = "npati_remote_token_master_key_999") {
-    this.secretKey = secretKey;
+  constructor(secretKey?: string) {
+    const configuredKey = secretKey || process.env.NPATI_REMOTE_ACCESS_TOKEN_SECRET || process.env.NPATI_ENCRYPTION_KEY;
+    if (!configuredKey && process.env.NODE_ENV === "production") {
+      throw new Error("NPATI_REMOTE_ACCESS_TOKEN_SECRET_REQUIRED");
+    }
+    if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) {
+      throw new Error("NPATI_REMOTE_ACCESS_TOKEN_SECRET_UNSAFE_DEFAULT");
+    }
+    this.secretKey = configuredKey || "npati-development-only-remote-token-key";
+    if (this.secretKey.length < 32) throw new Error("NPATI_REMOTE_ACCESS_TOKEN_SECRET_TOO_SHORT");
   }
 
   /**
    * 3. Scoped Remote Access Tokens: Mints short-lived signed tokens for CLI/Remote APIs
    */
   mintRemoteToken(params: {
+    tenantId: string;
     companyId: string;
     userId: string;
     scopes: string[];
@@ -173,10 +183,13 @@ export class ScopedRemoteAccessTokenManager {
     const tokenId = `rat_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const now = new Date();
     const ttl = params.ttlSeconds ?? 3600;
+    if (!Number.isInteger(ttl) || ttl < 60 || ttl > 86_400) throw new Error("REMOTE_TOKEN_TTL_OUT_OF_RANGE");
+    if (!params.tenantId || !params.companyId || !params.userId || params.scopes.length === 0) throw new Error("REMOTE_TOKEN_CLAIMS_REQUIRED");
     const expiresAt = new Date(now.getTime() + ttl * 1000).toISOString();
 
     const details: RemoteAccessToken = {
       tokenId,
+      tenantId: params.tenantId,
       companyId: params.companyId,
       userId: params.userId,
       scopes: params.scopes,
@@ -208,7 +221,7 @@ export class ScopedRemoteAccessTokenManager {
       const [tokenId, payloadBase64, signature] = parts;
       const expectedSig = createHmac("sha256", this.secretKey).update(payloadBase64!).digest("base64url");
 
-      if (signature !== expectedSig) {
+      if (!signature || signature.length !== expectedSig.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
         return { isValid: false, error: "INVALID_SIGNATURE: Token signature mismatch." };
       }
 
@@ -216,14 +229,18 @@ export class ScopedRemoteAccessTokenManager {
         Buffer.from(payloadBase64!, "base64url").toString("utf8")
       );
 
+      if (details.tokenId !== tokenId || !details.tenantId || !details.companyId || !details.userId || !Array.isArray(details.scopes) || details.scopes.length === 0) {
+        return { isValid: false, error: "INVALID_CLAIMS: Required remote-token claims are missing." };
+      }
+
       // Check Expiration
       if (new Date(details.expiresAt).getTime() < Date.now()) {
         return { isValid: false, error: "TOKEN_EXPIRED: Remote token has expired." };
       }
 
       // Check IP Allowlist
-      if (details.ipAllowlist && details.ipAllowlist.length > 0 && clientIp) {
-        if (!details.ipAllowlist.includes(clientIp)) {
+      if (details.ipAllowlist && details.ipAllowlist.length > 0) {
+        if (!clientIp || !details.ipAllowlist.includes(clientIp)) {
           return { isValid: false, error: `IP_FORBIDDEN: Client IP '${clientIp}' is not in allowlist.` };
         }
       }

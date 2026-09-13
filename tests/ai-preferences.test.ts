@@ -104,4 +104,13 @@ describe('NPATI AI preferences', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+  it('21. never falls back to or mirrors dev-workspace across authenticated scopes', async () => {
+    const localScope: AuthContext = { workspaceId: 'dev-workspace', userId: 'dev-user', permissions: ['workspace:read', 'workspace:write'] };
+    const authenticatedDevUser: AuthContext = { workspaceId: 'workspace:dev-user', userId: 'dev-user', permissions: ['workspace:read', 'workspace:write'] };
+    await store.add(localScope, model);
+    expect((await store.get(authenticatedDevUser)).addedModels).toEqual([]);
+    await store.add(authenticatedDevUser, otherModel);
+    expect((await store.get(localScope)).addedModels.map((item) => item.id)).toEqual([model.id]);
+    expect((await store.get(authenticatedDevUser)).addedModels.map((item) => item.id)).toEqual([otherModel.id]);
+  });
 });

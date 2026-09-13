@@ -54,7 +54,27 @@ describe("AES-256-GCM At Rest Encryption (CryptoVault)", () => {
 
     expect(decrypted).toEqual(payload);
   });
-});
+
+  it("requires an explicit strong master key in production", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousNpatiEnv = process.env.NPATI_ENV;
+    const previousNpatiKey = process.env.NPATI_ENCRYPTION_KEY;
+    const previousLegacyKey = process.env.ENCRYPTION_KEY;
+    try {
+      process.env.NODE_ENV = "production";
+      delete process.env.NPATI_ENCRYPTION_KEY;
+      delete process.env.ENCRYPTION_KEY;
+      expect(() => new CryptoVault()).toThrow("NPATI_ENCRYPTION_KEY_REQUIRED");
+      expect(() => new CryptoVault("too-short")).toThrow("NPATI_ENCRYPTION_KEY_TOO_SHORT");
+      process.env.NPATI_ENV = "production";
+      expect(() => new CryptoVault("npati-local-development-encryption-key-change-before-production")).toThrow("NPATI_ENCRYPTION_KEY_UNSAFE_DEFAULT");
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+      if (previousNpatiEnv === undefined) delete process.env.NPATI_ENV; else process.env.NPATI_ENV = previousNpatiEnv;
+      if (previousNpatiKey === undefined) delete process.env.NPATI_ENCRYPTION_KEY; else process.env.NPATI_ENCRYPTION_KEY = previousNpatiKey;
+      if (previousLegacyKey === undefined) delete process.env.ENCRYPTION_KEY; else process.env.ENCRYPTION_KEY = previousLegacyKey;
+    }
+  });});
 
 describe("API Key Authentication (ApiKeysRepository)", () => {
   it("creates, hashes, lists, and authenticates API keys with tenant scope", async () => {
@@ -122,6 +142,31 @@ describe("API Key Authentication (ApiKeysRepository)", () => {
     const notFound = await repo.authenticate("npati_live_0123456789abcdef0123456789abcdef0123456789abcdef");
     expect(notFound.authenticated).toBe(false);
     expect(notFound.error).toBe("API_KEY_NOT_FOUND");
+  });
+it("fails closed when durable device tracking cannot be written", async () => {
+    let rolledBack = false;
+    let released = false;
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("INSERT INTO company_api_key_devices")) throw new Error("tracking table unavailable");
+        if (sql === "ROLLBACK") rolledBack = true;
+        return { rows: [] };
+      },
+      release: () => { released = true; },
+    };
+    const pool = {
+      query: async () => ({ rows: [{
+        id: "key-db", companyId: "company-db", tenantId: "tenant-db", name: "DB key",
+        scopes: ["workspace:read"], expiresAt: null, revokedAt: null, userId: "owner-db",
+      }] }),
+      connect: async () => client,
+    };
+    const repo = new ApiKeysRepository(pool as never);
+
+    const error = await repo.authenticate("npati_live_valid_shape_for_fail_closed_test").catch((caught) => caught);
+    expect(error.code).toBe("API_KEY_DEVICE_TRACKING_FAILED");
+    expect(rolledBack).toBe(true);
+    expect(released).toBe(true);
   });
 });
 

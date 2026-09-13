@@ -200,10 +200,12 @@ export class ApiKeysRepository {
 
     const keyHash = this.hashToken(rawToken);
     const now = new Date();
-    const ip = deviceInput?.ip || "127.0.0.1";
-    const userAgent = deviceInput?.userAgent || "unknown-agent";
-    const platform = deviceInput?.platform || "unknown";
-    const deviceId = deviceInput?.deviceId || `${ip}_${Buffer.from(userAgent).toString("base64url").slice(0, 12)}`;
+    const bounded = (value: string | undefined, fallback: string, max: number) => (value?.trim() || fallback).slice(0, max);
+    const ip = bounded(deviceInput?.ip, "127.0.0.1", 128);
+    const userAgent = bounded(deviceInput?.userAgent, "unknown-agent", 512);
+    const platform = bounded(deviceInput?.platform, "unknown", 128);
+    const suppliedDeviceId = bounded(deviceInput?.deviceId, "", 160);
+    const deviceId = suppliedDeviceId || `auto_${createHash("sha256").update(`${ip}\0${userAgent}\0${platform}`).digest("hex").slice(0, 32)}`;
 
     if (this.pool) {
       const res = await this.pool.query(
@@ -227,26 +229,35 @@ export class ApiKeysRepository {
         return { authenticated: false, error: "API_KEY_EXPIRED" };
       }
 
-      // Update last_used_at
-      this.pool.query(`UPDATE company_api_keys SET last_used_at = $1 WHERE id = $2`, [now, key.id]).catch(() => {});
-
-      // Record device access
-      let totalDevices = 1;
+      // Device telemetry is security-critical: update usage and device state atomically.
+      const client = await this.pool.connect();
+      let totalDevices: number;
       try {
-        const deviceRecordId = randomUUID();
-        await this.pool.query(
+        await client.query("BEGIN");
+        await client.query(`UPDATE company_api_keys SET last_used_at = $1 WHERE id = $2`, [now, key.id]);
+        await client.query(
           `INSERT INTO company_api_key_devices (id, key_id, device_id, ip, user_agent, platform, requests_count, first_seen_at, last_seen_at)
            VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $7)
            ON CONFLICT (key_id, device_id)
-           DO UPDATE SET requests_count = company_api_key_devices.requests_count + 1, last_seen_at = $7, ip = $4`,
-          [deviceRecordId, key.id, deviceId, ip, userAgent, platform, now]
+           DO UPDATE SET requests_count = company_api_key_devices.requests_count + 1,
+                         last_seen_at = $7, ip = $4, user_agent = $5, platform = $6`,
+          [randomUUID(), key.id, deviceId, ip, userAgent, platform, now]
         );
-        const countRes = await this.pool.query(
-          `SELECT count(DISTINCT device_id)::int as count FROM company_api_key_devices WHERE key_id = $1`,
+        const countRes = await client.query(
+          `SELECT count(DISTINCT device_id)::int AS count FROM company_api_key_devices WHERE key_id = $1`,
           [key.id]
         );
-        totalDevices = countRes.rows[0]?.count ?? 1;
-      } catch {}
+        totalDevices = Number(countRes.rows[0]?.count ?? 0);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw Object.assign(new Error("API key device tracking failed"), {
+          code: "API_KEY_DEVICE_TRACKING_FAILED",
+          cause: error,
+        });
+      } finally {
+        client.release();
+      }
 
       const isAnomalous = totalDevices > 5;
 

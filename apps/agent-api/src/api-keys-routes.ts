@@ -4,7 +4,7 @@ import { AuthenticationError, type AuthProvider } from "./auth";
 import { normalizeApiKeyScopes, type ApiKeysRepository } from "./api-keys-repository";
 import { ScopedRemoteAccessTokenManager } from "./security-guardrails-and-tokens";
 
-export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysRepository, auth: AuthProvider, store: WorkspaceStore) {
+export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysRepository, auth: AuthProvider, store: WorkspaceStore, remoteTokens = new ScopedRemoteAccessTokenManager()) {
   async function authorize(request: FastifyRequest<{ Params: { companyId: string } }>, write = false) {
     const context = await auth.authenticate(request);
     const permission = write ? "workspace:write" : "workspace:read";
@@ -113,7 +113,6 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
   );
 
   // Mint scoped remote access token (#62)
-  const remoteTokens = new ScopedRemoteAccessTokenManager();
 
   app.post(
     "/companies/:companyId/remote-tokens",
@@ -126,14 +125,29 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
     ) => {
       const context = await authorize(request, true);
       const { scopes, ttlSeconds, ipAllowlist } = request.body || {};
+      let requestedScopes;
+      try {
+        requestedScopes = normalizeApiKeyScopes(Array.isArray(scopes) && scopes.length > 0 ? scopes : ["chat:use"]);
+      } catch (error: any) {
+        return reply.status(error?.status ?? 400).send({ error: error?.code ?? "INVALID_REMOTE_TOKEN_SCOPE", message: error?.message });
+      }
+      const isAdministrator = context.permissions.includes("admin:all") || context.permissions.includes("*");
+      const unauthorizedScope = requestedScopes.find((scope) => scope === "*" ? !isAdministrator : !isAdministrator && !context.permissions.includes(scope));
+      if (unauthorizedScope) return reply.status(403).send({ error: "REMOTE_TOKEN_SCOPE_ESCALATION", message: `You cannot delegate scope '${unauthorizedScope}'.` });
 
-      const minted = remoteTokens.mintRemoteToken({
-        companyId: request.params.companyId,
-        userId: context.userId,
-        scopes: Array.isArray(scopes) && scopes.length > 0 ? scopes : ["chat:use"],
-        ttlSeconds: typeof ttlSeconds === "number" ? ttlSeconds : 3600,
-        ipAllowlist: Array.isArray(ipAllowlist) ? ipAllowlist : undefined,
-      });
+      let minted;
+      try {
+        minted = remoteTokens.mintRemoteToken({
+          tenantId: context.workspaceId,
+          companyId: request.params.companyId,
+          userId: context.userId,
+          scopes: requestedScopes,
+          ttlSeconds: typeof ttlSeconds === "number" ? ttlSeconds : 3600,
+          ipAllowlist: Array.isArray(ipAllowlist) ? ipAllowlist : undefined,
+        });
+      } catch (error: any) {
+        return reply.status(400).send({ error: error?.message ?? "INVALID_REMOTE_TOKEN", message: "Remote token parameters are invalid" });
+      }
 
       return reply.status(201).send(minted);
     }
@@ -149,7 +163,7 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       }>,
       reply: FastifyReply
     ) => {
-      await authorize(request);
+      const context = await authorize(request);
       const { token, clientIp } = request.body || {};
       if (!token) return reply.status(400).send({ error: "TOKEN_REQUIRED", message: "Token is required" });
 
@@ -157,6 +171,9 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       const result = remoteTokens.verifyRemoteToken(token, checkIp);
       if (!result.isValid) {
         return reply.status(401).send({ isValid: false, error: result.error });
+      }
+      if (result.details?.companyId !== request.params.companyId || result.details.tenantId !== context.workspaceId) {
+        return reply.status(403).send({ isValid: false, error: "REMOTE_TOKEN_TENANT_SCOPE_DENIED" });
       }
       return { isValid: true, details: result.details };
     }

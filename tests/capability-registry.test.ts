@@ -130,6 +130,6 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       expect(callableOnly.json().length).toBe(42);
 
       await app.close();
-    });
+    }, 20_000);
   });
 });

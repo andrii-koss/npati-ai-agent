@@ -4,6 +4,7 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits for GCM
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
+const DEVELOPMENT_MASTER_KEY = "npati-development-only-master-key-change-me";
 
 export interface EncryptedPayload {
   version: "v1";
@@ -17,7 +18,17 @@ export class CryptoVault {
   private readonly masterKey: string;
 
   constructor(masterKey?: string) {
-    this.masterKey = masterKey || process.env.NPATI_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY || "npati-agent-default-master-encryption-key-32-chars";
+    const configuredKey = masterKey || process.env.NPATI_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+    if (!configuredKey && process.env.NODE_ENV === "production") {
+      throw new Error("NPATI_ENCRYPTION_KEY_REQUIRED: production encryption key is not configured");
+    }
+    if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) {
+      throw new Error("NPATI_ENCRYPTION_KEY_UNSAFE_DEFAULT: replace the local development key before production");
+    }
+    this.masterKey = configuredKey || DEVELOPMENT_MASTER_KEY;
+    if (this.masterKey.length < 32) {
+      throw new Error("NPATI_ENCRYPTION_KEY_TOO_SHORT: encryption key must contain at least 32 characters");
+    }
   }
 
   private deriveKey(salt: Buffer): Buffer {

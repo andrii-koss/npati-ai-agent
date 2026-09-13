@@ -105,7 +105,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(35)).toBe("VERIFIED_EXISTING");
       expect(status.get(36)).toBe("VERIFIED_EXISTING");
       expect(status.get(37)).toBe("VERIFIED_EXISTING");
-      expect(status.get(38)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(38)).toBe("VERIFIED_EXISTING");
       expect(status.get(39)).toBe("VERIFIED_EXISTING");
       expect(status.get(40)).toBe("VERIFIED_EXISTING");
       expect(status.get(41)).toBe("VERIFIED_EXISTING");
@@ -141,7 +141,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       const status = new Map(CAPABILITY_MATRIX.map((item) => [item.id, item.status]));
       expect(status.get(60)).toBe("NOT_IMPLEMENTED");
       expect(status.get(61)).toBe("VERIFIED_EXISTING");
-      expect(status.get(62)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(62)).toBe("VERIFIED_EXISTING");
       expect(status.get(63)).toBe("VERIFIED_EXISTING");
       expect(status.get(64)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(65)).toBe("PARTIALLY_IMPLEMENTED");
@@ -352,7 +352,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(218)).toBe("NOT_IMPLEMENTED");
       expect(status.get(219)).toBe("NOT_IMPLEMENTED");
       expect(status.get(220)).toBe("NOT_IMPLEMENTED");
-      expect(status.get(221)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(221)).toBe("VERIFIED_EXISTING");
       expect(status.get(222)).toBe("NOT_IMPLEMENTED");
       expect(status.get(223)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(224)).toBe("VERIFIED_EXISTING");
@@ -403,7 +403,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(257)).toBe("NOT_IMPLEMENTED");
       expect(status.get(258)).toBe("NOT_IMPLEMENTED");
       expect(status.get(259)).toBe("PARTIALLY_IMPLEMENTED");
-      expect(status.get(260)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(260)).toBe("VERIFIED_EXISTING");
       expect(status.get(261)).toBe("VERIFIED_EXISTING");
       expect(status.get(262)).toBe("VERIFIED_EXISTING");
       expect(status.get(263)).toBe("VERIFIED_EXISTING");

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-13T05:55:52.605Z",
+  "timestamp": "2026-09-13T06:29:26.273Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -8,8 +8,8 @@
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
     "partially implemented": 59,
-    "not implemented": 100,
-    "not applicable/runtime-only": 140
+    "not implemented": 99,
+    "not applicable/runtime-only": 141
   },
   "items": {
     "implemented and verified": [
@@ -2269,21 +2269,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 221,
-        "capabilityId": "system.device_tracking_per_api_key",
-        "name": "Device tracking per API key",
-        "type": "runtime",
-        "domain": "system",
-        "agentCallable": false,
-        "risk": "critical",
-        "testType": "unit",
-        "testFiles": [
-          "tests/qdrant-quantization-device-tracking.test.ts",
-          "tests/production-p01-security.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 222,
         "capabilityId": "system.version_manager",
         "name": "Version manager",
@@ -4106,6 +4091,22 @@
         "testType": "unit",
         "testFiles": [
           "tests/compression-caveman-ultra-omniglyph.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 221,
+        "capabilityId": "system.device_tracking_per_api_key",
+        "name": "Device tracking per API key",
+        "type": "runtime",
+        "domain": "system",
+        "agentCallable": false,
+        "risk": "critical",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/production-p01-security.test.ts",
+          "tests/security-auth-vault-scopes.test.ts",
+          "scripts/verify-production-api-key-auth.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },
