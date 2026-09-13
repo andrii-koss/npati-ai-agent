@@ -518,7 +518,6 @@ export function AIProviderMarketplace() {
         </h1>
         <p>Connect AI providers and choose the models NPATI Agent can use.</p>
       </div>
-      <button className="refresh-button" disabled={loading} onClick={() => { cacheRef.current.clear(); void load(0, true); }}>↻ <span>Refresh catalog</span></button>
     </header>
     <section className="overview-grid">
       <div><strong>{overview ? formatNumber(overview.providers) : (data ? formatNumber(data.overview.providers) : "—")}</strong><span>providers available</span></div>
