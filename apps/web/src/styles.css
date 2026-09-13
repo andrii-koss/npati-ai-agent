@@ -1762,6 +1762,11 @@ a {
   background: white;
 }
 
+.provider-avatar.dark-bg,
+.provider-avatar.dark-bg img {
+  background: #464646;
+}
+
 .provider-avatar.small img {
   padding: 5px;
 }

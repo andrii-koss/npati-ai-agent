@@ -84,9 +84,10 @@ function initials(name: string) {
 
 function ProviderIcon({ providerId, name, size }: { providerId: string; name: string; size?: "small" | "large" }) {
   const [failed, setFailed] = useState(false);
-  return <span className={`provider-avatar${size ? ` ${size}` : ""}`} aria-hidden="true">
+  const isDarkBg = ["llmgateway", "kimi", "kimi-coding-apikey"].includes(providerId.toLowerCase());
+  return <span className={`provider-avatar${size ? ` ${size}` : ""}${isDarkBg ? " dark-bg" : ""}`} data-provider-id={providerId} aria-hidden="true">
     <span className="provider-initials">{initials(name)}</span>
-    {!failed && <img src={`/api/ai/providers/${encodeURIComponent(providerId)}/icon?surface=light-v6`} alt="" loading="lazy" onError={() => setFailed(true)} />}
+    {!failed && <img src={`/api/ai/providers/${encodeURIComponent(providerId)}/icon?surface=light-v7`} alt="" loading="lazy" onError={() => setFailed(true)} />}
   </span>;
 }
 
