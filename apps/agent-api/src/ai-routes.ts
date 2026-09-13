@@ -202,7 +202,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
       const icon = await marketplace.providerIcon(request.params.providerId);
       return reply
         .header("content-type", icon.contentType)
-        .header("cache-control", "public, max-age=86400, stale-while-revalidate=604800")
+        .header("cache-control", "no-cache, no-store, must-revalidate")
         .send(Buffer.from(icon.body));
     } catch (error) { return sendError(reply, error); }
   });

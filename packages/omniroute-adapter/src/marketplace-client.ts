@@ -5,6 +5,7 @@ import {
   normalizeCatalog,
   normalizeModels,
 } from "./normalization";
+import { PROVIDER_ICON_OVERRIDES } from "./provider-icon-overrides";
 import type {
   AIModelSummary,
   AIProviderSummary,
@@ -306,6 +307,12 @@ export class OmniRouteMarketplace {
 
   async providerIcon(providerId: string): Promise<{ body: Uint8Array; contentType: string }> {
     return this.cached(`provider-icon:${providerId}`, false, async () => {
+      const normalizedId = providerId.toLowerCase();
+      const override = PROVIDER_ICON_OVERRIDES[normalizedId];
+      if (override) {
+        return override;
+      }
+
       const provider = PINNED_PROVIDER_CATALOG.providers.find((item) => item.id === providerId);
       if (!provider) throw new OmniRouteError("Provider not found", 404, "PROVIDER_NOT_FOUND");
       const iconAsset = typeof provider.iconAsset === "string" ? provider.iconAsset : undefined;
@@ -318,6 +325,25 @@ export class OmniRouteMarketplace {
         if (contentType?.startsWith("image/")) {
           const body = new Uint8Array(await response.arrayBuffer());
           return { body: contentType === "image/svg+xml" ? visibleSvgOnLightSurface(body) : body, contentType };
+        }
+      }
+
+      if (typeof provider.website === "string" && provider.website) {
+        try {
+          const u = new URL(provider.website);
+          const domain = u.hostname.replace(/^www\./, "");
+          const faviconRes = await fetch(`https://www.google.com/s2/favicons?domain=${domain}&sz=128`, {
+            signal: AbortSignal.timeout(4_000),
+          });
+          if (faviconRes.ok) {
+            const body = new Uint8Array(await faviconRes.arrayBuffer());
+            if (body.byteLength > 400) {
+              const contentType = faviconRes.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
+              return { body, contentType };
+            }
+          }
+        } catch {
+          // Fall through to generic icon
         }
       }
 
