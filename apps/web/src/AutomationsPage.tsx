@@ -648,7 +648,7 @@ export function AutomationsPage() {
                   </button>
                 )}
                 <span />
-                <button type="button" onClick={() => setDrawerOpen(false)}>
+                <button type="button" className="button-secondary" onClick={() => setDrawerOpen(false)}>
                   Cancel
                 </button>
                 <button className="button-primary automations-action-primary" disabled={saving}>
