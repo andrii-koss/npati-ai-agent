@@ -1,7 +1,7 @@
 import type { AuthContext } from "@npati/workspace";
 import type { CompanyKnowledgeRepository, CompanyMemory } from "./company-knowledge";
 
-export type ExtractedMemoryCategory = "preference" | "business_policy" | "technical_detail" | "contact";
+export type ExtractedMemoryCategory = "preference" | "business_policy" | "technical_detail" | "contact" | "constraint" | "decision";
 
 export interface ExtractedMemoryCandidate {
   content: string;
@@ -22,6 +22,9 @@ export class AutomaticMemoryExtractor {
     { category: "technical_detail", regex: /(?:наш(?:а|і|ий)?\s+)?(?:стек|архітектура|база\s+даних|сервер|crm|api|framework|database|stack|engine)\s*(?:є|це|is|:)?\s*([^\n\r;]{3,160})/giu, confidence: 0.85 },
     { category: "contact", regex: /(?:контакт(?:на\s+особа|ний\s+email|ний\s+телефон)?|contact\s+(?:person|email|phone))\s*(?:є|це|is|:)?\s*([^\n\r;]{3,160})/giu, confidence: 0.87 },
     { category: "business_policy", regex: /(?:запам['’]?ятай|remember(?:\s+that)?)\s*[:,-]?\s*([^\n\r]{8,200})/giu, confidence: 0.96 },
+    { category: "constraint", regex: /(?:do not|never|must not|cannot|avoid)\s+([^\.\n]+)/giu, confidence: 0.95 },
+    { category: "constraint", regex: /(?:requirement is|strictly require)\s+([^\.\n]+)/giu, confidence: 0.95 },
+    { category: "decision", regex: /(?:we decided to|the team agreed on|we chose|we are using|architecture uses)\s+([^\.\n]+)/giu, confidence: 0.90 },
   ];
 
   static extractFacts(messages: Array<{ role: string; content: string }>): ExtractedMemoryCandidate[] {

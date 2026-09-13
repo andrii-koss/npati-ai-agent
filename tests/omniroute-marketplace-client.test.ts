@@ -49,12 +49,13 @@ describe("OmniRoute marketplace client", () => {
     expect(svg).not.toContain("<script");
   });
 
-  it("renders a terminal pictogram for Antigravity CLI when no brand asset exists", async () => {
+  it("uses the bundled Antigravity brand asset when the runtime has no remote logo", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
     const icon = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).providerIcon("agy");
     const svg = new TextDecoder().decode(icon.body);
-    expect(svg).toContain('data-fallback-icon="terminal"');
-    expect(svg).toContain('M25 30l15 15-15 15');
+    expect(icon.contentType).toBe("image/svg+xml");
+    expect(svg).toContain('id="ag-mask"');
+    expect(svg).not.toContain('data-fallback-icon="terminal"');
   });
 
   it("makes a white-only OmniRoute SVG visible on the light NPATI icon surface", async () => {

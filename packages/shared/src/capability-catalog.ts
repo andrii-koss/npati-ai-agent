@@ -1506,7 +1506,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "ai",
     "name": "Rerank",
-    "description": "Додати після embeddings/RAG.",
+    "description": "Calls the configured production OmniRoute rerank model and fails closed with RERANK_UNAVAILABLE when no real reranker is active.",
     "useWhen": [
       "Internal system execution requires Rerank"
     ],
@@ -1667,7 +1667,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "system",
     "name": "Context compaction",
-    "description": "Можна поєднати з OmniRoute compression.",
+    "description": "Compacts long production chat histories with the selected AI model, preserves recent turns, and keeps the full history if summarization fails.",
     "useWhen": [
       "Internal system execution requires Context compaction"
     ],
@@ -1805,7 +1805,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Automatic memory extraction",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Extracts explicit user-authored company facts after successful JSON/SSE runs and durably persists provenance metadata while honoring noMemory.",
     "useWhen": [
       "Internal system execution requires Automatic memory extraction"
     ],

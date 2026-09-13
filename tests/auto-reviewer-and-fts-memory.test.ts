@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AutoExecReviewer } from "../apps/agent-api/src/auto-exec-reviewer";
-import { AutoMemoryExtractor } from "../apps/agent-api/src/auto-memory-extractor";
+import { AutomaticMemoryExtractor } from "../apps/agent-api/src/automatic-memory-extractor";
 import { FtsMemorySearchEngine } from "../apps/agent-api/src/fts5-memory-search";
 
 describe("Auto Reviewer for Exec (AutoExecReviewer)", () => {
@@ -36,7 +36,7 @@ describe("Auto Reviewer for Exec (AutoExecReviewer)", () => {
   });
 });
 
-describe("Automatic Memory Extractor (AutoMemoryExtractor)", () => {
+describe("Automatic Memory Extractor (production component)", () => {
   it("extracts preferences, constraints, and decisions from user messages", () => {
     const messages = [
       { role: "user", content: "I prefer TypeScript over Python for all backend services." },
@@ -45,12 +45,12 @@ describe("Automatic Memory Extractor (AutoMemoryExtractor)", () => {
       { role: "user", content: "We decided to deploy PostgreSQL with pgvector for embeddings." },
     ];
 
-    const facts = AutoMemoryExtractor.extractFacts(messages);
+    const facts = AutomaticMemoryExtractor.extractFacts(messages);
     expect(facts.length).toBe(4);
 
-    expect(facts.some((f) => f.category === "preference" && f.fact.includes("TypeScript"))).toBe(true);
-    expect(facts.some((f) => f.category === "constraint" && f.fact.includes("HTTP"))).toBe(true);
-    expect(facts.some((f) => f.category === "decision" && f.fact.includes("PostgreSQL"))).toBe(true);
+    expect(facts.some((f) => f.category === "preference" && f.content.includes("TypeScript"))).toBe(true);
+    expect(facts.some((f) => f.category === "constraint" && f.content.includes("HTTP"))).toBe(true);
+    expect(facts.some((f) => f.category === "decision" && f.content.includes("PostgreSQL"))).toBe(true);
   });
 });
 
