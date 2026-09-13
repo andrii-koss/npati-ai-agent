@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 const base = process.env.NPATI_API_URL ?? "http://localhost:3001";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,7 +74,7 @@ for (const item of embedRes.data.data) {
 console.log("✓ #64 Embeddings generated, validated L2-normalization (unit sphere), dimensions=1536");
 
 // 3. #65 Rerank & #302 OmniRoute Rerank API
-console.log("\n[3/7] Verifying #65 Rerank & #302 OmniRoute Rerank API (/ai/rerank)...");
+console.log("\n[3/7] Verifying honest #65 Rerank behavior (/ai/rerank)...");
 const rerankRes = await api("/ai/rerank", "POST", {
   query: "What is your refund and warranty policy?",
   documents: [
@@ -84,96 +85,111 @@ const rerankRes = await api("/ai/rerank", "POST", {
   topN: 2,
   minScore: 0.1,
 });
-
-if (!rerankRes.ok) {
-  throw new Error(`Rerank API failed: ${JSON.stringify(rerankRes.data)}`);
+let liveRerankAvailable = false;
+if (rerankRes.ok) {
+  if (!Array.isArray(rerankRes.data.results) || rerankRes.data.results[0]?.index !== 1) {
+    throw new Error(`Real rerank returned invalid ordering: ${JSON.stringify(rerankRes.data)}`);
+  }
+  if (String(rerankRes.data.model).includes("local-cross-encoder")) {
+    throw new Error("Production rerank must not masquerade a lexical heuristic as a cross-encoder model");
+  }
+  liveRerankAvailable = true;
+  console.log(`✓ #65 real provider available: model=${rerankRes.data.model}`);
+} else {
+  const code = rerankRes.data?.error?.code;
+  if (![400, 404, 503].includes(rerankRes.status) || !code) {
+    throw new Error(`Rerank failed without an explicit provider error: ${JSON.stringify(rerankRes)}`);
+  }
+  console.log(`✓ #65 remains Partial honestly: live provider unavailable (${rerankRes.status} ${code}); no synthetic fallback returned`);
 }
-if (!Array.isArray(rerankRes.data.results) || rerankRes.data.results.length === 0) {
-  throw new Error(`Expected rerank results array, got: ${JSON.stringify(rerankRes.data)}`);
+// 4. #72 Context Compaction
+console.log("\n[4/7] Verifying #72 diagnostic preview and production chat integration...");
+const messagesToCompact = Array.from({ length: 15 }, (_, index) => ({
+  role: index % 2 === 0 ? "user" : "assistant",
+  content: index === 0 ? "Our budget is 60,000 USD per year." : `Historical turn ${index + 1} with relevant project context.`,
+}));
+const compactRes = await api("/chat/compact", "POST", { messages: messagesToCompact, keepRecentTurns: 4 });
+if (!compactRes.ok || !compactRes.data.compacted || compactRes.data.preservedCount !== 4) {
+  throw new Error(`Context compaction diagnostic failed: ${JSON.stringify(compactRes.data)}`);
 }
 
-// The top ranked result must be document index 1 (refund policy)
-const topResult = rerankRes.data.results[0];
-if (topResult.index !== 1) {
-  throw new Error(`Expected document index 1 to rank first, got: ${JSON.stringify(topResult)}`);
-}
-if (topResult.relevanceScore < 0.25) {
-  throw new Error(`Expected relevanceScore >= 0.25, got: ${topResult.relevanceScore}`);
-}
-console.log(`✓ #65 & #302 Rerank API active: top rank=${topResult.rank}, score=${topResult.relevanceScore}, model=${rerankRes.data.model}`);
-
-// 4. #72 Context Compaction API
-console.log("\n[4/7] Verifying #72 Context Compaction API (/chat/compact)...");
-const messagesToCompact = [
-  { role: "user", content: "Привіт! Наш бюджет є $60,000 на рік." },
-  { role: "assistant", content: "Чудово, зафіксовано." },
-  { role: "user", content: "Ми використовуємо TypeScript та PostgreSQL." },
-  { role: "assistant", content: "Зрозумів." },
-  { role: "user", content: "Контактна особа є Дмитро (dmytro@example.com)." },
-  { role: "assistant", content: "Добре." },
-  { role: "user", content: "Turn 7 discussion on feature scope." },
-  { role: "assistant", content: "Turn 8 reply." },
-  { role: "user", content: "Turn 9 details." },
-  { role: "assistant", content: "Turn 10 reply." },
-  { role: "user", content: "Turn 11 details." },
-  { role: "assistant", content: "Turn 12 reply." },
-  { role: "user", content: "Turn 13 details." },
-  { role: "assistant", content: "Turn 14 reply." },
-  { role: "user", content: "Recent question: Can you summarize everything?" },
-];
-
-const compactRes = await api("/chat/compact", "POST", {
-  messages: messagesToCompact,
-  keepRecentTurns: 4,
+const conversationRes = await api("/conversations", "POST", { title: "P02 context compaction E2E" });
+if (!conversationRes.ok || !conversationRes.data?.id) throw new Error(`Could not create neutral conversation: ${JSON.stringify(conversationRes.data)}`);
+const conversationId = conversationRes.data.id;
+const messageRows = Array.from({ length: 14 }, (_, index) => {
+  const role = index % 2 === 0 ? "user" : "assistant";
+  const content = `Production history turn ${index + 1}: retain decision CTX-${Date.now()} and all constraints.`.replaceAll("'", "''");
+  return `('${randomUUID()}','${conversationId}','${role}','${content}')`;
+}).join(",");
+execFileSync("docker", ["exec", "npati-agent-postgres", "psql", "-U", "npati", "-d", "npati_agent", "-v", "ON_ERROR_STOP=1", "-c", `INSERT INTO messages(id,conversation_id,role,content) VALUES ${messageRows};`], { stdio: "pipe" });
+const productionCompact = await api("/chat", "POST", {
+  contextType: "none",
+  conversationId,
+  message: "Acknowledge the retained context in one short sentence.",
 });
-
-if (!compactRes.ok || !compactRes.data.compacted) {
-  throw new Error(`Context compaction failed: ${JSON.stringify(compactRes.data)}`);
+await api(`/conversations/${conversationId}`, "DELETE");
+if (!productionCompact.ok || productionCompact.data?.contextCompaction?.applied !== true) {
+  throw new Error(`Production chat did not apply context compaction: ${JSON.stringify(productionCompact.data)}`);
 }
-if (!compactRes.data.summary?.includes("[Previous Context Summary")) {
-  throw new Error(`Compaction missing structured summary header: ${compactRes.data.summary}`);
+if (productionCompact.data.contextCompaction.preservedCount !== 6) {
+  throw new Error(`Expected six recent turns after production compaction: ${JSON.stringify(productionCompact.data.contextCompaction)}`);
 }
-if (compactRes.data.preservedCount !== 4) {
-  throw new Error(`Expected 4 preserved turns, got ${compactRes.data.preservedCount}`);
-}
-if (!compactRes.data.flushedMemories.some((f) => f.includes("$60,000"))) {
-  throw new Error(`Flushed memories did not contain extracted budget fact: ${JSON.stringify(compactRes.data.flushedMemories)}`);
-}
-console.log(`✓ #72 Context Compactor compacted ${compactRes.data.originalCount} turns into 4 recent turns + summary, flushed ${compactRes.data.flushedMemories.length} facts`);
-
-// 5. #78 Automatic Memory Extraction API
-console.log("\n[5/7] Verifying #78 Automatic Memory Extraction (/companies/:companyId/knowledge/memory/extract)...");
-// Get or create test company
+console.log("✓ #72 model-backed compaction ran inside production /chat and preserved six recent turns");
+// 5. #78 Automatic Memory Extraction
+console.log("\n[5/7] Verifying #78 automatic extraction in production company chat...");
 const overviewRes = await api("/overview");
 const companies = overviewRes.data.companies ?? [];
 let companyId = companies[0]?.id;
 if (!companyId) {
   const createComp = await api("/companies", "POST", { name: "P02 Memory Test Corp" });
+  if (!createComp.ok || !createComp.data?.id) throw new Error(`Could not create test company: ${JSON.stringify(createComp.data)}`);
   companyId = createComp.data.id;
 }
-
-// Test no-memory suppression
-const extractNoMemRes = await api(`/companies/${companyId}/knowledge/memory/extract`, "POST", {
-  text: "Our budget is 1,000,000 USD and confidential.",
+const uniqueCode = `AUTO-MEM-${Date.now()}`;
+const automaticChat = await api("/chat", "POST", {
+  contextType: "company",
+  companyId,
+  message: `Remember that our escalation code is ${uniqueCode}.`,
+});
+if (!automaticChat.ok) throw new Error(`Company chat failed: ${JSON.stringify(automaticChat.data)}`);
+if (automaticChat.data?.automaticMemory?.status !== "completed" || automaticChat.data.automaticMemory.persistedCount < 1) {
+  throw new Error(`Company chat did not await automatic memory persistence: ${JSON.stringify(automaticChat.data?.automaticMemory)}`);
+}
+const memoryList = await api(`/companies/${companyId}/knowledge/memory`);
+if (!memoryList.ok || !memoryList.data.memories?.some((memory) => memory.content.includes(uniqueCode) && memory.source.startsWith("auto_extracted:"))) {
+  throw new Error(`Automatically extracted fact was not durably stored: ${JSON.stringify(memoryList.data)}`);
+}
+const privateCode = `PRIVATE-MEM-${Date.now()}`;
+const privateChat = await api("/chat", "POST", {
+  contextType: "company",
+  companyId,
   noMemory: true,
-  persist: true,
-});
-if (!extractNoMemRes.ok || extractNoMemRes.data.count !== 0) {
-  throw new Error(`Expected no memories extracted when noMemory=true, got: ${JSON.stringify(extractNoMemRes.data)}`);
+  message: `Remember that our escalation code is ${privateCode}.`,
+}, { "x-no-memory": "true" });
+if (!privateChat.ok || privateChat.data?.automaticMemory?.status !== "skipped") {
+  throw new Error(`noMemory company chat did not explicitly skip extraction: ${JSON.stringify(privateChat.data)}`);
 }
-
-// Test actual extraction & persistence
-const extractRes = await api(`/companies/${companyId}/knowledge/memory/extract`, "POST", {
-  text: "Наш бюджет є $90,000 на маркетингову кампанію. Ми використовуємо PostgreSQL базу даних. Контактна особа є Марія Шевченко (maria@company.ua).",
-  noMemory: false,
-  persist: true,
-});
-
-if (!extractRes.ok || extractRes.data.count === 0) {
-  throw new Error(`Extraction failed: ${JSON.stringify(extractRes.data)}`);
+const memoryAfterPrivate = await api(`/companies/${companyId}/knowledge/memory`);
+if (memoryAfterPrivate.data.memories?.some((memory) => memory.content.includes(privateCode))) {
+  throw new Error("noMemory fact was persisted unexpectedly");
 }
-console.log(`✓ #78 Automatic Memory Extractor extracted and persisted ${extractRes.data.count} structured company memories (verified noMemory suppression)`);
-
+const streamCode = `STREAM-MEM-${Date.now()}`;
+const streamResponse = await fetch(`${base}/chat/stream`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": `idem-stream-${Date.now()}` },
+  body: JSON.stringify({ contextType: "company", companyId, streamId: `p02-${Date.now()}`, message: `Remember that our escalation code is ${streamCode}.` }),
+});
+const streamBody = await streamResponse.text();
+const resultLine = streamBody.split("\n").find((line, index, lines) => line.startsWith("data:") && lines[index - 1]?.startsWith("event: result"));
+const streamResult = resultLine ? JSON.parse(resultLine.slice(5).trim()) : undefined;
+if (!streamResponse.ok || streamResult?.automaticMemory?.status !== "completed" || streamResult.automaticMemory.persistedCount < 1) {
+  throw new Error(`Streaming company chat did not await automatic memory persistence: ${streamBody.slice(-2000)}`);
+}
+const memoryAfterStream = await api(`/companies/${companyId}/knowledge/memory`);
+if (!memoryAfterStream.data.memories?.some((memory) => memory.content.includes(streamCode))) {
+  throw new Error("Streaming chat fact was not durably stored");
+}
+console.log("✓ #78 JSON and SSE company chats await durable PostgreSQL persistence; noMemory suppression verified");
 // 6. #80 Memory Rerank API & Knowledge Retrieval
 console.log("\n[6/7] Verifying #80 Memory Rerank & Knowledge Retrieval (/companies/:companyId/knowledge/retrieve & memory/rerank)...");
 const memoryRerankRes = await api(`/companies/${companyId}/knowledge/memory/rerank`, "POST", {

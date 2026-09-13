@@ -476,9 +476,7 @@ export function SkillsPage() {
         <div className="status-left"><span>Showing <strong>{filteredSkills.length}</strong> of <strong>{skills.length}</strong> skills</span></div>
       </div>
 
-      {error ? <div className="workspace-notice error">{error}</div> : loading ? (
-        <div className="workspace-notice">Loading agent skills...</div>
-      ) : filteredSkills.length === 0 ? (
+      {error ? <div className="workspace-notice error">{error}</div> : !loading && filteredSkills.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⌕</div><h3>No matching skills</h3>
           <p>Try another name, description, or capability.</p>

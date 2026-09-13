@@ -531,8 +531,6 @@ export function ActivityPage() {
           </div>
         )}
       </div>
-
-      {loading && <div className="workspace-notice">Loading run history...</div>}
       {error && <div className="workspace-notice error">{error}</div>}
 
       {!loading && companies.length === 0 && (

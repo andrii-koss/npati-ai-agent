@@ -290,8 +290,6 @@ export function ConnectionsPage() {
         </div>
       </div>
 
-      {loading && <div className="workspace-notice">Probing service connections...</div>}
-
       {!loading && filteredServices.length === 0 && (
         <div className="automations-empty-card" style={{ marginTop: "16px" }}>
           <div className="automations-empty-icon">🔍</div>

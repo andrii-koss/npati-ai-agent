@@ -299,8 +299,6 @@ export function CapabilityInspectorPage() {
           </label>
         </div>
       </div>
-
-      {loading && <div className="workspace-notice">Inspecting capabilities runtime...</div>}
       {error && <div className="workspace-notice error">{error}</div>}
 
       {!loading && !error && (

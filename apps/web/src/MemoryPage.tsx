@@ -454,10 +454,8 @@ export function MemoryPage() {
         </div>
       </div>
 
-      {loading && <div className="workspace-notice">Loading business memory...</div>}
-
       {/* Empty States */}
-      {!loading && items.length === 0 && (
+      {items.length === 0 && (
         <div className="automations-empty-card memory-empty-card">
           <div className="automations-empty-icon">🧠</div>
           <h3>No Durable Memory Items Yet</h3>

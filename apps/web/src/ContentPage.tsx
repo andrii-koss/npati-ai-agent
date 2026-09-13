@@ -387,9 +387,7 @@ export function ContentPage() {
         </div>
       </div>
 
-      {loading && <div className="workspace-notice">Loading generated content library...</div>}
-
-      {!loading && items.length === 0 && (
+      {items.length === 0 && (
         <div className="automations-empty-card content-empty-card">
           <div className="automations-empty-icon">📝</div>
           <h3>Your AI Content Library is Ready</h3>
