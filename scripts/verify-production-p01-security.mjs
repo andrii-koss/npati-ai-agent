@@ -64,14 +64,14 @@ console.log("\n[2/8] Verifying capability statuses via /capabilities/inspect..."
 const inspectRes = await apiRequest("/capabilities/inspect");
 if (!inspectRes.ok) throw new Error(`/capabilities/inspect failed: ${JSON.stringify(inspectRes.data)}`);
 
-const targetIds = [35, 38, 57, 60, 61, 62, 221, 260];
+const targetIds = [35, 38, 61, 62, 221, 260];
 const targetCaps = inspectRes.data.items.filter((i) => targetIds.includes(i.id));
 for (const cap of targetCaps) {
   if (cap.status !== "VERIFIED_EXISTING") {
     throw new Error(`Capability #${cap.id} (${cap.capabilityId}) expected VERIFIED_EXISTING but got ${cap.status}`);
   }
 }
-console.log(`✓ All 8 capabilities confirmed VERIFIED_EXISTING in live Docker runtime:`);
+console.log(`✓ All 6 production-certified capabilities confirmed VERIFIED_EXISTING in live Docker runtime:`);
 targetCaps.forEach((c) => console.log(`  - #${c.id} [${c.capabilityId}]: ${c.status}`));
 
 // 3. OIDC Dashboard Gate (#61)
@@ -308,5 +308,5 @@ try {
 }
 
 console.log("\n==========================================================");
-console.log("  ALL P0.1 SECURITY & AUTH CAPABILITIES VERIFIED (8/8)     ");
+console.log("  P0.1 SECURITY & AUTH CAPABILITIES VERIFIED (6/8; #57/#60 OPEN)     ");
 console.log("==========================================================");

@@ -184,12 +184,16 @@ export class NpatiBackendAuthProvider implements AuthProvider {
           if (s === "tools:read") permissions.push("tools:read", "workspace:read");
         }
       }
-      const workspaceId = `workspace:${details.companyId}`;
+      const requestedCompanyId = String((request.params as { companyId?: string } | undefined)?.companyId || "");
+      if (requestedCompanyId && requestedCompanyId !== details.companyId) {
+        throw new AuthenticationError("Remote token is not valid for this company", 403, "REMOTE_TOKEN_COMPANY_SCOPE_DENIED");
+      }
       const authContext: AuthContext = {
         userId: details.userId,
         externalSubject: `npati:remote:${details.tokenId}`,
-        workspaceId,
+        workspaceId: details.tenantId,
         permissions,
+        companyId: details.companyId,
       };
       await this.ensureWorkspaceInitialized(authContext);
       return authContext;

@@ -605,13 +605,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "security",
     "agentCallable": false,
     "risk": "low",
-    "testType": "integration",
+    "testType": "e2e",
     "testFiles": [
       "tests/capability-registry.test.ts",
       "tests/security-auth-vault-scopes.test.ts",
-      "tests/production-p01-security.test.ts"
+      "tests/production-p01-security.test.ts",
+      "scripts/verify-production-api-key-auth.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 39,
@@ -988,12 +989,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "security",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
-      "tests/production-p01-security.test.ts"
+      "tests/production-p01-security.test.ts",
+      "scripts/verify-production-api-key-auth.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 63,
@@ -3459,12 +3461,13 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "system",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/qdrant-quantization-device-tracking.test.ts",
-      "tests/production-p01-security.test.ts"
+      "tests/production-p01-security.test.ts",
+      "tests/security-auth-vault-scopes.test.ts",
+      "scripts/verify-production-api-key-auth.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 222,
@@ -4080,13 +4083,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "security",
     "agentCallable": false,
     "risk": "low",
-    "testType": "integration",
+    "testType": "e2e",
     "testFiles": [
       "tests/capability-registry.test.ts",
       "tests/ai-preferences.test.ts",
-      "tests/production-p01-security.test.ts"
+      "tests/production-p01-security.test.ts",
+      "scripts/verify-production-api-key-auth.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 261,

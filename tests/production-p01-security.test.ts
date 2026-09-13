@@ -136,7 +136,7 @@ describe("P0.1 Production Security, Auth & Guardrails Suite", () => {
   // 2. #62 Scoped Remote Access Tokens
   describe("Scoped Remote Access Tokens (#62)", () => {
     it("mints, verifies and enforces IP allowlist on remote access tokens", async () => {
-      const remoteTokens = new ScopedRemoteAccessTokenManager("remote_token_secret_master_123");
+      const remoteTokens = new ScopedRemoteAccessTokenManager("remote_token_secret_master_123456789");
       const store = new InMemoryWorkspaceStore();
       const authProvider = new NpatiBackendAuthProvider({
         remoteTokensManager: remoteTokens,
@@ -144,6 +144,7 @@ describe("P0.1 Production Security, Auth & Guardrails Suite", () => {
       });
 
       const { token, details } = remoteTokens.mintRemoteToken({
+        tenantId: "workspace:remote-tenant-1",
         companyId: "comp-remote-1",
         userId: "cli-user-1",
         scopes: ["agent:exec", "mcp:read"],

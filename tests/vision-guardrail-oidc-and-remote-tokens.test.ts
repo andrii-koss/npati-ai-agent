@@ -55,10 +55,11 @@ describe("OIDC Dashboard Gate (OidcDashboardGate)", () => {
 });
 
 describe("Scoped Remote Access Tokens (ScopedRemoteAccessTokenManager)", () => {
-  const manager = new ScopedRemoteAccessTokenManager("test_secret_key_777");
+  const manager = new ScopedRemoteAccessTokenManager("test_secret_key_777_at_least_32_chars");
 
   it("mints and verifies signed remote tokens with scopes and IP allowlists", () => {
     const { token } = manager.mintRemoteToken({
+      tenantId: "workspace:test-tenant",
       companyId: "comp-cli",
       userId: "user-dev-1",
       scopes: ["agent:exec", "tools:read"],
@@ -74,5 +75,20 @@ describe("Scoped Remote Access Tokens (ScopedRemoteAccessTokenManager)", () => {
     const forbiddenCheck = manager.verifyRemoteToken(token, "10.0.0.99");
     expect(forbiddenCheck.isValid).toBe(false);
     expect(forbiddenCheck.error).toContain("IP_FORBIDDEN");
+  });
+  it("fails closed for missing IP, tampering, invalid claims and excessive TTL", () => {
+    const { token } = manager.mintRemoteToken({
+      tenantId: "workspace:test-tenant",
+      companyId: "comp-cli",
+      userId: "user-dev-1",
+      scopes: ["workspace:read"],
+      ipAllowlist: ["192.168.1.50"],
+      ttlSeconds: 60,
+    });
+    expect(manager.verifyRemoteToken(token).error).toContain("IP_FORBIDDEN");
+    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+    expect(manager.verifyRemoteToken(tampered, "192.168.1.50").error).toContain("INVALID_SIGNATURE");
+    expect(() => manager.mintRemoteToken({ tenantId: "", companyId: "comp-cli", userId: "user", scopes: ["workspace:read"] })).toThrow("REMOTE_TOKEN_CLAIMS_REQUIRED");
+    expect(() => manager.mintRemoteToken({ tenantId: "tenant", companyId: "comp-cli", userId: "user", scopes: ["workspace:read"], ttlSeconds: 86_401 })).toThrow("REMOTE_TOKEN_TTL_OUT_OF_RANGE");
   });
 });
