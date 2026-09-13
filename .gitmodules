@@ -1,3 +1,4 @@
 [submodule "vendor/omniroute"]
 	path = vendor/omniroute
 	url = https://github.com/diegosouzapw/OmniRoute.git
+	ignore = untracked
