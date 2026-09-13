@@ -6,6 +6,9 @@ export interface VisualInspectionResult {
   scrubbedExif: boolean;
   imageDimensions: { width: number; height: number };
   inspectedAt: string;
+  format?: "jpeg" | "png";
+  removedMetadataChunks?: number;
+  sanitizedContent?: Buffer;
 }
 
 export interface OidcClaims {
@@ -45,45 +48,100 @@ export interface RemoteAccessToken {
 }
 
 export class VisionBridgeGuardrail {
-  private static readonly VISUAL_INJECTION_KEYWORDS = [
-    "system prompt",
-    "ignore instructions",
-    "developer mode",
-    "reveal passwords",
+  private static readonly VISUAL_INJECTION_PATTERNS = [
+    /\bsystem\s+prompt\b/i,
+    /\bignore\s+(?:all\s+)?(?:previous|prior|system|developer)\s+instructions?\b/i,
+    /\bdeveloper\s+mode\b/i,
+    /\breveal\s+(?:the\s+)?(?:passwords?|secrets?|credentials?|system\s+prompt)\b/i,
+    /\bdo\s+not\s+follow\s+(?:the\s+)?(?:system|developer)\b/i,
   ];
 
-  /**
-   * 1. Vision Bridge Guardrail: EXIF scrubbing & visual safety inspection
-   */
-  static inspectVisualInput(
-    imageContent: Buffer | string,
-    extractedOcrText?: string
-  ): VisualInspectionResult {
+  static inspectVisualInput(imageContent: Buffer | string, extractedOcrText?: string): VisualInspectionResult {
+    const bytes = this.decodeImage(imageContent);
+    const sanitized = this.sanitizeImage(bytes);
     const violations: string[] = [];
-    let scrubbedExif = false;
-
-    // 1. Check OCR text for hidden prompt injection instructions
     if (extractedOcrText) {
-      const textLower = extractedOcrText.toLowerCase();
-      for (const kw of this.VISUAL_INJECTION_KEYWORDS) {
-        if (textLower.includes(kw)) {
-          violations.push(`visual_prompt_injection: detected '${kw}'`);
-        }
+      for (const pattern of this.VISUAL_INJECTION_PATTERNS) {
+        const match = pattern.exec(extractedOcrText);
+        if (match) violations.push(`visual_prompt_injection: detected '${match[0]}'`);
       }
     }
-
-    // 2. EXIF data scrubbing simulation (strips GPS/camera metadata)
-    if (Buffer.isBuffer(imageContent) && imageContent.length > 0) {
-      scrubbedExif = true;
-    }
-
     return {
       isSafe: violations.length === 0,
-      violations,
-      scrubbedExif,
-      imageDimensions: { width: 1024, height: 1024 },
+      violations: [...new Set(violations)],
+      scrubbedExif: true,
+      imageDimensions: sanitized.dimensions,
       inspectedAt: new Date().toISOString(),
+      format: sanitized.format,
+      removedMetadataChunks: sanitized.removed,
+      sanitizedContent: sanitized.content,
     };
+  }
+
+  private static decodeImage(content: Buffer | string): Buffer {
+    if (Buffer.isBuffer(content)) return Buffer.from(content);
+    const value = content.trim();
+    const dataUrl = /^data:image\/(?:jpeg|jpg|png);base64,([A-Za-z0-9+/=\s]+)$/i.exec(value);
+    const encoded = dataUrl?.[1] ?? value;
+    if (!/^[A-Za-z0-9+/=\s]+$/.test(encoded)) throw Object.assign(new Error("Image must be JPEG/PNG bytes or base64."), { status: 400, code: "INVALID_IMAGE" });
+    const bytes = Buffer.from(encoded.replace(/\s/g, ""), "base64");
+    if (bytes.length === 0) throw Object.assign(new Error("Image is empty."), { status: 400, code: "INVALID_IMAGE" });
+    return bytes;
+  }
+
+  private static sanitizeImage(bytes: Buffer): { content: Buffer; format: "jpeg" | "png"; dimensions: { width: number; height: number }; removed: number } {
+    if (bytes.length > 25 * 1024 * 1024) throw Object.assign(new Error("Image exceeds 25MB."), { status: 413, code: "IMAGE_TOO_LARGE" });
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) return this.sanitizeJpeg(bytes);
+    if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return this.sanitizePng(bytes);
+    throw Object.assign(new Error("Only valid JPEG and PNG images are accepted."), { status: 415, code: "UNSUPPORTED_IMAGE_FORMAT" });
+  }
+
+  private static sanitizePng(bytes: Buffer) {
+    const parts: Buffer[] = [bytes.subarray(0, 8)];
+    let offset = 8, removed = 0, width = 0, height = 0, sawEnd = false;
+    const metadata = new Set(["eXIf", "tEXt", "zTXt", "iTXt"]);
+    while (offset + 12 <= bytes.length) {
+      const length = bytes.readUInt32BE(offset);
+      const end = offset + 12 + length;
+      if (length > 25 * 1024 * 1024 || end > bytes.length) throw Object.assign(new Error("Malformed PNG chunk."), { status: 400, code: "INVALID_IMAGE" });
+      const type = bytes.toString("ascii", offset + 4, offset + 8);
+      if (type === "IHDR") { width = bytes.readUInt32BE(offset + 8); height = bytes.readUInt32BE(offset + 12); }
+      if (metadata.has(type)) removed += 1; else parts.push(bytes.subarray(offset, end));
+      offset = end;
+      if (type === "IEND") { sawEnd = true; break; }
+    }
+    if (!sawEnd || width < 1 || height < 1 || width * height > 100_000_000) throw Object.assign(new Error("Invalid PNG dimensions or structure."), { status: 400, code: "INVALID_IMAGE" });
+    return { content: Buffer.concat(parts), format: "png" as const, dimensions: { width, height }, removed };
+  }
+
+  private static sanitizeJpeg(bytes: Buffer) {
+    const parts: Buffer[] = [bytes.subarray(0, 2)];
+    let offset = 2, removed = 0, width = 0, height = 0;
+    const sof = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    while (offset < bytes.length) {
+      if (bytes[offset] !== 0xff) throw Object.assign(new Error("Malformed JPEG marker."), { status: 400, code: "INVALID_IMAGE" });
+      const start = offset;
+      while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+      const marker = bytes[offset++];
+      if (marker === undefined) break;
+      if (marker === 0xd9) { parts.push(bytes.subarray(start, offset)); break; }
+      if (marker === 0xda) {
+        if (offset + 2 > bytes.length) throw Object.assign(new Error("Malformed JPEG scan."), { status: 400, code: "INVALID_IMAGE" });
+        parts.push(bytes.subarray(start));
+        offset = bytes.length;
+        break;
+      }
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { parts.push(bytes.subarray(start, offset)); continue; }
+      if (offset + 2 > bytes.length) throw Object.assign(new Error("Malformed JPEG segment."), { status: 400, code: "INVALID_IMAGE" });
+      const length = bytes.readUInt16BE(offset);
+      const end = offset + length;
+      if (length < 2 || end > bytes.length) throw Object.assign(new Error("Malformed JPEG segment length."), { status: 400, code: "INVALID_IMAGE" });
+      if (sof.has(marker) && length >= 7) { height = bytes.readUInt16BE(offset + 3); width = bytes.readUInt16BE(offset + 5); }
+      if (marker === 0xe1 || marker === 0xed || marker === 0xfe) removed += 1; else parts.push(bytes.subarray(start, end));
+      offset = end;
+    }
+    if (width < 1 || height < 1 || width * height > 100_000_000) throw Object.assign(new Error("Invalid JPEG dimensions or structure."), { status: 400, code: "INVALID_IMAGE" });
+    return { content: Buffer.concat(parts), format: "jpeg" as const, dimensions: { width, height }, removed };
   }
 }
 

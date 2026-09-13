@@ -1,4 +1,6 @@
 import { OmniRouteEngine } from "@npati/omniroute-adapter";
+import Fastify from "fastify";
+import { registerAIRoutes } from "../apps/agent-api/src/ai-routes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -101,5 +103,51 @@ describe("OmniRoute Embeddings resilience and failure matrix (NPATI-004D)", () =
     await expect(engine.embed({
       input: ["Chunk 1", "Chunk 2"], // expects 2 rows, received 1 malformed row
     })).rejects.toThrow(/invalid embeddings response/);
+  });
+});
+
+describe("OmniRoute Moderations production adapter", () => {
+  it("uses the real moderation endpoint and preserves provider categories", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      id: "modr-live",
+      model: "omni-moderation-latest",
+      results: [{
+        flagged: true,
+        categories: { violence: true, hate: false },
+        category_scores: { violence: 0.99, hate: 0.01 },
+        category_applied_input_types: { violence: ["text"] },
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128", apiKey: "secret" });
+    const result = await engine.moderate({ input: ["unsafe request"] });
+
+    expect(fetchMock).toHaveBeenCalledWith("http://omniroute:20128/api/v1/moderations", expect.objectContaining({ method: "POST" }));
+    expect(result.id).toBe("modr-live");
+    expect(result.results[0]?.flagged).toBe(true);
+    expect(result.results[0]?.categoryScores.violence).toBe(0.99);
+  });
+
+  it("rejects malformed provider responses instead of fabricating a result", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 })));
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await expect(engine.moderate({ input: ["one row required"] })).rejects.toThrow(/invalid moderations response/);
+  });
+});
+describe("AI inference routes fail closed", () => {
+  it("fails closed when production inference methods are absent", async () => {
+    const app = Fastify();
+    const auth = { authenticate: async () => ({ workspaceId: "ws-test", userId: "user-test", role: "owner", permissions: ["chat:use"] }) };
+    registerAIRoutes(app, {} as never, {} as never, auth as never, {} as never);
+
+    const embeddings = await app.inject({ method: "POST", url: "/ai/embeddings", payload: { input: "real vector required" } });
+    expect(embeddings.statusCode).toBe(503);
+    expect(embeddings.json().error.code).toBe("EMBEDDINGS_UNAVAILABLE");
+
+    const moderation = await app.inject({ method: "POST", url: "/ai/moderations", payload: { input: "moderate this" } });
+    expect(moderation.statusCode).toBe(503);
+    expect(moderation.json().error.code).toBe("MODERATION_UNAVAILABLE");
+    await app.close();
   });
 });

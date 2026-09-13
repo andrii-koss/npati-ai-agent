@@ -1316,7 +1316,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "ai",
     "name": "Moderations",
-    "description": "Корисно перед публікацією та customer-facing відповідями.",
+    "description": "Production moderation через OmniRoute /api/v1/moderations із реальними категоріями та оцінками; API працює fail-closed без provider endpoint.",
     "useWhen": [
       "Internal system execution requires Moderations"
     ],
@@ -1391,7 +1391,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "security_ops",
     "domain": "security",
     "name": "Vision bridge guardrail",
-    "description": "Критично перед email/browser/code автоматизацією.",
+    "description": "Очищає EXIF та текстові metadata з JPEG/PNG і блокує prompt injection у переданому або розпізнаному OCR-тексті. Автоматичний production OCR/vision analysis ще частковий.",
     "useWhen": [
       "Internal system execution requires Vision bridge guardrail"
     ],
@@ -1483,7 +1483,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Embeddings",
-    "description": "Потрібно для Company/Brand Brain і пошуку по документах.",
+    "description": "Справжні OmniRoute embeddings для Company Knowledge і pgvector; production API валідовує та нормалізує вектори й не використовує synthetic fallback.",
     "useWhen": [
       "Internal system execution requires Embeddings"
     ],

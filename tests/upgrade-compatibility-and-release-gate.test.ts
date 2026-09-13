@@ -132,18 +132,18 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(54)).toBe("VERIFIED_EXISTING");
       expect(status.get(55)).toBe("NOT_IMPLEMENTED");
       expect(status.get(56)).toBe("VERIFIED_EXISTING");
-      expect(status.get(57)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(57)).toBe("VERIFIED_EXISTING");
       expect(status.get(58)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(59)).toBe("NOT_IMPLEMENTED");
     });
 
     it("reports audited implementation status for capabilities 60 through 68", () => {
       const status = new Map(CAPABILITY_MATRIX.map((item) => [item.id, item.status]));
-      expect(status.get(60)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(60)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(61)).toBe("VERIFIED_EXISTING");
       expect(status.get(62)).toBe("VERIFIED_EXISTING");
       expect(status.get(63)).toBe("VERIFIED_EXISTING");
-      expect(status.get(64)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(64)).toBe("VERIFIED_EXISTING");
       expect(status.get(65)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(66)).toBe("VERIFIED_EXISTING");
       expect(status.get(67)).toBe("VERIFIED_EXISTING");

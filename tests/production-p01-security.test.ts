@@ -265,7 +265,7 @@ describe("P0.1 Production Security, Auth & Guardrails Suite", () => {
     });
 
     it("strips EXIF metadata and detects visual prompt injection", () => {
-      const sampleImage = Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x18, 0x45, 0x78, 0x69, 0x66]); // JPEG with EXIF header
+      const sampleImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC", "base64"); // valid 1x1 PNG
       const safeOcr = "Invoice total: $450.00. Payment received.";
 
       const safeInspection = SecurityPolicyEngine.protectVisualInput(sampleImage, safeOcr);

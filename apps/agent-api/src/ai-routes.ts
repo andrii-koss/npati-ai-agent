@@ -4,7 +4,6 @@ import type { AuthContext } from "@npati/workspace";
 import { OmniRouteError, type AIEngine, type MarketplaceQuery, type OmniRouteMarketplace, type ProviderAuthType, type ProviderFreeStatus } from "@npati/omniroute-adapter";
 import { AIPreferencesStore, type AICompressionMode, type AIMode } from "./ai-preferences";
 import type { AuthProvider } from "./auth";
-import { ContentModerationEngine } from "./multimodal-inference-engine";
 import { ResilientEmbeddingPipeline, ResilientRerankPipeline, type RerankCandidate } from "./resilient-inference-pipeline";
 
 function sendError(reply: FastifyReply, error: unknown) {
@@ -13,7 +12,14 @@ function sendError(reply: FastifyReply, error: unknown) {
   }
   if (error instanceof AIAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Unexpected AI marketplace error";
-  return reply.code(/must|required|not found/i.test(message) ? 400 : 500).send({ error: { code: "MARKETPLACE_ERROR", message } });
+  const explicitStatus = Number((error as { status?: unknown; statusCode?: unknown } | undefined)?.status ?? (error as { statusCode?: unknown } | undefined)?.statusCode);
+  const status = Number.isInteger(explicitStatus) && explicitStatus >= 400 && explicitStatus <= 599
+    ? explicitStatus
+    : (/must|required|not found/i.test(message) ? 400 : 500);
+  const code = typeof (error as { code?: unknown } | undefined)?.code === "string"
+    ? (error as { code: string }).code
+    : "MARKETPLACE_ERROR";
+  return reply.code(status).send({ error: { code, message } });
 }
 
 class AIAccessError extends Error { readonly code = "AI_ACCESS_DENIED"; readonly statusCode = 403; }
@@ -28,17 +34,21 @@ async function authorize(auth: AuthProvider, request: FastifyRequest, permission
 
 export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMarketplace, preferences: AIPreferencesStore, auth: AuthProvider, ai: AIEngine) {
   // Moderations API (#57)
-  app.post<{ Body: { input?: string | string[] } }>("/ai/moderations", async (request, reply) => {
+  app.post<{ Body: { input?: string | string[]; model?: string } }>("/ai/moderations", async (request, reply) => {
     try {
       await authorize(auth, request, "chat:use");
       const input = request.body?.input;
       if (!input) return reply.code(400).send({ error: { code: "INPUT_REQUIRED", message: "input text is required" } });
       const texts = Array.isArray(input) ? input : [input];
-      const results = texts.map((t) => ContentModerationEngine.moderateText(t));
+      if (texts.length === 0 || texts.length > 32 || texts.some((text) => typeof text !== "string" || text.trim().length === 0 || text.length > 100_000)) {
+        return reply.code(400).send({ error: { code: "INVALID_INPUT", message: "input must contain 1-32 non-empty strings of at most 100000 characters" } });
+      }
+      if (!ai.moderate) throw Object.assign(new Error("Production moderation provider is unavailable."), { status: 503, code: "MODERATION_UNAVAILABLE" });
+      const moderation = await ai.moderate({ input: texts, model: request.body?.model });
       return {
-        id: "modr_" + randomUUID(),
-        model: "npati-moderation-v1",
-        results,
+        id: moderation.id ?? "modr_" + randomUUID(),
+        model: moderation.model,
+        results: moderation.results,
       };
     } catch (error) {
       return sendError(reply, error);
@@ -58,39 +68,29 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
       const input = request.body?.input;
       if (!input) return reply.code(400).send({ error: { code: "INPUT_REQUIRED", message: "input text is required" } });
       const texts = Array.isArray(input) ? input : [input];
-      if (texts.length === 0) return reply.code(400).send({ error: { code: "INPUT_EMPTY", message: "input array cannot be empty" } });
+      if (texts.length === 0 || texts.length > 128 || texts.some((text) => typeof text !== "string" || text.trim().length === 0 || text.length > 100_000)) {
+        return reply.code(400).send({ error: { code: "INVALID_INPUT", message: "input must contain 1-128 non-empty strings of at most 100000 characters" } });
+      }
 
       let resultModel = request.body?.model || "text-embedding-3-small";
       let vectors: number[][];
       let totalTokens = texts.reduce((sum, t) => sum + Math.ceil(t.length / 4), 0);
 
-      // Try OmniRoute embed if available
-      if (ai.embed) {
-        try {
-          const res = await ai.embed({
-            input: texts,
-            model: request.body?.model,
-          });
-          vectors = res.vectors.map((v) => ResilientEmbeddingPipeline.normalizeVector(v));
-          resultModel = res.model;
-          if (res.usage?.total_tokens) totalTokens = res.usage.total_tokens;
-        } catch {
-          // Fallback to ResilientEmbeddingPipeline
-          const fallback = await ResilientEmbeddingPipeline.generateEmbeddings({
-            texts,
-            dimensions: request.body?.dimensions ?? 1536,
-            provider: "fallback-resilient",
-          });
-          vectors = fallback.vectors;
-        }
-      } else {
-        const fallback = await ResilientEmbeddingPipeline.generateEmbeddings({
-          texts,
-          dimensions: request.body?.dimensions ?? 1536,
-          provider: "fallback-resilient",
-        });
-        vectors = fallback.vectors;
+      if (!ai.embed) throw Object.assign(new Error("Production embeddings provider is unavailable."), { status: 503, code: "EMBEDDINGS_UNAVAILABLE" });
+      const res = await ai.embed({ input: texts, model: request.body?.model });
+      if (res.vectors.length !== texts.length || res.vectors.some((vector) => vector.length === 0 || vector.some((value) => !Number.isFinite(value)))) {
+        throw Object.assign(new Error("Embedding provider returned invalid vectors."), { status: 502, code: "INVALID_EMBEDDINGS_RESPONSE" });
       }
+      const dimensions = res.vectors[0]!.length;
+      if (res.vectors.some((vector) => vector.length !== dimensions)) {
+        throw Object.assign(new Error("Embedding provider returned inconsistent vector dimensions."), { status: 502, code: "INVALID_EMBEDDINGS_RESPONSE" });
+      }
+      if (request.body?.dimensions !== undefined && request.body.dimensions !== dimensions) {
+        throw Object.assign(new Error(`Configured embedding dimensions ${request.body.dimensions} do not match provider dimensions ${dimensions}.`), { status: 409, code: "EMBEDDING_DIMENSIONS_MISMATCH" });
+      }
+      vectors = res.vectors.map((vector) => ResilientEmbeddingPipeline.normalizeVector(vector));
+      resultModel = res.model;
+      if (res.usage?.total_tokens) totalTokens = res.usage.total_tokens;
 
       return {
         object: "list",

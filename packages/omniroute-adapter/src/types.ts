@@ -91,6 +91,17 @@ export interface SpeechSynthesisResult {
 
 export interface EmbeddingInput { input: string[]; model?: string; signal?: AbortSignal; timeoutMs?: number; }
 export interface EmbeddingResult { model: string; vectors: number[][]; usage?: Record<string, number>; }
+export interface ModerationInput { input: string[]; model?: string; signal?: AbortSignal; timeoutMs?: number; }
+export interface ModerationResult {
+  id?: string;
+  model: string;
+  results: Array<{
+    flagged: boolean;
+    categories: Record<string, boolean>;
+    categoryScores: Record<string, number>;
+    categoryAppliedInputTypes?: Record<string, string[]>;
+  }>;
+}
 export interface RerankInput { query: string; documents: string[]; model?: string; topN?: number; signal?: AbortSignal; timeoutMs?: number; }
 export interface RerankResult { model: string; results: Array<{ index: number; relevanceScore: number }>; }
 
@@ -194,6 +205,7 @@ export interface AIEngine {
   listModels(): Promise<ModelInfo[]>;
   getModel(id: string): Promise<ModelInfo | undefined>;
   executeTool(name: string, input: unknown): Promise<unknown>;
+  moderate?(input: ModerationInput): Promise<ModerationResult>;
   embed?(input: EmbeddingInput): Promise<EmbeddingResult>;
   rerank?(input: RerankInput): Promise<RerankResult>;
   searchMemory(query: string): Promise<unknown[]>;

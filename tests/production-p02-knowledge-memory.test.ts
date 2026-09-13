@@ -24,8 +24,8 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
     permissions: ["workspace:read", "business:manage", "chat:use"],
   };
 
-  // 1. #64 Embeddings
-  describe("#64 Embeddings (storage.embeddings)", () => {
+  // Offline deterministic embedding utility (not #64 production certification)
+  describe("Offline deterministic embedding utility", () => {
     it("generates deterministic L2-normalized embeddings of requested dimensions", async () => {
       const texts = [
         "NPATI Enterprise Agent Platform with Multi-Tenant Security",

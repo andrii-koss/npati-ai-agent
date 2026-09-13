@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-13T06:29:26.273Z",
+  "timestamp": "2026-09-13T12:15:04.891Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -7,9 +7,9 @@
     "implemented but missing UI": 0,
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
-    "partially implemented": 59,
-    "not implemented": 99,
-    "not applicable/runtime-only": 141
+    "partially implemented": 57,
+    "not implemented": 96,
+    "not applicable/runtime-only": 146
   },
   "items": {
     "implemented and verified": [
@@ -137,22 +137,6 @@
     "implemented but missing tests": [],
     "partially implemented": [
       {
-        "id": 38,
-        "capabilityId": "security.aes-256-gcm_at_rest",
-        "name": "AES-256-GCM at rest",
-        "type": "security_ops",
-        "domain": "security",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "integration",
-        "testFiles": [
-          "tests/capability-registry.test.ts",
-          "tests/security-auth-vault-scopes.test.ts",
-          "tests/production-p01-security.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
         "id": 44,
         "capabilityId": "system.isolated_group_sessions",
         "name": "Isolated group sessions",
@@ -217,18 +201,17 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
-        "id": 64,
-        "capabilityId": "storage.embeddings",
-        "name": "Embeddings",
-        "type": "runtime",
-        "domain": "storage",
+        "id": 60,
+        "capabilityId": "security.vision_bridge_guardrail",
+        "name": "Vision bridge guardrail",
+        "type": "security_ops",
+        "domain": "security",
         "agentCallable": false,
         "risk": "low",
-        "testType": "unit",
+        "testType": "integration",
         "testFiles": [
-          "tests/inference-and-memory-injection.test.ts",
-          "tests/omniroute-embeddings-resilience.test.ts",
-          "tests/production-p02-knowledge-memory.test.ts"
+          "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
+          "tests/production-p01-security.test.ts"
         ],
         "status": "PARTIALLY_IMPLEMENTED"
       },
@@ -1053,22 +1036,6 @@
         "status": "PARTIALLY_IMPLEMENTED"
       },
       {
-        "id": 260,
-        "capabilityId": "security.tenant-scoped_ai_modelrouting_preference",
-        "name": "Tenant-scoped AI model/routing preferences",
-        "type": "security_ops",
-        "domain": "security",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "integration",
-        "testFiles": [
-          "tests/capability-registry.test.ts",
-          "tests/ai-preferences.test.ts",
-          "tests/production-p01-security.test.ts"
-        ],
-        "status": "PARTIALLY_IMPLEMENTED"
-      },
-      {
         "id": 302,
         "capabilityId": "storage.omniroute_rerank_integration",
         "name": "OmniRoute Rerank integration",
@@ -1100,22 +1067,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 57,
-        "capabilityId": "ai.moderations",
-        "name": "Moderations",
-        "type": "runtime",
-        "domain": "ai",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/telemetry-cache-compaction.test.ts",
-          "tests/multimodal-inference-and-moderation.test.ts",
-          "tests/production-p01-security.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 59,
         "capabilityId": "system.ocr",
         "name": "OCR",
@@ -1128,36 +1079,6 @@
           "tests/modality-bridge-image-editing-browser.test.ts",
           "tests/multimodal-inference-and-moderation.test.ts",
           "tests/production-p12-multimodal.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 60,
-        "capabilityId": "security.vision_bridge_guardrail",
-        "name": "Vision bridge guardrail",
-        "type": "security_ops",
-        "domain": "security",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "integration",
-        "testFiles": [
-          "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
-          "tests/production-p01-security.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 62,
-        "capabilityId": "security.scoped_remote_access_tokens",
-        "name": "Scoped remote access tokens",
-        "type": "runtime",
-        "domain": "security",
-        "agentCallable": false,
-        "risk": "critical",
-        "testType": "unit",
-        "testFiles": [
-          "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
-          "tests/production-p01-security.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -3104,6 +3025,23 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 38,
+        "capabilityId": "security.aes-256-gcm_at_rest",
+        "name": "AES-256-GCM at rest",
+        "type": "security_ops",
+        "domain": "security",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/capability-registry.test.ts",
+          "tests/security-auth-vault-scopes.test.ts",
+          "tests/production-p01-security.test.ts",
+          "scripts/verify-production-api-key-auth.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 39,
         "capabilityId": "security.route_guard_tiers",
         "name": "Route guard tiers",
@@ -3330,6 +3268,22 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 57,
+        "capabilityId": "ai.moderations",
+        "name": "Moderations",
+        "type": "runtime",
+        "domain": "ai",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/telemetry-cache-compaction.test.ts",
+          "tests/multimodal-inference-and-moderation.test.ts",
+          "tests/production-p01-security.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 61,
         "capabilityId": "security.oidc_dashboard_gate",
         "name": "OIDC dashboard gate",
@@ -3346,6 +3300,22 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 62,
+        "capabilityId": "security.scoped_remote_access_tokens",
+        "name": "Scoped remote access tokens",
+        "type": "runtime",
+        "domain": "security",
+        "agentCallable": false,
+        "risk": "critical",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
+          "tests/production-p01-security.test.ts",
+          "scripts/verify-production-api-key-auth.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 63,
         "capabilityId": "security.auto_reviewer_for_exec",
         "name": "Auto reviewer for exec",
@@ -3358,6 +3328,22 @@
           "tests/auto-reviewer-and-fts-memory.test.ts",
           "tests/company-runtime.test.ts",
           "tests/production-wasm-exec.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 64,
+        "capabilityId": "storage.embeddings",
+        "name": "Embeddings",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "unit",
+        "testFiles": [
+          "tests/inference-and-memory-injection.test.ts",
+          "tests/omniroute-embeddings-resilience.test.ts",
+          "tests/production-p02-knowledge-memory.test.ts"
         ],
         "status": "VERIFIED_EXISTING"
       },
@@ -4157,6 +4143,23 @@
           "tests/scoped-memory-and-user-model.test.ts",
           "tests/web-research.test.ts",
           "tests/production-wasm-exec.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 260,
+        "capabilityId": "security.tenant-scoped_ai_modelrouting_preference",
+        "name": "Tenant-scoped AI model/routing preferences",
+        "type": "security_ops",
+        "domain": "security",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/capability-registry.test.ts",
+          "tests/ai-preferences.test.ts",
+          "tests/production-p01-security.test.ts",
+          "scripts/verify-production-api-key-auth.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },
