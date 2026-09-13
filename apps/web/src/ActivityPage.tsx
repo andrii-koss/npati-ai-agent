@@ -537,7 +537,7 @@ export function ActivityPage() {
         <div className="activity-empty-state">
           <h2>No Companies Found</h2>
           <p>Activity & Run Trace tracks multi-agent runs dispatched within an AI Company context.</p>
-          <Link to="/company" className="primary-action-btn">
+          <Link to="/company" className="button-primary automations-action-primary primary-action-btn">
             Create AI Company
           </Link>
         </div>
