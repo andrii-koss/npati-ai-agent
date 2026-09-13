@@ -270,6 +270,11 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
 
   useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
   useEffect(() => { if (mode === "models") void loadModels(true); }, [mode, modelSearch]);
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   async function connect(event?: FormEvent) {
     event?.preventDefault(); setBusy("Connecting…"); setMessage("");
