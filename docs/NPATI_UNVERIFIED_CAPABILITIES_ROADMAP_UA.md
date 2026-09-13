@@ -31,13 +31,13 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 
 ## Порядок реалізації
 
-### P0.1 — Єдиний Security, Policy та Safe Tool Execution [У РОБОТІ — 6/8 VERIFIED]
+### P0.1 — Єдиний Security, Policy та Safe Tool Execution [У РОБОТІ — 7/8 VERIFIED, 1 PARTIAL]
 
-**Статус після повторного аудиту:** 6/8 повторно сертифіковано (`#35`, `#38`, `#61`, `#62`, `#221`, `#260`). `#57` і `#60` чесно залишаються `Not implemented` до production moderation/vision pipeline.
+**Статус після реалізації:** 7/8 сертифіковано (`#35`, `#38`, `#57`, `#61`, `#62`, `#221`, `#260`). `#60` чесно залишається `PARTIALLY_IMPLEMENTED`, доки OCR/vision engine не розпізнаватиме прихований текст без переданого `ocrText`.
 - **#35 `API key auth`**: P → `VERIFIED_EXISTING` — PostgreSQL persistence, SHA-256 lookup hash, AES-GCM encrypted secret, deny-by-default scopes, контроль делегування wildcard, негайна revocation, company/tenant isolation та restart перевірені реальним Docker E2E.
 - **#38 `AES-256-GCM at rest`**: P → `VERIFIED_EXISTING` — AES-256-GCM з унікальними salt/IV і authenticated tag; production без явного ключа не стартує, слабкий ключ відхиляється, ротація секретів перевірена integration-тестом, ciphertext і restart — live Docker E2E.
-- **#57 `Moderations`**: N -> `NOT_IMPLEMENTED` (endpoint `POST /ai/moderations`, багатокатегорійне визначення hate/violence/self-harm/prompt_injection).
-- **#60 `Vision bridge guardrail`**: N -> `NOT_IMPLEMENTED` (очищення EXIF, детекція prompt injection у зоровому каналі та OCR).
+- **#57 `Moderations`**: N → `VERIFIED_EXISTING` — `POST /ai/moderations` викликає справжній OmniRoute `/api/v1/moderations`, повертає provider categories/scores, валідовує batch і працює fail-closed без runtime provider. Unit та live Docker E2E пройдені.
+- **#60 `Vision bridge guardrail`**: N → `PARTIALLY_IMPLEMENTED` — реальний parser видаляє JPEG EXIF/APP13/comment та PNG eXIf/tEXt/zTXt/iTXt, перевіряє формат/розміри й блокує prompt injection у `ocrText` та vision output. Потрібен production OCR/vision engine для автоматичного читання прихованого тексту з пікселів.
 - **#61 `OIDC dashboard gate`**: N -> `VERIFIED_EXISTING` (`OidcDashboardGate`, endpoint `POST /auth/oidc/login`, валідація issuer/aud/exp).
 - **#62 `Scoped remote access tokens`**: N → `VERIFIED_EXISTING` — HMAC token містить tenant/company/user/scopes, має TTL 60–86400 секунд та optional IP allowlist; signature, scope escalation, cross-company access і restart перевірені fail-closed у live Docker.
 - **#221 `Device tracking per API key`**: N → `VERIFIED_EXISTING` — кожна успішна API-key автентифікація атомарно оновлює `last_used_at` і durable device telemetry у PostgreSQL; стабільний device ID дедуплікує повторні запити, metadata обмежена за розміром, більше 5 пристроїв дає anomaly, помилка запису працює fail-closed. Tenant/company/key isolation і restart перевірені live Docker E2E.
@@ -50,13 +50,14 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 - Live Docker E2E для #35/#221: `scripts/verify-production-api-key-auth.mjs` — persistence/restart, revocation після restart, scope validation/delegation, encrypted-at-rest перевірка та company/tenant isolation.
 - Live Docker E2E для #38/#62/#260: `scripts/verify-production-api-key-auth.mjs` — ciphertext at rest, explicit Docker secrets, tenant/company/IP/scope binding, tamper rejection та persistence після restart.
 - Live Docker E2E для #61: `scripts/verify-production-oidc.mjs` (5/5: valid signature, tampered claims, wrong issuer, expired token, `alg=none`). Старий агрегований P0.1 script не є доказом для інших 7 пунктів.
+- Live Docker E2E для #57/#60: реальний `/ai/moderations` підтвердив `omni-moderation-latest` і provider scores; `/media/images/understand` підтвердив sanitization та `400 VISUAL_PROMPT_INJECTION`. #60 лишається Partial через відсутність production OCR із пікселів.
 
 ### P0.2 — Company Knowledge і довготривала пам'ять агента [ПОВЕРНУТО В РОБОТУ]
 
-**Статус після повторного аудиту:** 0 з 6 capabilities повністю сертифіковані; 4 залишаються `PARTIALLY_IMPLEMENTED`, 2 — `NOT_IMPLEMENTED`.
+**Статус після реалізації:** 1 з 6 capabilities сертифікована; 3 залишаються `PARTIALLY_IMPLEMENTED`, 2 — `NOT_IMPLEMENTED`.
 
 Пункти блоку:
-- **#64 `storage.embeddings`**: `PARTIALLY_IMPLEMENTED` — генерація векторних ембеддингів через `POST /ai/embeddings`, deterministic fallback з L2-нормалізацією на одиничну сферу (sum of squares ≈ 1.0) для cosine distance у PostgreSQL pgvector (`<=>`).
+- **#64 `storage.embeddings`**: `VERIFIED_EXISTING` — `POST /ai/embeddings` використовує справжній OmniRoute `/api/v1/embeddings`, перевіряє кількість, finite values та однакову dimensionality, нормалізує вектори для pgvector і працює fail-closed без synthetic production fallback. Live Docker: `openai/text-embedding-3-small`, 1536-d, L2 norm ≈ 1.0.
 - **#65 `ai.rerank`**: `PARTIALLY_IMPLEMENTED` — семантичний cross-encoder reranking через `POST /ai/rerank` із фільтрацією за stop words, обчисленням relevance score, thresholding (`minScore`) та `topN`.
 - **#72 `system.context_compaction`**: `PARTIALLY_IMPLEMENTED` — інтелектуальне стиснення діалогу через `POST /chat/compact` та `ContextCompactor`: вилучення ключових фактів (`extractMemoriesToFlush`) перед компактизацією, структурований roll-up summary старших реплік та збереження останніх turn-ів інтактними.
 - **#78 `storage.automatic_memory_extraction`**: `NOT_IMPLEMENTED` — `AutomaticMemoryExtractor` та `POST /companies/:companyId/knowledge/memory/extract`: багатокатегорійне вилучення фактів (`preference`, `business_policy`, `technical_detail`, `contact`) з оцінкою впевненості (confidence) та provenance; Jaccard token deduplication; автоматичний виклик у фоні при завершенні діалогу агента; суворе дотримання режиму приватності `noMemory`.
@@ -66,7 +67,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p02-knowledge-memory.test.ts` (13/13 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 - Live Docker E2E: `scripts/verify-production-p02-knowledge-memory.mjs` (7/7 live tests passed на реальному Docker API: embeddings, rerank, context compact, memory extract, memory rerank, company retrieve, capabilities inspect).
 
 ### P0.3 — Runtime reliability, streaming, observability і scale [#22 І #23 ЧЕСНО ЗАКРИТО]
@@ -93,7 +94,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration для #22/#23: `tests/production-admission-self-healing.test.ts` (5/5 passed: capacity, priority, timeout/cancel, 503 fallback, no fallback on 401, streaming safety) та повязані P0.3 regression suites.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 - Live Docker E2E для #22/#23: `scripts/verify-production-admission-self-healing.mjs` — auth guard, реальний primary HTTP 503 → fallback, `failoverCount=1`, bounded burst з HTTP 429, runtime metrics, tenant isolation і повторна перевірка після restart (усі перевірки passed).
 
 ### P1.1 — Browser automation [ПОВЕРНУТО В РОБОТУ — production browser не реалізовано]
@@ -120,7 +121,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Аудит #149-#158:**
 - Наявні старі unit-тести перевіряють лише API-каркаси та guardrails. Реального Playwright/CDP production E2E немає; вони не є доказом `Verified`.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 
 ### P1.2 — Multimodal Tools [ПОВЕРНУТО В РОБОТУ — synthetic adapters не сертифіковані]
 
@@ -148,7 +149,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Аудит блоку P1.2:**
 - Старі unit-тести перевіряють validation і synthetic adapters. До підключення реальних media providers та перевірки артефактів це не production certification.
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 
 ### P1.3 — Automations, triggers і durable tasks [ПОВЕРНУТО В РОБОТУ]
 
@@ -168,7 +169,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p13-automations.test.ts` (12/12 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 - Live Docker E2E: `scripts/verify-production-p13-automations.mjs` (12/12 live checks passed на реальному Docker API: auth guards, webhooks registration & public ingress, automations scheduler & cron jobs, background ledger, task flow multi-step execution, standing orders evaluation, IMAP inbound email conversion, webhook retries & DLQ replay, one-shot reminders scheduling/due queue, lifecycle hooks priority emission, capability inspect).
 
 ### P1.4 — Multi-agent, MCP та A2A control plane [ПОВЕРНУТО В РОБОТУ]
@@ -211,7 +212,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p14-orchestration-a2a.test.ts` (28/28 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 148 `VERIFIED_EXISTING`, 59 `PARTIALLY_IMPLEMENTED`, 99 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 153 `VERIFIED_EXISTING`, 57 `PARTIALLY_IMPLEMENTED`, 96 `NOT_IMPLEMENTED`).
 - Revalidation Audit: `node scripts/revalidate-306-capabilities.mjs` (306/306 verified).
 - Upgrade Gate: `node scripts/upgrade-gate.mjs` (5/5 checks green).
 - Live Docker E2E: `scripts/verify-production-p14-orchestration-a2a.mjs` (18/18 live checks passed на реальному Docker API: auth guards, 16-strategy catalog, strategy resolution, invalid strategy rejection, LKGP record/resolve, A2A v0.3 envelope create/validate/response, smart routing, health registry/report, OmniConductor DAG workflow execution, quota management & limit enforcement, provider discovery, cost analysis tree rollup, list capabilities, agent send & inbox delivery ack, context isolation & copy-on-write fork & explicit merge, nested sub-agents with depth/cycle protection & cancellation propagation, swarm routines with dynamic intent handoff).

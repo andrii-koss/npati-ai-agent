@@ -914,7 +914,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multimodal-inference-and-moderation.test.ts",
       "tests/production-p01-security.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 58,
@@ -963,7 +963,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/vision-guardrail-oidc-and-remote-tokens.test.ts",
       "tests/production-p01-security.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 61,
@@ -1027,7 +1027,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-embeddings-resilience.test.ts",
       "tests/production-p02-knowledge-memory.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 65,

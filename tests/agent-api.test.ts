@@ -306,7 +306,7 @@ describe("Agent API", () => {
         message: "Create a product listing.",
         conversationId: conversation.json().id,
         attachments: [
-          { kind: "image", name: "chair.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=" },
+          { kind: "image", name: "chair.png", mimeType: "image/png", dataBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC" },
           { kind: "audio", name: "voice.m4a", mimeType: "audio/x-m4a", dataBase64: "AQID" },
         ],
       },
@@ -318,7 +318,7 @@ describe("Agent API", () => {
     expect(transcriptionMimeType).toBe("audio/mp4");
     const userContent = lastChat?.messages.at(-1)?.content;
     expect(Array.isArray(userContent)).toBe(true);
-    expect(JSON.stringify(userContent)).toContain("data:image/png;base64,iVBORw0KGgo=");
+    expect(JSON.stringify(userContent)).toContain("data:image/png;base64,iVBORw0KGgoAAA");
     expect(JSON.stringify(userContent)).toContain("I sell furniture in Lviv.");
     const history = await app.inject({
       method: "GET",

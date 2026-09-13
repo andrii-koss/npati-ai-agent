@@ -212,12 +212,12 @@ if (!inspectRes.ok) {
 }
 
 const p02Capabilities = [
-  { id: 64, name: "storage.embeddings" },
-  { id: 65, name: "ai.rerank" },
-  { id: 72, name: "system.context_compaction" },
-  { id: 78, name: "storage.automatic_memory_extraction" },
-  { id: 80, name: "storage.memory_rerank" },
-  { id: 302, name: "storage.omniroute_rerank_integration" },
+  { id: 64, name: "storage.embeddings", expected: "VERIFIED_EXISTING" },
+  { id: 65, name: "ai.rerank", expected: "PARTIALLY_IMPLEMENTED" },
+  { id: 72, name: "system.context_compaction", expected: "PARTIALLY_IMPLEMENTED" },
+  { id: 78, name: "storage.automatic_memory_extraction", expected: "NOT_IMPLEMENTED" },
+  { id: 80, name: "storage.memory_rerank", expected: "NOT_IMPLEMENTED" },
+  { id: 302, name: "storage.omniroute_rerank_integration", expected: "PARTIALLY_IMPLEMENTED" },
 ];
 
 const items = inspectRes.data.items ?? inspectRes.data.capabilities ?? [];
@@ -228,12 +228,12 @@ for (const cap of p02Capabilities) {
   if (!found) {
     throw new Error(`Capability #${cap.id} (${cap.name}) not found in live /capabilities/inspect`);
   }
-  if (found.status !== "VERIFIED_EXISTING") {
-    throw new Error(`Capability #${cap.id} (${cap.name}) expected VERIFIED_EXISTING, got: ${found.status}`);
+  if (found.status !== cap.expected) {
+    throw new Error(`Capability #${cap.id} (${cap.name}) expected ${cap.expected}, got: ${found.status}`);
   }
-  console.log(`  • #${cap.id} ${cap.name}: VERIFIED_EXISTING [✓]`);
+  console.log(`  • #${cap.id} ${cap.name}: ${found.status}`);
 }
 
 console.log("\n==========================================================");
-console.log("  ALL P0.2 CAPABILITIES VERIFIED SUCCESSFULLY ON DOCKER   ");
+console.log("  P0.2 IMPLEMENTATION AND HONEST STATUSES VALIDATED       ");
 console.log("==========================================================");

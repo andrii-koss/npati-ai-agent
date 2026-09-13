@@ -13,6 +13,7 @@ import {
   ImageUnderstandingEngine,
 } from "./multimodal-bridge-and-browser";
 import { BrowserSecurityGuard } from "./browser-security-guard";
+import { VisionBridgeGuardrail } from "./security-guardrails-and-tokens";
 import {
   AudioTranslationEngine,
   VideoUnderstandingEngine,
@@ -235,11 +236,12 @@ export function registerMultimodalRoutes(
     Body: {
       imageInput: string; // base64 or URL
       query?: string;
+      ocrText?: string;
     };
   }>("/media/images/understand", async (r, reply) => {
     try {
       await ctx(auth, r, "workspace:read");
-      const { imageInput, query = "Describe this image in detail." } = r.body || {};
+      const { imageInput, query = "Describe this image in detail.", ocrText } = r.body || {};
 
       if (!imageInput || typeof imageInput !== "string" || imageInput.trim().length === 0) {
         throw Object.assign(new Error("imageInput (URL or base64) is required."), { status: 400, code: "MISSING_IMAGE" });
@@ -257,8 +259,35 @@ export function registerMultimodalRoutes(
         }
       }
 
-      const analysis = await ImageUnderstandingEngine.analyzeImage({ imageInput, query });
-      return reply.code(200).send(analysis);
+      let securedImageInput = imageInput;
+      let uploadInspection: ReturnType<typeof VisionBridgeGuardrail.inspectVisualInput> | undefined;
+      if (!isUrl) {
+        uploadInspection = VisionBridgeGuardrail.inspectVisualInput(imageInput, [query, ocrText].filter(Boolean).join("\n"));
+        if (!uploadInspection.isSafe) {
+          throw Object.assign(new Error(`Visual prompt injection detected: ${uploadInspection.violations.join(", ")}`), { status: 400, code: "VISUAL_PROMPT_INJECTION" });
+        }
+        const mime = uploadInspection.format === "png" ? "image/png" : "image/jpeg";
+        securedImageInput = `data:${mime};base64,${uploadInspection.sanitizedContent!.toString("base64")}`;
+      }
+
+      const analysis = await ImageUnderstandingEngine.analyzeImage({ imageInput: securedImageInput, query });
+      const detectedVisualText = [ocrText, analysis.sceneDescription, analysis.answers].filter(Boolean).join("\n");
+      if (detectedVisualText) {
+        const inspectionBytes = uploadInspection?.sanitizedContent ?? Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]);
+        const outputInspection = VisionBridgeGuardrail.inspectVisualInput(inspectionBytes, detectedVisualText);
+        if (!outputInspection.isSafe) {
+          throw Object.assign(new Error(`Visual prompt injection detected: ${outputInspection.violations.join(", ")}`), { status: 400, code: "VISUAL_PROMPT_INJECTION" });
+        }
+      }
+      return reply.code(200).send({
+        ...analysis,
+        security: {
+          visualGuardrail: "passed",
+          metadataScrubbed: uploadInspection?.scrubbedExif ?? false,
+          removedMetadataChunks: uploadInspection?.removedMetadataChunks ?? 0,
+          imageDimensions: uploadInspection?.imageDimensions,
+        },
+      });
     } catch (e) {
       return err(reply, e);
     }

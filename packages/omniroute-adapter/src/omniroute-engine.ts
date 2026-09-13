@@ -1,5 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
-import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, EmbeddingInput, EmbeddingResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
+import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -628,6 +628,35 @@ export class OmniRouteEngine implements AIEngine {
     return { model: payload.model ?? model, vectors: rows.map((row) => row.embedding!), usage: payload.usage };
   }
 
+  async moderate(input: ModerationInput): Promise<ModerationResult> {
+    if (!this.baseUrl) throw new Error("OmniRoute is not configured");
+    const model = input.model ?? "omni-moderation-latest";
+    const response = await fetch(this.baseUrl + "/api/v1/moderations", {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ model, input: input.input.length === 1 ? input.input[0] : input.input }),
+      signal: requestSignal(input.signal, input.timeoutMs ?? 30_000),
+    });
+    if (!response.ok) throw await this.responseError("moderations", response);
+    const payload = await response.json() as {
+      id?: string;
+      model?: string;
+      results?: Array<{ flagged?: boolean; categories?: Record<string, boolean>; category_scores?: Record<string, number>; category_applied_input_types?: Record<string, string[]> }>;
+    };
+    if (!Array.isArray(payload.results) || payload.results.length !== input.input.length) {
+      throw new Error("OmniRoute returned an invalid moderations response");
+    }
+    return {
+      id: payload.id,
+      model: payload.model ?? model,
+      results: payload.results.map((row) => ({
+        flagged: row.flagged === true,
+        categories: row.categories ?? {},
+        categoryScores: row.category_scores ?? {},
+        categoryAppliedInputTypes: row.category_applied_input_types,
+      })),
+    };
+  }
   async rerank(input: RerankInput): Promise<RerankResult> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const model = await this.rerankSpecialtyModel(input.model ?? this.rerankModel);
@@ -649,7 +678,7 @@ export class OmniRouteEngine implements AIEngine {
   }
 
   async getCapabilities(): Promise<string[]> {
-    return ["chat", "vision", "audio.transcription", "audio.speech", "embeddings", "rerank", "stream", "models", "web.search", "web.fetch", "health"];
+    return ["chat", "vision", "audio.transcription", "audio.speech", "moderations", "embeddings", "rerank", "stream", "models", "web.search", "web.fetch", "health"];
   }
 
   async resilienceStatus(): Promise<OmniRouteResilienceSnapshot> {
