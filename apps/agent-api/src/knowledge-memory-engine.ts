@@ -1,13 +1,15 @@
-import Database from "better-sqlite3";
-import type {ProductionQdrantClient} from "./qdrant-client";
+import { createRequire } from "node:module";
+import type { ProductionQdrantClient } from "./qdrant-client";
+
+const require = createRequire(import.meta.url);
 export interface KnowledgeEngineScope{workspaceId:string;companyId:string;userId:string}
 export interface KnowledgeEnginePoint{id:string;documentId:string;content:string;index:number;vector?:number[]}
 export interface KnowledgeEngineHit{id:string;content:string;score:number;engine:string}
 export interface KnowledgeMemoryEngine{readonly name:string;health():Promise<{healthy:boolean;detail?:string}>;upsert(scope:KnowledgeEngineScope,points:KnowledgeEnginePoint[]):Promise<void>;search(scope:KnowledgeEngineScope,query:{text:string;vector?:number[];limit:number}):Promise<KnowledgeEngineHit[]>;deleteDocument(scope:KnowledgeEngineScope&{documentId:string}):Promise<void>}
 function ftsQuery(value:string){const terms=value.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu)??[];return [...new Set(terms)].slice(0,24).map(term=>`"${term.replaceAll('"','""')}"*`).join(" OR ")}
 export class SqliteFts5MemoryEngine implements KnowledgeMemoryEngine{
- readonly name="sqlite-fts5";private readonly db:Database.Database;
- constructor(filename:string){this.db=new Database(filename);this.db.pragma("journal_mode = WAL");this.db.pragma("busy_timeout = 5000");this.db.exec(`
+ readonly name="sqlite-fts5";private readonly db: any;
+ constructor(filename:string){const Database=require("better-sqlite3");this.db=new Database(filename);this.db.pragma("journal_mode = WAL");this.db.pragma("busy_timeout = 5000");this.db.exec(`
  CREATE TABLE IF NOT EXISTS knowledge_fts_documents(rowid INTEGER PRIMARY KEY,point_id TEXT NOT NULL UNIQUE,workspace_id TEXT NOT NULL,company_id TEXT NOT NULL,user_id TEXT NOT NULL,document_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,content TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS knowledge_fts_scope_idx ON knowledge_fts_documents(workspace_id,company_id,user_id,document_id);
  CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(content,content='knowledge_fts_documents',content_rowid='rowid',tokenize='unicode61 remove_diacritics 2');

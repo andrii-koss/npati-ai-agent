@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { SPEECH_VOICES } from "./speech-voices";
 
 export type ChatAttachmentInput = {
   kind: "image" | "audio" | "document" | "file";
@@ -19,7 +20,23 @@ export function PendingMessageAttachments({ value }: { value: ChatAttachmentInpu
       : item.kind === "audio"
         ? <figure className="chat-message-attachment audio" key={index + item.name}>
             <audio controls src={"data:" + item.mimeType + ";base64," + item.dataBase64} />
-            <figcaption>{item.name}</figcaption>
+            <figcaption className="chat-audio-figcaption">
+              <span>{item.name}</span>
+              <a
+                href={"data:" + item.mimeType + ";base64," + item.dataBase64}
+                download={item.name}
+                className="chat-attachment-download-btn"
+                title={"Download " + item.name}
+                aria-label={"Download " + item.name}
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Download</span>
+              </a>
+            </figcaption>
           </figure>
         : <figure className="chat-message-attachment document" key={index + item.name}><strong>{item.name}</strong></figure>)}
   </div>;
@@ -44,11 +61,34 @@ function fileBase64(file: File) {
   });
 }
 
-export function ChatAttachments({ value, onChange, onError, disabled }: {
+export function ChatAttachments({
+  value,
+  onChange,
+  onError,
+  disabled,
+  privateRequestEnabled,
+  onPrivateRequestChange,
+  ttsEnabled,
+  onTtsEnabledChange,
+  ttsVoice,
+  onTtsVoiceChange,
+  inputText,
+  onGenerateSpeech,
+  isGeneratingSpeech,
+}: {
   value: ChatAttachmentInput[];
   onChange(value: ChatAttachmentInput[]): void;
   onError(message: string): void;
   disabled?: boolean;
+  privateRequestEnabled?: boolean;
+  onPrivateRequestChange?(enabled: boolean): void;
+  ttsEnabled?: boolean;
+  onTtsEnabledChange?(enabled: boolean): void;
+  ttsVoice?: string;
+  onTtsVoiceChange?(voice: string): void;
+  inputText?: string;
+  onGenerateSpeech?(): Promise<void>;
+  isGeneratingSpeech?: boolean;
 }) {
   const imageInput = useRef<HTMLInputElement>(null);
   const attachmentRoot = useRef<HTMLElement>(null);
@@ -59,6 +99,42 @@ export function ChatAttachments({ value, onChange, onError, disabled }: {
   const chunks = useRef<Blob[]>([]);
   const [recording, setRecording] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [localMode, setLocalMode] = useState<"none" | "private" | "tts">("none");
+  const [localTtsVoice, setLocalTtsVoice] = useState(() => {
+    try {
+      return localStorage.getItem("npati_chat_tts_voice") || "alloy";
+    } catch {
+      return "alloy";
+    }
+  });
+
+  const activePrivateRequest = privateRequestEnabled !== undefined ? Boolean(privateRequestEnabled) : localMode === "private";
+  const activeTtsEnabled = ttsEnabled !== undefined ? Boolean(ttsEnabled) : localMode === "tts";
+  const activeTtsVoice = ttsVoice !== undefined ? ttsVoice : localTtsVoice;
+
+  const handleTogglePrivateRequest = (checked: boolean) => {
+    if (onPrivateRequestChange) {
+      onPrivateRequestChange(checked);
+    } else {
+      setLocalMode(checked ? "private" : "none");
+    }
+  };
+
+  const handleToggleTts = (checked: boolean) => {
+    if (onTtsEnabledChange) {
+      onTtsEnabledChange(checked);
+    } else {
+      setLocalMode(checked ? "tts" : "none");
+    }
+  };
+
+  const handleVoiceChange = (voice: string) => {
+    setLocalTtsVoice(voice);
+    try {
+      localStorage.setItem("npati_chat_tts_voice", voice);
+    } catch {}
+    onTtsVoiceChange?.(voice);
+  };
 
   useEffect(() => () => stream.current?.getTracks().forEach((track) => track.stop()), []);
 
@@ -192,7 +268,21 @@ export function ChatAttachments({ value, onChange, onError, disabled }: {
     } catch (error) {
       stream.current?.getTracks().forEach((track) => track.stop());
       setRecording(false);
-      onError(error instanceof Error ? error.message : "Microphone access failed.");
+      let message = "Could not access microphone.";
+      if (error instanceof Error) {
+        const msg = error.message.toLowerCase();
+        const name = error.name;
+        if (name === "NotAllowedError" || msg.includes("permission denied") || msg.includes("permission dismissed")) {
+          message = "Microphone access was denied by Windows or the browser. Please: 1) In Windows Settings (Privacy > Microphone), enable 'Allow apps to access your microphone'; 2) In the browser address bar, allow microphone access for this site.";
+        } else if (name === "NotFoundError" || msg.includes("not found")) {
+          message = "No microphone detected. Please check your microphone connection.";
+        } else if (name === "NotReadableError" || msg.includes("in use")) {
+          message = "Microphone is currently in use by another application.";
+        } else {
+          message = error.message || "Could not access microphone.";
+        }
+      }
+      onError(message);
     }
   }
 
@@ -226,6 +316,84 @@ export function ChatAttachments({ value, onChange, onError, disabled }: {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13M9 9l10-2" /><circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" /></svg>
             <span><strong>Add audio file</strong><small>Upload from your computer</small></span>
           </button>
+          <div className="chat-add-menu-divider" />
+          <div className="chat-add-menu-item chat-add-menu-toggle-item">
+            <label className="chat-add-menu-toggle-label">
+              <input
+                type="checkbox"
+                checked={activePrivateRequest}
+                onChange={(e) => handleTogglePrivateRequest(e.target.checked)}
+              />
+              <span className={`chat-menu-checkbox ${activePrivateRequest ? "checked" : ""}`} aria-hidden="true">
+                {activePrivateRequest && (
+                  <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+              <span className="chat-menu-toggle-title">Private request</span>
+            </label>
+          </div>
+          <div className="chat-add-menu-item chat-add-menu-toggle-item chat-add-menu-tts-item">
+            {!activeTtsEnabled ? (
+              <label className="chat-add-menu-toggle-label chat-add-menu-tts-toggle">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  onChange={(e) => handleToggleTts(e.target.checked)}
+                />
+                <span className="chat-menu-checkbox chat-tts-checkbox" aria-hidden="true" />
+                <span className="chat-menu-toggle-title chat-tts-label">Text-to-Speech</span>
+              </label>
+            ) : (
+              <div className="chat-add-menu-tts-active-row">
+                <label className="chat-add-menu-checkbox-wrap" title="Disable Text-to-Speech">
+                  <input
+                    type="checkbox"
+                    checked={true}
+                    onChange={() => handleToggleTts(false)}
+                  />
+                  <span className="chat-menu-checkbox chat-tts-checkbox checked" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="12" height="12">
+                      <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </label>
+                <div className="chat-tts-voice-control">
+                  <span className="chat-tts-voice-title">Voice</span>
+                  <select
+                    className="chat-tts-voice-select"
+                    value={activeTtsVoice}
+                    onChange={(e) => handleVoiceChange(e.target.value)}
+                    aria-label="Speech voice"
+                  >
+                    {SPEECH_VOICES.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {voice.label} - {voice.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+          {activeTtsEnabled && onGenerateSpeech && inputText?.trim() && (
+            <button
+              type="button"
+              className="chat-add-menu-generate-btn"
+              disabled={disabled || isGeneratingSpeech}
+              onClick={() => {
+                setMenuOpen(false);
+                void onGenerateSpeech();
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
+              <span>
+                <strong>{isGeneratingSpeech ? "Generating speech…" : "Generate speech recording"}</strong>
+                <small>Create audio from your current message</small>
+              </span>
+            </button>
+          )}
         </div>}
       </div>
       <button type="button" className={"chat-icon-button microphone" + (recording ? " recording" : "")}

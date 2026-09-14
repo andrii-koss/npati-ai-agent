@@ -99,9 +99,12 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   }
 
   async authenticate(request: FastifyRequest): Promise<AuthContext> {
+    const queryToken = (request.query as Record<string, string> | undefined)?.token;
     const rawApiKey = (request.headers["x-api-key"] as string) || (request.headers["x-npati-api-key"] as string);
     const authHeader = request.headers.authorization;
-    const bearerToken = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : undefined;
+    const bearerToken = authHeader && authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : (queryToken && queryToken.trim() ? queryToken.trim() : undefined);
     const tokenOrApiKey = rawApiKey || bearerToken;
 
     // 1. API Key Authentication (#35 & #221)
@@ -224,12 +227,12 @@ export class NpatiBackendAuthProvider implements AuthProvider {
     }
 
     // 4. Standard Bearer JWT Authentication
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!bearerToken) {
       if (this.allowDevFallback) return this.devFallback.authenticate(request);
       throw new AuthenticationError("Bearer token is required");
     }
 
-    const token = authHeader.slice(7).trim();
+    const token = bearerToken;
     if (!token) {
       throw new AuthenticationError("Bearer token is empty", 401, "INVALID_TOKEN");
     }

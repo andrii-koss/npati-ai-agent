@@ -295,10 +295,10 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     ],
     "type": "configuration",
     "domain": "system",
-    "name": "Dashboard",
-    "description": "Workspace operations dashboard with live service health, business summary, and links to runtime diagnostics.",
+    "name": "Connected Services",
+    "description": "Workspace operations and connected services with live service health, business summary, and links to runtime diagnostics.",
     "useWhen": [
-      "Internal system execution requires Dashboard"
+      "Internal system execution requires Connected Services"
     ],
     "doNotUseWhen": [
       "Not directly callable by LLM agents; internal runtime only"
