@@ -399,6 +399,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       }
       catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     }
+    const durableMemoryFeaturesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='033_durable_memory_features'");
+    if (!durableMemoryFeaturesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration033 } = await import("./migration-033");
+        await runMigration033(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('033_durable_memory_features') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      }
+      catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
@@ -661,6 +673,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       languages=CASE WHEN $4::jsonb ? 'languages' THEN $4::jsonb->'languages' ELSE languages END,
       brand_tone=CASE WHEN $4::jsonb ? 'brandTone' THEN NULLIF($4::jsonb->>'brandTone','') ELSE brand_tone END,
       company_instructions=CASE WHEN $4::jsonb ? 'companyInstructions' THEN NULLIF($4::jsonb->>'companyInstructions','') ELSE company_instructions END,
+      memory=CASE WHEN $4::jsonb ? 'memory' THEN $4::jsonb->'memory' ELSE memory END,
       status=CASE WHEN $4::jsonb ? 'status' THEN $4::jsonb->>'status' ELSE status END,
       revision=revision+1,updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND revision=$5 RETURNING ${companyColumns}`,

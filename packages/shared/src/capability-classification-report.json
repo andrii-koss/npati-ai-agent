@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-13T18:50:41.898Z",
+  "timestamp": "2026-09-14T06:29:51.529Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -8,8 +8,8 @@
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
     "partially implemented": 56,
-    "not implemented": 95,
-    "not applicable/runtime-only": 148
+    "not implemented": 89,
+    "not applicable/runtime-only": 154
   },
   "items": {
     "implemented and verified": [
@@ -1067,50 +1067,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 73,
-        "capabilityId": "storage.usermd_user_model",
-        "name": "USER.md user model",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/inference-and-memory-injection.test.ts",
-          "tests/scoped-memory-and-user-model.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 74,
-        "capabilityId": "storage.memorymd_long-term_memory",
-        "name": "MEMORY.md long-term memory",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/inference-and-memory-injection.test.ts",
-          "tests/memory-md-quota-and-channel-auth.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 77,
-        "capabilityId": "storage.automatic_memory_flush",
-        "name": "Automatic memory flush",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/capability-registry.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 79,
         "capabilityId": "research.fts5_keyword_search",
         "name": "FTS5 keyword search",
@@ -1139,48 +1095,6 @@
           "tests/memory-decay-rerank-and-journal.test.ts",
           "tests/omniroute-adapter.test.ts",
           "tests/production-p02-knowledge-memory.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 81,
-        "capabilityId": "storage.typed_decay",
-        "name": "Typed decay",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/memory-decay-rerank-and-journal.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 83,
-        "capabilityId": "storage.daily_memory_notes",
-        "name": "Daily memory notes",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/memory-decay-rerank-and-journal.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 85,
-        "capabilityId": "storage.standing_intents",
-        "name": "Standing intents",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/standing-intents-wiki-and-dreaming.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -3427,6 +3341,40 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 73,
+        "capabilityId": "storage.usermd_user_model",
+        "name": "USER.md user model",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/inference-and-memory-injection.test.ts",
+          "tests/scoped-memory-and-user-model.test.ts",
+          "tests/production-memory-documents.test.ts",
+          "scripts/verify-production-memory-documents.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 74,
+        "capabilityId": "storage.memorymd_long-term_memory",
+        "name": "MEMORY.md long-term memory",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/inference-and-memory-injection.test.ts",
+          "tests/memory-md-quota-and-channel-auth.test.ts",
+          "tests/production-memory-documents.test.ts",
+          "scripts/verify-production-memory-documents.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 75,
         "capabilityId": "research.semantic_memory_search",
         "name": "Semantic memory search",
@@ -3459,6 +3407,21 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 77,
+        "capabilityId": "storage.automatic_memory_flush",
+        "name": "Automatic memory flush",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/durable-memory-features.test.ts",
+          "scripts/verify-production-durable-memory-features.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 78,
         "capabilityId": "storage.automatic_memory_extraction",
         "name": "Automatic memory extraction",
@@ -3471,6 +3434,21 @@
           "tests/capability-registry.test.ts",
           "tests/production-p02-knowledge-memory.test.ts",
           "scripts/verify-production-p02-knowledge-memory.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 81,
+        "capabilityId": "storage.typed_decay",
+        "name": "Typed decay",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/durable-memory-features.test.ts",
+          "scripts/verify-production-durable-memory-features.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },
@@ -3502,6 +3480,21 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 83,
+        "capabilityId": "storage.daily_memory_notes",
+        "name": "Daily memory notes",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/durable-memory-features.test.ts",
+          "scripts/verify-production-durable-memory-features.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 84,
         "capabilityId": "storage.memory_get",
         "name": "Memory get",
@@ -3514,6 +3507,21 @@
           "tests/company-tool-runtime.test.ts",
           "tests/company-runtime.test.ts",
           "scripts/verify-npati-004-e2e.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 85,
+        "capabilityId": "storage.standing_intents",
+        "name": "Standing intents",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/durable-memory-features.test.ts",
+          "scripts/verify-production-durable-memory-features.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },

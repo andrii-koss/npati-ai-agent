@@ -156,11 +156,11 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(70)).toBe("VERIFIED_EXISTING");
       expect(status.get(71)).toBe("VERIFIED_EXISTING");
       expect(status.get(72)).toBe("VERIFIED_EXISTING");
-      expect(status.get(73)).toBe("NOT_IMPLEMENTED");
-      expect(status.get(74)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(73)).toBe("VERIFIED_EXISTING");
+      expect(status.get(74)).toBe("VERIFIED_EXISTING");
       expect(status.get(75)).toBe("VERIFIED_EXISTING");
       expect(status.get(76)).toBe("VERIFIED_EXISTING");
-      expect(status.get(77)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(77)).toBe("VERIFIED_EXISTING");
       expect(status.get(78)).toBe("VERIFIED_EXISTING");
     });
 
@@ -168,11 +168,11 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       const status = new Map(CAPABILITY_MATRIX.map((item) => [item.id, item.status]));
       expect(status.get(79)).toBe("NOT_IMPLEMENTED");
       expect(status.get(80)).toBe("NOT_IMPLEMENTED");
-      expect(status.get(81)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(81)).toBe("VERIFIED_EXISTING");
       expect(status.get(82)).toBe("VERIFIED_EXISTING");
-      expect(status.get(83)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(83)).toBe("VERIFIED_EXISTING");
       expect(status.get(84)).toBe("VERIFIED_EXISTING");
-      expect(status.get(85)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(85)).toBe("VERIFIED_EXISTING");
       expect(status.get(86)).toBe("NOT_IMPLEMENTED");
       expect(status.get(87)).toBe("NOT_IMPLEMENTED");
       expect(status.get(88)).toBe("NOT_IMPLEMENTED");

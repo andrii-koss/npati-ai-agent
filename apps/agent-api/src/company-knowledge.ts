@@ -50,7 +50,33 @@ export class CompanyKnowledgeRepository {
  async addMemory(ctx:AuthContext,companyId:string,content:string,source='manual',metadata:Record<string,unknown>={}){return (await this.pool.query<CompanyMemory>(`INSERT INTO company_memories(id,workspace_id,company_id,user_id,content,source,metadata) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING ${memCols}`,[randomUUID(),ctx.workspaceId,companyId,ctx.userId,content.trim(),source,JSON.stringify(metadata)])).rows[0]!;}
  async updateMemory(ctx:AuthContext,companyId:string,id:string,content:string){const r=await this.pool.query<CompanyMemory>(`UPDATE company_memories SET content=$5,revision=revision+1,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND deleted_at IS NULL RETURNING ${memCols}`,[id,ctx.workspaceId,companyId,ctx.userId,content.trim()]);if(!r.rows[0])throw Object.assign(Error("Company memory not found"),{status:404});return r.rows[0];}
  async deleteMemory(ctx:AuthContext,companyId:string,id:string){const r=await this.pool.query("UPDATE company_memories SET deleted_at=COALESCE(deleted_at,now()),updated_at=now() WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND deleted_at IS NULL",[id,ctx.workspaceId,companyId,ctx.userId]);return Boolean(r.rowCount);}
- async purgeCompany(ctx:AuthContext,companyId:string){const client=await this.pool.connect();try{await client.query("BEGIN");await client.query("DELETE FROM company_knowledge_documents WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("DELETE FROM company_memories WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
+ async addMemoryIdempotent(ctx:AuthContext,companyId:string,content:string,source:string,requestKey:string,metadata:Record<string,unknown>={}){
+  const id=randomUUID();
+  const inserted=await this.pool.query<CompanyMemory>(`INSERT INTO company_memories(id,workspace_id,company_id,user_id,content,source,metadata,request_key) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT DO NOTHING RETURNING ${memCols}`,[id,ctx.workspaceId,companyId,ctx.userId,content.trim(),source,JSON.stringify(metadata),requestKey]);
+  if(inserted.rows[0])return {memory:inserted.rows[0],created:true};
+  const existing=await this.pool.query<CompanyMemory>(`SELECT ${memCols} FROM company_memories WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND source=$4 AND request_key=$5 AND deleted_at IS NULL`,[ctx.workspaceId,companyId,ctx.userId,source,requestKey]);
+  if(!existing.rows[0])throw Error("Memory idempotency conflict");
+  return {memory:existing.rows[0],created:false};
+ }
+ async addDailyNote(ctx:AuthContext,companyId:string,input:{date:string;topic:string;content:string;agentId?:string;idempotencyKey:string}){
+  const id=randomUUID();
+  const inserted=await this.pool.query(`INSERT INTO company_daily_memory_notes(id,workspace_id,company_id,user_id,note_date,topic,content,agent_id,idempotency_key) VALUES($1,$2,$3,$4,$5::date,$6,$7,$8::uuid,$9) ON CONFLICT DO NOTHING RETURNING id,company_id AS "companyId",note_date::text AS date,topic,content,agent_id AS "agentId",created_at AS "createdAt"`,[id,ctx.workspaceId,companyId,ctx.userId,input.date,input.topic.trim(),input.content.trim(),input.agentId??null,input.idempotencyKey]);
+  if(inserted.rows[0])return {note:inserted.rows[0],created:true};
+  const existing=await this.pool.query(`SELECT id,company_id AS "companyId",note_date::text AS date,topic,content,agent_id AS "agentId",created_at AS "createdAt" FROM company_daily_memory_notes WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND idempotency_key=$4`,[ctx.workspaceId,companyId,ctx.userId,input.idempotencyKey]);
+  if(!existing.rows[0])throw Error("Daily note idempotency conflict");
+  return {note:existing.rows[0],created:false};
+ }
+ async dailyNotes(ctx:AuthContext,companyId:string,date:string){return (await this.pool.query(`SELECT id,company_id AS "companyId",note_date::text AS date,topic,content,agent_id AS "agentId",created_at AS "createdAt" FROM company_daily_memory_notes WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND note_date=$4::date ORDER BY created_at,id`,[ctx.workspaceId,companyId,ctx.userId,date])).rows;}
+ async addStandingIntent(ctx:AuthContext,companyId:string,input:{title:string;description:string;triggerKeywords:string[];idempotencyKey:string}){
+  const id=randomUUID();
+  const inserted=await this.pool.query(`INSERT INTO company_standing_intents(id,workspace_id,company_id,user_id,title,description,trigger_keywords,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT DO NOTHING RETURNING id,company_id AS "companyId",title,description,status,trigger_keywords AS "triggerKeywords",revision,created_at AS "createdAt",updated_at AS "updatedAt",resolved_at AS "resolvedAt"`,[id,ctx.workspaceId,companyId,ctx.userId,input.title.trim(),input.description.trim(),JSON.stringify(input.triggerKeywords),input.idempotencyKey]);
+  if(inserted.rows[0])return {intent:inserted.rows[0],created:true};
+  const existing=await this.pool.query(`SELECT id,company_id AS "companyId",title,description,status,trigger_keywords AS "triggerKeywords",revision,created_at AS "createdAt",updated_at AS "updatedAt",resolved_at AS "resolvedAt" FROM company_standing_intents WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND idempotency_key=$4`,[ctx.workspaceId,companyId,ctx.userId,input.idempotencyKey]);
+  if(!existing.rows[0])throw Error("Standing intent idempotency conflict");
+  return {intent:existing.rows[0],created:false};
+ }
+ async standingIntents(ctx:AuthContext,companyId:string,status?:string){return (await this.pool.query(`SELECT id,company_id AS "companyId",title,description,status,trigger_keywords AS "triggerKeywords",revision,created_at AS "createdAt",updated_at AS "updatedAt",resolved_at AS "resolvedAt" FROM company_standing_intents WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND ($4::text IS NULL OR status=$4) ORDER BY updated_at DESC,id`,[ctx.workspaceId,companyId,ctx.userId,status??null])).rows;}
+ async updateStandingIntent(ctx:AuthContext,companyId:string,id:string,status:string,expectedRevision:number){const result=await this.pool.query(`UPDATE company_standing_intents SET status=$5,revision=revision+1,updated_at=now(),resolved_at=CASE WHEN $5 IN ('fulfilled','cancelled') THEN now() ELSE NULL END WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4 AND revision=$6 RETURNING id,company_id AS "companyId",title,description,status,trigger_keywords AS "triggerKeywords",revision,created_at AS "createdAt",updated_at AS "updatedAt",resolved_at AS "resolvedAt"`,[id,ctx.workspaceId,companyId,ctx.userId,status,expectedRevision]);if(!result.rows[0])throw Object.assign(Error("Standing intent was changed or not found"),{status:409});return result.rows[0];} async purgeCompany(ctx:AuthContext,companyId:string){const client=await this.pool.connect();try{await client.query("BEGIN");await client.query("DELETE FROM company_knowledge_documents WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("DELETE FROM company_memories WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3",[ctx.workspaceId,companyId,ctx.userId]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
  async close(){await this.pool.end();}
 }
 
@@ -120,13 +146,22 @@ export class CompanyKnowledgeProcessor {
     return candidates.slice(0,limit);
   }
   async retrieveContext(ctx:AuthContext,companyId:string,query:string,limit=6){
-    let [chunks,rawMemories]=await Promise.all([
+    let [chunks,rawMemories,dailyNotes,standingIntents]=await Promise.all([
       this.retrieve(ctx,companyId,query,limit),
-      this.repo.searchMemories(ctx,companyId,query,Math.max(limit*2,12))
+      this.repo.searchMemories(ctx,companyId,query,Math.max(limit*2,12)),
+      typeof (this.repo as any).dailyNotes==="function"?this.repo.dailyNotes(ctx,companyId,new Date().toISOString().slice(0,10)):Promise.resolve([]),
+      typeof (this.repo as any).standingIntents==="function"?this.repo.standingIntents(ctx,companyId):Promise.resolve([])
     ]);
     if(!rawMemories.length){
       rawMemories=await this.repo.memories(ctx,companyId);
     }
+    const queryLower=query.toLocaleLowerCase();
+    const structuredMemories:CompanyMemory[]=[
+      ...dailyNotes.map((note:any)=>({id:note.id,workspaceId:ctx.workspaceId,companyId,userId:ctx.userId,content:`${note.topic}: ${note.content}`,source:"daily_note",metadata:{type:"operational",title:note.topic,date:note.date,agentId:note.agentId},revision:1,createdAt:String(note.createdAt),updatedAt:String(note.createdAt)})),
+      ...standingIntents.filter((intent:any)=>!["fulfilled","cancelled"].includes(intent.status)&&((intent.triggerKeywords as string[]).length===0||(intent.triggerKeywords as string[]).some(keyword=>queryLower.includes(keyword.toLocaleLowerCase())))).map((intent:any)=>({id:intent.id,workspaceId:ctx.workspaceId,companyId,userId:ctx.userId,content:`Standing intent: ${intent.title}. ${intent.description}`,source:"standing_intent",metadata:{type:"project_rule",title:intent.title,status:intent.status,triggerKeywords:intent.triggerKeywords},revision:intent.revision,createdAt:String(intent.createdAt),updatedAt:String(intent.updatedAt)}))
+    ];
+    const existingIds=new Set(rawMemories.map(memory=>memory.id));
+    rawMemories=[...rawMemories,...structuredMemories.filter(memory=>!existingIds.has(memory.id))];
     const decayingItems:DecayingMemoryItem[]=rawMemories.map(m=>({
       id:m.id,
       type:(m.metadata?.type as MemoryDecayType)||(m.source==="ephemeral"?"ephemeral":m.source==="rule"?"project_rule":"operational"),
