@@ -77,6 +77,8 @@ services:
       WEB_RESEARCH_PER_DOMAIN_DELAY_MS: ${WEB_RESEARCH_PER_DOMAIN_DELAY_MS:-750}
       DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:-npati}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
       QDRANT_URL: http://qdrant:6333
+      QDRANT_INT8_ENABLED: "true"
+      FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000

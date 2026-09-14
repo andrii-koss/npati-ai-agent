@@ -5,7 +5,7 @@ import {ProductionQdrantClient} from "../apps/agent-api/src/qdrant-client";
 describe("advanced memory production contracts",()=>{
  afterEach(()=>vi.restoreAllMocks());
  it("Qdrant always applies workspace, company, and user filters",async()=>{
-  const fetchMock=vi.spyOn(globalThis,"fetch").mockResolvedValueOnce(new Response(JSON.stringify({result:{config:{params:{vectors:{size:3}}}}}),{status:200})).mockResolvedValueOnce(new Response(JSON.stringify({result:[]}),{status:200}));
+  const fetchMock=vi.spyOn(globalThis,"fetch").mockResolvedValueOnce(new Response(JSON.stringify({result:{config:{params:{vectors:{size:3}},quantization_config:{scalar:{type:"int8"}}}}}),{status:200})).mockResolvedValueOnce(new Response(JSON.stringify({result:[]}),{status:200}));
   await new ProductionQdrantClient("http://qdrant:6333").search({workspaceId:"w",companyId:"c",userId:"u"},[1,0,0],5);
   const body=JSON.parse(String(fetchMock.mock.calls[1]![1]?.body));
   expect(body.filter.must).toEqual(expect.arrayContaining([{key:"workspaceId",match:{value:"w"}},{key:"companyId",match:{value:"c"}},{key:"userId",match:{value:"u"}}]));

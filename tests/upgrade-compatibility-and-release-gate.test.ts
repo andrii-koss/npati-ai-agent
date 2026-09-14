@@ -166,7 +166,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
 
     it("reports audited implementation status for capabilities 79 through 88", () => {
       const status = new Map(CAPABILITY_MATRIX.map((item) => [item.id, item.status]));
-      expect(status.get(79)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(79)).toBe("VERIFIED_EXISTING");
       expect(status.get(80)).toBe("NOT_IMPLEMENTED");
       expect(status.get(81)).toBe("VERIFIED_EXISTING");
       expect(status.get(82)).toBe("VERIFIED_EXISTING");
@@ -351,7 +351,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(217)).toBe("NOT_IMPLEMENTED");
       expect(status.get(218)).toBe("NOT_IMPLEMENTED");
       expect(status.get(219)).toBe("VERIFIED_EXISTING");
-      expect(status.get(220)).toBe("NOT_IMPLEMENTED");
+      expect(status.get(220)).toBe("VERIFIED_EXISTING");
       expect(status.get(221)).toBe("VERIFIED_EXISTING");
       expect(status.get(222)).toBe("NOT_IMPLEMENTED");
       expect(status.get(223)).toBe("PARTIALLY_IMPLEMENTED");
@@ -381,8 +381,8 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(239)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(240)).toBe("PARTIALLY_IMPLEMENTED");
       expect(status.get(241)).toBe("PARTIALLY_IMPLEMENTED");
-      expect(status.get(242)).toBe("PARTIALLY_IMPLEMENTED");
-      expect(status.get(243)).toBe("PARTIALLY_IMPLEMENTED");
+      expect(status.get(242)).toBe("VERIFIED_EXISTING");
+      expect(status.get(243)).toBe("VERIFIED_EXISTING");
       expect(status.get(244)).toBe("VERIFIED_EXISTING");
       expect(status.get(245)).toBe("NOT_IMPLEMENTED");
       expect(status.get(246)).toBe("PARTIALLY_IMPLEMENTED");
