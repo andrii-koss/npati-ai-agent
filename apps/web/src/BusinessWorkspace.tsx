@@ -72,13 +72,50 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
+const WORKSPACE_OVERVIEW_STORAGE_KEY = "npati_workspace_overview_cache_v1";
+let cachedWorkspaceOverview: WorkspaceOverview | null = null;
+
+function getInitialWorkspaceOverview(): WorkspaceOverview | null {
+  if (cachedWorkspaceOverview) return cachedWorkspaceOverview;
+  try {
+    const raw = sessionStorage.getItem(WORKSPACE_OVERVIEW_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed.businesses)) {
+        cachedWorkspaceOverview = parsed as WorkspaceOverview;
+        return cachedWorkspaceOverview;
+      }
+    }
+  } catch { /* storage may be restricted */ }
+  return null;
+}
+
+function updateCachedWorkspaceOverview(data: WorkspaceOverview) {
+  cachedWorkspaceOverview = data;
+  try {
+    sessionStorage.setItem(WORKSPACE_OVERVIEW_STORAGE_KEY, JSON.stringify(data));
+  } catch { /* storage may be restricted */ }
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [overview, setOverview] = useState<WorkspaceOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [overview, setOverview] = useState<WorkspaceOverview | null>(getInitialWorkspaceOverview);
+  const [loading, setLoading] = useState(() => getInitialWorkspaceOverview() === null);
   const [error, setError] = useState("");
   async function refresh() {
-    setLoading(true);
-    try { setOverview(await api<WorkspaceOverview>("/workspace/context")); setError(""); }
+    if (!overview && !cachedWorkspaceOverview) {
+      setLoading(true);
+    }
+    try {
+      const nextOverview = await api<WorkspaceOverview>("/workspace/context");
+      updateCachedWorkspaceOverview(nextOverview);
+      setOverview((prev) => {
+        if (prev && JSON.stringify(prev) === JSON.stringify(nextOverview)) {
+          return prev;
+        }
+        return nextOverview;
+      });
+      setError("");
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Workspace is unavailable"); }
     finally { setLoading(false); }
   }

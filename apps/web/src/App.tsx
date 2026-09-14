@@ -216,40 +216,168 @@ function Home() {
   );
 }
 
+const SIDEBAR_CONVERSATIONS_CACHE_KEY = "npati_sidebar_conversations_cache_v1";
+let cachedSidebarConversations: SidebarConversation[] | null = null;
+let isSidebarConversationsLoaded = false;
+let activeSidebarConversationsFetch: Promise<SidebarConversation[]> | null = null;
+let cachedChatOpen = true;
+let cachedBusinessOpen = true;
+
+function getInitialSidebarConversations(): SidebarConversation[] {
+  if (cachedSidebarConversations !== null) {
+    return cachedSidebarConversations;
+  }
+  try {
+    const raw = sessionStorage.getItem(SIDEBAR_CONVERSATIONS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedSidebarConversations = parsed;
+        return parsed;
+      }
+    }
+  } catch { /* storage may be restricted */ }
+  return [];
+}
+
+function updateCachedSidebarConversations(items: SidebarConversation[]) {
+  cachedSidebarConversations = items;
+  isSidebarConversationsLoaded = true;
+  try {
+    sessionStorage.setItem(SIDEBAR_CONVERSATIONS_CACHE_KEY, JSON.stringify(items));
+  } catch { /* storage may be restricted */ }
+}
+
+const SIDEBAR_BUSINESSES_CACHE_KEY = "npati_sidebar_businesses_cache_v1";
+
+type CachedBusinessDraft = {
+  businessId: string;
+  business: { name: string };
+  conversationId?: string;
+};
+
+type CachedBusinessItem = {
+  id: string;
+  name: string;
+};
+
+let cachedSidebarDrafts: CachedBusinessDraft[] | null = null;
+let cachedSidebarBusinesses: CachedBusinessItem[] | null = null;
+let isSidebarBusinessesLoaded = false;
+
+function getInitialSidebarBusinesses(): { drafts: CachedBusinessDraft[]; businesses: CachedBusinessItem[] } {
+  if (cachedSidebarDrafts !== null && cachedSidebarBusinesses !== null) {
+    return { drafts: cachedSidebarDrafts, businesses: cachedSidebarBusinesses };
+  }
+  try {
+    const raw = sessionStorage.getItem(SIDEBAR_BUSINESSES_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.drafts) && Array.isArray(parsed.businesses)) {
+        cachedSidebarDrafts = parsed.drafts;
+        cachedSidebarBusinesses = parsed.businesses;
+        return parsed;
+      }
+    }
+  } catch { /* storage may be restricted */ }
+  return { drafts: [], businesses: [] };
+}
+
+function updateCachedSidebarBusinesses(drafts: CachedBusinessDraft[], businesses: CachedBusinessItem[]) {
+  cachedSidebarDrafts = drafts;
+  cachedSidebarBusinesses = businesses;
+  isSidebarBusinessesLoaded = true;
+  try {
+    sessionStorage.setItem(SIDEBAR_BUSINESSES_CACHE_KEY, JSON.stringify({ drafts, businesses }));
+  } catch { /* storage may be restricted */ }
+}
+
+function areSidebarConversationsEqual(a: SidebarConversation[], b: SidebarConversation[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const itemA = a[i];
+    const itemB = b[i];
+    if (!itemA || !itemB) return false;
+    if (
+      itemA.id !== itemB.id ||
+      itemA.title !== itemB.title ||
+      itemA.updatedAt !== itemB.updatedAt ||
+      itemA.businessId !== itemB.businessId ||
+      itemA.businessName !== itemB.businessName
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function fetchAllSidebarConversations(businesses: Array<{ id: string; name: string }>): Promise<SidebarConversation[]> {
+  const neutralRequest = authFetch("/api/conversations");
+  const businessRequests = businesses.map(async (business) => {
+    const response = await authFetch(`/api/businesses/${business.id}/conversations`);
+    if (!response.ok) return [] as SidebarConversation[];
+    return (await response.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
+      .map((conversation) => ({ ...conversation, businessId: business.id, businessName: business.name }));
+  });
+  const [neutralResponse, ...businessRows] = await Promise.all([neutralRequest, ...businessRequests]);
+  const neutralRows = neutralResponse.ok
+    ? (await neutralResponse.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
+        .map((conversation) => ({ ...conversation, businessId: null, businessName: "" }))
+    : [];
+  return [...neutralRows, ...businessRows.flat()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
 function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { overview, refresh, switchBusiness } = useWorkspace();
-  const [chatOpen, setChatOpen] = useState(true);
-  const [businessOpen, setBusinessOpen] = useState(true);
-  const [conversations, setConversations] = useState<SidebarConversation[]>([]);
+  const [chatOpen, setChatOpen] = useState(cachedChatOpen);
+  const [businessOpen, setBusinessOpen] = useState(cachedBusinessOpen);
+  const [conversations, setConversations] = useState<SidebarConversation[]>(getInitialSidebarConversations);
+  const [hasLoaded, setHasLoaded] = useState(() => isSidebarConversationsLoaded || cachedSidebarConversations !== null);
+  const initialBusinesses = useRef(getInitialSidebarBusinesses());
+  const drafts = overview?.onboardings ?? cachedSidebarDrafts ?? initialBusinesses.current.drafts;
+  const businesses = overview?.businesses ?? cachedSidebarBusinesses ?? initialBusinesses.current.businesses;
+  const hasBusinessesLoaded = isSidebarBusinessesLoaded || overview !== null || (cachedSidebarDrafts !== null && cachedSidebarBusinesses !== null);
   const currentBusiness = overview?.currentBusiness;
 
-  async function loadConversations() {
+  useEffect(() => {
+    if (overview) {
+      updateCachedSidebarBusinesses(overview.onboardings, overview.businesses);
+    }
+  }, [overview]);
+
+  async function loadConversations(force = false) {
     const businesses = overview?.businesses ?? [];
     try {
-      const neutralRequest = authFetch("/api/conversations");
-      const businessRequests = businesses.map(async (business) => {
-        const response = await authFetch(`/api/businesses/${business.id}/conversations`);
-        if (!response.ok) return [] as SidebarConversation[];
-        return (await response.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
-          .map((conversation) => ({ ...conversation, businessId: business.id, businessName: business.name }));
+      if (!activeSidebarConversationsFetch || force) {
+        activeSidebarConversationsFetch = fetchAllSidebarConversations(businesses)
+          .finally(() => {
+            activeSidebarConversationsFetch = null;
+          });
+      }
+      const nextRows = await activeSidebarConversationsFetch;
+      updateCachedSidebarConversations(nextRows);
+      setHasLoaded(true);
+      setConversations((prev) => {
+        if (areSidebarConversationsEqual(prev, nextRows)) {
+          return prev;
+        }
+        return nextRows;
       });
-      const [neutralResponse, ...businessRows] = await Promise.all([neutralRequest, ...businessRequests]);
-      const neutralRows = neutralResponse.ok
-        ? (await neutralResponse.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
-            .map((conversation) => ({ ...conversation, businessId: null, businessName: "" }))
-        : [];
-      setConversations([...neutralRows, ...businessRows.flat()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
     } catch {
-      setConversations([]);
+      setHasLoaded(true);
+      if (cachedSidebarConversations === null) {
+        setConversations([]);
+      }
     }
   }
   useEffect(() => {
     clearLegacyLocalChatsOnce();
     void loadConversations();
     const reload = () => {
-      void loadConversations();
+      void loadConversations(true);
     };
     window.addEventListener("npati:conversations-changed", reload);
     window.addEventListener("npati:saved-chats-changed", reload);
@@ -257,11 +385,17 @@ function Sidebar() {
       window.removeEventListener("npati:conversations-changed", reload);
       window.removeEventListener("npati:saved-chats-changed", reload);
     };
-  }, [overview?.businesses.map((business) => business.id).join(","), location.search]);
+  }, [overview?.businesses.map((business) => business.id).join(",")]);
 
   useEffect(() => {
-    if (location.pathname === "/business" || location.pathname.startsWith("/b/")) setBusinessOpen(true);
-    if (location.pathname === "/chat" || location.pathname.startsWith("/c/")) setChatOpen(true);
+    if (location.pathname === "/business" || location.pathname.startsWith("/b/")) {
+      setBusinessOpen(true);
+      cachedBusinessOpen = true;
+    }
+    if (location.pathname === "/chat" || location.pathname.startsWith("/c/")) {
+      setChatOpen(true);
+      cachedChatOpen = true;
+    }
   }, [location.pathname]);
 
   async function createBusinessIdea() {
@@ -281,6 +415,7 @@ function Sidebar() {
   }
   async function openNewChat() {
     setChatOpen(true);
+    cachedChatOpen = true;
     if (!currentBusiness) {
       const response = await authFetch("/api/conversations", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New conversation" }),
@@ -319,7 +454,7 @@ function Sidebar() {
     const response = await authFetch(endpoint, {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
     });
-    if (response.ok) await loadConversations();
+    if (response.ok) await loadConversations(true);
   }
   async function deleteConversation(conversation: SidebarConversation) {
     if (!window.confirm(`Delete chat “${conversation.title}”? This cannot be undone.`)) return;
@@ -333,6 +468,7 @@ function Sidebar() {
       return;
     }
     const remaining = conversations.filter((item) => item.id !== conversation.id);
+    updateCachedSidebarConversations(remaining);
     setConversations(remaining);
     window.dispatchEvent(new Event("npati:conversations-changed"));
     if (location.pathname === `/c/${conversation.id}`) {
@@ -348,9 +484,15 @@ function Sidebar() {
   async function deleteBusiness(id: string, name: string) {
     if (!window.confirm(`Delete business “${name}” and its chats, goals, and memory? This cannot be undone.`)) return;
     const response = await authFetch(`/api/businesses/${id}`, { method: "DELETE" });
-    if (response.ok) { await refresh(); navigate("/chat"); }
+    if (response.ok) {
+      const remainingDrafts = (cachedSidebarDrafts ?? drafts).filter((item) => item.businessId !== id);
+      const remainingBusinesses = (cachedSidebarBusinesses ?? businesses).filter((item) => item.id !== id);
+      updateCachedSidebarBusinesses(remainingDrafts, remainingBusinesses);
+      await refresh();
+      navigate("/chat");
+    }
   }
-  const onboardingConversationIds = new Set(overview?.onboardings.map((session) => session.conversationId) ?? []);
+  const onboardingConversationIds = new Set((overview?.onboardings ?? drafts).map((session) => session.conversationId).filter(Boolean));
   const chatConversations = conversations.filter(
     (c) => c.title !== "Business setup" && !onboardingConversationIds.has(c.id)
   );
@@ -363,11 +505,11 @@ function Sidebar() {
         <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
             <button className="sidebar-main-action" onClick={() => void openNewChat()}>+ New Chat</button>
-            <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => !open)}></button>
+            <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => { const next = !open; cachedChatOpen = next; return next; })}></button>
           </div>
           {chatOpen && (
             <div className="sidebar-dropdown">
-              {!hasSavedChats && <small className="sidebar-empty">No saved chats yet</small>}
+              {!hasSavedChats && hasLoaded && <small className="sidebar-empty">No saved chats yet</small>}
               {chatConversations.map((conversation) => (
                 <div className="sidebar-history-row" key={conversation.id}>
                   <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}><span>{conversation.title}</span><small>{conversation.businessName ? `${conversation.businessName} · ` : ""}{new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
@@ -381,19 +523,19 @@ function Sidebar() {
         <div className={`sidebar-group sidebar-business-group ${location.pathname === "/business" || location.pathname.startsWith("/b/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
             <button className="sidebar-main-action" onClick={() => void createBusinessIdea()}>+ Business</button>
-            <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => !open)}></button>
+            <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => { const next = !open; cachedBusinessOpen = next; return next; })}></button>
           </div>
           {businessOpen && (
             <div className="sidebar-dropdown">
-              {overview?.businesses.length === 0 && overview.onboardings.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
-              {overview?.onboardings.map((draft) => (
+              {hasBusinessesLoaded && businesses.length === 0 && drafts.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
+              {drafts.map((draft) => (
                 <div className="sidebar-history-row" key={draft.businessId}>
                   <button className="sidebar-history-link" onClick={() => navigate(`/b/${draft.businessId}`)}><span>{draft.business.name}</span><small>Setup draft</small></button>
                   <button className="sidebar-icon-action" aria-label={`Edit ${draft.business.name}`} onClick={() => editBusiness(draft.businessId)}>✎</button>
                   <button className="sidebar-icon-action danger" aria-label={`Delete ${draft.business.name}`} onClick={() => void deleteBusiness(draft.businessId, draft.business.name)}>×</button>
                 </div>
               ))}
-              {overview?.businesses.map((business) => (
+              {businesses.map((business) => (
                 <div className="sidebar-history-row" key={business.id}>
                   <button className="sidebar-history-link" onClick={() => void openBusiness(business.id)}><span>{business.name}</span><small>{business.id === currentBusiness?.id ? "Current" : "Use in chat"}</small></button>
                   <button className="sidebar-icon-action" aria-label={`Edit ${business.name}`} onClick={() => editBusiness(business.id)}>✎</button>
