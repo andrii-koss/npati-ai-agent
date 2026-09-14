@@ -3809,34 +3809,49 @@ a {
 }
 
 .chat-welcome {
-  height: 410px;
-  display: grid;
-  place-content: center;
-  justify-items: center;
+  margin: auto !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  padding: 16px;
+  transform: translateY(28px);
+}
+
+.onboarding-live-chat .message-stream:has(.chat-welcome),
+.standard-live-chat .message-stream:has(.chat-welcome),
+.message-stream:has(.chat-welcome) {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  overflow-y: hidden !important;
+  height: 100% !important;
+  flex: 1 !important;
+}
+
+.message-stream:has(.chat-welcome) .chat-scroll-spacer {
+  display: none !important;
 }
 
 .chat-welcome>span {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  color: white;
-  background: var(--npati-red);
-  border-radius: 13px;
-  font-weight: 800;
+  display: none !important;
 }
 
 .chat-welcome h2 {
-  margin: 18px 0 6px;
-  font-size: 25px;
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 700;
   letter-spacing: -.04em;
+  color: #111111;
 }
 
 .chat-welcome p {
   margin: 0;
-  color: var(--npati-gray-500);
-  font-size: 12px;
+  color: #000000 !important;
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .chat-welcome>div {
@@ -3844,17 +3859,34 @@ a {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .chat-welcome button {
-  padding: 7px 9px;
-  color: #555;
-  background: var(--npati-gray-50);
-  border: 1px solid var(--npati-gray-100);
+  padding: 8px 16px;
+  color: var(--npati-red, #d83438) !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(216, 52, 56, 0.42) !important;
   border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(216, 52, 56, 0.22) !important;
   cursor: pointer;
-  font-size: 9px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-welcome button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(216, 52, 56, 0.32) !important;
+  border-color: var(--npati-red, #d83438) !important;
+  color: var(--npati-red, #d83438) !important;
+  background: #ffffff !important;
+}
+
+.chat-welcome button:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 6px rgba(216, 52, 56, 0.18) !important;
 }
 
 .memory-candidate {
