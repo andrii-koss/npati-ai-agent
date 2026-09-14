@@ -76,6 +76,7 @@ services:
       WEB_RESEARCH_MAX_CONTENT_CHARACTERS: ${WEB_RESEARCH_MAX_CONTENT_CHARACTERS:-80000}
       WEB_RESEARCH_PER_DOMAIN_DELAY_MS: ${WEB_RESEARCH_PER_DOMAIN_DELAY_MS:-750}
       DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:-npati}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
+      QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -191,6 +192,23 @@ services:
         condition: service_healthy
     networks: [npati-agent-network]
 
+  qdrant:
+    container_name: npati-agent-qdrant
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "127.0.0.1:${NPATI_QDRANT_PORT:-6333}:6333"
+    expose:
+      - "6333"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [npati-agent-network]
   minio:
     container_name: npati-agent-minio
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -265,3 +283,5 @@ volumes:
     name: npati-agent-crawler-state
   minio-data:
     name: npati-agent-minio-data
+  qdrant-data:
+    name: npati-agent-qdrant-data

@@ -22,6 +22,7 @@ import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeQueue } from "./company-knowledge-queue";
+import { ProductionQdrantClient } from "./qdrant-client";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
 import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
 import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
@@ -320,12 +321,13 @@ export function buildApp(config: AppConfig = {}) {
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
+  const qdrant = process.env.QDRANT_URL ? new ProductionQdrantClient(process.env.QDRANT_URL) : undefined;
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox());
-  const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine) : undefined;
+  const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,qdrant) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
       const [knowledge,scoped]=await Promise.all([
