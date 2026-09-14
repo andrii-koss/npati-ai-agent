@@ -592,7 +592,7 @@ function BusinessRoute() {
     void switchBusiness(businessId).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not open this business."));
   }, [businessId, business?.id, loading, overview?.currentBusiness?.id]);
 
-  if (loading || (business && overview?.currentBusiness?.id !== businessId)) return <Workspace><div className="workspace-notice">Opening business…</div></Workspace>;
+  if (loading || (business && overview?.currentBusiness?.id !== businessId)) return <Workspace>{null}</Workspace>;
   if (!draft && !business) return <Workspace><div className="workspace-notice error">This business does not exist or is not available to your user.</div></Workspace>;
   if (error) return <Workspace><div className="workspace-notice error">{error}</div></Workspace>;
   return <Workspace><ConversationalChat key={businessId} businessId={businessId} businessRoute businessSetup={Boolean(draft)} /></Workspace>;
@@ -648,7 +648,7 @@ function CanonicalChatRoute() {
   }, [conversationId, loading, routeState?.businessId, routeState?.neutralChat, overview?.currentBusiness?.id, overview?.onboarding?.conversationId, overview?.businesses.map((business) => business.id).join(",")]);
 
   if (notFound) return <Workspace><div className="workspace-notice error">This chat does not exist or is not available to your user.</div></Workspace>;
-  if (!resolved) return <Workspace><div className="workspace-notice">Opening chat…</div></Workspace>;
+  if (!resolved) return <Workspace>{null}</Workspace>;
   return <Workspace><ConversationalChat initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} initialConversationId={conversationId} neutralChat={neutralChat} /></Workspace>;
 }
 import { AutomationsPage } from "./AutomationsPage";
