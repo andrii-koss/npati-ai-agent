@@ -1828,7 +1828,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "research",
     "name": "FTS5 keyword search",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Real SQLite FTS5/BM25 keyword backend with WAL persistence, Unicode tokenization, tenant/company/user filters, restart persistence, and document deletion cleanup; integrated into Company Knowledge retrieval.",
     "useWhen": [
       "Internal system execution requires FTS5 keyword search"
     ],
@@ -5167,7 +5167,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "int8 vector quantization",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Native Qdrant scalar int8 quantization is enabled on the production collection with cosine distance, persisted configuration, and live Docker validation.",
     "useWhen": [
       "Internal system execution requires int8 vector quantization"
     ],
@@ -5693,7 +5693,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Multiple memory engines",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "One production memory-engine registry coordinates authoritative PostgreSQL pgvector, optional Qdrant int8 vectors, and persistent SQLite FTS5 through a shared health/index/search/delete contract.",
     "useWhen": [
       "Internal system execution requires Multiple memory engines"
     ],
@@ -5716,7 +5716,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Memory import",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Authenticated transactional Company Memory import supports Markdown and structured JSON, dry-run preview, deterministic hash deduplication, provenance, idempotency, tenant isolation, restart persistence, and whole-batch rollback.",
     "useWhen": [
       "Internal system execution requires Memory import"
     ],

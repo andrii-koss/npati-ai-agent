@@ -1,4 +1,5 @@
 import { createHash,randomUUID } from "node:crypto";
+import { parseMemoryImport, type MemoryImportFormat } from "./production-memory-import";
 import type { FastifyInstance,FastifyRequest } from "fastify";
 import { WorkspaceAccessError,type WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
@@ -32,7 +33,6 @@ function resolveMime(filename:string,mime:string):string{
 async function ctx(auth:AuthProvider,r:FastifyRequest,permission:"workspace:read"|"business:manage"){const c=await auth.authenticate(r);if(!c.permissions.includes(permission))throw new WorkspaceAccessError("Missing permission: "+permission);return c;}
 function key(r:FastifyRequest){const v=r.headers["idempotency-key"];if(typeof v!=="string"||!/^[A-Za-z0-9._:-]{8,200}$/.test(v))throw Error("A valid Idempotency-Key header is required");return v;}
 function normalizeWikiPath(value:string){const path=(value??"").normalize("NFKC").trim().toLocaleLowerCase().replace(/\\/g,"/").replace(/\s+/g,"-");if(!/^[\p{L}\p{N}_\-/]{1,180}$/u.test(path)||path.includes("..")||path.startsWith("/")||path.endsWith("/"))throw Error("Invalid wiki path");return path;}
-import { parseMemoryImport, type MemoryImportFormat } from "./production-memory-import";
 function err(reply:any,e:unknown){const status=Number((e as any)?.status??(e instanceof WorkspaceAccessError?403:400));return reply.code(status).send({error:{code:status===404?"NOT_FOUND":"KNOWLEDGE_ERROR",message:e instanceof Error?e.message:String(e)}});}
 export function registerCompanyKnowledgeRoutes(app:FastifyInstance,deps:{auth:AuthProvider;store:WorkspaceStore;repo:CompanyKnowledgeRepository;files:FileMetadataRepository;storage:ObjectStorage;processor:CompanyKnowledgeProcessor;queue?:CompanyKnowledgeQueue}){
  const {auth,store,repo,files,storage,processor,queue}=deps;

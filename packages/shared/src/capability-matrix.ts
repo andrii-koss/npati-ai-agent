@@ -1261,11 +1261,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "research",
     "agentCallable": false,
     "risk": "critical",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/auto-reviewer-and-fts-memory.test.ts"
+      "tests/memory-engines-import-production.test.ts",
+      "scripts/verify-production-memory-engines-import.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 80,
@@ -3459,13 +3460,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/channel-groups-and-mentions.test.ts",
-      "tests/memory-import-codemode-clawhub.test.ts",
-      "tests/qdrant-quantization-device-tracking.test.ts"
+      "tests/memory-engines-import-production.test.ts",
+      "scripts/verify-production-memory-engines-import.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 221,
@@ -3786,11 +3786,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/infrastructure-deployers-and-memory-engines.test.ts"
+      "tests/memory-engines-import-production.test.ts",
+      "scripts/verify-production-memory-engines-import.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 243,
@@ -3800,45 +3801,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/action-sensitive-memory-and-compat-apis.test.ts",
-      "tests/admission-queue-and-conversation-memory.test.ts",
-      "tests/agent-api.test.ts",
-      "tests/agent.test.ts",
-      "tests/ai-preferences.test.ts",
-      "tests/architecture.test.ts",
-      "tests/auto-fusion-pipeline-routing.test.ts",
-      "tests/auto-reviewer-and-fts-memory.test.ts",
-      "tests/cache-savings-backups-session-search.test.ts",
-      "tests/channel-groups-and-mentions.test.ts",
-      "tests/chat-file-service.test.ts",
-      "tests/cli-configure-and-acp-editors.test.ts",
-      "tests/company-knowledge-concurrency.test.ts",
-      "tests/company-knowledge-ui.test.ts",
-      "tests/company-knowledge.test.ts",
-      "tests/company-runtime.test.ts",
-      "tests/company-tool-runtime.test.ts",
-      "tests/concurrent-session-capacity.test.ts",
-      "tests/group-sessions-and-tool-policy.test.ts",
-      "tests/inference-and-memory-injection.test.ts",
-      "tests/infrastructure-deployers-and-memory-engines.test.ts",
-      "tests/memory-decay-rerank-and-journal.test.ts",
-      "tests/memory-import-codemode-clawhub.test.ts",
-      "tests/memory-md-quota-and-channel-auth.test.ts",
-      "tests/memory.test.ts",
-      "tests/omniroute-adapter.test.ts",
-      "tests/per-request-no-memory-and-rtk.test.ts",
-      "tests/pii-and-subagents.test.ts",
-      "tests/qdrant-quantization-device-tracking.test.ts",
-      "tests/scoped-memory-and-user-model.test.ts",
-      "tests/standing-intents-wiki-and-dreaming.test.ts",
-      "tests/storage-protection.test.ts",
-      "tests/telemetry-cache-compaction.test.ts",
-      "tests/web-research.test.ts",
-      "tests/workspace-store.test.ts"
+      "tests/memory-engines-import-production.test.ts",
+      "scripts/verify-production-memory-engines-import.mjs"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 244,
