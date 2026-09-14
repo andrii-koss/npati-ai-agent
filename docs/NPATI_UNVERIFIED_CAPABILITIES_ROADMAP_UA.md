@@ -4,10 +4,10 @@
 
 ## Поточний стан
 
-- `VERIFIED_EXISTING`: 151 пунктів.
-- `PARTIALLY_IMPLEMENTED`: 57 пунктів.
-- `NOT_IMPLEMENTED`: 98 пунктів.
-- Разом незавершених: 155 пунктів.
+- `VERIFIED_EXISTING`: 157 пунктів.
+- `PARTIALLY_IMPLEMENTED`: 56 пунктів.
+- `NOT_IMPLEMENTED`: 93 пунктів.
+- Разом незавершених: 149 пунктів.
 - Уже `VERIFIED_EXISTING` пункти сюди не включені або позначені як закриті.
 - Позначки нижче: `P` — частково реалізовано, `N` — не реалізовано, `V` — верифіковано.
 > Повторний аудит 2026-09-13: unit-тест окремого helper або синтетичної відповіді не є production-сертифікацією. `Verified` потребує реального runtime wiring та live Docker E2E там, де capability взаємодіє з мережею, БД, браузером, файлами або зовнішнім провайдером.
@@ -67,7 +67,7 @@ Capability стає `VERIFIED_EXISTING` тільки коли одночасно
 **Тести та runtime-верифікація:**
 - Unit/Integration: `tests/production-p02-knowledge-memory.test.ts` (14/14 passed).
 - Release Gate: `tests/upgrade-compatibility-and-release-gate.test.ts` (34/34 passed).
-- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 155 `VERIFIED_EXISTING`, 56 `PARTIALLY_IMPLEMENTED`, 95 `NOT_IMPLEMENTED`).
+- Capability Matrix & Catalog Audit: `node scripts/verify-capability-matrix.mjs` (306/306 entries; 157 `VERIFIED_EXISTING`, 56 `PARTIALLY_IMPLEMENTED`, 93 `NOT_IMPLEMENTED`).
 - Live Docker E2E: `scripts/verify-production-p02-knowledge-memory.mjs` перевіряє real OmniRoute embeddings, чесний rerank fail-closed, model-backed compaction усередині `/chat`, awaited automatic memory у JSON/SSE, `noMemory`, PostgreSQL persistence та очищення ізольованих test data.
 
 ### P0.3 — Runtime reliability, streaming, observability і scale [#22 І #23 ЧЕСНО ЗАКРИТО]
@@ -251,11 +251,18 @@ Verified gate: чисте встановлення кожного заявлен
 
 ### P3.1 — Advanced memory features
 
-Пункти: #73 `USER.md user model` (N), #74 `MEMORY.md long-term memory` (N), #77 `Automatic memory flush` (N), #79 `FTS5 keyword search` (N), #81 `Typed decay` (N), #83 `Daily memory notes` (N), #85 `Standing intents` (N), #86 `Memory Wiki` (N), #87 `Dreaming` (N), #88 `Action-sensitive memory` (N), #219 `Qdrant support` (N), #220 `int8 vector quantization` (N), #242 `Multiple memory engines` (P), #243 `Memory import` (P).
+Пункти: #73 `USER.md user model` (V), #74 `MEMORY.md long-term memory` (V), #77 `Automatic memory flush` (V), #79 `FTS5 keyword search` (N), #81 `Typed decay` (V), #83 `Daily memory notes` (V), #85 `Standing intents` (V), #86 `Memory Wiki` (N), #87 `Dreaming` (N), #88 `Action-sensitive memory` (N), #219 `Qdrant support` (N), #220 `int8 vector quantization` (N), #242 `Multiple memory engines` (P), #243 `Memory import` (P).
+
+Виконано 2026-09-14: #77, #81, #83 і #85 переведено у Verified після unit/integration перевірок та production Docker E2E (scripts/verify-production-durable-memory-features.mjs): реальний chat compaction записує факти в PostgreSQL з дедуплікацією; typed decay metadata проходить production API і retrieval; daily notes мають idempotency; standing intents мають keyword matching та optimistic revision; усі дані переживають restart і ізольовані між tenant. #79 лишається Not implemented: Node SQLite у фактичному runtime повертає "no such module: fts5", а PostgreSQL FTS не перейменовується на FTS5.
 
 Що реалізувати: стабільний MemoryProvider contract; PostgreSQL залишається default, Qdrant — optional adapter; import із dry-run/dedup/provenance; typed TTL/decay; daily notes; standing intents; user model; action-sensitive write policy. FTS5 потрібен лише SQLite adapter і не повинен дублювати PostgreSQL FTS.
 
 Verified gate: однаковий conformance suite для кожного engine, migration/import rollback, deterministic decay clock, privacy deletion, no-memory enforcement, vector quantization quality threshold і restart consistency.
+
+Закрито 2026-09-13:
+- **#73 `USER.md user model`**: `VERIFIED_EXISTING` — revisioned USER.md зберігається у PostgreSQL-backed user settings, ізольований за workspace/user, інжектується у neutral, Business і Company chat та повністю вимикається через `noMemory`.
+- **#74 `MEMORY.md long-term memory`**: `VERIFIED_EXISTING` — revisioned MEMORY.md зберігається у чинному `companies.memory`, захищений company/tenant scope, інжектується в Company Agent і видаляється разом із компанією.
+- Unit/Integration: `tests/production-memory-documents.test.ts`. Live Docker E2E: `scripts/verify-production-memory-documents.mjs` — PostgreSQL uniqueness, optimistic concurrency, cross-tenant denial, API restart, реальний neutral/company inference, `noMemory` та cleanup.
 
 ### P3.2 — Mobile та desktop companions
 

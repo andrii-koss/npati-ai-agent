@@ -122,6 +122,7 @@ export class CompanyDelegationRuntime {
     private readonly guardrailPolicyResolver?: (ctx:AuthContext,companyId:string)=>Promise<CompanyGuardrailPolicy>,
     private readonly durableApprovals?: DurableApprovalGateway,
     private readonly telemetry?: Pick<AuditRepository, "recordUsage" | "log">,
+    private readonly userDocumentRetriever?: (ctx: AuthContext) => Promise<string | undefined>,
   ) {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
@@ -182,6 +183,10 @@ export class CompanyDelegationRuntime {
           errorMessage: `Company "${company.name}" is inactive`,
         });
         throw new CompanyRuntimeError("COMPANY_INACTIVE", `Company "${company.name}" is inactive`, 400);
+      }
+      if (!options.noMemory && this.userDocumentRetriever) {
+        const userMarkdown = await this.userDocumentRetriever(ctx);
+        if (userMarkdown) company = { ...company, memory: { ...company.memory, userMd: { markdown: userMarkdown } } };
       }
       const guardrailPolicy=await this.guardrailPolicyResolver?.(ctx,companyId);
       const protect=(text:string)=>SecurityPolicyEngine.protectText(text,guardrailPolicy).sanitized;

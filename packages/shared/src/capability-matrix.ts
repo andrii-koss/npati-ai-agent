@@ -1164,12 +1164,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
       "tests/inference-and-memory-injection.test.ts",
-      "tests/scoped-memory-and-user-model.test.ts"
+      "tests/scoped-memory-and-user-model.test.ts",
+      "tests/production-memory-documents.test.ts",
+      "scripts/verify-production-memory-documents.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 74,
@@ -1179,12 +1181,14 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
       "tests/inference-and-memory-injection.test.ts",
-      "tests/memory-md-quota-and-channel-auth.test.ts"
+      "tests/memory-md-quota-and-channel-auth.test.ts",
+      "tests/production-memory-documents.test.ts",
+      "scripts/verify-production-memory-documents.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 75,
@@ -1226,11 +1230,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/capability-registry.test.ts"
+      "tests/durable-memory-features.test.ts",
+      "scripts/verify-production-durable-memory-features.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 78,
@@ -1288,11 +1293,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/memory-decay-rerank-and-journal.test.ts"
+      "tests/durable-memory-features.test.ts",
+      "scripts/verify-production-durable-memory-features.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 82,
@@ -1329,11 +1335,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/memory-decay-rerank-and-journal.test.ts"
+      "tests/durable-memory-features.test.ts",
+      "scripts/verify-production-durable-memory-features.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 84,
@@ -1359,11 +1366,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/standing-intents-wiki-and-dreaming.test.ts"
+      "tests/durable-memory-features.test.ts",
+      "scripts/verify-production-durable-memory-features.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 86,

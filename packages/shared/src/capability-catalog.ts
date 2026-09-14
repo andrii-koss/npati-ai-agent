@@ -1690,7 +1690,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "USER.md user model",
-    "description": "Семантичний пошук Company Knowledge працює через реальні embeddings і pgvector з keyword fallback, strict auth та tenant/company/user isolation.",
+    "description": "Revisioned USER.md profiles persist in PostgreSQL user settings, are isolated by workspace/user, survive restart, respect noMemory, and are injected as authorized data into neutral, Business, and Company chat.",
     "useWhen": [
       "Internal system execution requires USER.md user model"
     ],
@@ -1713,7 +1713,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "MEMORY.md long-term memory",
-    "description": "PostgreSQL GIN full-text та pgvector кандидати об'єднуються reciprocal-rank fusion в одному CompanyKnowledgeProcessor; при відмові embeddings залишається scoped keyword fallback.",
+    "description": "Revisioned MEMORY.md documents persist inside the existing PostgreSQL Company memory record, enforce tenant/company authorization, survive restart, respect noMemory, and ground Company Agent execution.",
     "useWhen": [
       "Internal system execution requires MEMORY.md long-term memory"
     ],
@@ -1782,7 +1782,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Automatic memory flush",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "At a successful production business-chat compaction boundary, extracts only explicit user facts from discarded turns and durably stores them in tenant-scoped PostgreSQL Business Memory with duplicate protection; noMemory disables writes.",
     "useWhen": [
       "Internal system execution requires Automatic memory flush"
     ],
@@ -1874,7 +1874,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Typed decay",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Persists an explicit memory type and base weight and applies type-specific half-life decay during production Company Memory retrieval; immutable facts do not decay.",
     "useWhen": [
       "Internal system execution requires Typed decay"
     ],
@@ -1920,7 +1920,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Daily memory notes",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Durable tenant- and company-scoped PostgreSQL daily notes with date grouping, required idempotency keys, authenticated read/write routes, and restart persistence.",
     "useWhen": [
       "Internal system execution requires Daily memory notes"
     ],
@@ -1966,7 +1966,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Standing intents",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Durable tenant- and company-scoped PostgreSQL standing intents with keyword matching, lifecycle states, idempotent create, optimistic revision updates, and restart persistence.",
     "useWhen": [
       "Internal system execution requires Standing intents"
     ],
