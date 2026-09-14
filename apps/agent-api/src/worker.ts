@@ -10,6 +10,7 @@ import { PostgresFileMetadataRepository } from "./file-metadata";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeWorker } from "./company-knowledge-queue";
 import { ProductionQdrantClient } from "./qdrant-client";
+import { ProductionMemoryEngineRegistry, QdrantMemoryEngineAdapter, SqliteFts5MemoryEngine } from "./knowledge-memory-engine";
 import {CompanyApprovalsRepository} from "./approvals-repository";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
@@ -25,8 +26,12 @@ const storage=new MinioObjectStorage({endPoint:process.env.MINIO_ENDPOINT!,port:
 const files=new PostgresFileMetadataRepository(databaseUrl),knowledge=new CompanyKnowledgeRepository(databaseUrl);
 const approvals=new CompanyApprovalsRepository(databaseUrl),guardrails=new GuardrailPolicyRepository((store as any).pool);
 const audit=new AuditRepository(databaseUrl);
-const qdrant=process.env.QDRANT_URL?new ProductionQdrantClient(process.env.QDRANT_URL):undefined;
-const knowledgeProcessor=new CompanyKnowledgeProcessor(knowledge,files,storage,ai,qdrant);
+const qdrant=process.env.QDRANT_URL?new ProductionQdrantClient(process.env.QDRANT_URL,"npati_company_knowledge",process.env.QDRANT_INT8_ENABLED!=="false"):undefined;
+const memoryEngines=new ProductionMemoryEngineRegistry([
+ ...(qdrant?[new QdrantMemoryEngineAdapter(qdrant)]:[]),
+ ...(process.env.FTS5_DB_PATH?[new SqliteFts5MemoryEngine(process.env.FTS5_DB_PATH)]:[]),
+]);
+const knowledgeProcessor=new CompanyKnowledgeProcessor(knowledge,files,storage,ai,memoryEngines);
 const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,undefined,knowledge,new WasmExecSandbox()),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
 const runWorker=new CompanyRunQueueWorker(redisUrl,store,runtime,{concurrency:Number.parseInt(process.env.NPATI_COMPANY_WORKER_CONCURRENCY??"2",10),leaseMs:Number.parseInt(process.env.NPATI_COMPANY_RUN_LEASE_MS??"180000",10),recoveryMs:Number.parseInt(process.env.NPATI_COMPANY_RECOVERY_INTERVAL_MS??"30000",10)});
 const knowledgeWorker=new CompanyKnowledgeWorker(redisUrl,knowledge,knowledgeProcessor);
