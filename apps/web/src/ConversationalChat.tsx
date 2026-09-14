@@ -164,7 +164,6 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
       <div className="onboarding-live-chat standard-live-chat onboarding-empty-chat">
         <div className="message-stream">
           <div className="chat-welcome">
-            <span>N</span>
             <h2>What should we work on?</h2>
             <p>Tell me where you are today. I’ll build the initial business context from one useful answer and won’t invent missing facts.</p>
             <div>
@@ -180,7 +179,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
           {messages.map((message, index) => <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} key={message.id} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><ChatMessageContent content={message.content} /></article>)}
           {sending && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{(researching ? researchThinkingSteps : onboardingThinkingSteps)[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           <div ref={streamEndRef} aria-hidden="true" />
-          <div className="chat-scroll-spacer" aria-hidden="true" />
+          {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
         </div>
         <form className="onboarding-live-composer" onSubmit={submit}>
           {contextSwitcher}
@@ -217,16 +216,8 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
         <div className="message-stream">
           {messages.length === 0 && (
             <div className="chat-welcome">
-              <span>N</span>
               <h2>What should we work on?</h2>
               <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
-              <div>
-                {onboardingSuggestions.map((suggestion) => (
-                  <button key={suggestion} type="button" onClick={() => setInput(suggestion)}>
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
           {messages.map((message, index) => (
@@ -241,7 +232,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
             </article>
           )}
           <div ref={streamEndRef} aria-hidden="true" />
-          <div className="chat-scroll-spacer" aria-hidden="true" />
+          {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
         </div>
         {session.status === "paused" && (
           <div className="onboarding-actions">
