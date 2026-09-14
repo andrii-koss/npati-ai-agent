@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
+import { SPEECH_VOICES } from "./speech-voices";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
 
@@ -161,6 +162,69 @@ function PageIntro({ eyebrow, title, copy, action }: { eyebrow: string; title: s
 
 function Notice({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "error" | "success" }) {
   return <div className={`workspace-notice ${tone}`}>{children}</div>;
+}
+
+function FloatingNotice({
+  message,
+  tone = "neutral",
+  onClose,
+  action,
+}: {
+  message: string;
+  tone?: "neutral" | "error" | "success";
+  onClose?: () => void;
+  action?: ReactNode;
+}) {
+  useEffect(() => {
+    if (!onClose) return;
+    const timer = window.setTimeout(onClose, 8000);
+    return () => window.clearTimeout(timer);
+  }, [message, onClose]);
+
+  if (!message) return null;
+
+  return (
+    <div className={`chat-floating-notice ${tone}`} role="alert">
+      <div className="chat-floating-notice-icon">
+        {tone === "error" ? (
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        ) : tone === "success" ? (
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+        )}
+      </div>
+      <div className="chat-floating-notice-content">
+        <span className="chat-floating-notice-text">{message}</span>
+        {action && <div className="chat-floating-notice-action">{action}</div>}
+      </div>
+      {onClose && (
+        <button
+          type="button"
+          className="chat-floating-notice-close"
+          onClick={onClose}
+          aria-label="Close notification"
+          title="Dismiss"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
 }
 
 function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business; mode: string; onCancel?: () => void; onSaved(): Promise<void> }) {
@@ -554,10 +618,78 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
-  const [noMemory, setNoMemory] = useState(false);
+  const [chatMode, setChatMode] = useState<"none" | "private" | "tts">("none");
+  const noMemory = chatMode === "private";
+  const ttsEnabled = chatMode === "tts";
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem("npati_chat_tts_enabled");
+    } catch {}
+  }, []);
+
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
   const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
+  const [ttsVoice, setTtsVoice] = useState(() => {
+    try {
+      return localStorage.getItem("npati_chat_tts_voice") || "alloy";
+    } catch {
+      return "alloy";
+    }
+  });
+  const [isGeneratingSpeech, setIsGeneratingSpeech] = useState(false);
+
+  const handleModeChange = (mode: "none" | "private" | "tts") => {
+    setChatMode(mode);
+  };
+
+  const handleTtsVoiceChange = (voice: string) => {
+    setTtsVoice(voice);
+    try {
+      localStorage.setItem("npati_chat_tts_voice", voice);
+    } catch {}
+  };
+
+  async function generateSpeechForInput(): Promise<void> {
+    const text = input.trim();
+    if (!text || isGeneratingSpeech) return;
+    setIsGeneratingSpeech(true);
+    try {
+      const token = getStoredAuthToken();
+      const response = await fetch("/api/audio/speech", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ input: text, format: "mp3", voice: ttsVoice }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } | string } | null;
+        throw new Error(typeof payload?.error === "string" ? payload.error : payload?.error?.message ?? `TTS failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const buffer = await blob.arrayBuffer();
+      let binary = "";
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]!);
+      }
+      const base64Data = btoa(binary);
+      const audioAttachment: ChatAttachmentInput = {
+        name: `speech-${ttsVoice}.mp3`,
+        mimeType: "audio/mpeg",
+        kind: "audio",
+        dataBase64: base64Data,
+      };
+      setAttachments((prev) => [...prev.filter((a) => a.name !== audioAttachment.name), audioAttachment]);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Text-to-speech failed.");
+    } finally {
+      setIsGeneratingSpeech(false);
+    }
+  }
   const streamEndRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
   const [activeTurn, setActiveTurn] = useState("");
@@ -701,7 +833,45 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
     const privateRequest = noMemory;
     const optimisticId = `pending-${Date.now()}`;
-    const sentAttachments = attachments;
+    let sentAttachments = [...attachments];
+
+    if (ttsEnabled && message && !sentAttachments.some((item) => item.kind === "audio")) {
+      try {
+        const token = getStoredAuthToken();
+        const ttsResponse = await fetch("/api/audio/speech", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ input: message, format: "mp3", voice: ttsVoice }),
+        });
+        if (ttsResponse.ok) {
+          const blob = await ttsResponse.blob();
+          const buffer = await blob.arrayBuffer();
+          let binary = "";
+          const bytes = new Uint8Array(buffer);
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]!);
+          }
+          const base64Data = btoa(binary);
+          const ttsAttachment: ChatAttachmentInput = {
+            name: `speech-${ttsVoice}.mp3`,
+            mimeType: "audio/mpeg",
+            kind: "audio",
+            dataBase64: base64Data,
+          };
+          sentAttachments.push(ttsAttachment);
+        } else {
+          const payload = await ttsResponse.json().catch(() => null) as { error?: { message?: string } | string } | null;
+          const errMsg = typeof payload?.error === "string" ? payload.error : payload?.error?.message ?? `TTS failed (${ttsResponse.status})`;
+          setNotice(`Text-to-speech notice: ${errMsg}`);
+        }
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : "Text-to-speech failed.");
+      }
+    }
+
     const optimisticContent = message;
     setActiveTurn(optimisticContent);
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
@@ -769,7 +939,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   return (
     <>
-      {notice && <Notice tone={notice.startsWith("Saved") ? "success" : "error"}>{notice}{/provider/i.test(notice) && <Link to="/settings/ai">Open AI Marketplace →</Link>}</Notice>}
+      {notice && (
+        <FloatingNotice
+          message={notice}
+          tone={notice.startsWith("Saved") ? "success" : "error"}
+          onClose={() => setNotice("")}
+          action={/provider/i.test(notice) ? <Link to="/settings/ai">Open AI Marketplace →</Link> : undefined}
+        />
+      )}
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream">
           {messages.length === 0 && <div className="chat-welcome"><span>N</span><h2>What should we work on?</h2><p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p><div>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div></div>}
@@ -785,12 +962,33 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
           {contextSwitcher}
-          <label className={`composer-private-toggle ${noMemory ? "active" : ""}`} title="Do not read or save memory, chat history, or attachments for this request">
-            <input type="checkbox" checked={noMemory} disabled={sending} onChange={(event) => setNoMemory(event.target.checked)} />
-            <span className="composer-private-check" aria-hidden="true">✓</span>
-            <span>Private request</span>
-          </label>
-          <ChatAttachments value={attachments} onChange={setAttachments} onError={setNotice} disabled={sending} />
+          {noMemory && (
+            <span className="composer-private-badge" title="Private request active: memory, chat history, and attachments are not saved">
+              <span className="composer-private-dot" aria-hidden="true" />
+              <span>Private request</span>
+            </span>
+          )}
+          {ttsEnabled && (
+            <span className="composer-tts-badge" title={`Text-to-Speech active (Voice: ${SPEECH_VOICES.find((v) => v.id === ttsVoice)?.label ?? ttsVoice})`}>
+              <span className="composer-tts-dot" aria-hidden="true" />
+              <span>TTS: {SPEECH_VOICES.find((v) => v.id === ttsVoice)?.label ?? ttsVoice}</span>
+            </span>
+          )}
+          <ChatAttachments
+            value={attachments}
+            onChange={setAttachments}
+            onError={setNotice}
+            disabled={sending}
+            privateRequestEnabled={chatMode === "private"}
+            onPrivateRequestChange={(enabled) => handleModeChange(enabled ? "private" : "none")}
+            ttsEnabled={chatMode === "tts"}
+            onTtsEnabledChange={(enabled) => handleModeChange(enabled ? "tts" : "none")}
+            ttsVoice={ttsVoice}
+            onTtsVoiceChange={handleTtsVoiceChange}
+            inputText={input}
+            onGenerateSpeech={generateSpeechForInput}
+            isGeneratingSpeech={isGeneratingSpeech}
+          />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
           <div>{sending?<button type="button" onClick={()=>{const active=streamControllerRef.current;if(active)void cancelChatStream(active.streamId).finally(()=>active.controller.abort(new DOMException("Stopped","AbortError")));}}>Stop</button>:<button disabled={!input.trim() && attachments.length === 0}>Send →</button>}</div>
         </form>

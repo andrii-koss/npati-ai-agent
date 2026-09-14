@@ -219,7 +219,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
   {
     "id": 13,
     "capabilityId": "system.dashboard",
-    "name": "Dashboard",
+    "name": "Connected Services",
     "type": "configuration",
     "domain": "system",
     "agentCallable": false,

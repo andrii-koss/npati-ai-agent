@@ -378,15 +378,29 @@ function ScopedConversation({companyId}:{companyId?:string}) {
     }catch(e){if(!(e instanceof DOMException&&e.name==="AbortError"))setError(e instanceof Error?e.message:"Chat failed");}finally{if(streamControllerRef.current?.controller===controller)streamControllerRef.current=null;setSending(false);}
   }
   return <div className="onboarding-live-chat standard-live-chat">
-    {error&&<div role="alert" className="workspace-notice error">{error}</div>}
+    {error && (
+      <div role="alert" className="chat-floating-notice error">
+        <div className="chat-floating-notice-icon">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        </div>
+        <div className="chat-floating-notice-content">
+          <span className="chat-floating-notice-text">{error}</span>
+        </div>
+        <button type="button" className="chat-floating-notice-close" onClick={() => setError("")} aria-label="Dismiss">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    )}
     <div className="message-stream">{messages.map(m=><article key={m.id} className={m.role} aria-label={m.role==="user"?"Your message":"NPATI Agent message"}><ChatMessageContent content={m.content}/></article>)}{sending&&<p role="status">Working…</p>}</div>
     <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}>
       {contextSwitcher}
-      <label className={`composer-private-toggle ${noMemory ? "active" : ""}`} title="Do not read or save memory for this request">
-        <input type="checkbox" checked={noMemory} disabled={sending} onChange={event=>setNoMemory(event.target.checked)}/>
-        <span className="composer-private-check" aria-hidden="true">✓</span>
-        <span>Private request</span>
-      </label>
       <AutoResizeChatTextarea aria-label="Message" placeholder="Ask NPATI Agent…" value={input} onChange={e=>setInput(e.target.value)}/>
       <div>{sending?<button type="button" onClick={()=>{const active=streamControllerRef.current;if(active)void cancelChatStream(active.streamId).finally(()=>active.controller.abort(new DOMException("Stopped","AbortError")));}}>Stop</button>:<button disabled={!input.trim()}>Send →</button>}</div>
     </form>

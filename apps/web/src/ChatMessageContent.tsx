@@ -1,4 +1,5 @@
-import React, { Fragment, useState, type ReactNode } from "react";
+import React, { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { getStoredAuthToken } from "./AuthContext";
 
 const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -7,6 +8,7 @@ const sourceHeading = /^(?:джерела|sources)(?:\s*\(\d+\))?$/iu;
 const inlineSourcePrefix = /(?:^|[\s(])(?:джерело|source)\s*:/iu;
 
 const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document|file):([0-9a-f-]{36}):(.+)\\]\\]$", "i");
+const voiceMessageRegex = /^(?:🎤\s*)?Voice message:\s*([^\n\r]+)$/i;
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
 
@@ -130,6 +132,210 @@ function renderInlineMarkdown(content: string, sourceMode: boolean, sourceTitles
   return nodes;
 }
 
+function AudioAttachmentPlayer({
+  id,
+  name,
+  fallbackText,
+}: {
+  id: string;
+  name: string;
+  fallbackText?: string;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let unmounted = false;
+
+    async function loadAudio() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getStoredAuthToken();
+        const url = `/api/attachments/${id}${token ? "?token=" + encodeURIComponent(token) : ""}`;
+        const res = await fetch(url, {
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          if (unmounted) return;
+          const objectUrl = URL.createObjectURL(blob);
+          audioUrlRef.current = objectUrl;
+          setAudioUrl(objectUrl);
+          return;
+        }
+
+        // Fallback for speech files if attachment endpoint fails
+        if (name.startsWith("speech-") && fallbackText?.trim()) {
+          const voiceMatch = name.match(/^speech-([a-zA-Z0-9_-]+)\.mp3$/i);
+          const voice = voiceMatch ? voiceMatch[1]! : "alloy";
+          const speechRes = await fetch("/api/audio/speech", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(token ? { authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ input: fallbackText.trim(), format: "mp3", voice }),
+          });
+          if (speechRes.ok) {
+            const blob = await speechRes.blob();
+            if (unmounted) return;
+            const objectUrl = URL.createObjectURL(blob);
+            audioUrlRef.current = objectUrl;
+            setAudioUrl(objectUrl);
+            return;
+          }
+        }
+
+        throw new Error(`HTTP ${res.status}`);
+      } catch {
+        if (!unmounted) setError("Could not load audio recording");
+      } finally {
+        if (!unmounted) setLoading(false);
+      }
+    }
+
+    void loadAudio();
+
+    return () => {
+      unmounted = true;
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, [id, name, fallbackText]);
+
+  return (
+    <figure className="chat-message-attachment audio">
+      {audioUrl ? (
+        <audio controls preload="metadata" src={audioUrl} />
+      ) : loading ? (
+        <div className="chat-audio-loading">
+          <span className="chat-audio-spinner" />
+          <span>Loading voice recording…</span>
+        </div>
+      ) : error ? (
+        <div className="chat-audio-error">
+          <span>{error}</span>
+        </div>
+      ) : null}
+      <figcaption className="chat-audio-figcaption">
+        <span>{name}</span>
+        {audioUrl && (
+          <a
+            href={audioUrl}
+            download={name}
+            className="chat-attachment-download-btn"
+            title={"Download " + name}
+            aria-label={"Download " + name}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Download</span>
+          </a>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
+
+function SynthesizedVoiceAudioPlayer({
+  filename,
+  inputText,
+  voice,
+}: {
+  filename: string;
+  inputText: string;
+  voice: string;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let unmounted = false;
+    async function loadAudio() {
+      if (audioUrlRef.current || !inputText.trim()) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getStoredAuthToken();
+        const res = await fetch("/api/audio/speech", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ input: inputText.trim(), format: "mp3", voice }),
+        });
+        if (!res.ok) throw new Error("TTS generation failed");
+        const blob = await res.blob();
+        if (unmounted) return;
+        const url = URL.createObjectURL(blob);
+        audioUrlRef.current = url;
+        setAudioUrl(url);
+      } catch {
+        if (!unmounted) setError("Could not load audio recording");
+      } finally {
+        if (!unmounted) setLoading(false);
+      }
+    }
+
+    void loadAudio();
+
+    return () => {
+      unmounted = true;
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, [inputText, voice]);
+
+  return (
+    <figure className="chat-message-attachment audio">
+      {audioUrl ? (
+        <audio controls preload="metadata" src={audioUrl} />
+      ) : loading ? (
+        <div className="chat-audio-loading">
+          <span className="chat-audio-spinner" />
+          <span>Generating voice recording…</span>
+        </div>
+      ) : error ? (
+        <div className="chat-audio-error">
+          <span>{error}</span>
+        </div>
+      ) : null}
+      <figcaption className="chat-audio-figcaption">
+        <span>{filename}</span>
+        {audioUrl && (
+          <a
+            href={audioUrl}
+            download={filename}
+            className="chat-attachment-download-btn"
+            title={"Download " + filename}
+            aria-label={"Download " + filename}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Download</span>
+          </a>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
+
 export function ChatMessageContent({ content }: { content: string }) {
   const safeContent = content.replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "").trim();
   if (!safeContent) return null;
@@ -145,12 +351,46 @@ export function ChatMessageContent({ content }: { content: string }) {
           const id = attachment[2]!;
           let name = "attachment";
           try { name = decodeURIComponent(attachment[3]!); } catch { /* keep safe fallback */ }
-          const src = "/api/attachments/" + id;
+          const token = getStoredAuthToken();
+          const src = "/api/attachments/" + id + (token ? "?token=" + encodeURIComponent(token) : "");
+          const nonAttachmentLines = safeContent
+            .split("\n")
+            .filter((l) => !attachmentLine.test(l) && !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l))
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const textContext = nonAttachmentLines.join(" ");
           return kind === "image"
             ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="lazy" /><figcaption>{name}</figcaption></figure>
             : kind === "audio"
-              ? <figure className="chat-message-attachment audio" key={index}><audio controls preload="metadata" src={src} /><figcaption>{name}</figcaption></figure>
+              ? <AudioAttachmentPlayer key={index} id={id} name={name} fallbackText={textContext} />
               : <figure className="chat-message-attachment document" key={index}><a href={src} download={name}>Download {name}</a><figcaption>{name}</figcaption></figure>;
+        }
+        const voiceMatch = line.match(voiceMessageRegex);
+        if (voiceMatch) {
+          const filename = voiceMatch[1]!.trim();
+          const voiceNameMatch = filename.match(/^speech-([a-zA-Z0-9_-]+)\.mp3$/i);
+          const voice = voiceNameMatch ? voiceNameMatch[1]! : "alloy";
+          const nonVoiceLines = safeContent
+            .split("\n")
+            .filter((l) => !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l) && !attachmentLine.test(l))
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const textToSpeak = nonVoiceLines.join(" ") || "Speech recording";
+          return (
+            <SynthesizedVoiceAudioPlayer
+              key={index}
+              filename={filename}
+              inputText={textToSpeak}
+              voice={voice}
+            />
+          );
+        }
+        if (/^Transcript:\s*/i.test(line)) {
+          return (
+            <div className="chat-audio-transcript" key={index}>
+              <small>{line}</small>
+            </div>
+          );
         }
         if (heading) {
           inSourceSection = sourceHeading.test(cleanLabel(heading[2]!));

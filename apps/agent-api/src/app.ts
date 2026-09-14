@@ -257,18 +257,23 @@ async function prepareChatAttachments(aiEngine: AIEngine, message: string, attac
   const images = decoded.filter((item) => item.kind === "image").map((item) => ({ mimeType: item.mimeType, dataBase64: item.data.toString("base64") }));
   const audio = decoded.filter((item) => item.kind === "audio");
   const transcripts: Array<{ name: string; text: string }> = [];
+  const cleanMessage = message.trim();
   for (const item of audio) {
+    if (item.name.startsWith("speech-") && cleanMessage) {
+      transcripts.push({ name: item.name, text: cleanMessage });
+      continue;
+    }
     if (!aiEngine.transcribeAudio) throw new Error("The selected AI runtime does not support audio transcription.");
     const result = await aiEngine.transcribeAudio({ data: item.data, mimeType: item.mimeType, filename: item.name });
     transcripts.push({ name: item.name, text: result.text });
   }
-  const cleanMessage = message.trim();
-  const transcriptContext = transcripts.map((item) => "Voice message transcript (" + item.name + "):\n" + item.text).join("\n\n");
+  const relevantTranscripts = transcripts.filter((item) => !(item.name.startsWith("speech-") && cleanMessage));
+  const transcriptContext = relevantTranscripts.map((item) => "Voice message transcript (" + item.name + "):\n" + item.text).join("\n\n");
   const prompt = [cleanMessage || (images.length ? "Analyze the attached image and explain what is useful for my business." : "Respond to my voice message."), transcriptContext].filter(Boolean).join("\n\n");
   const display = [
     cleanMessage,
     ...decoded.filter((item) => item.kind === "image").map((item) => "📷 Image: " + item.name),
-    ...transcripts.map((item) => "🎤 Voice message: " + item.name + "\nTranscript: " + item.text),
+    ...transcripts.map((item) => "🎤 Voice message: " + item.name + (item.name.startsWith("speech-") && cleanMessage ? "" : "\nTranscript: " + item.text)),
   ].filter(Boolean).join("\n\n");
   return { prompt, display, images, decoded, transcripts };
 }
@@ -459,7 +464,7 @@ export function buildApp(config: AppConfig = {}) {
       ? [
           ...savedAttachments.flatMap((item) => [
             "[[npati-attachment:" + item.kind + ":" + item.id + ":" + encodeURIComponent(item.name) + "]]",
-            item.transcript ? "Transcript: " + item.transcript : String(),
+            item.transcript && (!message.trim() || !item.name.startsWith("speech-")) ? "Transcript: " + item.transcript : String(),
           ]),
           message.trim(),
         ].filter(Boolean).join(String.fromCharCode(10, 10))
@@ -574,7 +579,28 @@ export function buildApp(config: AppConfig = {}) {
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
     }
-    if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", media.display);
+    if (!memoryPolicy.noMemoryActive && media.decoded.length && !chatFiles) throw new Error("Persistent object storage is not configured.");
+    const savedAttachments = !memoryPolicy.noMemoryActive && chatFiles && conversation
+      ? await chatFiles.persist(auth, undefined, conversation.id, media.decoded.map((item) => ({ ...item, transcript: item.kind === "audio" ? media.transcripts.find((entry) => entry.name === item.name)?.text : undefined })))
+      : [];
+    const storedDisplay = savedAttachments.length
+      ? [
+          ...savedAttachments.flatMap((item) => [
+            "[[npati-attachment:" + item.kind + ":" + item.id + ":" + encodeURIComponent(item.name) + "]]",
+            item.transcript && (!message.trim() || !item.name.startsWith("speech-")) ? "Transcript: " + item.transcript : String(),
+          ]),
+          message.trim(),
+        ].filter(Boolean).join(String.fromCharCode(10, 10))
+      : media.display;
+    if (memoryPolicy.writeAllowed && conversation) {
+      try {
+        const userMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", storedDisplay);
+        await chatFiles?.linkMessage(auth, savedAttachments.map((item) => item.id), userMessage.id);
+      } catch (error) {
+        if (chatFiles) for (const item of savedAttachments) await chatFiles.delete(auth, item.id).catch(() => undefined);
+        throw error;
+      }
+    }
     const ai = await getAIContext(auth);
     const protectedHistory = memoryPolicy.readAllowed
       ? existing.messages.map((item) => ({ role: item.role, content: SecurityPolicyEngine.protectText(item.content).sanitized }))

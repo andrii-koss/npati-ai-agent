@@ -74,6 +74,13 @@ function formatType(type: string): string {
   }
 }
 
+export function getCapabilityDisplayName(item: { capabilityId?: string; name: string }): string {
+  if (item.capabilityId === "system.dashboard" || item.name === "Dashboard") {
+    return "Connected Services";
+  }
+  return item.name;
+}
+
 export function CapabilityInspectorPage() {
   const [slice, setSlice] = useState<InspectorSlice>("all");
   const [search, setSearch] = useState("");
@@ -149,6 +156,7 @@ export function CapabilityInspectorPage() {
     const term = search.toLowerCase();
     return raw.filter(
       (item) =>
+        getCapabilityDisplayName(item).toLowerCase().includes(term) ||
         item.name.toLowerCase().includes(term) ||
         item.capabilityId.toLowerCase().includes(term) ||
         item.domain.toLowerCase().includes(term) ||
@@ -368,7 +376,7 @@ export function CapabilityInspectorPage() {
                         <span className="inventory-badge">#{item.id}</span>
                       </td>
                       <td>
-                        <strong className="item-name">{item.name}</strong>
+                        <strong className="item-name">{getCapabilityDisplayName(item)}</strong>
                       </td>
                       <td>
                         <code

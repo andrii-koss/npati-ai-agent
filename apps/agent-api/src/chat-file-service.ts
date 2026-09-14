@@ -32,7 +32,7 @@ export class ChatFileService {
     private readonly protection?: StorageProtection,
   ) {}
 
-  async persist(context: AuthContext, businessId: string, chatId: string, attachments: PersistableAttachment[]) {
+  async persist(context: AuthContext, businessId: string | undefined, chatId: string, attachments: PersistableAttachment[]) {
     await this.protection?.consume(context,"upload",attachments.length);
     const saved: Array<{ id: string; kind: FileCategory; name: string; transcript?: string }> = [];
     for (const item of attachments) {
@@ -44,7 +44,7 @@ export class ChatFileService {
       const key = objectKey(["workspace",segment(context.workspaceId),"user",segment(context.userId),"chats",segment(chatId),item.kind,id]);
       const idempotencyKey = "chat:" + chatId + ":" + (item.clientId ?? checksum + ":" + item.name);
       const reservation = await this.repository.reserve(context, {
-        id, workspaceId: context.workspaceId, userId: context.userId, businessId, chatId,
+        id, workspaceId: context.workspaceId, userId: context.userId, businessId: businessId || undefined, chatId,
         bucket: NPATI_BUCKETS.chat, objectKey: key, originalFilename: item.name, mimeType: item.mimeType,
         sizeBytes: item.data.length, checksum, category: item.kind, idempotencyKey,
       });
@@ -82,6 +82,7 @@ export class ChatFileService {
     }
     if (file.businessId) await this.workspace.getBusiness(context,file.businessId);
     if (file.chatId && file.businessId) await this.workspace.getConversation(context,file.businessId,file.chatId);
+    if (file.chatId && !file.businessId) await this.workspace.getNeutralConversation(context,file.chatId);
     return file;
   }
 
