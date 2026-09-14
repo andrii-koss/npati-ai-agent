@@ -251,9 +251,11 @@ Verified gate: чисте встановлення кожного заявлен
 
 ### P3.1 — Advanced memory features
 
-Пункти: #73 `USER.md user model` (V), #74 `MEMORY.md long-term memory` (V), #77 `Automatic memory flush` (V), #79 `FTS5 keyword search` (N), #81 `Typed decay` (V), #83 `Daily memory notes` (V), #85 `Standing intents` (V), #86 `Memory Wiki` (N), #87 `Dreaming` (N), #88 `Action-sensitive memory` (N), #219 `Qdrant support` (N), #220 `int8 vector quantization` (N), #242 `Multiple memory engines` (P), #243 `Memory import` (P).
+Пункти: #73 `USER.md user model` (V), #74 `MEMORY.md long-term memory` (V), #77 `Automatic memory flush` (V), #79 `FTS5 keyword search` (N), #81 `Typed decay` (V), #83 `Daily memory notes` (V), #85 `Standing intents` (V), #86 `Memory Wiki` (V), #87 `Dreaming` (V), #88 `Action-sensitive memory` (V), #219 `Qdrant support` (V), #220 `int8 vector quantization` (N), #242 `Multiple memory engines` (P), #243 `Memory import` (P).
 
 Виконано 2026-09-14: #77, #81, #83 і #85 переведено у Verified після unit/integration перевірок та production Docker E2E (scripts/verify-production-durable-memory-features.mjs): реальний chat compaction записує факти в PostgreSQL з дедуплікацією; typed decay metadata проходить production API і retrieval; daily notes мають idempotency; standing intents мають keyword matching та optimistic revision; усі дані переживають restart і ізольовані між tenant. #79 лишається Not implemented: Node SQLite у фактичному runtime повертає "no such module: fts5", а PostgreSQL FTS не перейменовується на FTS5.
+
+Закрито 2026-09-14: #86, #87, #88 і #219 пройшли production Docker E2E (`scripts/verify-production-advanced-memory.mjs`). Wiki має PostgreSQL CRUD, backlinks, revision control, tenant isolation та agent retrieval; Dreaming створює idempotent durable cycle і консолідовану wiki-сторінку; action rules мають CRUD/revisions та інжектуються до delegation planning і planned-tool retrieval; optional Qdrant працює як реальний контейнер із tenant filters, restart persistence і delete cleanup. Qdrant-only retrieval доведено після контрольованого видалення тестових pgvector chunks.
 
 Що реалізувати: стабільний MemoryProvider contract; PostgreSQL залишається default, Qdrant — optional adapter; import із dry-run/dedup/provenance; typed TTL/decay; daily notes; standing intents; user model; action-sensitive write policy. FTS5 потрібен лише SQLite adapter і не повинен дублювати PostgreSQL FTS.
 

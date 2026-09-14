@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-14T06:29:51.529Z",
+  "timestamp": "2026-09-14T06:59:18.901Z",
   "total": 306,
   "counts": {
     "implemented and verified": 7,
@@ -8,8 +8,8 @@
     "implemented but missing agent routing": 0,
     "implemented but missing tests": 0,
     "partially implemented": 56,
-    "not implemented": 89,
-    "not applicable/runtime-only": 154
+    "not implemented": 85,
+    "not applicable/runtime-only": 158
   },
   "items": {
     "implemented and verified": [
@@ -1099,48 +1099,6 @@
         "status": "NOT_IMPLEMENTED"
       },
       {
-        "id": 86,
-        "capabilityId": "storage.memory_wiki",
-        "name": "Memory Wiki",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/standing-intents-wiki-and-dreaming.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 87,
-        "capabilityId": "storage.dreaming",
-        "name": "Dreaming",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/standing-intents-wiki-and-dreaming.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 88,
-        "capabilityId": "storage.action-sensitive_memory",
-        "name": "Action-sensitive memory",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/action-sensitive-memory-and-compat-apis.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
         "id": 94,
         "capabilityId": "orchestration.cost-optimized",
         "name": "cost-optimized",
@@ -2039,20 +1997,6 @@
         "testType": "unit",
         "testFiles": [
           "tests/compression-caveman-ultra-omniglyph.test.ts"
-        ],
-        "status": "NOT_IMPLEMENTED"
-      },
-      {
-        "id": 219,
-        "capabilityId": "storage.qdrant_support",
-        "name": "Qdrant support",
-        "type": "runtime",
-        "domain": "storage",
-        "agentCallable": false,
-        "risk": "low",
-        "testType": "unit",
-        "testFiles": [
-          "tests/qdrant-quantization-device-tracking.test.ts"
         ],
         "status": "NOT_IMPLEMENTED"
       },
@@ -3526,6 +3470,51 @@
         "status": "VERIFIED_EXISTING"
       },
       {
+        "id": 86,
+        "capabilityId": "storage.memory_wiki",
+        "name": "Memory Wiki",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/advanced-memory-production.test.ts",
+          "scripts/verify-production-advanced-memory.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 87,
+        "capabilityId": "storage.dreaming",
+        "name": "Dreaming",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/advanced-memory-production.test.ts",
+          "scripts/verify-production-advanced-memory.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 88,
+        "capabilityId": "storage.action-sensitive_memory",
+        "name": "Action-sensitive memory",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/advanced-memory-production.test.ts",
+          "scripts/verify-production-advanced-memory.mjs"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
         "id": 89,
         "capabilityId": "system.format_translation",
         "name": "Format translation",
@@ -4087,6 +4076,21 @@
         "testType": "unit",
         "testFiles": [
           "tests/compression-caveman-ultra-omniglyph.test.ts"
+        ],
+        "status": "VERIFIED_EXISTING"
+      },
+      {
+        "id": 219,
+        "capabilityId": "storage.qdrant_support",
+        "name": "Qdrant support",
+        "type": "runtime",
+        "domain": "storage",
+        "agentCallable": false,
+        "risk": "low",
+        "testType": "e2e",
+        "testFiles": [
+          "tests/advanced-memory-production.test.ts",
+          "scripts/verify-production-advanced-memory.mjs"
         ],
         "status": "VERIFIED_EXISTING"
       },

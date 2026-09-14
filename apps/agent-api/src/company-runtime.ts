@@ -116,7 +116,7 @@ export class CompanyDelegationRuntime {
     private readonly ai: AIEngine,
     private readonly timeoutMs = DEFAULT_TIMEOUT,
     toolRuntime?: CompanyToolExecutor,
-    private readonly knowledgeRetriever?: (ctx: AuthContext, companyId: string, query: string, scope?: MemoryScope) => Promise<{chunks:Array<{content:string}>;memories:Array<{content:string}>}>,
+    private readonly knowledgeRetriever?: (ctx: AuthContext, companyId: string, query: string, scope?: MemoryScope) => Promise<{chunks:Array<{content:string}>;memories:Array<{content:string;source?:string;metadata?:Record<string,unknown>}>}>,
     capabilityResolver?: EffectiveCapabilityResolver,
     riskApprovalService?: RiskApprovalService,
     private readonly guardrailPolicyResolver?: (ctx:AuthContext,companyId:string)=>Promise<CompanyGuardrailPolicy>,
@@ -227,12 +227,14 @@ export class CompanyDelegationRuntime {
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
+      const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
+      const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
       const planned = await this.ai.a2aSend({
         model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
           { role: "user", content: protect([
             `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
@@ -275,10 +277,10 @@ export class CompanyDelegationRuntime {
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
       // Specialists still require their own allowlist entry for direct knowledge tool calls.
       const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
-      const retrieved = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
+      const retrieved = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,[input.task,...plan.toolRequests.map(request=>request.tool)].join(" "),options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const knowledge={
         chunks:retrieved.chunks.map(item=>({content:protect(item.content)})),
-        memories:retrieved.memories.map(item=>({content:protect(item.content)})),
+        memories:retrieved.memories.map(item=>({content:protect(item.content),source:item.source,metadata:item.metadata})),
       };
       const normalizedToolRequests = plan.toolRequests.map((request) => {
         const requestingAgent = byId.get(request.agentId);

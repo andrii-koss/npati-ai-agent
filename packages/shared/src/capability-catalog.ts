@@ -1989,7 +1989,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Memory Wiki",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Durable PostgreSQL Company Memory Wiki with normalized hierarchical paths, tags, wikilink backlinks, optimistic revisions, tenant isolation, lifecycle APIs, restart persistence, and authorized agent retrieval.",
     "useWhen": [
       "Internal system execution requires Memory Wiki"
     ],
@@ -2012,7 +2012,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Dreaming",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Runs an idempotent durable consolidation cycle over real Company Memories, applies typed decay and exact deduplication, records the cycle in PostgreSQL, and writes a consolidated Memory Wiki page.",
     "useWhen": [
       "Internal system execution requires Dreaming"
     ],
@@ -2035,7 +2035,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Action-sensitive memory",
-    "description": "Взяти ідею шарів пам’яті; реалізувати tenant + brand scopes.",
+    "description": "Durable company-scoped action rules with idempotent CRUD, revisions and risk metadata; matching rules are injected before delegation planning and retrieved again using planned tool names.",
     "useWhen": [
       "Internal system execution requires Action-sensitive memory"
     ],
@@ -5144,7 +5144,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "runtime",
     "domain": "storage",
     "name": "Qdrant support",
-    "description": "Побудувати поверх цього User Memory + Company/Brand Brain з tenant isolation.",
+    "description": "Optional real Qdrant vector backend alongside authoritative PostgreSQL pgvector, with mandatory workspace/company/user filters, collision-safe point IDs, Docker persistence, Qdrant-only retrieval fallback, and document-delete cleanup.",
     "useWhen": [
       "Internal system execution requires Qdrant support"
     ],

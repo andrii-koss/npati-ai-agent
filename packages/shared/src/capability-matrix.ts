@@ -1381,11 +1381,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/standing-intents-wiki-and-dreaming.test.ts"
+      "tests/advanced-memory-production.test.ts",
+      "scripts/verify-production-advanced-memory.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 87,
@@ -1395,11 +1396,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/standing-intents-wiki-and-dreaming.test.ts"
+      "tests/advanced-memory-production.test.ts",
+      "scripts/verify-production-advanced-memory.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 88,
@@ -1409,11 +1411,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/action-sensitive-memory-and-compat-apis.test.ts"
+      "tests/advanced-memory-production.test.ts",
+      "scripts/verify-production-advanced-memory.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 89,
@@ -3441,11 +3444,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "domain": "storage",
     "agentCallable": false,
     "risk": "low",
-    "testType": "unit",
+    "testType": "e2e",
     "testFiles": [
-      "tests/qdrant-quantization-device-tracking.test.ts"
+      "tests/advanced-memory-production.test.ts",
+      "scripts/verify-production-advanced-memory.mjs"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 220,
