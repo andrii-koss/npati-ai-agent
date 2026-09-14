@@ -1,6 +1,7 @@
 import { brandConfig } from "@npati/branding";
 import type { HealthResponse } from "@npati/shared";
 import { ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AIProviderMarketplace, OAuthCallback } from "./AIProviderMarketplace";
 import { AuthProvider, useAuth, getStoredAuthToken } from "./AuthContext";
@@ -327,6 +328,86 @@ async function fetchAllSidebarConversations(businesses: Array<{ id: string; name
   return [...neutralRows, ...businessRows.flat()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+function IconShare() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IconRename() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function IconPin() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24Z" />
+    </svg>
+  );
+}
+
+function IconUnpin() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="2" y1="2" x2="22" y2="22" />
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.89A2 2 0 0 0 5 15.24V17h12" />
+      <path d="M15 9.34V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v1.34" />
+    </svg>
+  );
+}
+
+function IconArchive() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
+function IconDots() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+    </svg>
+  );
+}
+
+type SidebarMenuTarget = {
+  type: "chat" | "draft" | "business";
+  id: string;
+  title: string;
+  isPinned: boolean;
+  top: number;
+  left: number;
+  data: any;
+};
+
 function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -340,6 +421,117 @@ function Sidebar() {
   const businesses = overview?.businesses ?? cachedSidebarBusinesses ?? initialBusinesses.current.businesses;
   const hasBusinessesLoaded = isSidebarBusinessesLoaded || overview !== null || (cachedSidebarDrafts !== null && cachedSidebarBusinesses !== null);
   const currentBusiness = overview?.currentBusiness;
+
+  const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("npati_pinned_chats") || "[]"); } catch { return []; }
+  });
+  const [pinnedBusinessIds, setPinnedBusinessIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("npati_pinned_businesses") || "[]"); } catch { return []; }
+  });
+  const [archivedChatIds, setArchivedChatIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("npati_archived_chats") || "[]"); } catch { return []; }
+  });
+  const [archivedBusinessIds, setArchivedBusinessIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("npati_archived_businesses") || "[]"); } catch { return []; }
+  });
+  const [menuTarget, setMenuTarget] = useState<SidebarMenuTarget | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!menuTarget) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".sidebar-action-menu") || target?.closest(".sidebar-icon-action")) {
+        return;
+      }
+      setMenuTarget(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuTarget(null);
+    };
+    const onScroll = () => {
+      setMenuTarget(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [menuTarget]);
+
+  function togglePinChat(id: string) {
+    setPinnedChatIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [id, ...prev];
+      try { localStorage.setItem("npati_pinned_chats", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  function togglePinBusiness(id: string) {
+    setPinnedBusinessIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [id, ...prev];
+      try { localStorage.setItem("npati_pinned_businesses", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  function archiveChat(id: string) {
+    setArchivedChatIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try { localStorage.setItem("npati_archived_chats", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+    setToast("Chat archived");
+  }
+
+  function archiveBusiness(id: string) {
+    setArchivedBusinessIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try { localStorage.setItem("npati_archived_businesses", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+    setToast("Business archived");
+  }
+
+  async function shareLink(url: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setToast(`${label} link copied!`);
+    } catch {
+      window.prompt(`Copy ${label} link:`, url);
+    }
+  }
+
+  async function renameBusinessItem(id: string, currentName: string, isDraft?: boolean) {
+    const name = window.prompt("Rename business", currentName)?.trim();
+    if (!name || name === currentName) return;
+    if (isDraft) {
+      const draft = drafts.find((d) => d.businessId === id);
+      if (draft) {
+        draft.business.name = name;
+        updateCachedSidebarBusinesses(drafts, businesses);
+        await refresh();
+      }
+      return;
+    }
+    const response = await authFetch(`/api/businesses/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (response.ok) {
+      await refresh();
+    }
+  }
 
   useEffect(() => {
     if (overview) {
@@ -491,11 +683,149 @@ function Sidebar() {
       navigate("/chat");
     }
   }
+
   const onboardingConversationIds = new Set((overview?.onboardings ?? drafts).map((session) => session.conversationId).filter(Boolean));
   const chatConversations = conversations.filter(
-    (c) => c.title !== "Business setup" && !onboardingConversationIds.has(c.id)
+    (c) => c.title !== "Business setup" && !onboardingConversationIds.has(c.id) && !archivedChatIds.includes(c.id)
   );
+  const pinnedChats = chatConversations.filter((c) => pinnedChatIds.includes(c.id));
+  const unpinnedChats = chatConversations.filter((c) => !pinnedChatIds.includes(c.id));
   const hasSavedChats = chatConversations.length > 0;
+
+  const visibleDrafts = drafts.filter((d) => !archivedBusinessIds.includes(d.businessId));
+  const visibleBusinesses = businesses.filter((b) => !archivedBusinessIds.includes(b.id));
+
+  type BusinessListItem =
+    | { kind: "draft"; id: string; name: string; subtitle: string; draft: (typeof drafts)[0] }
+    | { kind: "business"; id: string; name: string; subtitle: string; business: (typeof businesses)[0] };
+
+  const allBusinessItems: BusinessListItem[] = [
+    ...visibleDrafts.map((d) => ({
+      kind: "draft" as const,
+      id: d.businessId,
+      name: d.business.name,
+      subtitle: "Setup draft",
+      draft: d,
+    })),
+    ...visibleBusinesses.map((b) => ({
+      kind: "business" as const,
+      id: b.id,
+      name: b.name,
+      subtitle: b.id === currentBusiness?.id ? "Current" : "Use in chat",
+      business: b,
+    })),
+  ];
+
+  const pinnedBusinessItems = allBusinessItems.filter((item) => pinnedBusinessIds.includes(item.id));
+  const unpinnedBusinessItems = allBusinessItems.filter((item) => !pinnedBusinessIds.includes(item.id));
+
+  function renderConversationRow(conversation: SidebarConversation, isPinned: boolean) {
+    const isMenuOpen = menuTarget?.type === "chat" && menuTarget.id === conversation.id;
+    const isActive = location.pathname === `/c/${conversation.id}`;
+    return (
+      <div className={`sidebar-history-row ${isActive ? "active" : ""} ${isPinned ? "is-pinned" : ""} ${isMenuOpen ? "menu-open" : ""}`} key={conversation.id}>
+        <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}>
+          <span>{conversation.title}</span>
+          <small>{conversation.businessName ? `${conversation.businessName} · ` : ""}{new Date(conversation.updatedAt).toLocaleDateString()}</small>
+        </button>
+        <button
+          className={`sidebar-icon-action ${isPinned ? "pinned" : ""}`}
+          aria-label={isPinned ? `Unpin ${conversation.title}` : `Pin ${conversation.title}`}
+          title={isPinned ? "Unpin chat" : "Pin chat"}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePinChat(conversation.id);
+          }}
+        >
+          {isPinned ? <IconUnpin /> : <IconPin />}
+        </button>
+        <button
+          className={`sidebar-icon-action ${isMenuOpen ? "active" : ""}`}
+          aria-label={`Options for ${conversation.title}`}
+          title="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const sidebarEl = e.currentTarget.closest(".sidebar");
+            const sidebarRight = sidebarEl ? sidebarEl.getBoundingClientRect().right : 230;
+            const left = Math.min(Math.max(rect.right + 10, sidebarRight + 8), window.innerWidth - 190);
+            const top = Math.max(10, Math.min(rect.top - 6, window.innerHeight - 250));
+            setMenuTarget(
+              isMenuOpen
+                ? null
+                : {
+                    type: "chat",
+                    id: conversation.id,
+                    title: conversation.title,
+                    isPinned,
+                    top,
+                    left,
+                    data: conversation,
+                  }
+            );
+          }}
+        >
+          <IconDots />
+        </button>
+      </div>
+    );
+  }
+
+  function renderBusinessItemRow(item: BusinessListItem, isPinned: boolean) {
+    const isMenuOpen = (menuTarget?.type === "draft" || menuTarget?.type === "business") && menuTarget.id === item.id;
+    const isActive = location.pathname === `/b/${item.id}` || (item.kind === "business" && location.pathname === `/settings/business/${item.id}`);
+    const onOpen = item.kind === "draft"
+      ? () => navigate(`/b/${item.id}`)
+      : () => void openBusiness(item.id);
+
+    return (
+      <div className={`sidebar-history-row ${isActive ? "active" : ""} ${isPinned ? "is-pinned" : ""} ${isMenuOpen ? "menu-open" : ""}`} key={item.id}>
+        <button className="sidebar-history-link" onClick={onOpen}>
+          <span>{item.name}</span>
+          <small>{item.subtitle}</small>
+        </button>
+        <button
+          className={`sidebar-icon-action ${isPinned ? "pinned" : ""}`}
+          aria-label={isPinned ? `Unpin ${item.name}` : `Pin ${item.name}`}
+          title={isPinned ? "Unpin business" : "Pin business"}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePinBusiness(item.id);
+          }}
+        >
+          {isPinned ? <IconUnpin /> : <IconPin />}
+        </button>
+        <button
+          className={`sidebar-icon-action ${isMenuOpen ? "active" : ""}`}
+          aria-label={`Options for ${item.name}`}
+          title="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const sidebarEl = e.currentTarget.closest(".sidebar");
+            const sidebarRight = sidebarEl ? sidebarEl.getBoundingClientRect().right : 230;
+            const left = Math.min(Math.max(rect.right + 10, sidebarRight + 8), window.innerWidth - 190);
+            const top = Math.max(10, Math.min(rect.top - 6, window.innerHeight - 250));
+            setMenuTarget(
+              isMenuOpen
+                ? null
+                : {
+                    type: item.kind,
+                    id: item.id,
+                    title: item.name,
+                    isPinned,
+                    top,
+                    left,
+                    data: item.kind === "draft" ? item.draft : item.business,
+                  }
+            );
+          }}
+        >
+          <IconDots />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <aside className="sidebar">
@@ -509,13 +839,18 @@ function Sidebar() {
           {chatOpen && (
             <div className="sidebar-dropdown">
               {!hasSavedChats && hasLoaded && <small className="sidebar-empty">No saved chats yet</small>}
-              {chatConversations.map((conversation) => (
-                <div className="sidebar-history-row" key={conversation.id}>
-                  <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}><span>{conversation.title}</span><small>{conversation.businessName ? `${conversation.businessName} · ` : ""}{new Date(conversation.updatedAt).toLocaleDateString()}</small></button>
-                  <button className="sidebar-icon-action" aria-label={`Rename ${conversation.title}`} onClick={() => void renameConversation(conversation)}>✎</button>
-                  <button className="sidebar-icon-action danger" aria-label={`Delete ${conversation.title}`} onClick={() => void deleteConversation(conversation)}>×</button>
-                </div>
-              ))}
+              {pinnedChats.length > 0 && (
+                <>
+                  <div className="sidebar-section-header">Pinned</div>
+                  {pinnedChats.map((conversation) => renderConversationRow(conversation, true))}
+                </>
+              )}
+              {unpinnedChats.length > 0 && (
+                <>
+                  {pinnedChats.length > 0 && <div className="sidebar-section-header">Recent</div>}
+                  {unpinnedChats.map((conversation) => renderConversationRow(conversation, false))}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -526,26 +861,116 @@ function Sidebar() {
           </div>
           {businessOpen && (
             <div className="sidebar-dropdown">
-              {hasBusinessesLoaded && businesses.length === 0 && drafts.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
-              {drafts.map((draft) => (
-                <div className="sidebar-history-row" key={draft.businessId}>
-                  <button className="sidebar-history-link" onClick={() => navigate(`/b/${draft.businessId}`)}><span>{draft.business.name}</span><small>Setup draft</small></button>
-                  <button className="sidebar-icon-action" aria-label={`Edit ${draft.business.name}`} onClick={() => editBusiness(draft.businessId)}>✎</button>
-                  <button className="sidebar-icon-action danger" aria-label={`Delete ${draft.business.name}`} onClick={() => void deleteBusiness(draft.businessId, draft.business.name)}>×</button>
-                </div>
-              ))}
-              {businesses.map((business) => (
-                <div className="sidebar-history-row" key={business.id}>
-                  <button className="sidebar-history-link" onClick={() => void openBusiness(business.id)}><span>{business.name}</span><small>{business.id === currentBusiness?.id ? "Current" : "Use in chat"}</small></button>
-                  <button className="sidebar-icon-action" aria-label={`Edit ${business.name}`} onClick={() => editBusiness(business.id)}>✎</button>
-                  <button className="sidebar-icon-action danger" aria-label={`Delete ${business.name}`} onClick={() => void deleteBusiness(business.id, business.name)}>×</button>
-                </div>
-              ))}
+              {hasBusinessesLoaded && allBusinessItems.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
+              {pinnedBusinessItems.length > 0 && (
+                <>
+                  <div className="sidebar-section-header">Pinned</div>
+                  {pinnedBusinessItems.map((item) => renderBusinessItemRow(item, true))}
+                </>
+              )}
+              {unpinnedBusinessItems.length > 0 && (
+                <>
+                  {pinnedBusinessItems.length > 0 && <div className="sidebar-section-header">Recent</div>}
+                  {unpinnedBusinessItems.map((item) => renderBusinessItemRow(item, false))}
+                </>
+              )}
             </div>
           )}
         </div>
         {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href}>{item}</Link>; })}
       </nav>
+
+      {menuTarget &&
+        createPortal(
+          <div
+            className="sidebar-action-menu"
+            style={{ top: menuTarget.top, left: menuTarget.left }}
+          >
+            <button
+              className="sidebar-action-item"
+              onClick={() => {
+                if (menuTarget.type === "chat") {
+                  void shareLink(`${window.location.origin}/c/${menuTarget.id}`, "Chat");
+                } else {
+                  void shareLink(`${window.location.origin}/b/${menuTarget.id}`, "Business");
+                }
+                setMenuTarget(null);
+              }}
+            >
+              <IconShare />
+              <span>Share</span>
+            </button>
+            <button
+              className="sidebar-action-item"
+              onClick={() => {
+                if (menuTarget.type === "chat") {
+                  void renameConversation(menuTarget.data as SidebarConversation);
+                } else if (menuTarget.type === "draft") {
+                  void renameBusinessItem(menuTarget.id, menuTarget.title, true);
+                } else {
+                  void renameBusinessItem(menuTarget.id, menuTarget.title, false);
+                }
+                setMenuTarget(null);
+              }}
+            >
+              <IconRename />
+              <span>Rename</span>
+            </button>
+            <div className="sidebar-action-divider" />
+            <button
+              className="sidebar-action-item"
+              onClick={() => {
+                if (menuTarget.type === "chat") {
+                  togglePinChat(menuTarget.id);
+                } else {
+                  togglePinBusiness(menuTarget.id);
+                }
+                setMenuTarget(null);
+              }}
+            >
+              {menuTarget.isPinned ? <IconUnpin /> : <IconPin />}
+              <span>
+                {menuTarget.isPinned
+                  ? menuTarget.type === "chat"
+                    ? "Unpin chat"
+                    : "Unpin business"
+                  : menuTarget.type === "chat"
+                  ? "Pin chat"
+                  : "Pin business"}
+              </span>
+            </button>
+            <button
+              className="sidebar-action-item"
+              onClick={() => {
+                if (menuTarget.type === "chat") {
+                  archiveChat(menuTarget.id);
+                } else {
+                  archiveBusiness(menuTarget.id);
+                }
+                setMenuTarget(null);
+              }}
+            >
+              <IconArchive />
+              <span>Archive</span>
+            </button>
+            <button
+              className="sidebar-action-item danger"
+              onClick={() => {
+                if (menuTarget.type === "chat") {
+                  void deleteConversation(menuTarget.data as SidebarConversation);
+                } else {
+                  void deleteBusiness(menuTarget.id, menuTarget.title);
+                }
+                setMenuTarget(null);
+              }}
+            >
+              <IconTrash />
+              <span>Delete</span>
+            </button>
+          </div>,
+          document.body
+        )}
+      {toast && <div className="sidebar-toast">{toast}</div>}
     </aside>
   );
 }
