@@ -2,7 +2,7 @@ import { getStoredAuthToken, useAuth } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BusinessChatPage, ChatContextSwitcherContext, useWorkspace } from "./BusinessWorkspace";
+import { BusinessChatPage, ChatContextSwitcherContext, FloatingNotice, useWorkspace } from "./BusinessWorkspace";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { cancelChatStream, streamChat } from "./chat-stream";
@@ -43,7 +43,9 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const business = overview?.currentBusiness;
-  const session = businessId ? overview?.onboardings.find((item) => item.businessId === businessId) : overview?.onboarding;
+  const session = businessId && businessId !== "new"
+    ? overview?.onboardings.find((item) => item.businessId === businessId)
+    : (businessId === "new" ? undefined : overview?.onboarding);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -63,8 +65,9 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   }
 
   useEffect(() => {
-    fetch("/api/ai/marketplace?tab=connected&limit=1").then((response) => response.json())
-      .then((value) => setProviderConnected(value?.overview?.connectedProviders > 0)).catch(() => setProviderConnected(false));
+    request<{ overview?: { connectedProviders?: number } }>("/ai/marketplace?tab=connected&limit=1")
+      .then((value) => setProviderConnected((value?.overview?.connectedProviders ?? 0) > 0))
+      .catch(() => setProviderConnected(false));
   }, []);
   useEffect(() => {
     if (session) void loadHistory(session.businessId, session.conversationId).catch(() => setMessages([]));
@@ -95,12 +98,15 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
     setResearching(isResearchRequest(payload.message));
     setError("");
     try {
-      const result = await request<AgentReply>("/chat", businessSetup ? { ...payload, businessSetup: true, businessId: session?.businessId ?? businessId } : payload);
+      const result = await request<AgentReply>("/chat", businessSetup ? { ...payload, businessSetup: true, businessId: session?.businessId ?? (businessId && businessId !== "new" ? businessId : undefined) } : payload);
       if (result.conversationId && !businessSetup) {
         setHandoffConversationId(result.conversationId);
         navigate(`/c/${result.conversationId}`, { replace: true });
       }
-      if (result.onboarding) await loadHistory(String(result.onboarding.business.id), result.onboarding.conversationId);
+      if (result.onboarding) {
+        navigate(`/b/${result.onboarding.business.id}`, { replace: true });
+        await loadHistory(String(result.onboarding.business.id), result.onboarding.conversationId);
+      }
       await refresh();
     } catch (reason) {
       if (optimisticId) setMessages((current) => current.filter((message) => message.id !== optimisticId));
@@ -155,26 +161,26 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   if (!session) return (
     <>
       {providerConnected === false && (
-        <div className="workspace-notice error">
-          Connect an AI provider to start conversational onboarding.
-          <Link to="/settings/ai">Open AI Marketplace →</Link>
-        </div>
+        <FloatingNotice
+          message="Connect an AI provider to start conversational onboarding."
+          tone="error"
+          onClose={() => setProviderConnected(null)}
+          action={<Link to="/settings/ai">Open AI Marketplace →</Link>}
+        />
       )}
-      {error && <div className="workspace-notice error">{error}</div>}
+      {error && (
+        <FloatingNotice
+          message={error}
+          tone="error"
+          onClose={() => setError("")}
+          action={/provider/i.test(error) ? <Link to="/settings/ai">Open AI Marketplace →</Link> : undefined}
+        />
+      )}
       <div className="onboarding-live-chat standard-live-chat onboarding-empty-chat">
         <div className="message-stream">
           <div className="chat-welcome">
             <h2>What should we work on?</h2>
-            <p>Tell me where you are today. I’ll build the initial business context from one useful answer and won’t invent missing facts.</p>
-            <div>
-              {([
-                ["existing", "I already have a business"],
-                ["starting", "I want to start a business"],
-                ["seller", "I want to sell something"],
-              ] as const).map(([scenario, title]) => (
-                <button key={scenario} disabled={sending || providerConnected === false} onClick={() => void act({ onboardingAction: "start", scenario })}>{title}</button>
-              ))}
-            </div>
+            <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
           </div>
           {messages.map((message, index) => <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} key={message.id} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><ChatMessageContent content={message.content} /></article>)}
           {sending && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{(researching ? researchThinkingSteps : onboardingThinkingSteps)[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
@@ -183,10 +189,9 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
         </div>
         <form className="onboarding-live-composer" onSubmit={submit}>
           {contextSwitcher}
-          <AutoResizeChatTextarea aria-label="Chat message" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} disabled={sending || providerConnected === false} placeholder="Describe what you want to work on…" autoFocus />
-          <div><button disabled={sending || providerConnected === false || !input.trim()}>Send →</button></div>
+          <AutoResizeChatTextarea aria-label="Chat message" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} disabled={sending} placeholder="Type your answer…" autoFocus />
+          <div><button disabled={sending || !input.trim()}>Send →</button></div>
         </form>
-        <p className="onboarding-start-manual">Prefer a form? <Link to="/settings/business">Set up manually</Link></p>
       </div>
     </>
   );
@@ -200,10 +205,12 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   return (
     <>
       {error && (
-        <div className="workspace-notice error">
-          {error}
-          {/provider/i.test(error) && <Link to="/settings/ai">Open AI Marketplace →</Link>}
-        </div>
+        <FloatingNotice
+          message={error}
+          tone="error"
+          onClose={() => setError("")}
+          action={/provider/i.test(error) ? <Link to="/settings/ai">Open AI Marketplace →</Link> : undefined}
+        />
       )}
       <div className="onboarding-progress">
         <div>
@@ -342,7 +349,14 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 
   return (
     <ChatContextSwitcherContext.Provider value={switcher}>
-      {error && <div role="alert" className="workspace-notice error">{error}</div>}
+      {error && (
+        <FloatingNotice
+          message={error}
+          tone="error"
+          onClose={() => setError("")}
+          action={/provider/i.test(error) ? <Link to="/settings/ai">Open AI Marketplace →</Link> : undefined}
+        />
+      )}
       {selection === "business" ? (
         <BusinessConversation {...props} />
       ) : (
@@ -370,24 +384,12 @@ function ScopedConversation({companyId}:{companyId?:string}) {
   }
   return <div className="onboarding-live-chat standard-live-chat">
     {error && (
-      <div role="alert" className="chat-floating-notice error">
-        <div className="chat-floating-notice-icon">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-        </div>
-        <div className="chat-floating-notice-content">
-          <span className="chat-floating-notice-text">{error}</span>
-        </div>
-        <button type="button" className="chat-floating-notice-close" onClick={() => setError("")} aria-label="Dismiss">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
+      <FloatingNotice
+        message={error}
+        tone="error"
+        onClose={() => setError("")}
+        action={/provider/i.test(error) ? <Link to="/settings/ai">Open AI Marketplace →</Link> : undefined}
+      />
     )}
     <div className="message-stream">{messages.map(m=><article key={m.id} className={m.role} aria-label={m.role==="user"?"Your message":"NPATI Agent message"}><ChatMessageContent content={m.content}/></article>)}{sending&&<p role="status">Working…</p>}</div>
     <form className="onboarding-live-composer" onSubmit={e=>void submit(e)}>
