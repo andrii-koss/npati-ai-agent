@@ -164,7 +164,7 @@ function Notice({ children, tone = "neutral" }: { children: ReactNode; tone?: "n
   return <div className={`workspace-notice ${tone}`}>{children}</div>;
 }
 
-function FloatingNotice({
+export function FloatingNotice({
   message,
   tone = "neutral",
   onClose,
@@ -318,13 +318,8 @@ export function BusinessPage() {
     void switchBusiness(editTarget.id);
   }, [editTarget?.id, current?.id]);
 
-  async function createBusinessIdea() {
-    const session = await api<OnboardingSession>("/business-onboarding", {
-      method: "POST",
-      body: JSON.stringify({ scenario: "starting" }),
-    });
-    await refresh();
-    navigate(`/b/${session.businessId}`);
+  function createBusinessIdea() {
+    navigate("/b/new", { state: { newBusiness: Date.now() } });
   }
 
   async function removeBusiness(id: string, name: string) {
@@ -714,7 +709,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   async function loadConversations(preferred?: string) {
     const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
     const rows = await api<Conversation[]>(base); setConversations(rows);
-    const next = preferred ?? selected ?? rows[0]?.id ?? null; setSelected(next);
+    const next = preferred ?? null; setSelected(next);
     if (next) {
       const loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
       setMessages(loaded);

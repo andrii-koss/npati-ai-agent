@@ -589,41 +589,15 @@ function Sidebar() {
     }
   }, [location.pathname]);
 
-  async function createBusinessIdea() {
-    const response = await authFetch("/api/business-onboarding", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ scenario: "starting" }),
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-      window.alert(payload?.error?.message ?? "Could not create a business idea.");
-      return;
-    }
-    const session = await response.json() as { businessId: string };
-    await refresh();
-    navigate(`/b/${session.businessId}`);
+  function createBusinessIdea() {
+    setBusinessOpen(true);
+    cachedBusinessOpen = true;
+    navigate("/b/new", { state: { newBusiness: Date.now() } });
   }
-  async function openNewChat() {
+  function openNewChat() {
     setChatOpen(true);
     cachedChatOpen = true;
-    if (!currentBusiness) {
-      const response = await authFetch("/api/conversations", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New conversation" }),
-      });
-      if (!response.ok) return;
-      const conversation = await response.json() as { id: string };
-      window.dispatchEvent(new Event("npati:conversations-changed"));
-      navigate(`/c/${conversation.id}`, { state: { neutralChat: true } });
-      return;
-    }
-    const response = await authFetch(`/api/businesses/${currentBusiness.id}/conversations`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "New conversation" }),
-    });
-    if (!response.ok) return;
-    const conversation = await response.json() as { id: string };
-    window.dispatchEvent(new Event("npati:conversations-changed"));
-    navigate(`/c/${conversation.id}`, { state: { businessId: currentBusiness.id } });
+    navigate("/chat", { state: { newChat: Date.now() } });
   }
   async function openBusiness(id: string) {
     await switchBusiness(id);
@@ -1007,10 +981,12 @@ function ChatRoute() {
 
 function BusinessRoute() {
   const { businessId = "" } = useParams();
+  const location = useLocation();
   const { overview, loading, switchBusiness } = useWorkspace();
   const [error, setError] = useState("");
   const draft = overview?.onboardings.find((session) => session.businessId === businessId);
   const business = overview?.businesses.find((item) => item.id === businessId);
+  const newBusinessKey = (location.state as { newBusiness?: number } | null)?.newBusiness;
 
   useEffect(() => {
     if (loading || !business || overview?.currentBusiness?.id === businessId) return;
@@ -1018,6 +994,17 @@ function BusinessRoute() {
   }, [businessId, business?.id, loading, overview?.currentBusiness?.id]);
 
   if (loading || (business && overview?.currentBusiness?.id !== businessId)) return <Workspace>{null}</Workspace>;
+  if (businessId === "new") {
+    return (
+      <Workspace>
+        <ConversationalChat
+          key={newBusinessKey ? `new-business-${newBusinessKey}` : "new-business"}
+          businessRoute
+          businessSetup
+        />
+      </Workspace>
+    );
+  }
   if (!draft && !business) return <Workspace><div className="workspace-notice error">This business does not exist or is not available to your user.</div></Workspace>;
   if (error) return <Workspace><div className="workspace-notice error">{error}</div></Workspace>;
   return <Workspace><ConversationalChat key={businessId} businessId={businessId} businessRoute businessSetup={Boolean(draft)} /></Workspace>;
