@@ -360,7 +360,7 @@ export function ChatMessageContent({ content }: { content: string }) {
             .filter(Boolean);
           const textContext = nonAttachmentLines.join(" ");
           return kind === "image"
-            ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="lazy" /><figcaption>{name}</figcaption></figure>
+            ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="eager" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} /><figcaption>{name}</figcaption></figure>
             : kind === "audio"
               ? <AudioAttachmentPlayer key={index} id={id} name={name} fallbackText={textContext} />
               : <figure className="chat-message-attachment document" key={index}><a href={src} download={name}>Download {name}</a><figcaption>{name}</figcaption></figure>;

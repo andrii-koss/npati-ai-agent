@@ -1,6 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import type { AgentReply } from "@npati/shared";
-import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
@@ -626,6 +626,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
   const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
   const [ttsVoice, setTtsVoice] = useState(() => {
     try {
       return localStorage.getItem("npati_chat_tts_voice") || "alloy";
@@ -686,8 +687,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }
   const streamEndRef = useRef<HTMLDivElement>(null);
+  const messageStreamRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
   const [activeTurn, setActiveTurn] = useState("");
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    if (messageStreamRef.current) {
+      messageStreamRef.current.scrollTo({
+        top: messageStreamRef.current.scrollHeight,
+        behavior,
+      });
+    }
+    streamEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
   const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
   const [visibleProgressCount, setVisibleProgressCount] = useState(0);
   const [presentingProgressEvent, setPresentingProgressEvent] = useState<ChatProgressEvent | null>(null);
@@ -713,16 +725,28 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     if (next) {
       const loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
       setMessages(loaded);
+      window.requestAnimationFrame(() => {
+        scrollToBottom("auto");
+        setTimeout(() => scrollToBottom("auto"), 50);
+        setTimeout(() => scrollToBottom("auto"), 200);
+      });
       return loaded;
     }
     setMessages([]);
     return [] as Message[];
   }
   useEffect(() => {
-    setSelected(null); setMessages([]); setReplyMeta(null); setNotice(""); setActiveTurn(""); resetProgress();
+    setSelected(initialConversationId ?? null);
+    setReplyMeta(null);
+    setNotice("");
+    setActiveTurn("");
+    resetProgress();
     if (initialConversationId) {
-      void loadConversations(initialConversationId);
+      setLoadingHistory(true);
+      void loadConversations(initialConversationId).finally(() => setLoadingHistory(false));
     } else {
+      setMessages([]);
+      setLoadingHistory(false);
       void loadConversations();
     }
   }, [business?.id, initialConversationId]);
@@ -732,12 +756,18 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     return () => window.clearInterval(timer);
   }, [sending]);
   useEffect(() => {
+    const handleImageLoaded = () => {
+      scrollToBottom("auto");
+    };
+    window.addEventListener("npati:chat-image-loaded", handleImageLoaded);
+    return () => window.removeEventListener("npati:chat-image-loaded", handleImageLoaded);
+  }, [scrollToBottom]);
+  useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      if (activeTurn && activeTurnRef.current) activeTurnRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-      else streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      scrollToBottom(sending ? "auto" : "smooth");
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [messages, activeTurn]);
+  }, [messages, sending, scrollToBottom]);
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     streamControllerRef.current?.controller.abort();
@@ -873,6 +903,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
     setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
+    window.requestAnimationFrame(() => {
+      scrollToBottom("auto");
+      setTimeout(() => scrollToBottom("auto"), 50);
+      setTimeout(() => scrollToBottom("auto"), 150);
+    });
     const assistantId=crypto.randomUUID();let receivedDelta=false;
     const controller=new AbortController(),streamId=crypto.randomUUID();streamControllerRef.current={controller,streamId};
     try {
@@ -886,14 +921,22 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }, enqueueProgress,{signal:controller.signal,onDelta:(delta)=>{
         receivedDelta=true;setStreamingResponse(true);
         setMessages(current=>{const found=current.some(item=>item.id===assistantId);return found?current.map(item=>item.id===assistantId?{...item,content:item.content+delta}:item):[...current,{id:assistantId,role:"assistant",content:delta,createdAt:new Date().toISOString()}];});
+        if (messageStreamRef.current) {
+          messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
+        }
       }});
       setReplyMeta(result);
       if (privateRequest) {
         if(!receivedDelta)setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
       } else if (result.conversationId) {
-        await loadConversations(result.conversationId);
-        navigate(`/c/${result.conversationId}`, { replace: !selected, state: business ? { businessId: business.id } : { neutralChat: true } });
+        setSelected(result.conversationId);
+        window.history.replaceState(
+          { ...window.history.state, usr: business ? { businessId: business.id } : { neutralChat: true } },
+          "",
+          `/c/${result.conversationId}`
+        );
         window.dispatchEvent(new Event("npati:conversations-changed"));
+        void loadConversations(result.conversationId);
       }
       setProgressComplete(true);
     } catch (reason) {
@@ -943,16 +986,21 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       )}
       <div className="onboarding-live-chat standard-live-chat">
-        <div className="message-stream">
-          {messages.length === 0 && <div className="chat-welcome"><h2>What should we work on?</h2><p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p></div>}
+        <div className="message-stream" ref={messageStreamRef}>
+          {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
+            <div className="chat-welcome">
+              <h2>What should we work on?</h2>
+              <p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p>
+            </div>
+          )}
           {messages.map((message, index) => <Fragment key={message.id}>
             {progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && message.role === "assistant" && index === messages.length - 1 && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed failed={progressFailed} />}
             <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><PendingMessageAttachments value={message.attachments ?? []} /><ChatMessageContent content={message.content} /></article>
           </Fragment>)}
           {!progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed={false} failed={progressFailed} />}
           {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
-          <div ref={streamEndRef} aria-hidden="true" />
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
+          <div ref={streamEndRef} aria-hidden="true" />
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>

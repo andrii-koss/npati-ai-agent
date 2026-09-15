@@ -14,7 +14,12 @@ export function PendingMessageAttachments({ value }: { value: ChatAttachmentInpu
   return <div className="chat-sent-attachments">
     {value.map((item, index) => item.kind === "image"
       ? <figure className="chat-message-attachment image" key={index + item.name}>
-          <img src={"data:" + item.mimeType + ";base64," + item.dataBase64} alt={item.name} />
+          <img
+            src={"data:" + item.mimeType + ";base64," + item.dataBase64}
+            alt={item.name}
+            loading="eager"
+            onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))}
+          />
           <figcaption>{item.name}</figcaption>
         </figure>
       : item.kind === "audio"

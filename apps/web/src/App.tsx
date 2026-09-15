@@ -695,7 +695,7 @@ function Sidebar() {
 
   function renderConversationRow(conversation: SidebarConversation, isPinned: boolean) {
     const isMenuOpen = menuTarget?.type === "chat" && menuTarget.id === conversation.id;
-    const isActive = location.pathname === `/c/${conversation.id}`;
+    const isActive = location.pathname === `/c/${conversation.id}` || window.location.pathname === `/c/${conversation.id}`;
     return (
       <div className={`sidebar-history-row ${isActive ? "active" : ""} ${isPinned ? "is-pinned" : ""} ${isMenuOpen ? "menu-open" : ""}`} key={conversation.id}>
         <button className="sidebar-history-link" onClick={() => void openConversation(conversation)}>
@@ -747,7 +747,7 @@ function Sidebar() {
 
   function renderBusinessItemRow(item: BusinessListItem, isPinned: boolean) {
     const isMenuOpen = (menuTarget?.type === "draft" || menuTarget?.type === "business") && menuTarget.id === item.id;
-    const isActive = location.pathname === `/b/${item.id}` || (item.kind === "business" && location.pathname === `/settings/business/${item.id}`);
+    const isActive = location.pathname === `/b/${item.id}` || window.location.pathname === `/b/${item.id}` || (item.kind === "business" && (location.pathname === `/settings/business/${item.id}` || window.location.pathname === `/settings/business/${item.id}`));
     const onOpen = item.kind === "draft"
       ? () => navigate(`/b/${item.id}`)
       : () => void openBusiness(item.id);
@@ -805,7 +805,7 @@ function Sidebar() {
     <aside className="sidebar">
       <Link className="brand sidebar-brand" to="/chat"><NpatiAgentLogo /></Link>
       <nav>
-        <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") ? "active" : ""}`}>
+        <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") || window.location.pathname === "/chat" || window.location.pathname.startsWith("/c/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
             <button className="sidebar-main-action" onClick={() => void openNewChat()}>+ New Chat</button>
             <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => { const next = !open; cachedChatOpen = next; return next; })}></button>
@@ -960,7 +960,7 @@ function Workspace({ children }: { children: ReactNode }) {
   if (!isAuthenticated) {
     return <Navigate to="/" replace state={{ from: location.pathname }} />;
   }
-  const isChat = location.pathname === "/chat" || location.pathname.startsWith("/b/") || location.pathname.startsWith("/c/");
+  const isChat = location.pathname === "/chat" || location.pathname.startsWith("/b/") || location.pathname.startsWith("/c/") || window.location.pathname === "/chat" || window.location.pathname.startsWith("/b/") || window.location.pathname.startsWith("/c/");
   const isSettings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
   const isCompany = location.pathname === "/company";
   const isActivity = location.pathname === "/activity";
@@ -1019,19 +1019,22 @@ function CanonicalChatRoute() {
   const { conversationId = "" } = useParams();
   const location = useLocation();
   const { overview, loading, switchBusiness } = useWorkspace();
-  const [resolved, setResolved] = useState(false);
-  const [neutralChat, setNeutralChat] = useState(false);
-  const [notFound, setNotFound] = useState(false);
   const routeState = location.state as { businessId?: string; neutralChat?: boolean } | null;
+  const isKnownNeutral = Boolean(routeState?.neutralChat);
+  const isKnownBusiness = Boolean(routeState?.businessId && overview?.currentBusiness?.id === routeState.businessId);
+  const [neutralChat, setNeutralChat] = useState(() => isKnownNeutral);
+  const [resolved, setResolved] = useState(() => isKnownNeutral || isKnownBusiness);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (loading || !overview || !conversationId) return;
     let cancelled = false;
     async function resolveConversation() {
-      setResolved(false);
-      setNeutralChat(false);
-      setNotFound(false);
-
+      if (routeState?.neutralChat) {
+        setNeutralChat(true);
+        setResolved(true);
+        return;
+      }
       const neutralResponse = await authFetch(`/api/conversations/${conversationId}`);
       if (neutralResponse.ok) {
         if (!cancelled) {
@@ -1060,8 +1063,27 @@ function CanonicalChatRoute() {
   }, [conversationId, loading, routeState?.businessId, routeState?.neutralChat, overview?.currentBusiness?.id, overview?.onboarding?.conversationId, overview?.businesses.map((business) => business.id).join(",")]);
 
   if (notFound) return <Workspace><div className="workspace-notice error">This chat does not exist or is not available to your user.</div></Workspace>;
-  if (!resolved) return <Workspace>{null}</Workspace>;
-  return <Workspace><ConversationalChat initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""} initialConversationId={conversationId} neutralChat={neutralChat} /></Workspace>;
+  if (!resolved) {
+    return (
+      <Workspace>
+        <div className="chat-workspace-content">
+          <div className="standard-live-chat">
+            <div className="message-stream" />
+          </div>
+        </div>
+      </Workspace>
+    );
+  }
+  return (
+    <Workspace>
+      <ConversationalChat
+        key={conversationId}
+        initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""}
+        initialConversationId={conversationId}
+        neutralChat={neutralChat}
+      />
+    </Workspace>
+  );
 }
 import { AutomationsPage } from "./AutomationsPage";
 import { ActivityPage } from "./ActivityPage";
