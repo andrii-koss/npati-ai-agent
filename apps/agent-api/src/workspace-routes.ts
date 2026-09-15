@@ -219,7 +219,15 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     try { return await store.updateNeutralConversation(await auth.authenticate(request), request.params.conversationId, request.body.title ?? "New conversation"); } catch (error) { return errorReply(reply, error); }
   });
   app.delete<{ Params: { conversationId: string } }>("/conversations/:conversationId", async (request, reply) => {
-    try { await store.deleteNeutralConversation(await auth.authenticate(request), request.params.conversationId); return reply.code(204).send(); } catch (error) { return errorReply(reply, error); }
+    try {
+      const context = await auth.authenticate(request);
+      await store.getNeutralConversation(context, request.params.conversationId);
+      await lifecycle?.beforeDeleteConversation?.(context, "", request.params.conversationId);
+      await store.deleteNeutralConversation(context, request.params.conversationId);
+      return reply.code(204).send();
+    } catch (error) {
+      return errorReply(reply, error);
+    }
   });
 
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/conversations", async (request, reply) => {
