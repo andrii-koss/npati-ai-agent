@@ -80,11 +80,10 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   }, [sending, researching]);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      if (activeTurn && activeTurnRef.current) activeTurnRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-      else streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [messages, activeTurn]);
+  }, [messages, sending]);
 
   async function act(payload: { onboardingAction?: string; scenario?: Scenario; message?: string }) {
     if (sending) return;
@@ -101,11 +100,13 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
       const result = await request<AgentReply>("/chat", businessSetup ? { ...payload, businessSetup: true, businessId: session?.businessId ?? (businessId && businessId !== "new" ? businessId : undefined) } : payload);
       if (result.conversationId && !businessSetup) {
         setHandoffConversationId(result.conversationId);
-        navigate(`/c/${result.conversationId}`, { replace: true });
+        window.history.replaceState(null, "", `/c/${result.conversationId}`);
+        window.dispatchEvent(new Event("npati:conversations-changed"));
       }
       if (result.onboarding) {
-        navigate(`/b/${result.onboarding.business.id}`, { replace: true });
+        window.history.replaceState(null, "", `/b/${result.onboarding.business.id}`);
         await loadHistory(String(result.onboarding.business.id), result.onboarding.conversationId);
+        window.dispatchEvent(new Event("npati:conversations-changed"));
       }
       await refresh();
     } catch (reason) {
@@ -221,7 +222,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
       </div>
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream">
-          {messages.length === 0 && (
+          {messages.length === 0 && !session?.conversationId && (
             <div className="chat-welcome">
               <h2>What should we work on?</h2>
               <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
