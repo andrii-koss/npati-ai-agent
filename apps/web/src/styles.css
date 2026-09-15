@@ -3645,10 +3645,12 @@ a {
 .message-stream article.user .chat-message-content {
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .message-stream article.user .chat-message-content>.chat-message-attachment {
   order: -1;
+  width: 100%;
 }
 
 .message-stream article.user.image-message {
@@ -4262,7 +4264,7 @@ a {
 
 .onboarding-live-composer {
   position: relative;
-  width: min(672px, 100%);
+  width: min(785px, 100%);
   min-height: 120px;
   margin-inline: auto;
   padding: 15px 18px 50px;
@@ -4515,23 +4517,65 @@ a {
 }
 
 .chat-attachment img,
-.chat-audio-icon {
+.chat-audio-icon,
+.chat-file-icon {
   width: 38px;
   height: 38px;
   border-radius: 7px;
+  flex-shrink: 0;
 }
 
 .chat-attachment img {
   object-fit: cover;
 }
 
-.chat-audio-icon {
+.chat-audio-icon,
+.chat-file-icon {
   display: grid;
   place-items: center;
   color: white;
+}
+
+.chat-audio-icon {
   background: var(--npati-red);
   font-size: 18px;
   font-weight: 900;
+}
+
+.chat-file-icon {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.chat-file-icon.excel {
+  background: #107c41;
+}
+
+.chat-file-icon.word {
+  background: #185abd;
+}
+
+.chat-file-icon.pdf {
+  background: #d93025;
+}
+
+.chat-file-icon.presentation {
+  background: #c43e1c;
+}
+
+.chat-file-icon.archive {
+  background: #d97706;
+}
+
+.chat-file-icon.code {
+  background: #334155;
+}
+
+.chat-file-icon.audio {
+  background: #7c3aed;
+}
+
+.chat-file-icon.document {
+  background: #475569;
 }
 
 .chat-attachment>span:nth-child(2) {
@@ -4948,6 +4992,48 @@ article.user .chat-attachment-download-btn:hover {
   border-top-color: currentColor;
   border-radius: 50%;
   animation: chat-audio-spin 0.8s linear infinite;
+}
+
+.chat-message-attachment.document {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f6f6f6;
+  border: 1px solid #dedede;
+  border-radius: 10px;
+  box-sizing: border-box;
+  max-width: 100%;
+  width: fit-content;
+  margin: 6px 0;
+}
+
+article.user .chat-message-attachment.document {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-document-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-document-name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  min-width: 0;
+  max-width: 220px;
+  flex: 1;
 }
 
 @keyframes chat-audio-spin {

@@ -1,5 +1,6 @@
 import React, { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { getStoredAuthToken } from "./AuthContext";
+import { AttachmentFileIcon } from "./ChatAttachments";
 
 const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -363,7 +364,20 @@ export function ChatMessageContent({ content }: { content: string }) {
             ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="eager" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} /><figcaption>{name}</figcaption></figure>
             : kind === "audio"
               ? <AudioAttachmentPlayer key={index} id={id} name={name} fallbackText={textContext} />
-              : <figure className="chat-message-attachment document" key={index}><a href={src} download={name}>Download {name}</a><figcaption>{name}</figcaption></figure>;
+              : <figure className="chat-message-attachment document" key={index}>
+                  <AttachmentFileIcon item={{ name, kind }} />
+                  <div className="chat-document-info">
+                    <span className="chat-document-name" title={name}>{name}</span>
+                    <a href={src} download={name} className="chat-attachment-download-btn" title={"Download " + name} aria-label={"Download " + name}>
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      <span>Download</span>
+                    </a>
+                  </div>
+                </figure>;
         }
         const voiceMatch = line.match(voiceMessageRegex);
         if (voiceMatch) {

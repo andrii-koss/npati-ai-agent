@@ -9,6 +9,146 @@ export type ChatAttachmentInput = {
   dataBase64: string;
 };
 
+export type FileCategory = "image" | "audio" | "excel" | "word" | "pdf" | "presentation" | "archive" | "code" | "document";
+
+export function getFileCategory(name: string, mimeType?: string, kind?: string): FileCategory {
+  if (kind === "image" || mimeType?.startsWith("image/")) return "image";
+  if (kind === "audio" || mimeType?.startsWith("audio/")) return "audio";
+
+  const lowerName = (name || "").toLowerCase();
+  const lowerMime = (mimeType || "").toLowerCase();
+
+  if (
+    /\.(xlsx?|csv|tsv|ods|xlsm|xlsb)$/i.test(lowerName) ||
+    lowerMime.includes("spreadsheet") ||
+    lowerMime.includes("excel") ||
+    lowerMime === "text/csv" ||
+    lowerMime.includes("csv")
+  ) {
+    return "excel";
+  }
+
+  if (/\.pdf$/i.test(lowerName) || lowerMime.includes("pdf")) {
+    return "pdf";
+  }
+
+  if (
+    /\.(docx?|rtf|odt)$/i.test(lowerName) ||
+    lowerMime.includes("wordprocessingml") ||
+    lowerMime.includes("msword")
+  ) {
+    return "word";
+  }
+
+  if (
+    /\.(pptx?|odp)$/i.test(lowerName) ||
+    lowerMime.includes("presentationml") ||
+    lowerMime.includes("powerpoint")
+  ) {
+    return "presentation";
+  }
+
+  if (
+    /\.(zip|rar|7z|tar|gz|bz2)$/i.test(lowerName) ||
+    lowerMime.includes("zip") ||
+    lowerMime.includes("compressed") ||
+    lowerMime.includes("archive")
+  ) {
+    return "archive";
+  }
+
+  if (
+    /\.(json|js|ts|tsx|jsx|py|html|css|sql|xml|yaml|yml)$/i.test(lowerName) ||
+    lowerMime.includes("json") ||
+    lowerMime.includes("javascript") ||
+    lowerMime.includes("xml")
+  ) {
+    return "code";
+  }
+
+  return "document";
+}
+
+export function AttachmentFileIcon({
+  item,
+  className = "",
+}: {
+  item: { name: string; mimeType?: string; kind?: string; dataBase64?: string };
+  className?: string;
+}) {
+  const category = getFileCategory(item.name, item.mimeType, item.kind);
+
+  if (category === "image" && item.dataBase64) {
+    return (
+      <img
+        src={"data:" + (item.mimeType || "image/png") + ";base64," + item.dataBase64}
+        alt={item.name}
+        className={className}
+        loading="eager"
+        onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))}
+      />
+    );
+  }
+
+  return (
+    <span className={`chat-file-icon ${category} ${className}`} aria-label={`${category} file`}>
+      {category === "excel" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <rect x="8" y="12" width="8" height="8" rx="1" strokeWidth="1.5" />
+          <line x1="8" y1="16" x2="16" y2="16" strokeWidth="1.5" />
+          <line x1="12" y1="12" x2="12" y2="20" strokeWidth="1.5" />
+        </svg>
+      ) : category === "pdf" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <text x="7" y="18" fill="currentColor" stroke="none" fontSize="7" fontWeight="bold" fontFamily="sans-serif">PDF</text>
+        </svg>
+      ) : category === "word" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="14" y2="17" />
+        </svg>
+      ) : category === "presentation" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <rect x="8" y="12" width="8" height="7" rx="1" strokeWidth="1.5" />
+          <circle cx="12" cy="15.5" r="1.5" strokeWidth="1.5" />
+        </svg>
+      ) : category === "audio" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18V5l10-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="16" cy="16" r="3" />
+        </svg>
+      ) : category === "code" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+      ) : category === "archive" ? (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 8v13H3V8" />
+          <path d="M1 3h22v5H1z" />
+          <line x1="10" y1="12" x2="14" y2="12" strokeWidth="2" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="12" y2="17" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
 export function PendingMessageAttachments({ value }: { value: ChatAttachmentInput[] }) {
   if (value.length === 0) return null;
   return <div className="chat-sent-attachments">
@@ -43,7 +183,12 @@ export function PendingMessageAttachments({ value }: { value: ChatAttachmentInpu
               </a>
             </figcaption>
           </figure>
-        : <figure className="chat-message-attachment document" key={index + item.name}><strong>{item.name}</strong></figure>)}
+        : <figure className="chat-message-attachment document" key={index + item.name}>
+            <AttachmentFileIcon item={item} />
+            <div className="chat-document-info">
+              <span className="chat-document-name" title={item.name}>{item.name}</span>
+            </div>
+          </figure>)}
   </div>;
 }
 
@@ -294,9 +439,7 @@ export function ChatAttachments({
   return <section ref={attachmentRoot} className="chat-attachments" aria-label="Message attachments">
     {value.length > 0 && <div className="chat-attachment-tray">
       {value.map((item, index) => <div className="chat-attachment" key={index + item.name}>
-        {item.kind === "image"
-          ? <img src={"data:" + item.mimeType + ";base64," + item.dataBase64} alt={item.name} />
-          : <span className="chat-audio-icon" aria-hidden="true">♪</span>}
+        <AttachmentFileIcon item={item} />
         <span title={item.name}>{item.name}</span>
         <button type="button" aria-label={"Remove " + item.name} disabled={disabled}
           onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}>×</button>
