@@ -112,10 +112,20 @@ export class ChatFileService {
   }
 
   async deleteChat(context: AuthContext, chatId: string) {
-    const files = await this.repository.listChat(context,chatId);
+    const files = await this.repository.listChat(context, chatId);
     for (const file of files) {
-      await this.repository.markDeleted(context,file.id);
-      await this.removeObject(file,context,"delete");
+      await this.repository.markDeleted(context, file.id);
+      await this.removeObject(file, context, "delete").catch(() => undefined);
+    }
+    try {
+      const chatPrefix = objectKey(["workspace", segment(context.workspaceId), "user", segment(context.userId), "chats", segment(chatId)]) + "/";
+      for await (const object of this.storage.list(NPATI_BUCKETS.chat, chatPrefix)) {
+        if (object.key) {
+          await this.storage.remove(NPATI_BUCKETS.chat, object.key).catch(() => undefined);
+        }
+      }
+    } catch {
+      // Ignore prefix listing or cleanup errors if storage is empty or unreachable
     }
   }
 

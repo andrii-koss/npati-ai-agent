@@ -121,7 +121,8 @@ export class PostgresFileMetadataRepository implements FileMetadataRepository {
     if (result.rowCount !== fileIds.length) throw new Error("One or more attachments could not be linked to the message");
   }
   async listChat(context: AuthContext, chatId: string) {
-    const result = await this.pool.query(`SELECT ${columns} FROM files WHERE workspace_id=$1 AND user_id=$2 AND chat_id=$3 AND deleted_at IS NULL ORDER BY created_at,id`, [context.workspaceId,context.userId,chatId]);
+    const chatPattern = `%/chats/${chatId}/%`;
+    const result = await this.pool.query(`SELECT ${columns} FROM files WHERE workspace_id=$1 AND user_id=$2 AND (chat_id=$3 OR object_key LIKE $4) AND deleted_at IS NULL ORDER BY created_at,id`, [context.workspaceId,context.userId,chatId,chatPattern]);
     return result.rows.map(mapFile);
   }
   async listBusiness(context: AuthContext, businessId: string) {
@@ -195,7 +196,7 @@ export class InMemoryFileMetadataRepository implements FileMetadataRepository {
   async markReady(context: AuthContext,id: string) { const f=await this.owned(context,id);f.status="ready";f.deletedAt=undefined;f.storageDeletedAt=undefined;f.updatedAt=new Date().toISOString();return f; }
   async markFailed(context: AuthContext,id: string) { const f=await this.owned(context,id);f.status="failed"; }
   async attachMessage(context: AuthContext,ids: string[],messageId: string) { for(const id of ids)(await this.owned(context,id)).messageId=messageId; }
-  async listChat(context: AuthContext,chatId: string) { return [...this.files.values()].filter(f=>f.workspaceId===context.workspaceId&&f.userId===context.userId&&f.chatId===chatId&&!f.deletedAt); }
+  async listChat(context: AuthContext,chatId: string) { return [...this.files.values()].filter(f=>f.workspaceId===context.workspaceId&&f.userId===context.userId&&(f.chatId===chatId||f.objectKey.includes(`/chats/${chatId}/`))&&!f.deletedAt); }
   async listBusiness(context: AuthContext,businessId: string) { return [...this.files.values()].filter(f=>f.workspaceId===context.workspaceId&&f.userId===context.userId&&f.businessId===businessId&&!f.deletedAt); }
   async listCompany(context: AuthContext,companyId: string) { return [...this.files.values()].filter(f=>f.workspaceId===context.workspaceId&&f.userId===context.userId&&f.companyId===companyId); }
   async purgeCompany(context: AuthContext,companyId: string) { let count=0;for(const [id,file] of this.files)if(file.workspaceId===context.workspaceId&&file.userId===context.userId&&file.companyId===companyId){this.files.delete(id);count++;}return count; }
