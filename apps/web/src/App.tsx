@@ -119,8 +119,8 @@ function ChatUserMenu() {
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
-            <Link to="/settings/business" onClick={closeMenu}>Business profile <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/goals" onClick={closeMenu}>Goals <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/ai" onClick={closeMenu}>AI Provider <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/company" onClick={closeMenu}>Company <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
             <button
