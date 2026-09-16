@@ -74,17 +74,37 @@ function DomainIcon({ domain }: { domain: string }) {
   }} />;
 }
 
+function cleanLabel(text: string): string {
+  const t = text.trim();
+  if (/^(?:index|default|home|main)\.(?:php|html|htm|aspx|jsp)$/i.test(t)) return "";
+  return t;
+}
+
 function pageLabel(page: PageState) {
   if (page.domain === "file" || page.url.startsWith("file://")) {
     return page.title || "Файл";
   }
-  if (page.title && page.title.toLowerCase() !== page.domain.toLowerCase()) return page.title;
+  const cleanTitle = page.title ? cleanLabel(page.title) : "";
+  if (cleanTitle && cleanTitle.toLowerCase() !== page.domain.toLowerCase()) {
+    return cleanTitle;
+  }
   try {
-    const path = new URL(page.url).pathname.replace(/^\/+|\/+$/g, "");
-    if (!path) return "Головна сторінка";
-    return path.split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ") || "Сторінка";
+    const urlObj = new URL(page.url);
+    const pathname = urlObj.pathname.replace(/^\/+|\/+$/g, "");
+    const rp = urlObj.searchParams.get("rp") || urlObj.searchParams.get("p") || urlObj.searchParams.get("page");
+    if (rp) {
+      const cleanRp = rp.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ");
+      if (cleanRp) return cleanRp.charAt(0).toUpperCase() + cleanRp.slice(1);
+    }
+    if (!pathname || /^(?:index|default)\.(?:php|html|htm|aspx)$/i.test(pathname)) {
+      return "Головна сторінка";
+    }
+    const lastSegment = pathname.split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ");
+    const cleanSegment = lastSegment ? cleanLabel(lastSegment) : "";
+    if (cleanSegment) return cleanSegment.charAt(0).toUpperCase() + cleanSegment.slice(1);
+    return "Головна сторінка";
   } catch {
-    return page.title || "Сторінка";
+    return cleanTitle || "Сторінка";
   }
 }
 

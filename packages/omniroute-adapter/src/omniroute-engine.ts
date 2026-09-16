@@ -175,7 +175,7 @@ export class OmniRouteEngine implements AIEngine {
         method: "POST",
         headers: this.headers(request.compression, request.idempotencyKey),
         body: JSON.stringify(body),
-        signal: requestSignal(request.signal, request.timeoutMs ?? 120_000),
+        signal: requestSignal(request.signal, request.timeoutMs ?? 180_000),
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
@@ -239,7 +239,7 @@ export class OmniRouteEngine implements AIEngine {
         : { model, messages: request.messages, stream: true };
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST", headers: this.headers(request.compression, request.idempotencyKey), body: JSON.stringify(body),
-        signal: requestSignal(request.signal, request.timeoutMs ?? 120_000),
+        signal: requestSignal(request.signal, request.timeoutMs ?? 180_000),
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
