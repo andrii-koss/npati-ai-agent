@@ -5,7 +5,7 @@ import { AttachmentFileIcon } from "./ChatAttachments";
 const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const genericSourceLabel = /^(?:джерело|джерела|source|sources|посилання)$/iu;
-const sourceHeading = /^(?:джерела|sources)(?:\s*\(\d+\))?$/iu;
+const sourceHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:джерела|sources)(?:\*\*)?(?:\s*\(?\d*\)?)?:?$/iu;
 const inlineSourcePrefix = /(?:^|[\s(])(?:джерело|source)\s*:/iu;
 
 const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document|file):([0-9a-f-]{36}):(.+)\\]\\]$", "i");
@@ -35,7 +35,9 @@ export function collectSourceTitles(content: string) {
   while ((match = markdownLink.exec(content))) {
     const label = cleanLabel(match[1] ?? "");
     const url = match[2] ?? "";
-    if (label && !genericSourceLabel.test(label)) titles.set(sourceKey(url), label);
+    if (label && !genericSourceLabel.test(label) && !/^https?:\/\//i.test(label)) {
+      titles.set(sourceKey(url), label);
+    }
   }
   return titles;
 }
@@ -67,19 +69,32 @@ function fallbackSourceTitle(url: URL) {
   return path ? url.hostname.replace(/^www\./, "") + " / " + path : url.hostname.replace(/^www\./, "");
 }
 
-function SourceLink({ rawUrl, href, title }: { rawUrl: string; href: string; title?: string }) {
-  const url = new URL(rawUrl);
-  const domain = url.hostname.toLowerCase().replace(/^www\./, "");
-  const previewTitle = title || fallbackSourceTitle(url);
+function SourceLink({ rawUrl, href, title, label }: { rawUrl: string; href: string; title?: string; label?: string }) {
+  let domain = "";
+  let path = "";
+  try {
+    const url = new URL(rawUrl);
+    domain = url.hostname.toLowerCase().replace(/^www\./, "");
+    path = decodeURIComponent(url.pathname + url.search);
+  } catch {
+    domain = rawUrl.replace(/^https?:\/\//i, "").replace(/^www\./, "").split("/")[0] || "";
+  }
+  const cleanLbl = label ? cleanLabel(label) : "";
+  const isGeneric = !cleanLbl || genericSourceLabel.test(cleanLbl) || /^https?:\/\//i.test(cleanLbl);
+  let parsedUrl: URL | null = null;
+  try { parsedUrl = new URL(rawUrl); } catch {}
+  const previewTitle = title || (!isGeneric ? cleanLbl : (parsedUrl ? fallbackSourceTitle(parsedUrl) : domain || rawUrl));
+  const displayLabel = !isGeneric ? cleanLbl : (domain || rawUrl);
+
   return <span className="source-link-wrap">
-    <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Відкрити джерело " + domain}>
+    <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Відкрити посилання " + (domain || displayLabel)}>
       <SourceFavicon domain={domain} />
-      <span>{domain}</span>
+      <span>{displayLabel}</span>
     </a>
     <span className="source-link-preview" role="tooltip">
       <span className="source-link-preview-head"><SourceFavicon domain={domain} /><span>{domain}</span></span>
       <strong>{previewTitle}</strong>
-      <small>{url.pathname + url.search}</small>
+      {path && <small>{path}</small>}
     </span>
   </span>;
 }
@@ -111,11 +126,8 @@ function renderInlineMarkdown(content: string, sourceMode: boolean, sourceTitles
     if (match[2] && match[3]) {
       const label = cleanLabel(match[2]);
       const href = toTrackedChatUrl(match[3]);
-      const isSource = sourceMode || genericSourceLabel.test(label);
       nodes.push(href
-        ? isSource
-          ? <SourceLink key={key} rawUrl={match[3]} href={href} title={sourceTitles.get(sourceKey(match[3]))} />
-          : <a key={key} href={href} target="_blank" rel="noopener noreferrer">{label}</a>
+        ? <SourceLink key={key} rawUrl={match[3]} href={href} title={sourceTitles.get(sourceKey(match[3]))} label={label} />
         : label);
     } else if (match[4]) {
       nodes.push(<strong key={key}>{match[4]}</strong>);
@@ -124,7 +136,7 @@ function renderInlineMarkdown(content: string, sourceMode: boolean, sourceTitles
       const rawUrl = trailing ? match[5].slice(0, -trailing.length) : match[5];
       const href = toTrackedChatUrl(rawUrl);
       nodes.push(href
-        ? <Fragment key={key}><a href={href} target="_blank" rel="noopener noreferrer">{rawUrl}</a>{trailing}</Fragment>
+        ? <Fragment key={key}><SourceLink rawUrl={rawUrl} href={href} title={sourceTitles.get(sourceKey(rawUrl))} />{trailing}</Fragment>
         : match[5]);
     }
     cursor = inlineMarkdown.lastIndex;
@@ -500,7 +512,12 @@ function RenderedCodeBlock({ code, lang, filename }: { code: string; lang: strin
 }
 
 export function ChatMessageContent({ content }: { content: string }) {
-  const safeContent = content.replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "").trim();
+  const safeContent = content
+    .replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "")
+    .replace(/\[([\s\S]*?)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g, (_full, label: string, url: string) => {
+      return "[" + label.replace(/\r?\n\s*/g, " ").trim() + "](" + url.trim() + ")";
+    })
+    .trim();
   if (!safeContent) return null;
   const sourceTitles = collectSourceTitles(safeContent);
 
@@ -674,6 +691,16 @@ export function ChatMessageContent({ content }: { content: string }) {
       elements.push(
         <h3 key={`h-${elements.length}`}>
           {renderInlineMarkdown(heading[2]!, false, sourceTitles)}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    if (sourceHeading.test(cleanLabel(line))) {
+      inSourceSection = true;
+      elements.push(
+        <h3 key={`src-head-${elements.length}`}>
+          {renderInlineMarkdown(line, false, sourceTitles)}
         </h3>
       );
       i++;

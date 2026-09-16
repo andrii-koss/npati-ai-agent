@@ -209,6 +209,64 @@ describe("Agent API", () => {
     expect(conversations.json()[0].title).toBe("Analyze Hostkoss and its services");
   });
 
+  it("runs web research and emits SSE progress events in neutral chat (contextType: none)", async () => {
+    let receivedSystemPrompt = "";
+    const aiEngine: AIEngine = {
+      chat: async () => ({
+        content: "Researched NPATI website successfully.",
+        model: "openai/gpt-4.1-mini",
+        usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+      }),
+      async *stream(request) {
+        receivedSystemPrompt = (request.messages.find((m) => m.role === "system")?.content as string) ?? "";
+        yield "NPATI "; yield "is an online marketplace.";
+      },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const webResearch = {
+      shouldResearch: (msg: string) => /https?:\/\/|проаналізуй|сайт/i.test(msg),
+      run: async (_message: string, _business: unknown, _refresh: boolean, progress?: (event: Record<string, unknown>) => void) => {
+        progress?.({ type: "source_discovered", url: "https://www.npati.com/", title: "NPATI" });
+        progress?.({ type: "page_fetch_started", url: "https://www.npati.com/", domain: "npati.com" });
+        progress?.({ type: "page_fetch_completed", url: "https://www.npati.com/", domain: "npati.com", title: "NPATI Marketplace" });
+        progress?.({ type: "research_completed", sourceCount: 1, pageCount: 1 });
+        return {
+          kind: "url_analysis" as const,
+          context: "NPATI is a Free Classified Ads & Video Marketplace.",
+          sources: [{ url: "https://www.npati.com/", title: "NPATI Marketplace", accessedAt: new Date().toISOString() }],
+        };
+      },
+    } as unknown as WebResearchService;
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace, webResearch });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: { message: "проаналізуй цей сатй https://www.npati.com/", contextType: "none" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    const progressEvents = [...response.body.matchAll(/event: progress\ndata: ({[^\n]+})/g)].map((match) => JSON.parse(match[1]!).type);
+    expect(progressEvents).toEqual([
+      "source_discovered",
+      "page_fetch_started",
+      "page_fetch_completed",
+      "research_completed",
+      "final_generation_started",
+      "final_generation_completed",
+    ]);
+    expect(receivedSystemPrompt).toContain("NPATI Web Research & Crawler");
+    expect(receivedSystemPrompt).toContain("NPATI is a Free Classified Ads & Video Marketplace.");
+    expect(receivedSystemPrompt).toContain("Do NOT claim that you lack real-time web browsing access");
+    expect(response.body).toContain('"sources":[{"url":"https://www.npati.com/"');
+    expect(response.body).toContain('"used":true');
+  });
+
   it("forwards ordered model deltas through the chat SSE endpoint", async () => {
     const aiEngine: AIEngine = {
       chat: async () => { throw new Error("Non-streaming chat must not be used"); },
