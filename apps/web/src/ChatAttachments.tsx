@@ -288,14 +288,42 @@ export function ChatAttachments({
 
   useEffect(() => () => stream.current?.getTracks().forEach((track) => track.stop()), []);
 
+function inferClientMimeType(name: string, type?: string): string {
+  if (type && type !== "application/octet-stream") return type.toLowerCase().split(";", 1)[0]!;
+  const lower = name.toLowerCase();
+  if (/\.(xlsx|xlsm|xlsb)$/i.test(lower)) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (/\.xls$/i.test(lower)) return "application/vnd.ms-excel";
+  if (/\.csv$/i.test(lower)) return "text/csv";
+  if (/\.tsv$/i.test(lower)) return "text/tab-separated-values";
+  if (/\.pdf$/i.test(lower)) return "application/pdf";
+  if (/\.(docx|doc)$/i.test(lower)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (/\.(pptx|ppt)$/i.test(lower)) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (/\.zip$/i.test(lower)) return "application/zip";
+  if (/\.(tar|tar\.gz|tgz)$/i.test(lower)) return "application/x-tar";
+  if (/\.gz$/i.test(lower)) return "application/gzip";
+  if (/\.json$/i.test(lower)) return "application/json";
+  if (/\.xml$/i.test(lower)) return "application/xml";
+  if (/\.(txt|log|ini|cfg|env)$/i.test(lower)) return "text/plain";
+  if (/\.(md|markdown)$/i.test(lower)) return "text/markdown";
+  if (/\.(m4a)$/i.test(lower)) return "audio/mp4";
+  if (/\.(mp3)$/i.test(lower)) return "audio/mpeg";
+  if (/\.(wav)$/i.test(lower)) return "audio/wav";
+  if (/\.(ogg)$/i.test(lower)) return "audio/ogg";
+  if (/\.(webm)$/i.test(lower)) return "audio/webm";
+  if (/\.(png)$/i.test(lower)) return "image/png";
+  if (/\.(jpg|jpeg)$/i.test(lower)) return "image/jpeg";
+  if (/\.(webp)$/i.test(lower)) return "image/webp";
+  if (/\.(gif)$/i.test(lower)) return "image/gif";
+  return type || "application/octet-stream";
+}
+
   async function addFiles(files: File[]) {
     try {
       if (value.length + files.length > 3) throw new Error("You can attach up to 3 files per message.");
       const next = [...value];
       for (const file of files) {
-        const rawMimeType = file.type.toLowerCase().split(";", 1)[0] || (/\.m4a$/i.test(file.name) ? "audio/mp4" : "");
-        const kind = rawMimeType.startsWith("image/") ? "image" : rawMimeType.startsWith("audio/") ? "audio" : rawMimeType ? "document" : null;
-        if (!kind) throw new Error("The selected file type is unavailable.");
+        const rawMimeType = inferClientMimeType(file.name, file.type);
+        const kind = rawMimeType.startsWith("image/") ? "image" : rawMimeType.startsWith("audio/") ? "audio" : "document";
         if (kind === "image" && file.size > IMAGE_LIMIT) throw new Error("Each image must be 5 MB or smaller.");
         if (kind === "audio" && file.size > AUDIO_LIMIT) throw new Error("Each audio file must be 15 MB or smaller.");
         if (kind === "document" && file.size > DOCUMENT_LIMIT) throw new Error("Each document must be 20 MB or smaller.");
@@ -458,7 +486,7 @@ export function ChatAttachments({
           </button>
           <button type="button" onClick={() => { setMenuOpen(false); documentInput.current?.click(); }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h5" /></svg>
-            <span><strong>Add document</strong><small>PDF, Word, Excel, text or JSON</small></span>
+            <span><strong>Add document / table / archive</strong><small>Excel, PDF, Word, ZIP, CSV or code</small></span>
           </button>
           <button type="button" onClick={() => { setMenuOpen(false); audioInput.current?.click(); }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13M9 9l10-2" /><circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" /></svg>
@@ -557,7 +585,7 @@ export function ChatAttachments({
       <input ref={audioInput} type="file"
         accept=".m4a,audio/x-m4a,audio/m4a,audio/webm,audio/ogg,audio/mpeg,audio/mp4,audio/wav,audio/aac,audio/flac"
         hidden onChange={(event) => void pick(event)} />
-      <input ref={documentInput} type="file" accept=".pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple hidden onChange={(event) => void pick(event)} />
+      <input ref={documentInput} type="file" accept=".pdf,.txt,.csv,.tsv,.json,.xml,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.tar,.gz" multiple hidden onChange={(event) => void pick(event)} />
     </div>
   </section>;
 }

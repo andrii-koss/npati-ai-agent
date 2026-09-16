@@ -337,82 +337,364 @@ function SynthesizedVoiceAudioPlayer({
   );
 }
 
+function escapeCsvValue(val: string): string {
+  const str = String(val ?? "").trim();
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+const RenderedTableBlock = React.memo(function RenderedTableBlock({
+  headers,
+  rows,
+  sourceTitles,
+}: {
+  headers: string[];
+  rows: string[][];
+  sourceTitles: Map<string, string>;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function exportCsv() {
+    const csvContent = "\uFEFF" + [
+      headers.map(escapeCsvValue).join(","),
+      ...rows.map(r => r.map(escapeCsvValue).join(","))
+    ].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "edited_table.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function copyCsv() {
+    const csvContent = [
+      headers.map(escapeCsvValue).join(","),
+      ...rows.map(r => r.map(escapeCsvValue).join(","))
+    ].join("\n");
+    navigator.clipboard.writeText(csvContent).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="chat-table-wrapper">
+      <div className="chat-table-header">
+        <div className="chat-table-title">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <rect x="8" y="12" width="8" height="8" rx="1" strokeWidth="1.5" />
+          </svg>
+          <span>Таблиця ({rows.length} {rows.length === 1 ? "рядок" : rows.length < 5 ? "рядки" : "рядків"})</span>
+        </div>
+        <div className="chat-table-actions">
+          <button type="button" className="chat-action-btn" onClick={copyCsv} title="Скопіювати CSV">
+            {copied ? "Скопійовано!" : "Копіювати CSV"}
+          </button>
+          <button type="button" className="chat-action-btn download" onClick={exportCsv} title="Завантажити таблицю як Excel / CSV">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Завантажити Excel / CSV</span>
+          </button>
+        </div>
+      </div>
+      <div className="chat-table-scroll">
+        <table className="chat-rendered-table">
+          <thead>
+            <tr>
+              {headers.map((h, idx) => (
+                <th key={idx}>{renderInlineMarkdown(h, false, sourceTitles)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rIdx) => {
+              const rowKey = row[0] ? `row-${row[0]}-${rIdx}` : `row-${rIdx}`;
+              return (
+                <tr key={rowKey}>
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx}>
+                      {cell ? renderInlineMarkdown(cell, false, sourceTitles) : "\u00A0"}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+});
+
+function RenderedCodeBlock({ code, lang, filename }: { code: string; lang: string; filename?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function copyText() {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function downloadFile() {
+    const ext = filename
+      ? filename.split(".").pop() || "txt"
+      : lang === "csv" ? "csv"
+      : lang === "tsv" ? "tsv"
+      : lang === "json" ? "json"
+      : lang === "python" || lang === "py" ? "py"
+      : lang === "typescript" || lang === "ts" ? "ts"
+      : lang === "javascript" || lang === "js" ? "js"
+      : lang === "html" ? "html"
+      : lang === "css" ? "css"
+      : lang === "sql" ? "sql"
+      : lang === "yaml" || lang === "yml" ? "yaml"
+      : "txt";
+
+    const name = filename || `export.${ext}`;
+    const isCsvOrTsv = ext === "csv" || ext === "tsv";
+    const content = isCsvOrTsv ? "\uFEFF" + code : code;
+    const blob = new Blob([content], { type: isCsvOrTsv ? "text/csv;charset=utf-8;" : "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="chat-code-block-wrapper">
+      <div className="chat-code-header">
+        <span className="chat-code-lang">{filename || lang || "code"}</span>
+        <div className="chat-code-actions">
+          <button type="button" className="chat-action-btn" onClick={copyText} title="Скопіювати код">
+            {copied ? "Скопійовано!" : "Копіювати"}
+          </button>
+          <button type="button" className="chat-action-btn download" onClick={downloadFile} title="Завантажити файл">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Завантажити {lang === "csv" ? "CSV / Excel" : "файл"}</span>
+          </button>
+        </div>
+      </div>
+      <pre className="chat-code-pre"><code>{code}</code></pre>
+    </div>
+  );
+}
+
 export function ChatMessageContent({ content }: { content: string }) {
   const safeContent = content.replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "").trim();
   if (!safeContent) return null;
   const sourceTitles = collectSourceTitles(safeContent);
+
+  const lines = safeContent.split("\n");
+  const elements: ReactNode[] = [];
   let inSourceSection = false;
-  return (
-    <div className="chat-message-content">
-      {safeContent.split("\n").map((line, index) => {
-        const heading = line.match(/^(#{1,3})\s+(.+)$/);
-        const attachment = line.match(attachmentLine);
-        if (attachment) {
-          const kind = attachment[1]!;
-          const id = attachment[2]!;
-          let name = "attachment";
-          try { name = decodeURIComponent(attachment[3]!); } catch { /* keep safe fallback */ }
-          const token = getStoredAuthToken();
-          const src = "/api/attachments/" + id + (token ? "?token=" + encodeURIComponent(token) : "");
-          const nonAttachmentLines = safeContent
-            .split("\n")
-            .filter((l) => !attachmentLine.test(l) && !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l))
-            .map((l) => l.trim())
-            .filter(Boolean);
-          const textContext = nonAttachmentLines.join(" ");
-          return kind === "image"
-            ? <figure className="chat-message-attachment image" key={index}><img src={src} alt={name} loading="eager" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} /><figcaption>{name}</figcaption></figure>
-            : kind === "audio"
-              ? <AudioAttachmentPlayer key={index} id={id} name={name} fallbackText={textContext} />
-              : <figure className="chat-message-attachment document" key={index}>
-                  <AttachmentFileIcon item={{ name, kind }} />
-                  <div className="chat-document-info">
-                    <span className="chat-document-name" title={name}>{name}</span>
-                    <a href={src} download={name} className="chat-attachment-download-btn" title={"Download " + name} aria-label={"Download " + name}>
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                      <span>Download</span>
-                    </a>
-                  </div>
-                </figure>;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+
+    // 1. Code blocks: ```lang
+    if (line.trim().startsWith("```")) {
+      const langHeader = line.trim().slice(3).trim();
+      let lang = langHeader;
+      let filename: string | undefined;
+      if (langHeader.includes(":")) {
+        const parts = langHeader.split(":");
+        lang = parts[0]!.trim();
+        filename = parts.slice(1).join(":").trim();
+      } else if (langHeader.includes(" ") && /\.[a-z0-9]+$/i.test(langHeader)) {
+        const parts = langHeader.split(/\s+/);
+        lang = parts[0]!.trim();
+        filename = parts[1]!.trim();
+      }
+      i++;
+      const codeLines: string[] = [];
+      while (i < lines.length && !lines[i]!.trim().startsWith("```")) {
+        codeLines.push(lines[i]!);
+        i++;
+      }
+      if (i < lines.length) i++;
+      if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit") {
+        continue;
+      }
+      elements.push(
+        <RenderedCodeBlock
+          key={`code-${elements.length}`}
+          code={codeLines.join("\n")}
+          lang={lang}
+          filename={filename}
+        />
+      );
+      continue;
+    }
+
+    // 2. Markdown tables: line starts with | and delimiter is next
+    const isTableStart = line.trim().startsWith("|") && line.trim().replace(/[\s|]/g, "").length > 0;
+    const isDelimiter = i + 1 < lines.length && /^\|?(\s*:?-+:?\s*\|?)+$/.test(lines[i + 1]!.trim());
+    if (isTableStart && isDelimiter) {
+      const tableStartIdx = i;
+      const parseCells = (row: string) => {
+        const trimmed = row.trim();
+        const stripped = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+        return stripped.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").trim());
+      };
+      const headers = parseCells(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i]!.trim().startsWith("|")) {
+        const rawLine = lines[i]!.trim();
+        if (/^\|?(\s*:?-+:?\s*\|?)+$/.test(rawLine)) {
+          i++;
+          continue;
         }
-        const voiceMatch = line.match(voiceMessageRegex);
-        if (voiceMatch) {
-          const filename = voiceMatch[1]!.trim();
-          const voiceNameMatch = filename.match(/^speech-([a-zA-Z0-9_-]+)\.mp3$/i);
-          const voice = voiceNameMatch ? voiceNameMatch[1]! : "alloy";
-          const nonVoiceLines = safeContent
-            .split("\n")
-            .filter((l) => !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l) && !attachmentLine.test(l))
-            .map((l) => l.trim())
-            .filter(Boolean);
-          const textToSpeak = nonVoiceLines.join(" ") || "Speech recording";
-          return (
-            <SynthesizedVoiceAudioPlayer
-              key={index}
-              filename={filename}
-              inputText={textToSpeak}
-              voice={voice}
-            />
-          );
+        const cells = parseCells(rawLine);
+        while (cells.length < headers.length) {
+          cells.push("");
         }
-        if (/^Transcript:\s*/i.test(line)) {
-          return (
-            <div className="chat-audio-transcript" key={index}>
-              <small>{line}</small>
+        if (cells.length > headers.length) {
+          cells.length = headers.length;
+        }
+        rows.push(cells);
+        i++;
+      }
+      elements.push(
+        <RenderedTableBlock
+          key={`table-block-${tableStartIdx}`}
+          headers={headers}
+          rows={rows}
+          sourceTitles={sourceTitles}
+        />
+      );
+      continue;
+    }
+
+    // 3. Attachments
+    const attachment = line.match(attachmentLine);
+    if (attachment) {
+      const kind = attachment[1]!;
+      const id = attachment[2]!;
+      let name = "attachment";
+      try { name = decodeURIComponent(attachment[3]!); } catch {}
+      const token = getStoredAuthToken();
+      const src = "/api/attachments/" + id + (token ? "?token=" + encodeURIComponent(token) : "");
+      const nonAttachmentLines = safeContent
+        .split("\n")
+        .filter((l) => !attachmentLine.test(l) && !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l))
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const textContext = nonAttachmentLines.join(" ");
+
+      elements.push(
+        kind === "image" ? (
+          <figure className="chat-message-attachment image" key={`att-${elements.length}`}>
+            <img src={src} alt={name} loading="eager" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} />
+            <figcaption>{name}</figcaption>
+          </figure>
+        ) : kind === "audio" ? (
+          <AudioAttachmentPlayer key={`att-${elements.length}`} id={id} name={name} fallbackText={textContext} />
+        ) : (
+          <figure className="chat-message-attachment document" key={`att-${elements.length}`}>
+            <AttachmentFileIcon item={{ name, kind }} />
+            <div className="chat-document-info">
+              <span className="chat-document-name" title={name}>{name}</span>
+              <a href={src} download={name} className="chat-attachment-download-btn" title={"Download " + name} aria-label={"Download " + name}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Download</span>
+              </a>
             </div>
-          );
-        }
-        if (heading) {
-          inSourceSection = sourceHeading.test(cleanLabel(heading[2]!));
-          return <h3 key={index}>{renderInlineMarkdown(heading[2]!, false, sourceTitles)}</h3>;
-        }
-        if (!line) return <div className="chat-message-space" key={index} aria-hidden="true" />;
-        return <div className="chat-message-line" key={index}>{renderInlineMarkdown(line, isSourceCitationLine(line, inSourceSection), sourceTitles)}</div>;
-      })}
-    </div>
-  );
+          </figure>
+        )
+      );
+      i++;
+      continue;
+    }
+
+    // 4. Voice synthesized messages
+    const voiceMatch = line.match(voiceMessageRegex);
+    if (voiceMatch) {
+      const filename = voiceMatch[1]!.trim();
+      const voiceNameMatch = filename.match(/^speech-([a-zA-Z0-9_-]+)\.mp3$/i);
+      const voice = voiceNameMatch ? voiceNameMatch[1]! : "alloy";
+      const nonVoiceLines = safeContent
+        .split("\n")
+        .filter((l) => !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l) && !attachmentLine.test(l))
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const textToSpeak = nonVoiceLines.join(" ") || "Speech recording";
+      elements.push(
+        <SynthesizedVoiceAudioPlayer
+          key={`voice-${elements.length}`}
+          filename={filename}
+          inputText={textToSpeak}
+          voice={voice}
+        />
+      );
+      i++;
+      continue;
+    }
+
+    // 5. Transcript
+    if (/^Transcript:\s*/i.test(line)) {
+      elements.push(
+        <div className="chat-audio-transcript" key={`tr-${elements.length}`}>
+          <small>{line}</small>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // 6. Heading
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      inSourceSection = sourceHeading.test(cleanLabel(heading[2]!));
+      elements.push(
+        <h3 key={`h-${elements.length}`}>
+          {renderInlineMarkdown(heading[2]!, false, sourceTitles)}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+
+    // 7. Space
+    if (!line.trim()) {
+      elements.push(<div className="chat-message-space" key={`sp-${elements.length}`} aria-hidden="true" />);
+      i++;
+      continue;
+    }
+
+    // 8. Normal line
+    elements.push(
+      <div className="chat-message-line" key={`line-${elements.length}`}>
+        {renderInlineMarkdown(line, isSourceCitationLine(line, inSourceSection), sourceTitles)}
+      </div>
+    );
+    i++;
+  }
+
+  return <div className="chat-message-content">{elements}</div>;
 }
