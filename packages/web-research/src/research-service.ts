@@ -5,7 +5,7 @@ import type {
 } from "./types";
 
 const URL_PATTERN = /https?:\/\/[^\s<>()]+/i;
-const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|web research|research online|search the web|find companies|who sells|analy[sz]e)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|\u0434\u043e\u0441\u043b\u0456\u0434|\u0430\u043d\u0430\u043b\u0456\u0437|\u0437\u043d\u0430\u0439\u0434\u0438/iu;
+const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|web research|research online|search the web|find companies|who sells|analy[sz]e|scan|browse|google|website|internet)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|\u0434\u043e\u0441\u043b\u0456\u0434|\u0430\u043d\u0430\u043b\u0456\u0437|\u0437\u043d\u0430\u0439\u0434\u0438|\u0441\u043a\u0430\u043d\u0443|\u0456\u043d\u0442\u0435\u0440\u043d\u0435\u0442|\u0441\u0430\u0439\u0442|\u043f\u043e\u0448\u0443\u043a|\u043f\u0435\u0440\u0435\u0432\u0456\u0440|\u043f\u043e\u0434\u0438\u0432/iu;
 const COMPETITOR_PATTERN = /\b(competitor|competitors|competition|find companies|who sells)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442/iu;
 const LIGHT_FETCH_PATTERN = /\b(read|open|fetch|summarize this page)\b|\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439|\u0432\u0456\u0434\u043a\u0440\u0438\u0439|\u043a\u043e\u0440\u043e\u0442\u043a\u043e/iu;
 
@@ -30,7 +30,7 @@ function escapeRegex(value: string) {
 function generalSearchQuery(message: string) {
   const ignored = new Set(["analyze", "analyse", "find", "search", "research", "review", "check", "detail", "detailed"]);
   const entities = unique(
-    (message.match(/\b[A-Z][A-Za-z0-9.-]{2,}\b/g) ?? []).filter((value) => !ignored.has(value.toLowerCase())),
+    (message.match(/\b[\p{Lu}][\p{L}\p{N}.-]{2,}\b/gu) ?? []).filter((value) => !ignored.has(value.toLowerCase())),
     5,
   );
   const intent = /\bblog\b|\u0431\u043b\u043e\u0433/iu.test(message) ? "official website blog" : "official website";
@@ -109,7 +109,7 @@ export class WebResearchService {
   }
 
   async run(message: string, business: BusinessResearchContext, refresh = false, progress?: ResearchProgressListener): Promise<ResearchOutcome | null> {
-    const url = message.match(URL_PATTERN)?.[0]?.replace(/[.,;!?]+$/, "");
+    const url = message.match(URL_PATTERN)?.[0]?.replace(/[.,;!?\])>]+$/, "");
     if (url) {
       const explicitlyLight = LIGHT_FETCH_PATTERN.test(message) && !RESEARCH_PATTERN.test(message);
       return this.analyzeUrl(url, business, refresh, !explicitlyLight, progress);

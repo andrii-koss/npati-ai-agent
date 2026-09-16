@@ -705,6 +705,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [presentingProgressEvent, setPresentingProgressEvent] = useState<ChatProgressEvent | null>(null);
   const [progressComplete, setProgressComplete] = useState(false);
   const [progressFailed, setProgressFailed] = useState(false);
+  const progressCompleteRef = useRef(false);
+  const flushDeltasRef = useRef<(() => void) | null>(null);
   const progressEventsRef = useRef<ChatProgressEvent[]>([]);
   const progressQueueRef = useRef<ChatProgressEvent[]>([]);
   const pendingSearchResultsRef = useRef<ChatProgressEvent | null>(null);
@@ -718,18 +720,24 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       : ["Help me brainstorm business ideas", "How do I research market demand?", "Explain how NPATI Agent works"],
     [business?.id]
   );
-  async function loadConversations(preferred?: string) {
+  async function loadConversations(preferred?: string, preserveActiveTurn = false) {
     const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
     const rows = await api<Conversation[]>(base); setConversations(rows);
     const next = preferred ?? null; setSelected(next);
     if (next) {
       const loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
       setMessages(loaded);
-      window.requestAnimationFrame(() => {
-        scrollToBottom("auto");
-        setTimeout(() => scrollToBottom("auto"), 50);
-        setTimeout(() => scrollToBottom("auto"), 200);
-      });
+      if (!preserveActiveTurn && !activeTurn) {
+        window.requestAnimationFrame(() => {
+          scrollToBottom("auto");
+          setTimeout(() => scrollToBottom("auto"), 50);
+          setTimeout(() => scrollToBottom("auto"), 200);
+        });
+      } else if (activeTurn && activeTurnRef.current) {
+        window.requestAnimationFrame(() => {
+          activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
       return loaded;
     }
     setMessages([]);
@@ -757,17 +765,27 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, [sending]);
   useEffect(() => {
     const handleImageLoaded = () => {
-      scrollToBottom("auto");
+      if (!activeTurn) {
+        scrollToBottom("auto");
+      }
     };
     window.addEventListener("npati:chat-image-loaded", handleImageLoaded);
     return () => window.removeEventListener("npati:chat-image-loaded", handleImageLoaded);
-  }, [scrollToBottom]);
+  }, [activeTurn, scrollToBottom]);
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      scrollToBottom(sending ? "auto" : "smooth");
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages, sending, scrollToBottom]);
+    // When there is an active turn (user just sent a message or assistant is replying),
+    // do NOT scroll to the bottom of the long message!
+    // The user must always see the beginning of the conversation turn.
+    if (activeTurn && activeTurnRef.current) {
+      return;
+    }
+    if (!sending) {
+      const frame = window.requestAnimationFrame(() => {
+        scrollToBottom("smooth");
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [messages, sending, activeTurn, scrollToBottom]);
   useEffect(() => () => {
     if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     streamControllerRef.current?.controller.abort();
@@ -778,6 +796,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       const next = progressQueueRef.current[0];
       if (!next) {
         progressTimerRef.current = null;
+        if (progressEventsRef.current.some((e) => !e.type.startsWith("final_generation"))) {
+          progressCompleteRef.current = true;
+          setProgressComplete(true);
+          flushDeltasRef.current?.();
+        }
         return;
       }
       const isPageResult = next.type === "page_fetch_completed" || next.type === "page_fetch_failed";
@@ -789,17 +812,27 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           setPresentingProgressEvent(null);
           nextProgressRevealRef.current = Date.now() + 250;
           progressTimerRef.current = null;
-          if (progressQueueRef.current.length > 0) drainProgressQueue();
+          if (progressQueueRef.current.length > 0) {
+            drainProgressQueue();
+          } else {
+            progressCompleteRef.current = true;
+            setProgressComplete(true);
+            flushDeltasRef.current?.();
+          }
         }, PAGE_PROGRESS_PRESENTATION_MS);
         return;
       }
       progressQueueRef.current.shift();
       setVisibleProgressCount((count) => count + 1);
-      // Search results and the first fetched page form one continuous visual
-      // transition: globe -> active page, without an empty pause between them.
       nextProgressRevealRef.current = Date.now() + (next.type === "search_results_received" ? 0 : 800);
       progressTimerRef.current = null;
-      if (progressQueueRef.current.length > 0) drainProgressQueue();
+      if (progressQueueRef.current.length > 0) {
+        drainProgressQueue();
+      } else if (next.type === "research_completed" || next.type === "final_generation_completed") {
+        progressCompleteRef.current = true;
+        setProgressComplete(true);
+        flushDeltasRef.current?.();
+      }
     }, delay);
   }
   function queueProgressEvent(event: ChatProgressEvent) {
@@ -810,12 +843,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     if (progressTimerRef.current === null) drainProgressQueue();
   }
   function enqueueProgress(event: ChatProgressEvent) {
-    // Discovered URLs are backend evidence, but they do not create a visible row.
-    // Keeping them out of the visual queue prevents invisible events from delaying pages.
     if (event.type === "source_discovered") return;
-    // Search-based crawlMany returns its pages as one completed batch. Keep the
-    // globe active while that real work is running instead of pinning the first
-    // candidate URL on screen for the duration of the whole batch.
     if (event.type === "search_results_received") {
       pendingSearchResultsRef.current = event;
       return;
@@ -828,7 +856,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       queueProgressEvent(pendingSearchResultsRef.current);
       pendingSearchResultsRef.current = null;
     }
-    // Direct URL and sequential fallback fetches still expose their real start.
     if (event.type === "page_fetch_started") {
       if (pageStartPendingRef.current) return;
       pageStartPendingRef.current = true;
@@ -836,8 +863,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     if (event.type === "page_fetch_completed" || event.type === "page_fetch_failed" || event.type === "research_completed") {
       pageStartPendingRef.current = false;
     }
-    // Terminal generation events must stay in the same presentation queue.
-    // Flushing here would make every completed crawl page appear at once.
     queueProgressEvent(event);
   }
   function resetProgress() {
@@ -853,6 +878,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     setVisibleProgressCount(0);
     setProgressComplete(false);
     setProgressFailed(false);
+    progressCompleteRef.current = false;
+    flushDeltasRef.current = null;
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
@@ -904,12 +931,42 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     resetProgress();
     setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     window.requestAnimationFrame(() => {
-      scrollToBottom("auto");
-      setTimeout(() => scrollToBottom("auto"), 50);
-      setTimeout(() => scrollToBottom("auto"), 150);
+      activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
     });
-    const assistantId=crypto.randomUUID();let receivedDelta=false;
-    const controller=new AbortController(),streamId=crypto.randomUUID();streamControllerRef.current={controller,streamId};
+    const assistantId = crypto.randomUUID();
+    let receivedDelta = false;
+    const controller = new AbortController(), streamId = crypto.randomUUID();
+    streamControllerRef.current = { controller, streamId };
+
+    const deltaBuffer: string[] = [];
+
+    const appendDelta = (chunk: string) => {
+      if (!receivedDelta) {
+        receivedDelta = true;
+        activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      setStreamingResponse(true);
+      setMessages((current) => {
+        const found = current.some((item) => item.id === assistantId);
+        return found
+          ? current.map((item) => (item.id === assistantId ? { ...item, content: item.content + chunk } : item))
+          : [...current, { id: assistantId, role: "assistant", content: chunk, createdAt: new Date().toISOString() }];
+      });
+      // Do NOT scroll to bottom! Keep user reading from the top!
+    };
+
+    const flushDeltas = () => {
+      flushDeltasRef.current = null;
+      if (deltaBuffer.length > 0) {
+        const buffered = deltaBuffer.join("");
+        deltaBuffer.length = 0;
+        appendDelta(buffered);
+      }
+    };
+    flushDeltasRef.current = flushDeltas;
+
     try {
       const result = await streamChat<AgentReply>({
         message,
@@ -919,16 +976,23 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         ...(companyId ? { companyId } : {}),
         noMemory: privateRequest,
         streamId,
-      }, enqueueProgress,{signal:controller.signal,onDelta:(delta)=>{
-        receivedDelta=true;setStreamingResponse(true);
-        setMessages(current=>{const found=current.some(item=>item.id===assistantId);return found?current.map(item=>item.id===assistantId?{...item,content:item.content+delta}:item):[...current,{id:assistantId,role:"assistant",content:delta,createdAt:new Date().toISOString()}];});
-        if (messageStreamRef.current) {
-          messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
-        }
-      }});
+      }, enqueueProgress, {
+        signal: controller.signal,
+        onDelta: (delta) => {
+          if (!progressCompleteRef.current) {
+            deltaBuffer.push(delta);
+            return;
+          }
+          if (deltaBuffer.length > 0) {
+            flushDeltas();
+          }
+          appendDelta(delta);
+        },
+      });
+      flushDeltas();
       setReplyMeta(result);
       if (privateRequest) {
-        if(!receivedDelta)setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
+        if (!receivedDelta) setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
       } else if (result.conversationId) {
         setSelected(result.conversationId);
         window.history.replaceState(
@@ -937,12 +1001,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           `/c/${result.conversationId}`
         );
         window.dispatchEvent(new Event("npati:conversations-changed"));
-        void loadConversations(result.conversationId);
+        void loadConversations(result.conversationId, true);
       }
+      progressCompleteRef.current = true;
       setProgressComplete(true);
     } catch (reason) {
+      flushDeltas();
       const typed = reason as Error & { code?: string };
-      if(typed.name==="AbortError"){setProgressComplete(true);setNotice("");return;}
+      if (typed.name === "AbortError") {
+        progressCompleteRef.current = true;
+        setProgressComplete(true);
+        setNotice("");
+        return;
+      }
       setProgressFailed(true);
       setNotice(typed.message);
       if (privateRequest) {
@@ -963,7 +1034,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
         setInput(message); setAttachments(sentAttachments);
       }
-    } finally { if(streamControllerRef.current?.controller===controller)streamControllerRef.current=null;setSending(false);setStreamingResponse(false); }
+    } finally {
+      flushDeltas();
+      if (streamControllerRef.current?.controller === controller) streamControllerRef.current = null;
+      setSending(false);
+      setStreamingResponse(false);
+    }
   }
   async function remember() {
     if (!business || !replyMeta?.memoryCandidate) return;
@@ -994,11 +1070,40 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               <p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p>
             </div>
           )}
-          {messages.map((message, index) => <Fragment key={message.id}>
-            {progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && message.role === "assistant" && index === messages.length - 1 && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed failed={progressFailed} />}
-            <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><PendingMessageAttachments value={message.attachments ?? []} /><ChatMessageContent content={message.content} /></article>
-          </Fragment>)}
-          {!progressComplete && progressEvents.some((event) => !event.type.startsWith("final_generation")) && <ResearchProgressPanel events={progressEvents} visibleCount={visibleProgressCount} presentingEvent={presentingProgressEvent} completed={false} failed={progressFailed} />}
+          {messages.map((message, index) => {
+            const isLatestAssistant = message.role === "assistant" && index === messages.length - 1;
+            const hasResearch = progressEvents.some((event) => !event.type.startsWith("final_generation"));
+            return (
+              <Fragment key={message.id}>
+                {isLatestAssistant && hasResearch && (
+                  <ResearchProgressPanel
+                    events={progressEvents}
+                    visibleCount={visibleProgressCount}
+                    presentingEvent={presentingProgressEvent}
+                    completed={progressComplete}
+                    failed={progressFailed}
+                  />
+                )}
+                <article
+                  ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined}
+                  className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`}
+                  aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
+                >
+                  <PendingMessageAttachments value={message.attachments ?? []} />
+                  <ChatMessageContent content={message.content} />
+                </article>
+              </Fragment>
+            );
+          })}
+          {!messages.some((m, idx) => m.role === "assistant" && idx === messages.length - 1) && progressEvents.some((event) => !event.type.startsWith("final_generation")) && (
+            <ResearchProgressPanel
+              events={progressEvents}
+              visibleCount={visibleProgressCount}
+              presentingEvent={presentingProgressEvent}
+              completed={progressComplete}
+              failed={progressFailed}
+            />
+          )}
           {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />

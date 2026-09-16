@@ -3729,6 +3729,26 @@ a {
   outline: none;
 }
 
+.message-stream article .chat-message-content a.source-link-chip span {
+  max-width: min(280px, 60vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-stream article.user .chat-message-content a.source-link-chip {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.message-stream article.user .chat-message-content a.source-link-chip:hover,
+.message-stream article.user .chat-message-content a.source-link-chip:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
 .source-link-favicon,
 .source-link-globe {
   width: 15px;
@@ -3752,23 +3772,32 @@ a {
 .source-link-preview {
   position: absolute;
   left: 50%;
-  top: calc(100% + 9px);
-  z-index: 40;
+  top: calc(100% + 8px);
+  z-index: 100;
   width: min(380px, calc(100vw - 52px));
-  padding: 15px 17px;
+  padding: 14px 16px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   color: #181818;
-  background: white;
+  background: #ffffff;
   border: 1px solid #e5e5e5;
-  border-radius: 16px;
-  box-shadow: 0 12px 34px rgb(17 17 17 / 13%);
+  border-radius: 14px;
+  box-shadow: 0 12px 34px rgb(17 17 17 / 16%);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translate(-24%, 5px);
+  transform: translate(-24%, 4px);
   transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
   white-space: normal;
+}
+
+.source-link-preview::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  height: 14px;
 }
 
 .source-link-wrap:hover .source-link-preview,
@@ -3776,6 +3805,7 @@ a {
   opacity: 1;
   visibility: visible;
   transform: translate(-24%, 0);
+  pointer-events: auto;
 }
 
 .source-link-preview-head {
@@ -3783,8 +3813,18 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #444;
+  color: #555555;
   font-size: 12px;
+  font-weight: 600;
+}
+
+.message-stream article.user .source-link-preview {
+  color: #181818;
+  background: #ffffff;
+}
+
+.message-stream article.user .source-link-preview-head {
+  color: #555555;
 }
 
 .message-stream article .source-link-preview strong {

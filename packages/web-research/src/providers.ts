@@ -129,12 +129,12 @@ export class Crawl4AIProvider {
       const row = (rows[0] ?? {}) as Json;
       const finalUrl = typeof row.url === "string" ? row.url : safe.toString();
       await this.validator.validateRedirect(safe.toString(), finalUrl);
-      const markdown = contentString(row.markdown);
-      const text = contentString(row.cleaned_html) ?? contentString(row.text) ?? markdown;
+      const markdown = contentString(row.markdown) ?? contentString(row.raw_markdown) ?? contentString(row.fit_markdown);
+      const text = contentString(row.cleaned_html) ?? contentString(row.text) ?? contentString(row.description) ?? markdown;
       const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Json : {};
       return {
         url: finalUrl,
-        title: typeof metadata.title === "string" ? metadata.title : undefined,
+        title: typeof metadata.title === "string" ? metadata.title : (typeof row.title === "string" ? row.title : undefined),
         markdown: markdown?.slice(0, this.limits.maxContentCharacters),
         text: text?.slice(0, this.limits.maxContentCharacters),
         links: [...new Set(crawlLinks(row.links))],
@@ -192,11 +192,18 @@ export class Crawl4AIProvider {
         await this.validator.validate(finalUrl);
         const links = row.links && typeof row.links === "object" ? row.links as Json : {};
         const structured = row.structured && typeof row.structured === "object" ? row.structured as Json : {};
+        const rawMd = typeof row.fit_markdown === "string" ? row.fit_markdown
+          : typeof row.raw_markdown === "string" ? row.raw_markdown
+          : typeof row.markdown === "string" ? row.markdown
+          : undefined;
+        const rawTxt = typeof row.text === "string" ? row.text
+          : typeof row.description === "string" ? row.description
+          : rawMd;
         pages.push({
           url: finalUrl,
           title: typeof row.title === "string" ? row.title : undefined,
-          text: typeof row.text === "string" ? row.text.slice(0, this.limits.maxContentCharacters) : undefined,
-          markdown: typeof row.fit_markdown === "string" ? row.fit_markdown.slice(0, this.limits.maxContentCharacters) : undefined,
+          text: rawTxt ? rawTxt.slice(0, this.limits.maxContentCharacters) : undefined,
+          markdown: rawMd ? rawMd.slice(0, this.limits.maxContentCharacters) : undefined,
           links: [...new Set(crawlLinks(links))],
           internalLinks: [...new Set(crawlLinks(links.internal))],
           externalLinks: [...new Set(crawlLinks(links.external))],
