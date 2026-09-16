@@ -828,7 +828,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       progressTimerRef.current = null;
       if (progressQueueRef.current.length > 0) {
         drainProgressQueue();
-      } else if (next.type === "research_completed" || next.type === "final_generation_completed") {
+      } else {
         progressCompleteRef.current = true;
         setProgressComplete(true);
         flushDeltasRef.current?.();
@@ -979,7 +979,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }, enqueueProgress, {
         signal: controller.signal,
         onDelta: (delta) => {
-          if (!progressCompleteRef.current) {
+          if (!progressCompleteRef.current && progressEventsRef.current.length > 0) {
             deltaBuffer.push(delta);
             return;
           }

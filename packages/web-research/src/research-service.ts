@@ -4,10 +4,128 @@ import type {
   ResearchProgressListener, ResearchSource, WebResearchLimits, WebResearchProvider,
 } from "./types";
 
+const DOMAIN_TLDS = "(?:com|org|net|edu|gov|mil|int|ua|uk|us|ca|de|fr|it|es|nl|pl|cz|sk|ro|bg|gr|at|ch|se|no|fi|dk|ie|be|pt|by|kz|uz|io|ai|co|me|tv|cc|app|dev|page|tech|store|shop|online|site|pro|cloud|club|space|xyz|icu|top|live|vip|world|info|biz|mobi|name|agency|center|digital|solutions|link|click|today|group|media|news|press|blog)";
+
+const URL_OR_DOMAIN_REGEX = new RegExp(
+  "(?:https?:\\/\\/[^\\s<>()\"']+|\\b(?:www\\.)[a-z0-9.-]+\\.[a-z]{2,}(?:\\/[^\\s<>()\"']*)?|\\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.(?:[a-z0-9-]+\\.)*" + DOMAIN_TLDS + "(?:\\/[^\\s<>()\"']*)?)",
+  "gi"
+);
+
 const URL_PATTERN = /https?:\/\/[^\s<>()]+/i;
 const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|web research|research online|search the web|find companies|who sells|analy[sz]e|scan|browse|google|website|internet)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|\u0434\u043e\u0441\u043b\u0456\u0434|\u0430\u043d\u0430\u043b\u0456\u0437|\u0437\u043d\u0430\u0439\u0434\u0438|\u0441\u043a\u0430\u043d\u0443|\u0456\u043d\u0442\u0435\u0440\u043d\u0435\u0442|\u0441\u0430\u0439\u0442|\u043f\u043e\u0448\u0443\u043a|\u043f\u0435\u0440\u0435\u0432\u0456\u0440|\u043f\u043e\u0434\u0438\u0432/iu;
 const COMPETITOR_PATTERN = /\b(competitor|competitors|competition|find companies|who sells)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442/iu;
 const LIGHT_FETCH_PATTERN = /\b(read|open|fetch|summarize this page)\b|\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439|\u0432\u0456\u0434\u043a\u0440\u0438\u0439|\u043a\u043e\u0440\u043e\u0442\u043a\u043e/iu;
+
+export function extractTargetUrlOrDomain(message: string): string | null {
+  const match = message.match(URL_OR_DOMAIN_REGEX);
+  if (!match) return null;
+  let raw = match[0].replace(/[.,;!?)\\]>]+$/, "").trim();
+  if (/^[a-z0-9.-]+\.[a-z]{2,}/i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    raw = "https://" + raw;
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {}
+  return null;
+}
+
+const GENERIC_WORDS = new Set([
+  "блог", "blog", "сайт", "сатй", "site", "website", "сторінку", "сторінка", "page", "webpage",
+  "статтю", "новини", "news", "відгуки", "reviews", "ціни", "тарифи", "pricing", "prices",
+  "контакти", "contact", "послуги", "services", "товари", "products", "компанію", "компанія", "company",
+  "посилання", "link", "links", "інформацію", "дані", "info", "data", "ринок", "market", "конкурентів", "конкуренти", "competitors",
+  "це", "цей", "ця", "все", "this", "the", "a", "an", "який", "яка", "яке", "онлайн", "online", "мене", "себе", "me", "it", "all",
+  "help", "hello", "привіт", "почати", "start", "stop", "test", "офіційний", "official"
+]);
+
+export function extractSiteEntity(message: string): string | null {
+  if (extractTargetUrlOrDomain(message)) return null;
+
+  const trimmed = message.trim();
+
+  // Pattern 1: Site/website/brand keyword followed by target name:
+  // e.g., "Analyze site hostkoss", "проаналізуй сайт hostkoss", "Проаналізуй бренд Hostkoss і сайти, які до нього належать"
+  const sitePrefixRegex = /(?:analyze|analyse|scan|check|review|audit|inspect|test|проаналізуй|аналізуй|аналіз|проскануй|скануй|перевір|досліди|подивись|оглянь|знайди|пошукай)?\s*(?:site|website|web\s*site|webpage|page|веб[- ]?сайт|сайт|сатй|сторінку|домен|бренд|brand|компанію|компанія|сервіс|platform|платформа)\s*[:\-–—]?\s*([a-zA-Z0-9\u0400-\u04FF_-]{2,50})/iu;
+  const matchSite = trimmed.match(sitePrefixRegex);
+  if (matchSite && matchSite[1]) {
+    const candidate = matchSite[1].trim();
+    if (!GENERIC_WORDS.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  // Pattern 2: Action keyword directly followed by target name:
+  // e.g., "Analyze hostkoss", "проаналізуй hostkoss", "скануй hostkoss"
+  const actionRegex = /(?:analyze|analyse|scan|audit|inspect|проаналізуй|аналізуй|проскануй|скануй|перевір|досліди|подивись|оглянь)\s+([a-zA-Z0-9\u0400-\u04FF_-]{2,50})/iu;
+  const matchAction = trimmed.match(actionRegex);
+  if (matchAction && matchAction[1]) {
+    const candidate = matchAction[1].trim();
+    if (!GENERIC_WORDS.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  // Pattern 3: Standalone single word (e.g. user just enters "hostkoss")
+  if (/^[a-zA-Z0-9\u0400-\u04FF_-]{3,40}$/u.test(trimmed)) {
+    if (!GENERIC_WORDS.has(trimmed.toLowerCase())) {
+      return trimmed;
+    }
+  }
+
+  return null;
+}
+
+const SOCIAL_OR_AGGREGATOR = new Set([
+  "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
+  "youtube.com", "wikipedia.org", "github.com", "reddit.com", "t.me", "telegram.org",
+  "pinterest.com", "tiktok.com"
+]);
+
+export function findTargetUrlFromSearchResults(results: Array<{ url: string; title?: string; snippet?: string }>, target: string): string | null {
+  const cleanTarget = target.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const scored = results.map((item, index) => {
+    const domain = hostname(item.url);
+    if (!domain) return { item, domain: "", score: -1000 };
+
+    const domainParts = domain.split(".");
+    const domainName = domainParts[0] || "";
+    const cleanDomain = domain.replace(/[^a-z0-9]/g, "");
+
+    let score = 0;
+    score -= index * 2;
+
+    if (cleanTarget.length >= 3 && (domainName === cleanTarget || cleanDomain.startsWith(cleanTarget))) {
+      score += 100;
+    } else if (cleanTarget.length >= 3 && cleanDomain.includes(cleanTarget)) {
+      score += 50;
+    }
+
+    const titleLower = (item.title || "").toLowerCase();
+    if (titleLower.includes(target.toLowerCase())) {
+      score += 20;
+    }
+
+    const snippetLower = (item.snippet || "").toLowerCase();
+    if (snippetLower.includes(target.toLowerCase())) {
+      score += 10;
+    }
+
+    const primaryDomain = domainParts[0] ?? "";
+    if (SOCIAL_OR_AGGREGATOR.has(domain) && (primaryDomain ? !cleanTarget.includes(primaryDomain) : true)) {
+      score -= 80;
+    }
+
+    return { item, domain, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  return best && best.score > 0 ? best.item.url : null;
+}
 
 function keywords(context: BusinessResearchContext) {
   return [context.businessType, context.industry, context.niche, context.productsServicesSummary, context.description]
@@ -28,11 +146,18 @@ function escapeRegex(value: string) {
 }
 
 function generalSearchQuery(message: string) {
-  const ignored = new Set(["analyze", "analyse", "find", "search", "research", "review", "check", "detail", "detailed"]);
+  const ignored = new Set([
+    "analyze", "analyse", "find", "search", "research", "review", "check", "detail", "detailed",
+    ...GENERIC_WORDS
+  ]);
+  const siteEntity = extractSiteEntity(message);
   const entities = unique(
     (message.match(/\b[\p{Lu}][\p{L}\p{N}.-]{2,}\b/gu) ?? []).filter((value) => !ignored.has(value.toLowerCase())),
-    5,
+    5
   );
+  if (!entities.length && siteEntity) {
+    entities.push(siteEntity);
+  }
   const intent = /\bblog\b|\u0431\u043b\u043e\u0433/iu.test(message) ? "official website blog" : "official website";
   return {
     query: entities.length ? [entities.join(" "), intent].join(" ") : message.trim().slice(0, 500),
@@ -83,6 +208,88 @@ function pageFailure(page: CrawledPage) {
   return undefined;
 }
 
+function normalizePageUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hash = "";
+    const dropParams = [
+      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+      "ref", "fbclid", "gclid", "session", "phpsessid", "token", "aff",
+    ];
+    for (const p of dropParams) parsed.searchParams.delete(p);
+    let pathname = parsed.pathname.replace(/\/+$/, "");
+    if (pathname === "/index.php" || pathname === "/index.html") {
+      if ([...parsed.searchParams.keys()].length === 0) {
+        pathname = "";
+      }
+    }
+    parsed.pathname = pathname || "/";
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function cleanExtractedTitle(page: CrawledPage): string | undefined {
+  let title = page.title?.trim();
+  if (title && !/^(?:index|default|home|main)\.(?:php|html|htm|aspx|jsp)$/i.test(title)) {
+    return title;
+  }
+  const content = page.markdown || page.text || "";
+  const h1Match = content.match(/^#\s+([^\n\r]+)/m) || content.match(/^##\s+([^\n\r]+)/m);
+  if (h1Match && h1Match[1]) {
+    const candidate = h1Match[1].trim();
+    if (candidate.length > 2 && candidate.length < 120 && !candidate.startsWith("http")) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+export function deduplicateAndFilterPages(pages: CrawledPage[], maxPages: number): CrawledPage[] {
+  const seenUrls = new Set<string>();
+  const seenTitles = new Set<string>();
+  const result: CrawledPage[] = [];
+
+  for (const page of pages) {
+    const normUrl = normalizePageUrl(page.url);
+    if (seenUrls.has(normUrl)) continue;
+    seenUrls.add(normUrl);
+
+    const lowerUrl = normUrl.toLowerCase();
+    if (
+      lowerUrl.includes("/clientarea") ||
+      lowerUrl.includes("/login") ||
+      lowerUrl.includes("/logout") ||
+      lowerUrl.includes("/cart.php?a=add") ||
+      lowerUrl.includes("/pwreset") ||
+      lowerUrl.includes("action=logout")
+    ) {
+      continue;
+    }
+
+    const title = cleanExtractedTitle(page);
+    const cleanedPage: CrawledPage = {
+      ...page,
+      url: normUrl,
+      title: title || page.title,
+    };
+
+    if (title) {
+      const lowerTitle = title.toLowerCase();
+      if (seenTitles.has(lowerTitle)) {
+        continue;
+      }
+      seenTitles.add(lowerTitle);
+    }
+
+    result.push(cleanedPage);
+    if (result.length >= maxPages) break;
+  }
+
+  return result.length > 0 ? result : pages.slice(0, maxPages);
+}
+
 function reportCrawledPages(pages: CrawledPage[], progress?: ResearchProgressListener) {
   const usable: CrawledPage[] = [];
   for (const page of pages) {
@@ -105,19 +312,48 @@ export class WebResearchService {
   ) {}
 
   shouldResearch(message: string) {
-    return URL_PATTERN.test(message) || RESEARCH_PATTERN.test(message);
+    return Boolean(extractTargetUrlOrDomain(message) || extractSiteEntity(message) || RESEARCH_PATTERN.test(message));
   }
 
   async run(message: string, business: BusinessResearchContext, refresh = false, progress?: ResearchProgressListener): Promise<ResearchOutcome | null> {
-    const url = message.match(URL_PATTERN)?.[0]?.replace(/[.,;!?\])>]+$/, "");
-    if (url) {
+    const directUrl = extractTargetUrlOrDomain(message);
+    if (directUrl) {
       const explicitlyLight = LIGHT_FETCH_PATTERN.test(message) && !RESEARCH_PATTERN.test(message);
-      return this.analyzeUrl(url, business, refresh, !explicitlyLight, progress);
+      return this.analyzeUrl(directUrl, business, refresh, !explicitlyLight, progress);
+    }
+    const siteEntity = extractSiteEntity(message);
+    if (siteEntity) {
+      return this.analyzeSiteByName(siteEntity, business, refresh, progress);
     }
     if (!RESEARCH_PATTERN.test(message)) return null;
     return COMPETITOR_PATTERN.test(message)
       ? this.analyzeCompetitors(business, refresh, progress)
       : this.analyzeSearch(message, business, refresh, progress);
+  }
+
+  private async analyzeSiteByName(
+    targetName: string,
+    business: BusinessResearchContext,
+    refresh: boolean,
+    progress?: ResearchProgressListener
+  ): Promise<ResearchOutcome> {
+    const isBlog = /\bblog\b|\u0431\u043b\u043e\u0433/iu.test(targetName);
+    const query = `${targetName} official website${isBlog ? " blog" : ""}`;
+    report(progress, { type: "search_started", query });
+    const results = await this.provider.search({
+      query,
+      maxResults: Math.max(10, this.limits.maxSearchResults),
+      country: business.country,
+      refresh,
+    });
+    report(progress, { type: "search_results_received", query, resultCount: results.length });
+
+    const targetUrl = findTargetUrlFromSearchResults(results, targetName);
+    if (targetUrl) {
+      return this.analyzeUrl(targetUrl, business, refresh, true, progress);
+    }
+
+    return this.analyzeSearch(targetName, business, refresh, progress);
   }
 
   private async analyzeUrl(url: string, business: BusinessResearchContext, refresh: boolean, deep: boolean, progress?: ResearchProgressListener): Promise<ResearchOutcome> {
@@ -146,7 +382,7 @@ export class WebResearchService {
           resume: true,
           includeMedia: false,
         });
-        pages = crawl.pages;
+        pages = deduplicateAndFilterPages(crawl.pages, this.limits.maxPagesPerSite);
       } catch {
         const page = await this.provider.fetch({ url: safe.toString(), refresh });
         pages = [{ url: page.finalUrl ?? page.url, title: page.title, text: page.text, markdown: page.markdown, links: page.links }];
@@ -210,7 +446,7 @@ export class WebResearchService {
           resume: true,
           includeMedia: false,
         });
-        for (const page of reportCrawledPages(crawl.pages, progress)) {
+        for (const page of reportCrawledPages(deduplicateAndFilterPages(crawl.pages, this.limits.maxPagesPerSite * candidates.length), progress)) {
           const domain = hostname(page.url);
           pagesByDomain.set(domain, [...(pagesByDomain.get(domain) ?? []), page]);
         }
@@ -293,7 +529,7 @@ export class WebResearchService {
     if (candidates.length && this.provider.crawlMany) {
       try {
         for (const candidate of candidates) report(progress, { type: "page_fetch_started", url: candidate.url, domain: hostname(candidate.url), title: candidate.title });
-        pages = reportCrawledPages((await this.provider.crawlMany({
+        pages = reportCrawledPages(deduplicateAndFilterPages((await this.provider.crawlMany({
           urls: candidates.map((candidate) => candidate.url),
           query,
           maxPages: this.limits.maxPagesPerSite,
@@ -307,7 +543,7 @@ export class WebResearchService {
           concurrency: this.limits.maxConcurrentJobs,
           resume: true,
           includeMedia: false,
-        })).pages, progress);
+        })).pages, this.limits.maxPagesPerSite * candidates.length), progress);
       } catch (error) {
         degraded = "Deep crawling was unavailable; the analysis uses lighter page fetches.";
         for (const candidate of candidates) report(progress, { type: "page_fetch_failed", url: candidate.url, domain: hostname(candidate.url), title: candidate.title, error: error instanceof Error ? error.message : undefined });

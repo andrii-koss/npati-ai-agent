@@ -278,4 +278,78 @@ describe("competitor discovery", () => {
     expect(candle?.context).not.toContain("Table B");
     expect(table?.context).toContain("Table B");
   });
+
+  it("analyzes domain directly without protocol, e.g. Analyze site hostkoss.com", async () => {
+    const provider = {
+      search: vi.fn(),
+      fetch: vi.fn(),
+      crawl: vi.fn().mockResolvedValue({
+        rootUrl: "https://hostkoss.com/",
+        startedAt: "",
+        completedAt: "",
+        pages: [
+          { url: "https://hostkoss.com/", title: "Hostkoss - Хостинг", markdown: "# Hostkoss Hosting" },
+          { url: "https://hostkoss.com/vps", title: "Hostkoss VPS", markdown: "# VPS Servers" },
+        ],
+      }),
+    };
+    const service = new WebResearchService(provider, { validate: async (url: string) => new URL(url) } as SafeUrlValidator, limits);
+    const outcome = await service.run("Analyze site hostkoss.com", {});
+    expect(outcome?.kind).toBe("url_analysis");
+    expect(provider.search).not.toHaveBeenCalled();
+    expect(provider.crawl).toHaveBeenCalledWith(expect.objectContaining({ url: "https://hostkoss.com/" }));
+    expect(outcome?.sources.map((s) => s.url)).toEqual(["https://hostkoss.com/", "https://hostkoss.com/vps"]);
+    expect(outcome?.context).toContain("Research target: hostkoss.com");
+  });
+
+  it("resolves and analyzes official website for brand name e.g. Analyze site hostkoss", async () => {
+    const provider = {
+      search: vi.fn().mockResolvedValue([
+        { url: "https://sitechecker.pro/analyze/hostkoss.com", title: "Analyze site hostkoss", snippet: "SEO tool" },
+        { url: "https://hostkoss.com/", title: "Hostkoss - Хостинг", snippet: "Надійний хостинг" },
+        { url: "https://twitter.com/hostkoss", title: "Hostkoss Twitter", snippet: "Social" },
+      ]),
+      fetch: vi.fn(),
+      crawl: vi.fn().mockResolvedValue({
+        rootUrl: "https://hostkoss.com/",
+        startedAt: "",
+        completedAt: "",
+        pages: [
+          { url: "https://hostkoss.com/", title: "Hostkoss - Хостинг", markdown: "# Hostkoss Hosting" },
+        ],
+      }),
+    };
+    const service = new WebResearchService(provider, { validate: async (url: string) => new URL(url) } as SafeUrlValidator, limits);
+    const outcome = await service.run("Analyze site hostkoss", {});
+    expect(provider.search).toHaveBeenCalledWith(expect.objectContaining({ query: "hostkoss official website" }));
+    expect(provider.crawl).toHaveBeenCalledWith(expect.objectContaining({ url: "https://hostkoss.com/" }));
+    expect(outcome?.kind).toBe("url_analysis");
+    expect(outcome?.sources[0]?.url).toBe("https://hostkoss.com/");
+    expect(outcome?.context).toContain("Research target: hostkoss.com");
+    // Crucial: Ensure sitechecker.pro was NOT crawled!
+    expect(outcome?.sources.some((s) => s.url.includes("sitechecker.pro"))).toBe(false);
+  });
+
+  it("resolves and analyzes official website for Ukrainian query e.g. проаналізуй сайт hostkoss", async () => {
+    const provider = {
+      search: vi.fn().mockResolvedValue([
+        { url: "https://hostkoss.com/", title: "Hostkoss", snippet: "Хостинг провайдер" },
+      ]),
+      fetch: vi.fn(),
+      crawl: vi.fn().mockResolvedValue({
+        rootUrl: "https://hostkoss.com/",
+        startedAt: "",
+        completedAt: "",
+        pages: [
+          { url: "https://hostkoss.com/", title: "Hostkoss", markdown: "# Hostkoss" },
+        ],
+      }),
+    };
+    const service = new WebResearchService(provider, { validate: async (url: string) => new URL(url) } as SafeUrlValidator, limits);
+    const outcome = await service.run("проаналізуй сайт hostkoss", {});
+    expect(provider.search).toHaveBeenCalledWith(expect.objectContaining({ query: "hostkoss official website" }));
+    expect(provider.crawl).toHaveBeenCalledWith(expect.objectContaining({ url: "https://hostkoss.com/" }));
+    expect(outcome?.kind).toBe("url_analysis");
+    expect(outcome?.sources[0]?.url).toBe("https://hostkoss.com/");
+  });
 });
