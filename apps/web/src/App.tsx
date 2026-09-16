@@ -120,8 +120,8 @@ function ChatUserMenu() {
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
             <Link to="/settings/ai" onClick={closeMenu}>AI Provider <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/company" onClick={closeMenu}>Company <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/company" onClick={closeMenu}>Company <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
             <button
               type="button"
@@ -323,7 +323,7 @@ async function fetchAllSidebarConversations(businesses: Array<{ id: string; name
   const [neutralResponse, ...businessRows] = await Promise.all([neutralRequest, ...businessRequests]);
   const neutralRows = neutralResponse.ok
     ? (await neutralResponse.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
-        .map((conversation) => ({ ...conversation, businessId: null, businessName: "" }))
+      .map((conversation) => ({ ...conversation, businessId: null, businessName: "" }))
     : [];
   return [...neutralRows, ...businessRows.flat()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
@@ -751,14 +751,14 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
               isMenuOpen
                 ? null
                 : {
-                    type: "chat",
-                    id: conversation.id,
-                    title: conversation.title,
-                    isPinned,
-                    top,
-                    left,
-                    data: conversation,
-                  }
+                  type: "chat",
+                  id: conversation.id,
+                  title: conversation.title,
+                  isPinned,
+                  top,
+                  left,
+                  data: conversation,
+                }
             );
           }}
         >
@@ -807,14 +807,14 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
               isMenuOpen
                 ? null
                 : {
-                    type: item.kind,
-                    id: item.id,
-                    title: item.name,
-                    isPinned,
-                    top,
-                    left,
-                    data: item.kind === "draft" ? item.draft : item.business,
-                  }
+                  type: item.kind,
+                  id: item.id,
+                  title: item.name,
+                  isPinned,
+                  top,
+                  left,
+                  data: item.kind === "draft" ? item.draft : item.business,
+                }
             );
           }}
         >
@@ -938,8 +938,8 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
                     ? "Unpin chat"
                     : "Unpin business"
                   : menuTarget.type === "chat"
-                  ? "Pin chat"
-                  : "Pin business"}
+                    ? "Pin chat"
+                    : "Pin business"}
               </span>
             </button>
             <button
