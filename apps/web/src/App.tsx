@@ -398,6 +398,25 @@ function IconDots() {
   );
 }
 
+function IconMenu() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+function IconClose() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
 type SidebarMenuTarget = {
   type: "chat" | "draft" | "business";
   id: string;
@@ -408,7 +427,7 @@ type SidebarMenuTarget = {
   data: any;
 };
 
-function Sidebar() {
+function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { overview, refresh, switchBusiness } = useWorkspace();
@@ -590,16 +609,19 @@ function Sidebar() {
   }, [location.pathname]);
 
   function createBusinessIdea() {
+    onClose?.();
     setBusinessOpen(true);
     cachedBusinessOpen = true;
     navigate("/b/new", { state: { newBusiness: Date.now() } });
   }
   function openNewChat() {
+    onClose?.();
     setChatOpen(true);
     cachedChatOpen = true;
     navigate("/chat", { state: { newChat: Date.now() } });
   }
   async function openBusiness(id: string) {
+    onClose?.();
     await switchBusiness(id);
     navigate(`/b/${id}`);
   }
@@ -607,6 +629,7 @@ function Sidebar() {
     navigate(`/settings/business/${id}`);
   }
   async function openConversation(conversation: SidebarConversation) {
+    onClose?.();
     if (conversation.businessId && conversation.businessId !== currentBusiness?.id) await switchBusiness(conversation.businessId);
     navigate(`/c/${conversation.id}`, { state: conversation.businessId ? { businessId: conversation.businessId } : { neutralChat: true } });
   }
@@ -802,7 +825,13 @@ function Sidebar() {
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? "mobile-open" : ""}`}>
+      <div className="sidebar-mobile-head">
+        <Link className="brand" to="/chat" onClick={onClose}><NpatiAgentLogo /></Link>
+        <button type="button" className="sidebar-close-button" aria-label="Close menu" onClick={onClose}>
+          <IconClose />
+        </button>
+      </div>
       <Link className="brand sidebar-brand" to="/chat"><NpatiAgentLogo /></Link>
       <nav>
         <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") || window.location.pathname === "/chat" || window.location.pathname.startsWith("/c/") ? "active" : ""}`}>
@@ -851,7 +880,7 @@ function Sidebar() {
             </div>
           )}
         </div>
-        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href}>{item}</Link>; })}
+        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href} onClick={onClose}>{item}</Link>; })}
       </nav>
 
       {menuTarget &&
@@ -954,6 +983,12 @@ function Sidebar() {
 function Workspace({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
   if (isLoading) {
     return <div className="workspace"><div className="workspace-notice">Loading workspace…</div></div>;
   }
@@ -970,7 +1005,40 @@ function Workspace({ children }: { children: ReactNode }) {
   const isConnections = location.pathname === "/connections" || location.pathname.startsWith("/connections");
   const isMemory = location.pathname === "/memory" || location.pathname.startsWith("/memory");
   const isSkills = location.pathname === "/skills" || location.pathname.startsWith("/skills");
-  return <div className="workspace"><Sidebar /><section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills ? "settings-workspace-content" : ""}`}>{isChat && <ChatUserMenu />}{!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && <div className="workspace-topbar"><BusinessSwitcher /></div>}{children}</section></div>;
+  return (
+    <div className={`workspace ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
+      <header className="workspace-mobile-header">
+        <button
+          type="button"
+          className="mobile-header-menu-button"
+          aria-label="Open navigation menu"
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <IconMenu />
+        </button>
+        <Link className="mobile-header-brand" to="/chat" onClick={() => setMobileNavOpen(false)}>
+          <NpatiAgentLogo />
+        </Link>
+        <div className="mobile-header-right">
+          <ChatUserMenu />
+        </div>
+      </header>
+      {mobileNavOpen && (
+        <div
+          className="sidebar-backdrop"
+          aria-hidden="true"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+      <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills ? "settings-workspace-content" : ""}`}>
+        {isChat && <ChatUserMenu />}
+        {!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && <div className="workspace-topbar"><BusinessSwitcher /></div>}
+        {children}
+      </section>
+    </div>
+  );
 }
 
 function ChatRoute() {
