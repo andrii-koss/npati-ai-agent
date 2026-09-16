@@ -156,7 +156,7 @@ export const DEFAULT_GUARDRAIL_POLICY: CompanyGuardrailPolicy = {
   redactCredentials: true,
   enableModeration: true,
   customBlockedTerms: [],
-  maxInputCharacters: 100_000,
+  maxInputCharacters: 300_000,
 };
 
 export class SecurityPolicyViolation extends Error {

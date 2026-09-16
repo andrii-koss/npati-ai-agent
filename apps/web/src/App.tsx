@@ -1096,6 +1096,7 @@ function CanonicalChatRoute() {
 
   useEffect(() => {
     if (loading || !overview || !conversationId) return;
+    setNotFound(false);
     let cancelled = false;
     async function resolveConversation() {
       if (routeState?.neutralChat) {

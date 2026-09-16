@@ -8,7 +8,10 @@ export default defineConfig({
   bundle: true,
   clean: true,
   sourcemap: true,
-  noExternal: [/^@npati\//],
+  noExternal: [/^@npati\//, "exceljs"],
   external: ["pg", "redis"],
   loader: { ".sql": "text" },
+  banner: {
+    js: "import { createRequire as __createRequire } from 'node:module'; var require = __createRequire(import.meta.url);",
+  },
 });

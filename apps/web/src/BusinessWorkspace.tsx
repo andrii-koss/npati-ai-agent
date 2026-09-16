@@ -606,8 +606,8 @@ const businessThinkingSteps = [
 
 const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
-export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean }) {
-  const { overview } = useWorkspace(); const business = neutralChat ? null : overview?.currentBusiness;
+export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
+  const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
@@ -915,7 +915,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         message,
         conversationId: selected ?? undefined,
         attachments: sentAttachments,
-        contextType: business ? "business" : "none",
+        contextType: companyId ? "company" : (business ? "business" : "none"),
+        ...(companyId ? { companyId } : {}),
         noMemory: privateRequest,
         streamId,
       }, enqueueProgress,{signal:controller.signal,onDelta:(delta)=>{
