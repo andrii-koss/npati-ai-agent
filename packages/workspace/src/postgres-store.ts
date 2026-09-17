@@ -487,9 +487,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0]!;
   }
 
+  async getUserBusiness(context: AuthContext, businessId: string) {
+    await this.assertMember(context);
+    const result = await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3`, [businessId, context.workspaceId, context.userId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Business is not available or not owned by this user");
+    return result.rows[0]!;
+  }
+
   async listBusinesses(context: AuthContext) {
     await this.assertMember(context);
     return (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND activation_status='active' ORDER BY created_at`, [context.workspaceId])).rows;
+  }
+
+  async listUserBusinesses(context: AuthContext) {
+    await this.assertMember(context);
+    return (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND activation_status='active' ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
   }
 
   async listBusinessesPage(context: AuthContext, requestedLimit = 20, cursor?: string) {
@@ -561,6 +573,19 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       description=COALESCE($14,description), audience_summary=COALESCE($15,audience_summary),
       products_services_summary=COALESCE($16,products_services_summary), updated_at=now()
       WHERE id=$1 AND workspace_id=$2 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
+    return result.rows[0]!;
+  }
+
+  async updateUserBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
+    await this.getUserBusiness(context, businessId);
+    const values = [businessId, context.workspaceId, context.userId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary];
+    const result = await this.pool.query<Business>(`UPDATE businesses SET
+      name=COALESCE($4,name), business_type=COALESCE($5,business_type), industry=COALESCE($6,industry), niche=COALESCE($7,niche),
+      country=COALESCE($8,country), market=COALESCE($9,market), website=COALESCE($10,website), business_stage=COALESCE($11,business_stage),
+      team_type=COALESCE($12,team_type), business_model=COALESCE($13,business_model), presence_type=COALESCE($14,presence_type),
+      description=COALESCE($15,description), audience_summary=COALESCE($16,audience_summary),
+      products_services_summary=COALESCE($17,products_services_summary), updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
     return result.rows[0]!;
   }
 

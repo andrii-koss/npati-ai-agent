@@ -107,6 +107,13 @@ export function GoalsPage() {
 
   useEffect(() => {
     void loadGoals();
+    const handleGoalsChanged = () => { void loadGoals(); };
+    window.addEventListener("npati:goals-changed", handleGoalsChanged);
+    window.addEventListener("npati:business-changed", handleGoalsChanged);
+    return () => {
+      window.removeEventListener("npati:goals-changed", handleGoalsChanged);
+      window.removeEventListener("npati:business-changed", handleGoalsChanged);
+    };
   }, [businessId]);
 
   // Statistics calculation

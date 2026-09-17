@@ -2,7 +2,7 @@ import React, { Fragment, useEffect, useMemo, useRef, useState, type ReactNode }
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
 
-const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
+const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const genericSourceLabel = /^(?:джерело|джерела|source|sources|посилання)$/iu;
 const sourceHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:джерела|sources)(?:\*\*)?(?:\s*\(?\d*\)?)?:?$/iu;
@@ -147,10 +147,31 @@ function renderInlineMarkdown(content: string, sourceMode: boolean, sourceTitles
     const key = match.index + "-" + match[0];
     if (match[2] && match[3]) {
       const label = cleanLabel(match[2]);
-      const href = toTrackedChatUrl(match[3]);
-      nodes.push(href
-        ? <SourceLink key={key} rawUrl={match[3]} href={href} title={sourceTitles.get(sourceKey(match[3]))} label={label} />
-        : label);
+      const url = match[3];
+      if (url.startsWith("/")) {
+        nodes.push(
+          <a
+            key={key}
+            href={url}
+            className="chat-internal-link"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              color: "var(--brand-500, #3b82f6)",
+              fontWeight: 600,
+              textDecoration: "underline",
+            }}
+          >
+            {label}
+          </a>
+        );
+      } else {
+        const href = toTrackedChatUrl(url);
+        nodes.push(href
+          ? <SourceLink key={key} rawUrl={url} href={href} title={sourceTitles.get(sourceKey(url))} label={label} />
+          : label);
+      }
     } else if (match[4]) {
       nodes.push(<strong key={key}>{match[4]}</strong>);
     } else if (match[5]) {
@@ -582,6 +603,8 @@ function markdownToCardHtml(md: string): string {
     s = s.replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, "$1<em>$2</em>$3");
     // Code inline: `code`
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    // Links: [label](url)
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)/g, '<a href="$2" class="chat-card-link" style="color:var(--brand-500, #3b82f6);text-decoration:underline;font-weight:600;display:inline-flex;margin-top:4px;">$1</a>');
     return s;
   };
 
@@ -928,16 +951,16 @@ export function ChatMessageContent({ content }: { content: string }) {
         i++;
       }
       if (i < lines.length) i++;
-      if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit") {
+      if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit" || lang === "business-action" || lang === "business-profile" || lang === "goal-action" || lang === "goal-profile") {
         continue;
       }
-      const isCardBlock = /^(?:card|artifact|document|idea|draft|canvas|box|post|text-block)$/i.test(lang);
+      const isCardBlock = /^(?:card|artifact|document|idea|draft|canvas|box|post|text-block|goal)$/i.test(lang);
       if (isCardBlock) {
         elements.push(
           <EditableContentCard
             key={`card-${elements.length}`}
             initialContent={codeLines.join("\n")}
-            title={filename || (lang === "idea" ? "Бізнес-ідея" : "Бізнес-ідея")}
+            title={filename || (lang === "idea" ? "Бізнес-ідея" : lang === "goal" ? "Ціль бізнесу" : "Бізнес-ідея")}
           />
         );
         continue;

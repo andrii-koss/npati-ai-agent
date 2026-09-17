@@ -857,29 +857,6 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
             </div>
           )}
         </div>
-        <div className={`sidebar-group sidebar-business-group ${location.pathname === "/business" || location.pathname.startsWith("/b/") ? "active" : ""}`}>
-          <div className="sidebar-group-head">
-            <button className="sidebar-main-action" onClick={() => void createBusinessIdea()}>+ Business</button>
-            <button className="sidebar-chevron" aria-label="Show businesses" aria-expanded={businessOpen} onClick={() => setBusinessOpen((open) => { const next = !open; cachedBusinessOpen = next; return next; })}></button>
-          </div>
-          {businessOpen && (
-            <div className="sidebar-dropdown">
-              {hasBusinessesLoaded && allBusinessItems.length === 0 && <small className="sidebar-empty">No businesses yet</small>}
-              {pinnedBusinessItems.length > 0 && (
-                <>
-                  <div className="sidebar-section-header">Pinned</div>
-                  {pinnedBusinessItems.map((item) => renderBusinessItemRow(item, true))}
-                </>
-              )}
-              {unpinnedBusinessItems.length > 0 && (
-                <>
-                  {pinnedBusinessItems.length > 0 && <div className="sidebar-section-header">Recent</div>}
-                  {unpinnedBusinessItems.map((item) => renderBusinessItemRow(item, false))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
         {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href} onClick={onClose}>{item}</Link>; })}
       </nav>
 

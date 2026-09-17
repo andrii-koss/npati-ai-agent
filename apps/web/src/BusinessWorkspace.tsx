@@ -120,7 +120,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Workspace is unavailable"); }
     finally { setLoading(false); }
   }
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    void refresh();
+    const handleBusinessChanged = () => { void refresh(); };
+    window.addEventListener("npati:business-changed", handleBusinessChanged);
+    return () => window.removeEventListener("npati:business-changed", handleBusinessChanged);
+  }, []);
   async function switchBusiness(id: string) {
     await api("/workspace/current-business", { method: "PUT", body: JSON.stringify({ businessId: id }) });
     await refresh();
@@ -456,7 +461,12 @@ export function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]); const [editing, setEditing] = useState<Goal | null>(null);
   const [form, setForm] = useState({ title: "", description: "", targetDate: "", priority: "2" }); const [error, setError] = useState("");
   async function load() { if (business) setGoals(await api<Goal[]>(`/businesses/${business.id}/goals`)); }
-  useEffect(() => { void load().catch((reason) => setError(String(reason))); }, [business?.id]);
+  useEffect(() => {
+    void load().catch((reason) => setError(String(reason)));
+    const handleGoalsChanged = () => { void load().catch(() => {}); };
+    window.addEventListener("npati:goals-changed", handleGoalsChanged);
+    return () => window.removeEventListener("npati:goals-changed", handleGoalsChanged);
+  }, [business?.id]);
   if (!business) return <><PageIntro eyebrow="Execution" title="Goals" copy="Define measurable outcomes for the current business." /><EmptyBusiness feature="Goals" /></>;
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -1119,6 +1129,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
       flushDeltas();
       setReplyMeta(result);
+      if ((result as any)?.businessAction) {
+        window.dispatchEvent(new CustomEvent("npati:business-changed", { detail: (result as any).businessAction }));
+      }
+      if ((result as any)?.goalAction) {
+        window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
+      }
       if (privateRequest) {
         if (!receivedDelta) setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
       } else if (result.conversationId) {
