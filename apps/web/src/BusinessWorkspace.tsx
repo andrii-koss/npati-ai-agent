@@ -1287,7 +1287,37 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             isGeneratingSpeech={isGeneratingSpeech}
           />
           <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
-          <div>{sending?<button type="button" onClick={()=>{const active=streamControllerRef.current;if(active)void cancelChatStream(active.streamId).finally(()=>active.controller.abort(new DOMException("Stopped","AbortError")));}}>Stop</button>:<button disabled={!input.trim() && attachments.length === 0}>Send →</button>}</div>
+          <div>
+            {sending ? (
+              <button
+                type="button"
+                className="chat-stop-btn"
+                onClick={() => {
+                  const active = streamControllerRef.current;
+                  if (active) void cancelChatStream(active.streamId).finally(() => active.controller.abort(new DOMException("Stopped", "AbortError")));
+                }}
+                aria-label="Зупинити генерацію"
+                title="Зупинити генерацію"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                  <rect x="5" y="5" width="14" height="14" rx="2.5" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="chat-send-btn"
+                disabled={!input.trim() && attachments.length === 0}
+                aria-label="Надіслати"
+                title="Надіслати"
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="4" y1="12" x2="20" y2="12" />
+                  <polyline points="14 6 20 12 14 18" />
+                </svg>
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </>
