@@ -62,6 +62,14 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return business;
   }
 
+  private assertUserBusiness(context: AuthContext, businessId: string) {
+    const business = this.businesses.get(businessId);
+    if (!business || business.workspaceId !== context.workspaceId || business.ownerUserId !== context.userId) {
+      throw new WorkspaceAccessError("Business is not available or not owned by this user");
+    }
+    return business;
+  }
+
   async overview(context: AuthContext): Promise<WorkspaceOverview> {
     const identity = await this.ensure(context);
     const businesses = await this.listBusinesses(context);
@@ -90,6 +98,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return [...this.businesses.values()].filter((business) => business.workspaceId === context.workspaceId && business.activationStatus === "active").sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   }
 
+  async listUserBusinesses(context: AuthContext) {
+    return [...this.businesses.values()]
+      .filter((business) => business.workspaceId === context.workspaceId && business.ownerUserId === context.userId && business.activationStatus === "active")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.createdAt.localeCompare(a.createdAt));
+  }
+
   async listBusinessesPage(context: AuthContext, requestedLimit = 20, cursor?: string) {
     const limit = companyPageLimit(requestedLimit);
     const after = decodeBusinessCursor(cursor);
@@ -100,6 +114,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
 
   async getBusiness(context: AuthContext, businessId: string) { return this.assertBusiness(context, businessId); }
+
+  async getUserBusiness(context: AuthContext, businessId: string) { return this.assertUserBusiness(context, businessId); }
 
   async createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
     await this.ensure(context);
@@ -122,6 +138,14 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
   async updateBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
     const current = this.assertBusiness(context, businessId);
+    const updated = { ...current, ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)), updatedAt: now() };
+    if (!updated.name.trim()) throw new Error("Business name is required");
+    this.businesses.set(businessId, updated);
+    return updated;
+  }
+
+  async updateUserBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
+    const current = this.assertUserBusiness(context, businessId);
     const updated = { ...current, ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)), updatedAt: now() };
     if (!updated.name.trim()) throw new Error("Business name is required");
     this.businesses.set(businessId, updated);

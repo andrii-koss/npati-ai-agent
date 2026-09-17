@@ -181,10 +181,13 @@ export interface WorkspaceStore {
   overview(context: AuthContext): Promise<WorkspaceOverview>;
   setCurrentBusiness(context: AuthContext, businessId: string): Promise<Business>;
   listBusinesses(context: AuthContext): Promise<Business[]>;
+  listUserBusinesses(context: AuthContext): Promise<Business[]>;
   listBusinessesPage(context: AuthContext, limit?: number, cursor?: string): Promise<BusinessPage>;
   getBusiness(context: AuthContext, businessId: string): Promise<Business>;
+  getUserBusiness(context: AuthContext, businessId: string): Promise<Business>;
   createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string): Promise<Business>;
   updateBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>): Promise<Business>;
+  updateUserBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>): Promise<Business>;
   deleteBusiness(context: AuthContext, businessId: string): Promise<boolean>;
   listCompanies(context: AuthContext, limit?: number, cursor?: string): Promise<CompanyPage>;
   getCompany(context: AuthContext, companyId: string): Promise<Company>;

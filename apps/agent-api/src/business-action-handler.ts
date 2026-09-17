@@ -1,0 +1,403 @@
+import type { AuthContext, Business, BusinessInput, Goal, GoalInput, WorkspaceStore } from "@npati/workspace";
+
+export interface BusinessActionDirective {
+  action: "create" | "update";
+  businessId?: string;
+  businessName?: string;
+  profile: {
+    name?: string;
+    businessStage?: string;
+    industry?: string;
+    niche?: string;
+    country?: string;
+    market?: string;
+    teamType?: string;
+    presenceType?: string;
+    businessModel?: string;
+    website?: string;
+    description?: string;
+    productsServicesSummary?: string;
+    audienceSummary?: string;
+  };
+}
+
+export interface GoalActionDirective {
+  action: "create" | "update";
+  businessId?: string;
+  businessName?: string;
+  goalId?: string;
+  goal: {
+    title: string;
+    description?: string;
+    priority?: number | string;
+    status?: "active" | "completed" | "paused" | "cancelled";
+    targetValue?: number | string;
+    currentValue?: number | string;
+    targetUnit?: string;
+    targetDate?: string;
+  };
+}
+
+function normalizeBusinessStage(val?: string): "idea" | "starting" | "operating" | "growing" | "scaling" {
+  const s = String(val || "").toLowerCase().trim();
+  if (s.includes("idea") || s.includes("іде")) return "idea";
+  if (s.includes("start") || s.includes("старт") || s.includes("запуск")) return "starting";
+  if (s.includes("operat") || s.includes("діюч") || s.includes("робоч")) return "operating";
+  if (s.includes("grow") || s.includes("рост") || s.includes("зрост")) return "growing";
+  if (s.includes("scal") || s.includes("масштаб")) return "scaling";
+  return "starting";
+}
+
+function normalizeTeamType(val?: string): "solo" | "team" {
+  const s = String(val || "").toLowerCase().trim();
+  if (s.includes("team") || s.includes("команд") || s.includes("партнер")) return "team";
+  return "solo";
+}
+
+function normalizePresenceType(val?: string): "online" | "local" | "both" {
+  const s = String(val || "").toLowerCase().trim();
+  if (s.includes("both") || (s.includes("онлайн") && s.includes("локал")) || s.includes("обидва") || s.includes("гібрид")) return "both";
+  if (s.includes("local") || s.includes("локал") || s.includes("офлайн") || s.includes("фізич")) return "local";
+  return "online";
+}
+
+function normalizeGoalPriority(val?: unknown): number {
+  if (val === 1 || val === "1" || String(val).toLowerCase().includes("high") || String(val).toLowerCase().includes("висок")) return 1;
+  if (val === 3 || val === "3" || String(val).toLowerCase().includes("low") || String(val).toLowerCase().includes("низьк")) return 3;
+  return 2;
+}
+
+function normalizeGoalStatus(val?: string): "active" | "completed" | "paused" | "cancelled" {
+  const s = String(val || "").toLowerCase().trim();
+  if (s.includes("complete") || s.includes("викон") || s.includes("досяг")) return "completed";
+  if (s.includes("pause") || s.includes("пауз") || s.includes("зупин")) return "paused";
+  if (s.includes("cancel") || s.includes("скас")) return "cancelled";
+  return "active";
+}
+
+export class BusinessActionHandler {
+  static buildSystemPrompt(
+    userBusinesses: Business[],
+    goalsByBusiness: Array<{ businessId: string; businessName: string; goals: Goal[] }> = []
+  ): string {
+    const businessList = userBusinesses.length > 0
+      ? userBusinesses.map((b) => `- ID: "${b.id}", Name: "${b.name}", Stage: "${b.businessStage || 'starting'}", Industry: "${b.industry || '-'}", Niche: "${b.niche || '-'}"`).join("\n")
+      : "(No existing business profiles for this user yet)";
+
+    const goalsList = goalsByBusiness.length > 0 && goalsByBusiness.some((entry) => entry.goals.length > 0)
+      ? goalsByBusiness
+          .flatMap((entry) =>
+            entry.goals.map(
+              (g) =>
+                `- [Business: "${entry.businessName}", BusinessID: "${entry.businessId}"] Goal ID: "${g.id}", Title: "${g.title}", Status: "${g.status}", Priority: P${g.priority}${g.targetValue ? `, Target: ${g.currentValue ?? 0}/${g.targetValue} ${g.targetUnit || ''}` : ''}${g.targetDate ? `, Due: ${g.targetDate.slice(0, 10)}` : ''}`
+            )
+          )
+          .join("\n")
+      : "(No existing goals for this user yet)";
+
+    return `\n\nCRITICAL BUSINESS PROFILE & GOAL MANAGEMENT RULES:
+You have native, automated capabilities to CREATE and EDIT both Business Profiles AND Goals directly in the user's workspace.
+When you output a \`\`\`business-action\`\`\` or \`\`\`goal-action\`\`\` code block, the platform's backend engine immediately intercepts it and executes the actual database write/update.
+THEREFORE:
+- NEVER state that you cannot edit settings, cannot save changes, lack tools, or lack access. You DO have write access through these directive blocks.
+- Whenever the user asks to create/edit a business idea or create/edit a goal, you MUST output the corresponding directive block.
+- Always confirm to the user that their business or goal has been recorded/updated in the system.
+
+USER'S CURRENT BUSINESSES (YOU CAN ONLY ACCESS OR LINK TO THESE):
+${businessList}
+
+USER'S EXISTING GOALS:
+${goalsList}
+
+USER ISOLATION & SECURITY:
+- You are STRICTLY RESTRICTED to accessing, creating, or modifying businesses and goals belonging to this authenticated user.
+- Goals MUST ALWAYS be linked to a business owned by this user (via businessId or businessName).
+- Never access or claim access to any other user's business or goal.
+
+==================================================
+STEP 1 - BUSINESS PROFILE (CREATION & EDITING):
+==================================================
+When the user asks to create or edit a business idea:
+1. Formulate ALL 13 profile fields completely:
+   - name: Distinctive business name
+   - businessStage: "idea" | "starting" | "operating" | "growing" | "scaling"
+   - industry: e.g. E-commerce, Консалтинг, HoReCa, IT / SaaS, тощо.
+   - niche: Precise market niche
+   - country: Primary country (e.g. Україна)
+   - market: "Local", "National", "Global", тощо.
+   - teamType: "solo" | "team"
+   - presenceType: "online" | "local" | "both"
+   - businessModel: Business model & monetization
+   - website: URL or https://...
+   - description: What does the business do? Value proposition.
+   - productsServicesSummary: Core products or services
+   - audienceSummary: Target audience, customer pain points
+
+2. Emit an executable directive at the end of your message:
+\`\`\`business-action
+{
+  "action": "create",
+  "profile": {
+    "name": "...",
+    "businessStage": "idea",
+    "industry": "...",
+    "niche": "...",
+    "country": "...",
+    "market": "...",
+    "teamType": "team",
+    "presenceType": "both",
+    "businessModel": "...",
+    "website": "https://...",
+    "description": "...",
+    "productsServicesSummary": "...",
+    "audienceSummary": "..."
+  }
+}
+\`\`\`
+(For editing an existing business: use "action": "update", "businessId": "<ID-from-list-above>", and provide updated fields).
+
+3. Wrap the summary in an interactive card:
+\`\`\`card:Бізнес-профіль: <Назва>
+**Назва бізнесу:** <Назва>
+**Стадія:** <Стадія>
+**Галузь:** <Галузь>
+**Ніша:** <Ніша>
+**Країна:** <Країна>
+**Ринок:** <Ринок>
+**Команда:** <Команда>
+**Присутність:** <Присутність>
+**Бізнес-модель:** <Бізнес-модель>
+**Вебсайт:** <Вебсайт>
+
+### Чим займається бізнес
+<Опис>
+
+### Продукти або послуги
+<Продукти/послуги>
+
+### Цільова аудиторія
+<Цільова аудиторія>
+
+[Відкрити в налаштуваннях бізнесу →](/settings/business/{{businessId}})
+\`\`\`
+
+4. AFTER CREATING A BUSINESS:
+Proactively prompt the user for **Крок 2 (Step 2)**: setting measurable Goals & Objectives for this business! (e.g. 'Наступний крок 2: давай визначимо конкретну ціль для цього бізнесу (наприклад, залучити перших 50 клієнтів або запустити сайт за 30 днів). Яку ціль поставимо?'). If the user already specified their goal in their request, create the business AND the goal immediately!
+
+==================================================
+STEP 2 - GOALS & OBJECTIVES (CREATION & EDITING):
+==================================================
+When the user asks to create, add, or edit a Goal (e.g., "поставити ціль", "створи ціль", "додай ціль", "зміни ціль", "відредагуй ціль", "познач ціль як виконану", etc.):
+1. Each goal belongs to a business. Determine the target business from context, name, or businessId (if none specified, use the user's active/latest business).
+2. Formulate the goal fields:
+   - title: Clear, action-oriented milestone title (e.g., "Залучити перших 50 платних клієнтів")
+   - description: Success criteria and what success looks like
+   - priority: 1 (High P1) | 2 (Normal P2) | 3 (Low P3)
+   - status: "active" | "completed" | "paused" | "cancelled"
+   - targetValue: Numeric metric target (optional, e.g. 50, 100, 100000)
+   - currentValue: Numeric metric current progress (optional, e.g. 0)
+   - targetUnit: Metric unit (e.g. "клієнтів", "грн", "замовлень", "користувачів", "$")
+   - targetDate: Target deadline in format YYYY-MM-DD (optional)
+
+3. Emit an executable directive at the end of your response:
+\`\`\`goal-action
+{
+  "action": "create",
+  "businessId": "<ID or name of business>",
+  "goal": {
+    "title": "...",
+    "description": "...",
+    "priority": 2,
+    "status": "active",
+    "targetValue": 50,
+    "currentValue": 0,
+    "targetUnit": "клієнтів",
+    "targetDate": "2026-11-30"
+  }
+}
+\`\`\`
+(For editing an existing goal: use "action": "update", "businessId": "<ID>", "goalId": "<ID or title of goal>", "goal": { ...changed fields... }).
+
+4. Wrap the goal summary in an interactive card:
+\`\`\`card:Ціль: <Назва цілі>
+**Ціль:** <Назва цілі>
+**Бізнес:** <Назва бізнесу>
+**Опис / Критерії успіху:** <Опис>
+**Пріоритет:** <P1 (Високий) | P2 (Нормальний) | P3 (Низький)>
+**Статус:** <Активна | Виконана | Призупинена>
+**Цільовий показник:** <currentValue> / <targetValue> <targetUnit>
+**Дедлайн:** <targetDate>
+
+[Відкрити в цілях бізнесу →](/settings/goals)
+\`\`\`
+
+You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the same turn if the user requested to create both the idea and the goal simultaneously!`;
+  }
+
+  static async extractAndExecute(
+    auth: AuthContext,
+    text: string,
+    workspaceStore: WorkspaceStore,
+    log?: { warn(obj: unknown, msg?: string): void }
+  ): Promise<{
+    cleanText: string;
+    businessAction?: { action: "create" | "update"; business: Business };
+    goalAction?: { action: "create" | "update"; goal: Goal; businessName?: string };
+  }> {
+    let currentText = text;
+    let businessAction: { action: "create" | "update"; business: Business } | undefined;
+    let goalAction: { action: "create" | "update"; goal: Goal; businessName?: string } | undefined;
+
+    // 1. Process business-action if present
+    const bMatch = currentText.match(/```(?:business-action|business-profile)\s*([\s\S]*?)```/i);
+    if (bMatch && bMatch[1]) {
+      const rawBlock = bMatch[0];
+      try {
+        const directive = JSON.parse(bMatch[1].trim()) as BusinessActionDirective;
+        if (directive && (directive.action === "create" || directive.action === "update")) {
+          const p = directive.profile || {};
+          const name = String(p.name || directive.businessName || "").trim() || "Нова бізнес-ідея";
+
+          const input: BusinessInput = {
+            name,
+            businessStage: normalizeBusinessStage(p.businessStage),
+            industry: p.industry ? String(p.industry).trim() : undefined,
+            niche: p.niche ? String(p.niche).trim() : undefined,
+            country: p.country ? String(p.country).trim() : undefined,
+            market: p.market ? String(p.market).trim() : undefined,
+            teamType: normalizeTeamType(p.teamType),
+            presenceType: normalizePresenceType(p.presenceType),
+            businessModel: p.businessModel ? String(p.businessModel).trim() : undefined,
+            website: p.website ? String(p.website).trim() : undefined,
+            description: p.description ? String(p.description).trim() : undefined,
+            productsServicesSummary: p.productsServicesSummary ? String(p.productsServicesSummary).trim() : undefined,
+            audienceSummary: p.audienceSummary ? String(p.audienceSummary).trim() : undefined,
+          };
+
+          let business: Business;
+          if (directive.action === "create") {
+            business = await workspaceStore.createBusiness(auth, input);
+          } else {
+            const userBusinesses = await workspaceStore.listUserBusinesses(auth);
+            let targetId = directive.businessId?.trim();
+            if (!targetId || !userBusinesses.some((b) => b.id === targetId)) {
+              const matched = userBusinesses.find(
+                (b) => b.name.toLowerCase() === name.toLowerCase() ||
+                       (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
+              );
+              if (matched) targetId = matched.id;
+              else if (userBusinesses.length === 1) targetId = userBusinesses[0]!.id;
+              else throw new Error(`Business "${name}" not found or not owned by user.`);
+            }
+            business = await workspaceStore.updateUserBusiness(auth, targetId, input);
+          }
+
+          businessAction = { action: directive.action, business };
+          currentText = currentText.replace(rawBlock, "").trim();
+          currentText = currentText.replace(/\{\{businessId\}\}/g, business.id);
+        }
+      } catch (err) {
+        log?.warn({ err }, "Failed to execute business action");
+        currentText = currentText.replace(rawBlock, "").trim();
+      }
+    }
+
+    // 2. Process goal-action if present
+    const gMatch = currentText.match(/```(?:goal-action|goal-profile)\s*([\s\S]*?)```/i);
+    if (gMatch && gMatch[1]) {
+      const rawBlock = gMatch[0];
+      try {
+        const directive = JSON.parse(gMatch[1].trim()) as GoalActionDirective;
+        if (directive && (directive.action === "create" || directive.action === "update")) {
+          const g = directive.goal || {};
+          const title = String(g.title || "").trim();
+          if (!title) throw new Error("Goal title is required");
+
+          // Determine target business
+          const userBusinesses = await workspaceStore.listUserBusinesses(auth);
+          let targetBusinessId = directive.businessId?.trim();
+
+          if (targetBusinessId === "{{businessId}}" && businessAction?.business) {
+            targetBusinessId = businessAction.business.id;
+          } else if (targetBusinessId && !userBusinesses.some((b) => b.id === targetBusinessId)) {
+            // Check if matches by name
+            const matched = userBusinesses.find(
+              (b) => b.name.toLowerCase() === targetBusinessId!.toLowerCase() ||
+                     (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
+            );
+            if (matched) targetBusinessId = matched.id;
+            else if (businessAction?.business) targetBusinessId = businessAction.business.id;
+            else if (userBusinesses.length > 0) targetBusinessId = userBusinesses[0]!.id;
+            else throw new Error("No available business found to link this goal to.");
+          } else if (!targetBusinessId) {
+            if (directive.businessName) {
+              const matched = userBusinesses.find(
+                (b) => b.name.toLowerCase() === directive.businessName!.toLowerCase()
+              );
+              targetBusinessId = matched ? matched.id : (businessAction?.business?.id || userBusinesses[0]?.id);
+            } else if (businessAction?.business) {
+              targetBusinessId = businessAction.business.id;
+            } else if (userBusinesses.length > 0) {
+              targetBusinessId = userBusinesses[0]!.id;
+            } else {
+              throw new Error("No business available to attach goal to.");
+            }
+          }
+
+          if (!targetBusinessId) throw new Error("Target business not found for goal.");
+
+          // Validate ownership
+          const targetBusiness = await workspaceStore.getUserBusiness(auth, targetBusinessId);
+
+          const goalInput: GoalInput = {
+            title,
+            description: g.description ? String(g.description).trim() : undefined,
+            priority: normalizeGoalPriority(g.priority),
+            status: normalizeGoalStatus(g.status),
+            targetValue: g.targetValue !== undefined && g.targetValue !== null && g.targetValue !== "" ? Number(g.targetValue) : undefined,
+            currentValue: g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? Number(g.currentValue) : undefined,
+            targetUnit: g.targetUnit ? String(g.targetUnit).trim() : undefined,
+            targetDate: g.targetDate ? String(g.targetDate).trim() : undefined,
+          };
+
+          let goal: Goal;
+          if (directive.action === "create") {
+            goal = await workspaceStore.createGoal(auth, targetBusinessId, goalInput);
+          } else {
+            // Update existing goal
+            const existingGoals = await workspaceStore.listGoals(auth, targetBusinessId);
+            let targetGoalId = directive.goalId?.trim();
+            if (!targetGoalId || !existingGoals.some((eg) => eg.id === targetGoalId)) {
+              // Match by title
+              const matched = existingGoals.find(
+                (eg) => eg.title.toLowerCase() === title.toLowerCase() ||
+                       (directive.goalId && eg.title.toLowerCase().includes(directive.goalId.toLowerCase()))
+              );
+              if (matched) targetGoalId = matched.id;
+              else if (existingGoals.length === 1) targetGoalId = existingGoals[0]!.id;
+              else throw new Error(`Goal "${title}" not found for business "${targetBusiness.name}".`);
+            }
+            goal = await workspaceStore.updateGoal(auth, targetBusinessId, targetGoalId, goalInput);
+          }
+
+          goalAction = { action: directive.action, goal, businessName: targetBusiness.name };
+          currentText = currentText.replace(rawBlock, "").trim();
+        }
+      } catch (err) {
+        log?.warn({ err }, "Failed to execute goal action");
+        currentText = currentText.replace(rawBlock, "").trim();
+      }
+    }
+
+    // Clean up any stray placeholders
+    if (businessAction?.business) {
+      currentText = currentText.replace(/\{\{businessId\}\}/g, businessAction.business.id);
+    }
+
+    return {
+      cleanText: currentText,
+      businessAction,
+      goalAction,
+    };
+  }
+}
