@@ -55,6 +55,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   const [providerConnected, setProviderConnected] = useState<boolean | null>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
+  const latestMessageRef = useRef<HTMLElement>(null);
   const legacyCompletionRef = useRef("");
   const [activeTurn, setActiveTurn] = useState("");
   const [handoffConversationId, setHandoffConversationId] = useState("");
@@ -79,10 +80,22 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
     return () => window.clearInterval(timer);
   }, [sending, researching]);
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    });
-    return () => window.cancelAnimationFrame(frame);
+    if (sending) {
+      const frame = window.requestAnimationFrame(() => {
+        streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (messages.length > 0) {
+      const frame = window.requestAnimationFrame(() => {
+        if (latestMessageRef.current) {
+          latestMessageRef.current.scrollIntoView({ behavior: "auto", block: "start" });
+        } else {
+          streamEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
   }, [messages, sending]);
 
   async function act(payload: { onboardingAction?: string; scenario?: Scenario; message?: string }) {
@@ -183,7 +196,23 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
             <h2>What should we work on?</h2>
             <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
           </div>
-          {messages.map((message, index) => <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} key={message.id} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}><ChatMessageContent content={message.content} /></article>)}
+          {messages.map((message, index) => (
+            <article
+              ref={(el) => {
+                if (index === messages.length - 1) {
+                  latestMessageRef.current = el;
+                }
+                if (message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
+                  activeTurnRef.current = el;
+                }
+              }}
+              key={message.id}
+              className={message.role}
+              aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
+            >
+              <ChatMessageContent content={message.content} />
+            </article>
+          ))}
           {sending && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{(researching ? researchThinkingSteps : onboardingThinkingSteps)[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           <div ref={streamEndRef} aria-hidden="true" />
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
@@ -229,7 +258,19 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
             </div>
           )}
           {messages.map((message, index) => (
-            <article ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined} key={message.id} className={message.role} aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}>
+            <article
+              ref={(el) => {
+                if (index === messages.length - 1) {
+                  latestMessageRef.current = el;
+                }
+                if (message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
+                  activeTurnRef.current = el;
+                }
+              }}
+              key={message.id}
+              className={message.role}
+              aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
+            >
               <ChatMessageContent content={message.content} />
             </article>
           ))}

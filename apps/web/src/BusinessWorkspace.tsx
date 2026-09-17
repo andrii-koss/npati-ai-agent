@@ -606,6 +606,121 @@ const businessThinkingSteps = [
 
 const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
+function AssistantMessageToolbar({
+  content,
+  onRegenerate,
+}: {
+  content: string;
+  onRegenerate?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [liked, setLiked] = useState<boolean | null>(null);
+
+  const handleCopy = async () => {
+    const clean = content
+      .replace(/^```card:[^\n]*\n([\s\S]*?)\n```$/gm, "$1")
+      .trim();
+    try {
+      await navigator.clipboard.writeText(clean);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textArea = document.createElement("textarea");
+      textArea.value = clean;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "NPATI Agent",
+          text: content,
+        });
+        return;
+      } catch {}
+    }
+    handleCopy();
+  };
+
+  return (
+    <div className="assistant-message-toolbar" aria-label="Дії з відповіддю">
+      <button
+        type="button"
+        className={`assistant-toolbar-btn ${copied ? "copied" : ""}`}
+        onClick={handleCopy}
+        title={copied ? "Скопійовано!" : "Скопіювати всю відповідь"}
+        aria-label="Скопіювати всю відповідь"
+      >
+        {copied ? (
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+      <button
+        type="button"
+        className={`assistant-toolbar-btn ${liked === true ? "active" : ""}`}
+        onClick={() => setLiked((prev) => (prev === true ? null : true))}
+        title="Корисна відповідь"
+        aria-label="Корисна відповідь"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={`assistant-toolbar-btn ${liked === false ? "active" : ""}`}
+        onClick={() => setLiked((prev) => (prev === false ? null : false))}
+        title="Не корисна відповідь"
+        aria-label="Не корисна відповідь"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className="assistant-toolbar-btn"
+        onClick={handleShare}
+        title="Поділитися відповіддю"
+        aria-label="Поділитися відповіддю"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+          <polyline points="16 6 12 2 8 6" />
+          <line x1="12" y1="2" x2="12" y2="15" />
+        </svg>
+      </button>
+      {onRegenerate && (
+        <button
+          type="button"
+          className="assistant-toolbar-btn"
+          onClick={onRegenerate}
+          title="Згенерувати знову"
+          aria-label="Згенерувати знову"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
@@ -689,6 +804,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const streamEndRef = useRef<HTMLDivElement>(null);
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
+  const latestMessageRef = useRef<HTMLElement>(null);
   const [activeTurn, setActiveTurn] = useState("");
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -699,6 +815,17 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
     }
     streamEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  const scrollToLatestMessageStart = useCallback((behavior: ScrollBehavior = "auto") => {
+    if (latestMessageRef.current) {
+      latestMessageRef.current.scrollIntoView({ behavior, block: "start" });
+    } else if (messageStreamRef.current) {
+      messageStreamRef.current.scrollTo({
+        top: messageStreamRef.current.scrollHeight,
+        behavior,
+      });
+    }
   }, []);
   const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
   const [visibleProgressCount, setVisibleProgressCount] = useState(0);
@@ -729,9 +856,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       setMessages(loaded);
       if (!preserveActiveTurn && !activeTurn) {
         window.requestAnimationFrame(() => {
-          scrollToBottom("auto");
-          setTimeout(() => scrollToBottom("auto"), 50);
-          setTimeout(() => scrollToBottom("auto"), 200);
+          scrollToLatestMessageStart("auto");
+          setTimeout(() => scrollToLatestMessageStart("auto"), 50);
+          setTimeout(() => scrollToLatestMessageStart("auto"), 150);
+          setTimeout(() => scrollToLatestMessageStart("auto"), 300);
         });
       } else if (activeTurn && activeTurnRef.current) {
         window.requestAnimationFrame(() => {
@@ -1085,12 +1213,32 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   />
                 )}
                 <article
-                  ref={message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn) ? activeTurnRef : undefined}
+                  ref={(el) => {
+                    if (index === messages.length - 1) {
+                      latestMessageRef.current = el;
+                    }
+                    if (message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
+                      activeTurnRef.current = el;
+                    }
+                  }}
                   className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`}
                   aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   <ChatMessageContent content={message.content} />
+                  {message.role === "assistant" && !sending && (
+                    <AssistantMessageToolbar
+                      content={message.content}
+                      onRegenerate={() => {
+                        for (let k = index - 1; k >= 0; k--) {
+                          if (messages[k]?.role === "user") {
+                            setInput(messages[k]!.content);
+                            break;
+                          }
+                        }
+                      }}
+                    />
+                  )}
                 </article>
               </Fragment>
             );
