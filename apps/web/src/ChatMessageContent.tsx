@@ -1,4 +1,4 @@
-import React, { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
 
@@ -511,8 +511,336 @@ function RenderedCodeBlock({ code, lang, filename }: { code: string; lang: strin
   );
 }
 
+function markdownToCardHtml(md: string): string {
+  if (!md) return "";
+  // Normalize em-dashes and en-dashes to standard hyphen
+  const cleanMd = md.replace(/[\u2014\u2013]/g, " - ");
+  const lines = cleanMd.split("\n");
+  const htmlParts: string[] = [];
+  let inList = false;
+  let listType: "ul" | "ol" = "ul";
+
+  const formatInline = (str: string): string => {
+    let s = str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    // Bold: **text** or __text__
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    // Italic: *text* (when not bold) or _text_
+    s = s.replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, "$1<em>$2</em>$3");
+    // Code inline: `code`
+    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    return s;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]!;
+    const trimmed = rawLine.trim();
+
+    // Check headings
+    const h1 = trimmed.match(/^#\s+(.+)$/);
+    const h2 = trimmed.match(/^##\s+(.+)$/);
+    const h3 = trimmed.match(/^###\s+(.+)$/);
+    const h4 = trimmed.match(/^####\s+(.+)$/);
+
+    // Check list items
+    const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/);
+    const numMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+
+    if (bulletMatch || numMatch) {
+      const isNum = !bulletMatch;
+      const targetType = isNum ? "ol" : "ul";
+      if (!inList) {
+        inList = true;
+        listType = targetType;
+        htmlParts.push(`<${listType}>`);
+      } else if (listType !== targetType) {
+        htmlParts.push(`</${listType}>`);
+        listType = targetType;
+        htmlParts.push(`<${listType}>`);
+      }
+      const itemContent = formatInline(bulletMatch ? bulletMatch[1]! : numMatch![1]!);
+      htmlParts.push(`<li>${itemContent}</li>`);
+      continue;
+    }
+
+    if (inList) {
+      htmlParts.push(`</${listType}>`);
+      inList = false;
+    }
+
+    if (!trimmed) {
+      continue;
+    }
+
+    if (h1) {
+      htmlParts.push(`<h1>${formatInline(h1[1]!)}</h1>`);
+    } else if (h2) {
+      htmlParts.push(`<h2>${formatInline(h2[1]!)}</h2>`);
+    } else if (h3) {
+      htmlParts.push(`<h3>${formatInline(h3[1]!)}</h3>`);
+    } else if (h4) {
+      htmlParts.push(`<h4>${formatInline(h4[1]!)}</h4>`);
+    } else {
+      htmlParts.push(`<p>${formatInline(trimmed)}</p>`);
+    }
+  }
+
+  if (inList) {
+    htmlParts.push(`</${listType}>`);
+  }
+
+  return htmlParts.join("");
+}
+
+function EditableContentCard({
+  initialContent,
+  title,
+}: {
+  initialContent: string;
+  title: string;
+}) {
+  const initialHtml = useMemo(() => markdownToCardHtml(initialContent), [initialContent]);
+  const [copied, setCopied] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const isUserEditedRef = useRef(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isUserEditedRef.current) {
+      const html = markdownToCardHtml(initialContent);
+      if (bodyRef.current && document.activeElement !== bodyRef.current) {
+        bodyRef.current.innerHTML = html;
+      }
+      if (modalBodyRef.current && document.activeElement !== modalBodyRef.current) {
+        modalBodyRef.current.innerHTML = html;
+      }
+    }
+  }, [initialContent]);
+
+  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+    isUserEditedRef.current = true;
+    const html = e.currentTarget.innerHTML;
+    if (bodyRef.current && e.currentTarget !== bodyRef.current) {
+      bodyRef.current.innerHTML = html;
+    }
+    if (modalBodyRef.current && e.currentTarget !== modalBodyRef.current) {
+      modalBodyRef.current.innerHTML = html;
+    }
+  };
+
+  const handleCopy = async () => {
+    const textToCopy = (bodyRef.current?.innerText ?? initialContent).replace(/[\u2014\u2013]/g, " - ");
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textArea = document.createElement("textarea");
+      textArea.value = textToCopy;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDownload = () => {
+    const textToDownload = (bodyRef.current?.innerText ?? initialContent).replace(/[\u2014\u2013]/g, " - ");
+    const cleanTitle = (title || "dokument").replace(/[\s/\\?%*:|"<>]+/g, "_").trim();
+    const blob = new Blob([textToDownload], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${cleanTitle}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleFullscreen = () => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      if (next) {
+        requestAnimationFrame(() => {
+          if (modalBodyRef.current && bodyRef.current) {
+            modalBodyRef.current.innerHTML = bodyRef.current.innerHTML;
+          }
+        });
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen]);
+
+  return (
+    <>
+      <div className="editable-content-card">
+        <div className="editable-card-header">
+          <span className="editable-card-title">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            <span>{title}</span>
+          </span>
+          <div className="editable-card-actions">
+            <button
+              type="button"
+              className={`editable-card-action-btn ${copied ? "copied" : ""}`}
+              onClick={handleCopy}
+              title={copied ? "Скопійовано!" : "Скопіювати весь текст"}
+              aria-label="Скопіювати весь текст"
+            >
+              {copied ? (
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="editable-card-action-btn"
+              onClick={handleDownload}
+              title="Завантажити файл"
+              aria-label="Завантажити файл"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="editable-card-action-btn"
+              onClick={toggleFullscreen}
+              title="Розгорнути на весь екран"
+              aria-label="Розгорнути на весь екран"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div
+          ref={bodyRef}
+          className="editable-card-body"
+          contentEditable={true}
+          suppressContentEditableWarning={true}
+          spellCheck={true}
+          onInput={handleInput}
+          dangerouslySetInnerHTML={{ __html: initialHtml }}
+        />
+      </div>
+
+      {isFullscreen && (
+        <div className="editable-card-modal-backdrop" onClick={toggleFullscreen}>
+          <div className="editable-card-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="editable-card-header">
+              <span className="editable-card-title">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                <span>{title}</span>
+              </span>
+              <div className="editable-card-actions">
+                <button
+                  type="button"
+                  className={`editable-card-action-btn ${copied ? "copied" : ""}`}
+                  onClick={handleCopy}
+                  title={copied ? "Скопійовано!" : "Скопіювати весь текст"}
+                  aria-label="Скопіювати весь текст"
+                >
+                  {copied ? (
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="editable-card-action-btn"
+                  onClick={handleDownload}
+                  title="Завантажити файл"
+                  aria-label="Завантажити файл"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="editable-card-action-btn"
+                  onClick={toggleFullscreen}
+                  title="Згорнути"
+                  aria-label="Згорнути"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 14 10 14 10 20" />
+                    <polyline points="20 10 14 10 14 4" />
+                    <line x1="14" y1="10" x2="21" y2="3" />
+                    <line x1="3" y1="21" x2="10" y2="14" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div
+              ref={modalBodyRef}
+              className="editable-card-body"
+              contentEditable={true}
+              suppressContentEditableWarning={true}
+              spellCheck={true}
+              onInput={handleInput}
+              dangerouslySetInnerHTML={{ __html: bodyRef.current ? bodyRef.current.innerHTML : initialHtml }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function ChatMessageContent({ content }: { content: string }) {
   const safeContent = content
+    .replace(/[\u2014\u2013]/g, " - ")
     .replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "")
     .replace(/\[([\s\S]*?)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g, (_full, label: string, url: string) => {
       return "[" + label.replace(/\r?\n\s*/g, " ").trim() + "](" + url.trim() + ")";
@@ -551,6 +879,17 @@ export function ChatMessageContent({ content }: { content: string }) {
       }
       if (i < lines.length) i++;
       if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit") {
+        continue;
+      }
+      const isCardBlock = /^(?:card|artifact|document|idea|draft|canvas|box|post|text-block)$/i.test(lang);
+      if (isCardBlock) {
+        elements.push(
+          <EditableContentCard
+            key={`card-${elements.length}`}
+            initialContent={codeLines.join("\n")}
+            title={filename || (lang === "idea" ? "Бізнес-ідея" : "Бізнес-ідея")}
+          />
+        );
         continue;
       }
       elements.push(

@@ -3594,6 +3594,7 @@ a {
   max-width: 100%;
   margin-bottom: 18px;
   box-sizing: border-box;
+  scroll-margin-top: 20px;
 }
 
 .message-stream article.user {
@@ -3711,7 +3712,7 @@ a {
   align-items: center;
   gap: 6px;
   color: var(--npati-red);
-  background: #fff3f4;
+  background: #ffffff;
   border: 1px solid #f3c7cc;
   border-radius: 999px;
   text-decoration: none;
@@ -3724,8 +3725,9 @@ a {
 .message-stream article .chat-message-content a.source-link-chip:hover,
 .message-stream article .chat-message-content a.source-link-chip:focus-visible {
   color: #b91f2d;
-  background: #ffe8ea;
+  background: #ffffff;
   border-color: #e99da5;
+  box-shadow: 0 1px 4px rgba(225, 29, 46, 0.12);
   outline: none;
 }
 
@@ -12998,3 +13000,228 @@ article.user .chat-message-attachment.document {
   color: #e6edf3;
   white-space: pre;
 }
+
+/* Editable Content Card (Artifact / Document Card) */
+.editable-content-card {
+  margin: 16px 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.editable-content-card:hover {
+  border-color: #cbd5e1;
+}
+
+.editable-content-card:focus-within {
+  border-color: rgba(225, 29, 46, 0.4);
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.08), 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.editable-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px 9px 18px;
+  background: #fff8f8;
+  border-bottom: 1px solid #fce7e8;
+  user-select: none;
+}
+
+.editable-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--npati-red, #e11d2e);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.editable-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editable-card-action-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.editable-card-action-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.editable-card-action-btn:active {
+  transform: scale(0.94);
+}
+
+.editable-card-action-btn.copied {
+  color: #10b981;
+}
+
+.editable-card-body {
+  padding: 16px 20px 24px 20px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: #1e293b;
+  font-family: inherit;
+  white-space: normal;
+  word-break: break-word;
+  outline: none;
+  cursor: text;
+  min-height: 48px;
+}
+
+.editable-card-body h1,
+.editable-card-body h2,
+.editable-card-body h3,
+.editable-card-body h4 {
+  font-weight: 700;
+  color: #0f172a;
+  margin: 18px 0 8px 0;
+  line-height: 1.35;
+}
+
+.editable-card-body h1:first-child,
+.editable-card-body h2:first-child,
+.editable-card-body h3:first-child,
+.editable-card-body p:first-child {
+  margin-top: 0;
+}
+
+.editable-card-body h1 {
+  font-size: 21px;
+}
+
+.editable-card-body h2 {
+  font-size: 18px;
+}
+
+.editable-card-body h3 {
+  font-size: 16px;
+}
+
+.editable-card-body strong,
+.editable-card-body b {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.editable-card-body p {
+  margin: 10px 0;
+}
+
+.editable-card-body ul,
+.editable-card-body ol {
+  margin: 8px 0 8px 22px;
+  padding-left: 0;
+}
+
+.editable-card-body li {
+  margin-bottom: 4px;
+}
+
+.editable-card-body code {
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13.5px;
+}
+
+.editable-card-body:empty:before {
+  content: "Введіть або відредагуйте текст...";
+  color: #94a3b8;
+}
+
+/* Fullscreen modal for card */
+.editable-card-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.editable-card-modal {
+  width: 100%;
+  max-width: 860px;
+  max-height: 88vh;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editable-card-modal .editable-card-body {
+  overflow-y: auto;
+  padding: 16px 24px 24px 24px;
+  max-height: calc(88vh - 70px);
+  font-size: 16.5px;
+}
+
+/* Assistant message action toolbar */
+.assistant-message-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 4px;
+}
+
+.assistant-toolbar-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #8e8e93;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.assistant-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1c1c1e;
+}
+
+.assistant-toolbar-btn:active {
+  transform: scale(0.92);
+}
+
+.assistant-toolbar-btn.active {
+  color: var(--npati-red, #e11d2e);
+}
+
+.assistant-toolbar-btn.copied {
+  color: #10b981;
+}
+
