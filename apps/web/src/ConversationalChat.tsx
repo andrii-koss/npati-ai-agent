@@ -220,7 +220,20 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
         <form className="onboarding-live-composer" onSubmit={submit}>
           {contextSwitcher}
           <AutoResizeChatTextarea aria-label="Chat message" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} disabled={sending} placeholder="Type your answer…" autoFocus />
-          <div><button disabled={sending || !input.trim()}>Send →</button></div>
+          <div>
+            <button
+              type="submit"
+              className="chat-send-btn"
+              disabled={sending || !input.trim()}
+              aria-label="Надіслати"
+              title="Надіслати"
+            >
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <polyline points="14 6 20 12 14 18" />
+              </svg>
+            </button>
+          </div>
         </form>
       </div>
     </>
@@ -296,7 +309,20 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
             <form className="onboarding-live-composer" onSubmit={submit}>
               {contextSwitcher}
               <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder="Type your answer…" autoFocus />
-              <div><button disabled={sending || !input.trim()}>Send →</button></div>
+              <div>
+                <button
+                  type="submit"
+                  className="chat-send-btn"
+                  disabled={sending || !input.trim()}
+                  aria-label="Надіслати"
+                  title="Надіслати"
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="4" y1="12" x2="20" y2="12" />
+                    <polyline points="14 6 20 12 14 18" />
+                  </svg>
+                </button>
+              </div>
             </form>
             <div className="onboarding-live-actions">
               <button disabled={sending} onClick={() => void act({ onboardingAction: "skip" })}>Skip</button>
@@ -389,6 +415,12 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 
   const setupSwitcher = (
     <div className="composer-context-switcher" title="Active context">
+      <div className="composer-context-trigger" aria-hidden="true">
+        <span className="composer-context-text">Business setup</span>
+        <svg className="composer-context-icon" viewBox="0 0 10 6" width="10" height="6" fill="none">
+          <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
       <select aria-label="Active context" value="business-setup" disabled className="composer-context-select">
         <option value="business-setup">Business setup</option>
       </select>
@@ -397,6 +429,14 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 
   const switcher = (
     <div className="composer-context-switcher" title={activeCompanyName || "Active context"}>
+      <div className="composer-context-trigger" aria-hidden="true">
+        <span className="composer-context-text">
+          {activeCompanyName || "No company"}
+        </span>
+        <svg className="composer-context-icon" viewBox="0 0 10 6" width="10" height="6" fill="none">
+          <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
       <select
         aria-label="Active context"
         value={selectValue}

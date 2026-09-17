@@ -70,6 +70,21 @@ function fallbackSourceTitle(url: URL) {
 }
 
 function SourceLink({ rawUrl, href, title, label }: { rawUrl: string; href: string; title?: string; label?: string }) {
+  const [alignRight, setAlignRight] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  const checkAlignment = () => {
+    if (wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      const distFromRight = window.innerWidth - rect.right;
+      if (distFromRight < 350 || rect.left > window.innerWidth * 0.55) {
+        setAlignRight(true);
+      } else {
+        setAlignRight(false);
+      }
+    }
+  };
+
   let domain = "";
   let path = "";
   try {
@@ -86,17 +101,24 @@ function SourceLink({ rawUrl, href, title, label }: { rawUrl: string; href: stri
   const previewTitle = title || (!isGeneric ? cleanLbl : (parsedUrl ? fallbackSourceTitle(parsedUrl) : domain || rawUrl));
   const displayLabel = !isGeneric ? cleanLbl : (domain || rawUrl);
 
-  return <span className="source-link-wrap">
-    <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Відкрити посилання " + (domain || displayLabel)}>
-      <SourceFavicon domain={domain} />
-      <span>{displayLabel}</span>
-    </a>
-    <span className="source-link-preview" role="tooltip">
-      <span className="source-link-preview-head"><SourceFavicon domain={domain} /><span>{domain}</span></span>
-      <strong>{previewTitle}</strong>
-      {path && <small>{path}</small>}
+  return (
+    <span
+      ref={wrapRef}
+      className={`source-link-wrap ${alignRight ? "align-right" : ""}`}
+      onMouseEnter={checkAlignment}
+      onFocus={checkAlignment}
+    >
+      <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Відкрити посилання " + (domain || displayLabel)}>
+        <SourceFavicon domain={domain} />
+        <span>{displayLabel}</span>
+      </a>
+      <span className="source-link-preview" role="tooltip">
+        <span className="source-link-preview-head"><SourceFavicon domain={domain} /><span>{domain}</span></span>
+        <strong>{previewTitle}</strong>
+        {path && <small>{path}</small>}
+      </span>
     </span>
-  </span>;
+  );
 }
 
 export function toTrackedChatUrl(value: string) {
@@ -395,23 +417,42 @@ const RenderedTableBlock = React.memo(function RenderedTableBlock({
     });
   }
 
+  const isIndexHeader = (h?: string) => Boolean(h && /^([#№]|no\.?|id)$/i.test(h.trim()));
+
   return (
     <div className="chat-table-wrapper">
       <div className="chat-table-header">
         <div className="chat-table-title">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <rect x="8" y="12" width="8" height="8" rx="1" strokeWidth="1.5" />
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="3" y1="9" x2="21" y2="9" />
+            <line x1="3" y1="15" x2="21" y2="15" />
+            <line x1="9" y1="9" x2="9" y2="21" />
+            <line x1="15" y1="9" x2="15" y2="21" />
           </svg>
           <span>Таблиця ({rows.length} {rows.length === 1 ? "рядок" : rows.length < 5 ? "рядки" : "рядків"})</span>
         </div>
         <div className="chat-table-actions">
-          <button type="button" className="chat-action-btn" onClick={copyCsv} title="Скопіювати CSV">
-            {copied ? "Скопійовано!" : "Копіювати CSV"}
+          <button type="button" className={`chat-action-btn ${copied ? "copied" : ""}`} onClick={copyCsv} title="Скопіювати CSV">
+            {copied ? (
+              <>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Скопійовано!</span>
+              </>
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                <span>Копіювати CSV</span>
+              </>
+            )}
           </button>
           <button type="button" className="chat-action-btn download" onClick={exportCsv} title="Завантажити таблицю як Excel / CSV">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -425,7 +466,9 @@ const RenderedTableBlock = React.memo(function RenderedTableBlock({
           <thead>
             <tr>
               {headers.map((h, idx) => (
-                <th key={idx}>{renderInlineMarkdown(h, false, sourceTitles)}</th>
+                <th key={idx} className={isIndexHeader(h) ? "th-index" : ""}>
+                  {renderInlineMarkdown(h, false, sourceTitles)}
+                </th>
               ))}
             </tr>
           </thead>
@@ -434,11 +477,18 @@ const RenderedTableBlock = React.memo(function RenderedTableBlock({
               const rowKey = row[0] ? `row-${row[0]}-${rIdx}` : `row-${rIdx}`;
               return (
                 <tr key={rowKey}>
-                  {row.map((cell, cIdx) => (
-                    <td key={cIdx}>
-                      {cell ? renderInlineMarkdown(cell, false, sourceTitles) : "\u00A0"}
-                    </td>
-                  ))}
+                  {row.map((cell, cIdx) => {
+                    const isIndex = isIndexHeader(headers[cIdx]);
+                    const isPrimary = cIdx === 0 && !isIndex;
+                    return (
+                      <td
+                        key={cIdx}
+                        className={isIndex ? "td-index" : isPrimary ? "td-primary-cell" : ""}
+                      >
+                        {cell ? renderInlineMarkdown(cell, false, sourceTitles) : "\u00A0"}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}

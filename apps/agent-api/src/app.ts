@@ -796,7 +796,7 @@ export function buildApp(config: AppConfig = {}) {
       "     }\n" +
       "     ```\n" +
       "     Supported actions: \"insert_after\" (with search or afterRow), \"append_rows\", \"update_cells\" (with cellUpdates: [{searchRow, column, value}]), \"add_column\" (with newColumn: {header, values}).\n" +
-      "2. For new or standalone tables: output in clean Markdown table format (| col1 | col2 |) or ```csv block. The web interface renders every table with a 'Завантажити Excel / CSV' button.";
+      "2. For new or standalone tables: output in clean Markdown table format (| col1 | col2 |) or ```csv block. Keep column headers concise, crisp, and clear (e.g. 'Проєкт', 'Категорія', 'Призначення', 'Посилання'). Avoid overly verbose header names so tables remain elegant and readable. The web interface renders every table with a 'Завантажити Excel / CSV' button.";
     const cardArtifactInstruction = "\n\nCRITICAL ARTIFACT & INTERACTIVE CARD RULES:\n" +
       "When generating a business idea, draft, post, script, proposal, formulated statement, bio, or actionable text that the user might want to read, edit, copy, or download:\n" +
       "1. Provide a short introductory sentence before the card (e.g. 'Ось короткий варіант:' or 'Ось готовий варіант:').\n" +
