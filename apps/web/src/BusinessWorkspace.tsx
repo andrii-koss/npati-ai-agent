@@ -1035,31 +1035,75 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       : ["Help me brainstorm business ideas", "How do I research market demand?", "Explain how NPATI Agent works"],
     [business?.id]
   );
+  const prevBusinessIdRef = useRef(business?.id);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
   async function loadConversations(preferred?: string, preserveActiveTurn = false) {
     const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
-    const rows = await api<Conversation[]>(base); setConversations(rows);
+    let rows: Conversation[] = [];
+    try {
+      rows = await api<Conversation[]>(base);
+    } catch {
+      if (base !== "/conversations") {
+        try { rows = await api<Conversation[]>("/conversations"); } catch {}
+      }
+    }
+    setConversations(rows);
     const next = preferred ?? null; setSelected(next);
     if (next) {
-      const loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
-      setMessages(loaded);
-      if (!preserveActiveTurn && !activeTurn) {
-        window.requestAnimationFrame(() => {
-          scrollToLatestMessageStart("auto");
-          setTimeout(() => scrollToLatestMessageStart("auto"), 50);
-          setTimeout(() => scrollToLatestMessageStart("auto"), 150);
-          setTimeout(() => scrollToLatestMessageStart("auto"), 300);
-        });
-      } else if (activeTurn && activeTurnRef.current) {
-        window.requestAnimationFrame(() => {
-          activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+      let loaded: Message[] = [];
+      try {
+        loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
+      } catch {
+        if (base !== "/conversations") {
+          try {
+            loaded = (await api<{ messages: Message[] }>(`/conversations/${next}`)).messages;
+          } catch {}
+        }
       }
-      return loaded;
+      if (loaded.length > 0) {
+        setMessages((current) => {
+          if (current.length === loaded.length) {
+            const allMatch = current.every((cur, i) => loaded[i]?.role === cur.role);
+            if (allMatch) {
+              return current.map((cur, i) => {
+                const lod = loaded[i]!;
+                return cur.id === lod.id && cur.content === lod.content ? cur : { ...cur, id: lod.id, content: lod.content };
+              });
+            }
+          }
+          return loaded;
+        });
+        if (!preserveActiveTurn && !activeTurn) {
+          window.requestAnimationFrame(() => {
+            scrollToLatestMessageStart("auto");
+            setTimeout(() => scrollToLatestMessageStart("auto"), 50);
+            setTimeout(() => scrollToLatestMessageStart("auto"), 150);
+            setTimeout(() => scrollToLatestMessageStart("auto"), 300);
+          });
+        } else if (activeTurn && activeTurnRef.current) {
+          window.requestAnimationFrame(() => {
+            activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
+        return loaded;
+      }
     }
-    setMessages([]);
+    if (!preserveActiveTurn) {
+      setMessages([]);
+    }
     return [] as Message[];
   }
   useEffect(() => {
+    const businessChanged = prevBusinessIdRef.current !== business?.id;
+    prevBusinessIdRef.current = business?.id;
+
+    if (businessChanged && (selectedRef.current || messages.length > 0)) {
+      void loadConversations(selectedRef.current ?? undefined, true);
+      return;
+    }
+
     setSelected(initialConversationId ?? null);
     setReplyMeta(null);
     setNotice("");
@@ -1092,7 +1136,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     // When there is an active turn (user just sent a message or assistant is replying),
     // do NOT scroll to the bottom of the long message!
     // The user must always see the beginning of the conversation turn.
-    if (activeTurn && activeTurnRef.current) {
+    if (activeTurn) {
       return;
     }
     if (!sending) {
@@ -1322,6 +1366,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           "",
           `/c/${result.conversationId}`
         );
+        if (window.location.pathname.startsWith("/b/")) {
+          navigate(`/c/${result.conversationId}`, { replace: true });
+        }
         window.dispatchEvent(new Event("npati:conversations-changed"));
         void loadConversations(result.conversationId, true);
       }
