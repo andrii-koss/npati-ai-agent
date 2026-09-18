@@ -540,6 +540,18 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return [...this.goals.values()].filter((goal) => goal.workspaceId === context.workspaceId && goal.businessId === businessId).sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt));
   }
 
+  async listUserGoals(context: AuthContext) {
+    await this.ensure(context);
+    const userBusinessIds = new Set(
+      [...this.businesses.values()]
+        .filter((b) => b.workspaceId === context.workspaceId && b.ownerUserId === context.userId)
+        .map((b) => b.id)
+    );
+    return [...this.goals.values()]
+      .filter((goal) => goal.workspaceId === context.workspaceId && (goal.createdByUserId === context.userId || userBusinessIds.has(goal.businessId)))
+      .sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt));
+  }
+
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
     this.assertBusiness(context, businessId);
     const timestamp = now();
@@ -547,6 +559,15 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     if (!goal.title) throw new Error("Goal title is required");
     this.goals.set(goal.id, goal);
     return goal;
+  }
+
+  async linkGoal(context: AuthContext, businessId: string, goalId: string) {
+    this.assertBusiness(context, businessId);
+    const goal = this.goals.get(goalId);
+    if (!goal || goal.workspaceId !== context.workspaceId) throw new WorkspaceAccessError("Goal not found");
+    const updated = { ...goal, businessId, updatedAt: now() };
+    this.goals.set(goalId, updated);
+    return updated;
   }
 
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
@@ -571,12 +592,34 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
   }
 
+  async listUserMemories(context: AuthContext, query = "", limit = 100) {
+    await this.ensure(context);
+    const userBusinessIds = new Set(
+      [...this.businesses.values()]
+        .filter((b) => b.workspaceId === context.workspaceId && b.ownerUserId === context.userId)
+        .map((b) => b.id)
+    );
+    const needle = query.trim().toLowerCase();
+    return [...this.memories.values()]
+      .filter((item) => item.workspaceId === context.workspaceId && (item.userId === context.userId || userBusinessIds.has(item.businessId)) && (!needle || `${item.type} ${item.title} ${item.content}`.toLowerCase().includes(needle)))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+  }
+
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
     this.assertBusiness(context, businessId); assertNoSecrets(input);
     const timestamp = now();
     const item: MemoryItem = { id: randomUUID(), workspaceId: context.workspaceId, businessId, userId: context.userId, source: input.source ?? "user", ...input, createdAt: timestamp, updatedAt: timestamp };
     this.memories.set(item.id, item);
     return item;
+  }
+
+  async linkMemory(context: AuthContext, businessId: string, memoryId: string) {
+    this.assertBusiness(context, businessId);
+    const memory = this.memories.get(memoryId);
+    if (!memory || memory.workspaceId !== context.workspaceId) throw new WorkspaceAccessError("Memory not found");
+    const updated = { ...memory, businessId, updatedAt: now() };
+    this.memories.set(memoryId, updated);
+    return updated;
   }
 
   async updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
