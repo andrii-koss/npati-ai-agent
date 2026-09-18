@@ -657,7 +657,7 @@ export function buildApp(config: AppConfig = {}) {
       signal,
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log);
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
     result.message = executedAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
@@ -948,7 +948,7 @@ export function buildApp(config: AppConfig = {}) {
       }
     }
 
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log);
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
     content = executedAction.cleanText;
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);

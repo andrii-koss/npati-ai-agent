@@ -1,10 +1,10 @@
 import type { AuthContext, Business, BusinessInput, Goal, GoalInput, WorkspaceStore } from "@npati/workspace";
 
 export interface BusinessActionDirective {
-  action: "create" | "update";
+  action: "create" | "update" | "delete";
   businessId?: string;
   businessName?: string;
-  profile: {
+  profile?: {
     name?: string;
     businessStage?: string;
     industry?: string;
@@ -22,12 +22,12 @@ export interface BusinessActionDirective {
 }
 
 export interface GoalActionDirective {
-  action: "create" | "update";
+  action: "create" | "update" | "delete";
   businessId?: string;
   businessName?: string;
   goalId?: string;
-  goal: {
-    title: string;
+  goal?: {
+    title?: string;
     description?: string;
     priority?: number | string;
     status?: "active" | "completed" | "paused" | "cancelled";
@@ -96,26 +96,26 @@ export class BusinessActionHandler {
       : "(No existing goals for this user yet)";
 
     return `\n\nCRITICAL BUSINESS PROFILE & GOAL MANAGEMENT RULES:
-You have native, automated capabilities to CREATE and EDIT both Business Profiles AND Goals directly in the user's workspace.
-When you output a \`\`\`business-action\`\`\` or \`\`\`goal-action\`\`\` code block, the platform's backend engine immediately intercepts it and executes the actual database write/update.
+You have native, automated capabilities to CREATE, EDIT, and DELETE both Business Profiles AND Goals directly in the user's workspace.
+When you output a \`\`\`business-action\`\`\` or \`\`\`goal-action\`\`\` code block, the platform's backend engine immediately intercepts it and executes the actual database write/update/delete.
 THEREFORE:
-- NEVER state that you cannot edit settings, cannot save changes, lack tools, or lack access. You DO have write access through these directive blocks.
-- Whenever the user asks to create/edit a business idea or create/edit a goal, you MUST output the corresponding directive block.
-- Always confirm to the user that their business or goal has been recorded/updated in the system.
+- NEVER state that you cannot edit settings, cannot save changes, cannot delete items, lack tools, or lack access. You DO have write and delete access through these directive blocks.
+- Whenever the user asks to create, edit, or delete a business idea or goal, you MUST output the corresponding directive block.
+- Always confirm to the user that their business or goal has been recorded, updated, or deleted in the system.
 
-USER'S CURRENT BUSINESSES (YOU CAN ONLY ACCESS OR LINK TO THESE):
+USER'S CURRENT BUSINESSES (YOU CAN ONLY ACCESS, MODIFY OR DELETE THESE):
 ${businessList}
 
 USER'S EXISTING GOALS:
 ${goalsList}
 
 USER ISOLATION & SECURITY:
-- You are STRICTLY RESTRICTED to accessing, creating, or modifying businesses and goals belonging to this authenticated user.
+- You are STRICTLY RESTRICTED to accessing, creating, modifying, or deleting businesses and goals belonging to this authenticated user.
 - Goals MUST ALWAYS be linked to a business owned by this user (via businessId or businessName).
-- Never access or claim access to any other user's business or goal.
+- Never access, modify, or delete any other user's business or goal.
 
 ==================================================
-STEP 1 - BUSINESS PROFILE (CREATION & EDITING):
+STEP 1 - BUSINESS PROFILE (CREATION, EDITING & DELETION):
 ==================================================
 When the user asks to create or edit a business idea:
 1. Formulate ALL 13 profile fields completely:
@@ -181,11 +181,23 @@ When the user asks to create or edit a business idea:
 [Відкрити в налаштуваннях бізнесу →](/settings/business/{{businessId}})
 \`\`\`
 
-4. AFTER CREATING A BUSINESS:
+4. DELETING A BUSINESS IDEA:
+When the user asks to delete, remove, or erase a business idea (e.g., "видали бізнес", "видали бізнес-ідею <назва>", "видалити цей бізнес", "delete business", etc.):
+Identify the target business by ID or name from the list above. Emit an executable delete directive at the end of your message:
+\`\`\`business-action
+{
+  "action": "delete",
+  "businessId": "<ID-from-list-above>",
+  "businessName": "<Name of business>"
+}
+\`\`\`
+Confirm clearly in your message that the business idea and its related data have been deleted from their workspace. Do not include an interactive card when deleting.
+
+5. AFTER CREATING A BUSINESS:
 Proactively prompt the user for **Крок 2 (Step 2)**: setting measurable Goals & Objectives for this business! (e.g. 'Наступний крок 2: давай визначимо конкретну ціль для цього бізнесу (наприклад, залучити перших 50 клієнтів або запустити сайт за 30 днів). Яку ціль поставимо?'). If the user already specified their goal in their request, create the business AND the goal immediately!
 
 ==================================================
-STEP 2 - GOALS & OBJECTIVES (CREATION & EDITING):
+STEP 2 - GOALS & OBJECTIVES (CREATION, EDITING & DELETION):
 ==================================================
 When the user asks to create, add, or edit a Goal (e.g., "поставити ціль", "створи ціль", "додай ціль", "зміни ціль", "відредагуй ціль", "познач ціль як виконану", etc.):
 1. Each goal belongs to a business. Determine the target business from context, name, or businessId (if none specified, use the user's active/latest business).
@@ -218,7 +230,19 @@ When the user asks to create, add, or edit a Goal (e.g., "поставити ц�
 \`\`\`
 (For editing an existing goal: use "action": "update", "businessId": "<ID>", "goalId": "<ID or title of goal>", "goal": { ...changed fields... }).
 
-4. Wrap the goal summary in an interactive card:
+4. DELETING A GOAL:
+When the user asks to delete or remove a Goal (e.g., "видали ціль", "видалити ціль <назва>", "зняти ціль", "delete goal", etc.):
+Identify the target business and target goal by ID or title. Emit an executable delete directive at the end of your response:
+\`\`\`goal-action
+{
+  "action": "delete",
+  "businessId": "<ID or name of business>",
+  "goalId": "<ID or title of goal>"
+}
+\`\`\`
+Confirm clearly in your message that the goal has been deleted. Do not include an interactive card when deleting.
+
+5. Wrap active/created goal summary in an interactive card:
 \`\`\`card:Ціль: <Назва цілі>
 **Ціль:** <Назва цілі>
 **Бізнес:** <Назва бізнесу>
@@ -238,15 +262,16 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
     auth: AuthContext,
     text: string,
     workspaceStore: WorkspaceStore,
-    log?: { warn(obj: unknown, msg?: string): void }
+    log?: { warn(obj: unknown, msg?: string): void },
+    beforeDeleteBusiness?: (context: AuthContext, businessId: string) => Promise<void>
   ): Promise<{
     cleanText: string;
-    businessAction?: { action: "create" | "update"; business: Business };
-    goalAction?: { action: "create" | "update"; goal: Goal; businessName?: string };
+    businessAction?: { action: "create" | "update" | "delete"; business?: Business; businessId?: string };
+    goalAction?: { action: "create" | "update" | "delete"; goal?: Goal; goalId?: string; businessName?: string };
   }> {
     let currentText = text;
-    let businessAction: { action: "create" | "update"; business: Business } | undefined;
-    let goalAction: { action: "create" | "update"; goal: Goal; businessName?: string } | undefined;
+    let businessAction: { action: "create" | "update" | "delete"; business?: Business; businessId?: string } | undefined;
+    let goalAction: { action: "create" | "update" | "delete"; goal?: Goal; goalId?: string; businessName?: string } | undefined;
 
     // 1. Process business-action if present
     const bMatch = currentText.match(/```(?:business-action|business-profile)\s*([\s\S]*?)```/i);
@@ -254,47 +279,81 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
       const rawBlock = bMatch[0];
       try {
         const directive = JSON.parse(bMatch[1].trim()) as BusinessActionDirective;
-        if (directive && (directive.action === "create" || directive.action === "update")) {
-          const p = directive.profile || {};
-          const name = String(p.name || directive.businessName || "").trim() || "Нова бізнес-ідея";
-
-          const input: BusinessInput = {
-            name,
-            businessStage: normalizeBusinessStage(p.businessStage),
-            industry: p.industry ? String(p.industry).trim() : undefined,
-            niche: p.niche ? String(p.niche).trim() : undefined,
-            country: p.country ? String(p.country).trim() : undefined,
-            market: p.market ? String(p.market).trim() : undefined,
-            teamType: normalizeTeamType(p.teamType),
-            presenceType: normalizePresenceType(p.presenceType),
-            businessModel: p.businessModel ? String(p.businessModel).trim() : undefined,
-            website: p.website ? String(p.website).trim() : undefined,
-            description: p.description ? String(p.description).trim() : undefined,
-            productsServicesSummary: p.productsServicesSummary ? String(p.productsServicesSummary).trim() : undefined,
-            audienceSummary: p.audienceSummary ? String(p.audienceSummary).trim() : undefined,
-          };
-
-          let business: Business;
-          if (directive.action === "create") {
-            business = await workspaceStore.createBusiness(auth, input);
-          } else {
+        if (directive && (directive.action === "create" || directive.action === "update" || directive.action === "delete")) {
+          if (directive.action === "delete") {
             const userBusinesses = await workspaceStore.listUserBusinesses(auth);
             let targetId = directive.businessId?.trim();
-            if (!targetId || !userBusinesses.some((b) => b.id === targetId)) {
-              const matched = userBusinesses.find(
-                (b) => b.name.toLowerCase() === name.toLowerCase() ||
-                       (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
-              );
-              if (matched) targetId = matched.id;
-              else if (userBusinesses.length === 1) targetId = userBusinesses[0]!.id;
-              else throw new Error(`Business "${name}" not found or not owned by user.`);
-            }
-            business = await workspaceStore.updateUserBusiness(auth, targetId, input);
-          }
+            let targetBusiness: Business | undefined;
 
-          businessAction = { action: directive.action, business };
-          currentText = currentText.replace(rawBlock, "").trim();
-          currentText = currentText.replace(/\{\{businessId\}\}/g, business.id);
+            if (targetId && userBusinesses.some((b) => b.id === targetId)) {
+              targetBusiness = userBusinesses.find((b) => b.id === targetId);
+            } else {
+              const searchName = (directive.businessName || (directive.profile as any)?.name || targetId || "").toLowerCase().trim();
+              if (searchName) {
+                targetBusiness = userBusinesses.find(
+                  (b) => b.name.toLowerCase() === searchName ||
+                         b.name.toLowerCase().includes(searchName) ||
+                         searchName.includes(b.name.toLowerCase())
+                );
+              }
+              if (!targetBusiness && userBusinesses.length === 1) {
+                targetBusiness = userBusinesses[0];
+              }
+            }
+
+            if (!targetBusiness) {
+              throw new Error(`Business "${directive.businessName || directive.businessId || ""}" not found or not owned by user.`);
+            }
+
+            if (beforeDeleteBusiness) {
+              await beforeDeleteBusiness(auth, targetBusiness.id).catch((err) => log?.warn({ err }, "beforeDeleteBusiness error"));
+            }
+            await workspaceStore.deleteBusiness(auth, targetBusiness.id);
+
+            businessAction = { action: "delete", business: targetBusiness, businessId: targetBusiness.id };
+            currentText = currentText.replace(rawBlock, "").trim();
+          } else {
+            const p = directive.profile || {};
+            const name = String(p.name || directive.businessName || "").trim() || "Нова бізнес-ідея";
+
+            const input: BusinessInput = {
+              name,
+              businessStage: normalizeBusinessStage(p.businessStage),
+              industry: p.industry ? String(p.industry).trim() : undefined,
+              niche: p.niche ? String(p.niche).trim() : undefined,
+              country: p.country ? String(p.country).trim() : undefined,
+              market: p.market ? String(p.market).trim() : undefined,
+              teamType: normalizeTeamType(p.teamType),
+              presenceType: normalizePresenceType(p.presenceType),
+              businessModel: p.businessModel ? String(p.businessModel).trim() : undefined,
+              website: p.website ? String(p.website).trim() : undefined,
+              description: p.description ? String(p.description).trim() : undefined,
+              productsServicesSummary: p.productsServicesSummary ? String(p.productsServicesSummary).trim() : undefined,
+              audienceSummary: p.audienceSummary ? String(p.audienceSummary).trim() : undefined,
+            };
+
+            let business: Business;
+            if (directive.action === "create") {
+              business = await workspaceStore.createBusiness(auth, input);
+            } else {
+              const userBusinesses = await workspaceStore.listUserBusinesses(auth);
+              let targetId = directive.businessId?.trim();
+              if (!targetId || !userBusinesses.some((b) => b.id === targetId)) {
+                const matched = userBusinesses.find(
+                  (b) => b.name.toLowerCase() === name.toLowerCase() ||
+                         (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
+                );
+                if (matched) targetId = matched.id;
+                else if (userBusinesses.length === 1) targetId = userBusinesses[0]!.id;
+                else throw new Error(`Business "${name}" not found or not owned by user.`);
+              }
+              business = await workspaceStore.updateUserBusiness(auth, targetId, input);
+            }
+
+            businessAction = { action: directive.action, business, businessId: business.id };
+            currentText = currentText.replace(rawBlock, "").trim();
+            currentText = currentText.replace(/\{\{businessId\}\}/g, business.id);
+          }
         }
       } catch (err) {
         log?.warn({ err }, "Failed to execute business action");
@@ -308,11 +367,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
       const rawBlock = gMatch[0];
       try {
         const directive = JSON.parse(gMatch[1].trim()) as GoalActionDirective;
-        if (directive && (directive.action === "create" || directive.action === "update")) {
-          const g = directive.goal || {};
-          const title = String(g.title || "").trim();
-          if (!title) throw new Error("Goal title is required");
-
+        if (directive && (directive.action === "create" || directive.action === "update" || directive.action === "delete")) {
           // Determine target business
           const userBusinesses = await workspaceStore.listUserBusinesses(auth);
           let targetBusinessId = directive.businessId?.trim();
@@ -349,39 +404,71 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
           // Validate ownership
           const targetBusiness = await workspaceStore.getUserBusiness(auth, targetBusinessId);
 
-          const goalInput: GoalInput = {
-            title,
-            description: g.description ? String(g.description).trim() : undefined,
-            priority: normalizeGoalPriority(g.priority),
-            status: normalizeGoalStatus(g.status),
-            targetValue: g.targetValue !== undefined && g.targetValue !== null && g.targetValue !== "" ? Number(g.targetValue) : undefined,
-            currentValue: g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? Number(g.currentValue) : undefined,
-            targetUnit: g.targetUnit ? String(g.targetUnit).trim() : undefined,
-            targetDate: g.targetDate ? String(g.targetDate).trim() : undefined,
-          };
-
-          let goal: Goal;
-          if (directive.action === "create") {
-            goal = await workspaceStore.createGoal(auth, targetBusinessId, goalInput);
-          } else {
-            // Update existing goal
+          if (directive.action === "delete") {
             const existingGoals = await workspaceStore.listGoals(auth, targetBusinessId);
             let targetGoalId = directive.goalId?.trim();
-            if (!targetGoalId || !existingGoals.some((eg) => eg.id === targetGoalId)) {
-              // Match by title
-              const matched = existingGoals.find(
-                (eg) => eg.title.toLowerCase() === title.toLowerCase() ||
-                       (directive.goalId && eg.title.toLowerCase().includes(directive.goalId.toLowerCase()))
-              );
-              if (matched) targetGoalId = matched.id;
-              else if (existingGoals.length === 1) targetGoalId = existingGoals[0]!.id;
-              else throw new Error(`Goal "${title}" not found for business "${targetBusiness.name}".`);
-            }
-            goal = await workspaceStore.updateGoal(auth, targetBusinessId, targetGoalId, goalInput);
-          }
+            const searchTitle = (directive.goal?.title || targetGoalId || "").toLowerCase().trim();
+            let targetGoal: Goal | undefined;
 
-          goalAction = { action: directive.action, goal, businessName: targetBusiness.name };
-          currentText = currentText.replace(rawBlock, "").trim();
+            if (targetGoalId && existingGoals.some((eg) => eg.id === targetGoalId)) {
+              targetGoal = existingGoals.find((eg) => eg.id === targetGoalId);
+            } else if (searchTitle) {
+              targetGoal = existingGoals.find(
+                (eg) => eg.title.toLowerCase() === searchTitle ||
+                       eg.title.toLowerCase().includes(searchTitle) ||
+                       searchTitle.includes(eg.title.toLowerCase())
+              );
+            }
+            if (!targetGoal && existingGoals.length === 1) {
+              targetGoal = existingGoals[0];
+            }
+
+            if (!targetGoal) {
+              throw new Error(`Goal "${searchTitle || directive.goalId}" not found for business "${targetBusiness.name}".`);
+            }
+
+            await workspaceStore.deleteGoal(auth, targetBusinessId, targetGoal.id);
+            goalAction = { action: "delete", goal: targetGoal, goalId: targetGoal.id, businessName: targetBusiness.name };
+            currentText = currentText.replace(rawBlock, "").trim();
+          } else {
+            const g = directive.goal || {};
+            const title = String(g.title || "").trim();
+            if (!title) throw new Error("Goal title is required");
+
+            const goalInput: GoalInput = {
+              title,
+              description: g.description ? String(g.description).trim() : undefined,
+              priority: normalizeGoalPriority(g.priority),
+              status: normalizeGoalStatus(g.status),
+              targetValue: g.targetValue !== undefined && g.targetValue !== null && g.targetValue !== "" ? Number(g.targetValue) : undefined,
+              currentValue: g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? Number(g.currentValue) : undefined,
+              targetUnit: g.targetUnit ? String(g.targetUnit).trim() : undefined,
+              targetDate: g.targetDate ? String(g.targetDate).trim() : undefined,
+            };
+
+            let goal: Goal;
+            if (directive.action === "create") {
+              goal = await workspaceStore.createGoal(auth, targetBusinessId, goalInput);
+            } else {
+              // Update existing goal
+              const existingGoals = await workspaceStore.listGoals(auth, targetBusinessId);
+              let targetGoalId = directive.goalId?.trim();
+              if (!targetGoalId || !existingGoals.some((eg) => eg.id === targetGoalId)) {
+                // Match by title
+                const matched = existingGoals.find(
+                  (eg) => eg.title.toLowerCase() === title.toLowerCase() ||
+                         (directive.goalId && eg.title.toLowerCase().includes(directive.goalId.toLowerCase()))
+                );
+                if (matched) targetGoalId = matched.id;
+                else if (existingGoals.length === 1) targetGoalId = existingGoals[0]!.id;
+                else throw new Error(`Goal "${title}" not found for business "${targetBusiness.name}".`);
+              }
+              goal = await workspaceStore.updateGoal(auth, targetBusinessId, targetGoalId, goalInput);
+            }
+
+            goalAction = { action: directive.action, goal, goalId: goal.id, businessName: targetBusiness.name };
+            currentText = currentText.replace(rawBlock, "").trim();
+          }
         }
       } catch (err) {
         log?.warn({ err }, "Failed to execute goal action");
