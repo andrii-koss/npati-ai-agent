@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AIEngine, ChatResult } from "@npati/omniroute-adapter";
-import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, Business, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, Goal, MemoryItem, WorkspaceStore } from "@npati/workspace";
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
 import {SecurityPolicyEngine,SecurityPolicyViolation,type CompanyGuardrailPolicy} from "./security-guardrails";
@@ -62,22 +62,76 @@ function summary(input: Record<string, unknown>) {
 function json(value: unknown, max = 20_000) {
   try { return JSON.stringify(value).slice(0, max); } catch { return "[unserializable]"; }
 }
-function context(company: Company, includeMemory = true) {
-  return [
-    `Company: ${company.name}`, company.website && `Website: ${company.website}`,
-    company.industry && `Industry: ${company.industry}`, company.description && `Description: ${company.description}`,
+interface LinkedBusinessContext {
+  business?: Business;
+  goals?: Goal[];
+  memories?: MemoryItem[];
+}
+
+function context(company: Company, includeMemory = true, linked?: LinkedBusinessContext) {
+  const parts: (string | false | undefined | null)[] = [
+    `Company: ${company.name}`,
+    company.website && `Website: ${company.website}`,
+    company.industry && `Industry: ${company.industry}`,
+    company.description && `Description: ${company.description}`,
     company.productsServices && `Products / Services: ${company.productsServices}`,
     company.languages.length && `Languages: ${company.languages.join(", ")}`,
     company.brandTone && `Brand tone: ${company.brandTone}`,
     company.companyInstructions && `Company instructions: ${company.companyInstructions}`,
-    includeMemory && company.knowledge.length && `Company knowledge: ${json(company.knowledge, 8_000)}`,
-    includeMemory && Object.keys(company.memory).length && `Company memory: ${json(company.memory, 8_000)}`,
-  ].filter(Boolean).join("\n");
+  ];
+
+  if (linked?.business) {
+    const b = linked.business;
+    parts.push(
+      `\n=== LINKED BUSINESS IDEA / PROFILE ===`,
+      `Business Idea Name: ${b.name}`,
+      `Stage: ${b.businessStage}`,
+      b.industry && `Industry: ${b.industry}`,
+      b.niche && `Niche: ${b.niche}`,
+      b.market && `Market: ${b.market}`,
+      b.country && `Country: ${b.country}`,
+      b.teamType && `Team: ${b.teamType}`,
+      b.presenceType && `Presence: ${b.presenceType}`,
+      b.businessModel && `Business Model: ${b.businessModel}`,
+      b.website && `Website: ${b.website}`,
+      b.description && `Description: ${b.description}`,
+      b.productsServicesSummary && `Products / Services: ${b.productsServicesSummary}`,
+      b.audienceSummary && `Target Audience: ${b.audienceSummary}`,
+    );
+  }
+
+  if (linked?.goals && linked.goals.length > 0) {
+    parts.push(
+      `\n=== LINKED BUSINESS GOALS ===`,
+      ...linked.goals.map((g, i) => `${i + 1}. [${g.status.toUpperCase()}] ${g.title}${g.description ? `: ${g.description}` : ""}${g.targetValue ? ` (Target: ${g.targetValue} ${g.targetUnit ?? ""})` : ""}${g.targetDate ? ` (Due: ${g.targetDate})` : ""}`),
+    );
+  }
+
+  if (includeMemory && linked?.memories && linked.memories.length > 0) {
+    parts.push(
+      `\n=== LINKED BUSINESS MEMORY ===`,
+      ...linked.memories.map((m, i) => `${i + 1}. [${m.type}] ${m.title}: ${m.content}`),
+    );
+  }
+
+  if (includeMemory && company.knowledge.length) {
+    parts.push(`Company knowledge: ${json(company.knowledge, 8_000)}`);
+  }
+  if (includeMemory && Object.keys(company.memory).length) {
+    parts.push(`Company memory: ${json(company.memory, 8_000)}`);
+  }
+
+  return parts.filter(Boolean).join("\n");
 }
-function instruction(company: Company, agent: CompanyAgent, manager = false, includeMemory = true) {
+
+function instruction(company: Company, agent: CompanyAgent, manager = false, includeMemory = true, linked?: LinkedBusinessContext) {
   return [
-    "You are an AI Agent inside an NPATI Company.", context(company, includeMemory), `Agent name: ${agent.name}`,
-    `Agent role: ${agent.role}`, agent.description && `Role description: ${agent.description}`,
+    "You are an AI Agent inside an NPATI Company.",
+    context(company, includeMemory, linked),
+    linked?.business && `AWARENESS MANDATE: You represent Company "${company.name}" linked to Business Idea "${linked.business.name}". You have complete immediate awareness of this company, its business idea, its goals, and its memory. NEVER ask the user which company, business idea, goal, or memory is active — you already know all of them seamlessly! When asked, answer directly with full knowledge from this context without hesitation.`,
+    `Agent name: ${agent.name}`,
+    `Agent role: ${agent.role}`,
+    agent.description && `Role description: ${agent.description}`,
     agent.systemInstruction && `System instruction: ${agent.systemInstruction}`,
     agent.promptGuidelines && `Prompt guidelines: ${agent.promptGuidelines}`,
     includeMemory && agent.tools.map(toolName).includes("knowledge") && "Grounding rule: when Relevant Company Knowledge or Company Memory is supplied, treat it as authoritative. Copy exact factual values when asked. Never replace them with assumptions or invented facts; if the answer is absent, say that it is not available in Company Knowledge.",
@@ -188,6 +242,21 @@ export class CompanyDelegationRuntime {
         const userMarkdown = await this.userDocumentRetriever(ctx);
         if (userMarkdown) company = { ...company, memory: { ...company.memory, userMd: { markdown: userMarkdown } } };
       }
+      let linkedBusiness: Business | undefined;
+      let linkedGoals: Goal[] = [];
+      let linkedMemories: MemoryItem[] = [];
+      if (company.businessId) {
+        try {
+          linkedBusiness = await this.store.getBusiness(ctx, company.businessId);
+          linkedGoals = await this.store.listGoals(ctx, company.businessId);
+          if (!options.noMemory) {
+            linkedMemories = await this.store.listMemory(ctx, company.businessId);
+          }
+        } catch {
+          // Linked business may have been removed or inaccessible
+        }
+      }
+      const linked: LinkedBusinessContext = { business: linkedBusiness, goals: linkedGoals, memories: linkedMemories };
       const guardrailPolicy=await this.guardrailPolicyResolver?.(ctx,companyId);
       const protect=(text:string)=>SecurityPolicyEngine.protectText(text,guardrailPolicy).sanitized;
       const protectedTask=protect(input.task.trim());
@@ -234,7 +303,7 @@ export class CompanyDelegationRuntime {
         model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
           { role: "user", content: protect([
             `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
@@ -296,7 +365,7 @@ export class CompanyDelegationRuntime {
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n"+knowledge.chunks.map(item=>item.content).join("\n\n---\n\n") : "",
       ].filter(Boolean).join("\n\n");
-      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory);
+      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory, linked);
       const ids = [...new Set([...selected.map((agent) => agent.id), main.id])];
       await this.store.replaceCompanyAgentRunSteps(ctx, companyId, created.run.id, ids.map((id, index) => {
         const agent = byId.get(id) ?? main;
@@ -312,7 +381,7 @@ export class CompanyDelegationRuntime {
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory)) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)) },
           { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
         ],
       });
@@ -323,7 +392,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: protect(instruction(company, main, true, !options.noMemory) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user.") },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user.") },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
@@ -614,7 +683,7 @@ export class CompanyDelegationRuntime {
     return evidence.join("\n\n");
   }
 
-  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true) {
+  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext) {
     if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "OmniRoute combos are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();
     for (const agent of unique) {
@@ -622,7 +691,7 @@ export class CompanyDelegationRuntime {
       const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
       await this.ai.ensureCombo({ name, strategy: "priority", models: [...new Set([primary, fallback])],
-        description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory),
+        description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory, linked),
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs } }, signal);
       names.set(agent.id, name);

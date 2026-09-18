@@ -180,11 +180,17 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     } catch (error) { return errorReply(reply, error); }
   });
 
+  app.get("/goals", async (request, reply) => {
+    try { return await store.listUserGoals(await auth.authenticate(request)); } catch (error) { return errorReply(reply, error); }
+  });
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/goals", async (request, reply) => {
     try { return await store.listGoals(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }
   });
   app.post<{ Params: { businessId: string }; Body: GoalInput }>("/businesses/:businessId/goals", async (request, reply) => {
     try { return reply.code(201).send(await store.createGoal(await auth.authenticate(request), request.params.businessId, request.body)); } catch (error) { return errorReply(reply, error); }
+  });
+  app.post<{ Params: { businessId: string; goalId: string } }>("/businesses/:businessId/goals/:goalId/link", async (request, reply) => {
+    try { return await store.linkGoal(await auth.authenticate(request), request.params.businessId, request.params.goalId); } catch (error) { return errorReply(reply, error); }
   });
   app.patch<{ Params: { businessId: string; goalId: string }; Body: Partial<GoalInput> }>("/businesses/:businessId/goals/:goalId", async (request, reply) => {
     try { return await store.updateGoal(await auth.authenticate(request), request.params.businessId, request.params.goalId, request.body); } catch (error) { return errorReply(reply, error); }
@@ -193,11 +199,17 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     try { await store.deleteGoal(await auth.authenticate(request), request.params.businessId, request.params.goalId); return reply.code(204).send(); } catch (error) { return errorReply(reply, error); }
   });
 
+  app.get<{ Querystring: { search?: string; limit?: string } }>("/memory", async (request, reply) => {
+    try { return await store.listUserMemories(await auth.authenticate(request), request.query.search, Number(request.query.limit ?? 100)); } catch (error) { return errorReply(reply, error); }
+  });
   app.get<{ Params: { businessId: string }; Querystring: { search?: string; limit?: string } }>("/businesses/:businessId/memory", async (request, reply) => {
     try { return await store.listMemory(await auth.authenticate(request), request.params.businessId, request.query.search, Number(request.query.limit ?? 100)); } catch (error) { return errorReply(reply, error); }
   });
   app.post<{ Params: { businessId: string }; Body: MemoryInput }>("/businesses/:businessId/memory", async (request, reply) => {
     try { return reply.code(201).send(await store.createMemory(await auth.authenticate(request), request.params.businessId, request.body)); } catch (error) { return errorReply(reply, error); }
+  });
+  app.post<{ Params: { businessId: string; memoryId: string } }>("/businesses/:businessId/memory/:memoryId/link", async (request, reply) => {
+    try { return await store.linkMemory(await auth.authenticate(request), request.params.businessId, request.params.memoryId); } catch (error) { return errorReply(reply, error); }
   });
   app.patch<{ Params: { businessId: string; memoryId: string }; Body: Partial<MemoryInput> }>("/businesses/:businessId/memory/:memoryId", async (request, reply) => {
     try { return await store.updateMemory(await auth.authenticate(request), request.params.businessId, request.params.memoryId, request.body); } catch (error) { return errorReply(reply, error); }

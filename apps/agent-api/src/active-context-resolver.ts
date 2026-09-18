@@ -44,12 +44,21 @@ export class ActiveContextResolver {
         throw new WorkspaceAccessError(`Company not found or access denied: ${validated.companyId}`);
       }
 
+      let business: Business | undefined;
+      if (company.businessId) {
+        try {
+          business = await this.store.getBusiness(auth, company.businessId);
+        } catch {
+          // Business may not be accessible or deleted
+        }
+      }
+
       const snapshot: RunContextSnapshot = {
         contextType: "company",
         workspaceId: auth.workspaceId,
         userId: auth.userId,
         companyId: company.id,
-        businessId: null,
+        businessId: company.businessId ?? null,
         agentId: company.mainAgentId ?? null,
         companyRevision: company.revision,
         capturedAt: timestamp,
@@ -59,9 +68,10 @@ export class ActiveContextResolver {
         context: {
           contextType: "company",
           companyId: company.id,
-          businessId: null,
+          businessId: company.businessId ?? null,
         },
         company,
+        business,
         snapshot,
       };
     }

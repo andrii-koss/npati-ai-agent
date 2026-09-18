@@ -31,6 +31,7 @@ type WorkspaceOverview = {
 };
 type Goal = { id: string; title: string; description?: string; status: string; priority: number; targetDate?: string };
 type MemoryItem = { id: string; type: string; title: string; content: string; source: string; updatedAt: string };
+type Company = { id: string; name: string; businessId?: string; revision: number; status: string };
 type Skill = { id: string; name: string; description: string; capabilities: string[] };
 type Conversation = { id: string; title: string; updatedAt: string };
 type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[] };
@@ -236,14 +237,60 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
   const [form, setForm] = useState({ ...blankBusiness, ...initial });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Cross-linking state: Goals, Memory
+  const [availableGoals, setAvailableGoals] = useState<Goal[]>([]);
+  const [availableMemories, setAvailableMemories] = useState<MemoryItem[]>([]);
+
+  const [selectedGoalId, setSelectedGoalId] = useState<string>("");
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalDescription, setNewGoalDescription] = useState("");
+
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string>("");
+  const [newMemoryType, setNewMemoryType] = useState("business_fact");
+  const [newMemoryTitle, setNewMemoryTitle] = useState("");
+  const [newMemoryContent, setNewMemoryContent] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function fetchLinkedData() {
+      try {
+        const [goalsRes, memoriesRes] = await Promise.all([
+          api<Goal[]>("/goals").catch(() => []),
+          api<MemoryItem[]>("/memory").catch(() => []),
+        ]);
+        if (!active) return;
+        setAvailableGoals(goalsRes || []);
+        setAvailableMemories(memoriesRes || []);
+
+        if (initial?.id) {
+          const [bGoals, bMemories] = await Promise.all([
+            api<Goal[]>(`/businesses/${initial.id}/goals`).catch(() => []),
+            api<MemoryItem[]>(`/businesses/${initial.id}/memory`).catch(() => []),
+          ]);
+          if (!active) return;
+          if (bGoals.length > 0 && bGoals[0]?.id) {
+            setSelectedGoalId(bGoals[0].id);
+          }
+          if (bMemories.length > 0 && bMemories[0]?.id) {
+            setSelectedMemoryId(bMemories[0].id);
+          }
+        }
+      } catch {}
+    }
+    void fetchLinkedData();
+    return () => { active = false; };
+  }, [initial?.id]);
+
   function field(name: keyof typeof blankBusiness) {
     return { value: form[name] ?? "", onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [name]: event.target.value }) };
   }
+
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     const fallbackName = mode === "starting" ? "New Business Idea" : mode === "seller" ? "My Selling Business" : "";
     try {
-      await api(initial ? `/businesses/${initial.id}` : "/businesses", {
+      const saved = await api<Business>(initial ? `/businesses/${initial.id}` : "/businesses", {
         method: initial ? "PATCH" : "POST",
         body: JSON.stringify({
           ...form,
@@ -252,10 +299,50 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
           businessStage: !initial && mode === "starting" ? "idea" : !initial && mode === "seller" ? "starting" : form.businessStage,
         }),
       });
+
+      const targetBusinessId = saved.id || initial?.id;
+
+      if (targetBusinessId) {
+        // 1. Goal: link selected or create new
+        if (selectedGoalId === "create_new" && newGoalTitle.trim()) {
+          await api(`/businesses/${targetBusinessId}/goals`, {
+            method: "POST",
+            body: JSON.stringify({
+              title: newGoalTitle.trim(),
+              description: newGoalDescription.trim() || undefined,
+              status: "active",
+              priority: 1,
+            }),
+          }).catch(() => {});
+        } else if (selectedGoalId && selectedGoalId !== "none" && selectedGoalId !== "create_new") {
+          await api(`/businesses/${targetBusinessId}/goals/${selectedGoalId}/link`, {
+            method: "POST",
+          }).catch(() => {});
+        }
+
+        // 2. Memory: link selected or create new
+        if (selectedMemoryId === "create_new" && newMemoryTitle.trim() && newMemoryContent.trim()) {
+          await api(`/businesses/${targetBusinessId}/memory`, {
+            method: "POST",
+            body: JSON.stringify({
+              type: newMemoryType || "business_fact",
+              title: newMemoryTitle.trim(),
+              content: newMemoryContent.trim(),
+              source: "user",
+            }),
+          }).catch(() => {});
+        } else if (selectedMemoryId && selectedMemoryId !== "none" && selectedMemoryId !== "create_new") {
+          await api(`/businesses/${targetBusinessId}/memory/${selectedMemoryId}/link`, {
+            method: "POST",
+          }).catch(() => {});
+        }
+      }
+
       await onSaved();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save business"); }
     finally { setSaving(false); }
   }
+
   return (
     <form className="workspace-form business-profile-form" onSubmit={submit}>
       <div className="form-section-title"><span>Business profile</span><p>Give NPATI enough context to make relevant recommendations. You can refine this later.</p></div>
@@ -272,6 +359,98 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <label className="field"><span>Business model</span><input {...field("businessModel")} placeholder="Services, products, subscription…" /></label>
         <label className="field"><span>Website</span><input {...field("website")} type="url" placeholder="https://" /></label>
       </div>
+
+      <div className="form-section-title" style={{ marginTop: "1.5rem" }}>
+        <span>Alignment & Linkages (Зв'язки бізнес-ідеї)</span>
+        <p>Підв'яжіть створену ціль користувача та пам'ять (memory) до цієї бізнес-ідеї.</p>
+      </div>
+
+      <div className="field-grid">
+        <label className="field">
+          <span>Ціль користувача (Goal)</span>
+          <select value={selectedGoalId} onChange={(e) => setSelectedGoalId(e.target.value)}>
+            <option value="none">-- Без цілі (No goal) --</option>
+            {availableGoals.map((g) => (
+              <option key={g.id} value={g.id}>
+                [{g.status}] {g.title}
+              </option>
+            ))}
+            <option value="create_new">+ Створити нову ціль...</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Memory для бізнес-ідеї</span>
+          <select value={selectedMemoryId} onChange={(e) => setSelectedMemoryId(e.target.value)}>
+            <option value="none">-- Без memory (No memory) --</option>
+            {availableMemories.map((m) => (
+              <option key={m.id} value={m.id}>
+                [{m.type}] {m.title}: {m.content.slice(0, 35)}...
+              </option>
+            ))}
+            <option value="create_new">+ Додати новий факт (Memory)...</option>
+          </select>
+        </label>
+      </div>
+
+      {selectedGoalId === "create_new" && (
+        <div className="field-grid" style={{ marginTop: "0.5rem" }}>
+          <label className="field">
+            <span>Назва нової цілі</span>
+            <input
+              value={newGoalTitle}
+              onChange={(e) => setNewGoalTitle(e.target.value)}
+              placeholder="e.g. Залучити 100 постійних клієнтів"
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Опис або очікуваний результат</span>
+            <input
+              value={newGoalDescription}
+              onChange={(e) => setNewGoalDescription(e.target.value)}
+              placeholder="e.g. $2 000 чистого прибутку щомісяця"
+            />
+          </label>
+        </div>
+      )}
+
+      {selectedMemoryId === "create_new" && (
+        <div className="business-narrative-fields" style={{ marginTop: "0.5rem" }}>
+          <div className="field-grid">
+            <label className="field">
+              <span>Категорія пам'яті</span>
+              <select value={newMemoryType} onChange={(e) => setNewMemoryType(e.target.value)}>
+                <option value="business_fact">Business fact</option>
+                <option value="audience">Audience</option>
+                <option value="brand">Brand</option>
+                <option value="preference">Preference</option>
+                <option value="decision">Decision</option>
+                <option value="product">Product</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Заголовок факту</span>
+              <input
+                value={newMemoryTitle}
+                onChange={(e) => setNewMemoryTitle(e.target.value)}
+                placeholder="e.g. Сировина з Карпат"
+                required
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Зміст (Memory fact)</span>
+            <textarea
+              value={newMemoryContent}
+              onChange={(e) => setNewMemoryContent(e.target.value)}
+              placeholder="Вкажіть важливий факт або деталі, які агент має пам'ятати про цю бізнес-ідею"
+              required
+            />
+          </label>
+        </div>
+      )}
+
       <div className="business-narrative-fields">
         <label className="field"><span>What does the business do?</span><textarea {...field("description")} placeholder="Products, services, value proposition…" /></label>
         <label className="field"><span>Products or services</span><textarea {...field("productsServicesSummary")} placeholder="What you sell or plan to offer…" /></label>
@@ -388,7 +567,7 @@ export function BusinessPage() {
     <main className="automations-container business-settings-page">
       <BusinessSettingsHeader
         copy="Manage the business profiles, markets, audiences, and operating context NPATI uses across chats and recommendations."
-        action={<><button className="button-secondary" onClick={() => void createBusinessIdea()}>Guided setup</button><button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Add Business</button></>}
+        action={<button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Add Business</button>}
       />
 
       <section className="overview-grid inspector-stats-grid business-stats-grid">
@@ -425,7 +604,7 @@ export function BusinessPage() {
             </article>
           ))}
           {businesses.map((business) => (
-            <article className="record-card business-profile-card" key={business.id} onClick={() => navigate(`/b/${business.id}`)}>
+            <article className="record-card business-profile-card" key={business.id} onClick={() => navigate(`/settings/business/${business.id}`)}>
               <div className="business-card-main">
                 <span className="business-card-icon">{business.name.charAt(0).toUpperCase() || "B"}</span>
                 <div>
@@ -440,7 +619,6 @@ export function BusinessPage() {
                 </div>
               </div>
               <div className="record-actions">
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${business.id}`); }}>Open chat</button>
                 <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>Edit</button>
                 <button disabled={convertingId === business.id} onClick={(event) => { event.stopPropagation(); void convertToCompany(business); }}>{convertingId === business.id ? "Converting..." : "Create company"}</button>
                 <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>Delete</button>

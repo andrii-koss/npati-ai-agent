@@ -1062,11 +1062,37 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return (await this.pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
   }
 
+  async listUserGoals(context: AuthContext) {
+    await this.assertMember(context);
+    return (await this.pool.query<Goal>(
+      `SELECT ${goalColumns} FROM goals
+       WHERE workspace_id=$1 AND (created_by_user_id=$2 OR business_id IN (
+         SELECT id FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2
+       ))
+       ORDER BY priority, updated_at DESC`,
+      [context.workspaceId, context.userId]
+    )).rows;
+  }
+
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
     await this.getBusiness(context, businessId);
     const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.title.trim(), input.description ?? null, input.status ?? "active", input.targetValue ?? null, input.targetUnit ?? null, input.currentValue ?? null, input.targetDate ?? null, input.priority ?? 3];
     const result = await this.pool.query<Goal>(`INSERT INTO goals(id,workspace_id,business_id,created_by_user_id,title,description,status,target_value,target_unit,current_value,target_date,priority)
       VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${goalColumns}`, values);
+    return result.rows[0]!;
+  }
+
+  async linkGoal(context: AuthContext, businessId: string, goalId: string) {
+    await this.getBusiness(context, businessId);
+    const result = await this.pool.query<Goal>(
+      `UPDATE goals SET business_id=$1, updated_at=now()
+       WHERE id=$2 AND workspace_id=$3 AND (created_by_user_id=$4 OR business_id IN (
+         SELECT id FROM businesses WHERE workspace_id=$3 AND owner_user_id=$4
+       ))
+       RETURNING ${goalColumns}`,
+      [businessId, goalId, context.workspaceId, context.userId]
+    );
+    if (!result.rowCount) throw new WorkspaceAccessError("Goal not found or not owned by user");
     return result.rows[0]!;
   }
 
@@ -1090,10 +1116,37 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return (await this.pool.query<MemoryItem>(`SELECT ${memoryColumns} FROM memory_items WHERE workspace_id=$1 AND business_id=$2 AND ($3='' OR type ILIKE $4 OR title ILIKE $4 OR content ILIKE $4) ORDER BY updated_at DESC LIMIT $5`, [context.workspaceId, businessId, query.trim(), needle, Math.min(limit, 100)])).rows;
   }
 
+  async listUserMemories(context: AuthContext, query = "", limit = 100) {
+    await this.assertMember(context);
+    const needle = `%${query.trim()}%`;
+    return (await this.pool.query<MemoryItem>(
+      `SELECT ${memoryColumns} FROM memory_items
+       WHERE workspace_id=$1 AND (user_id=$2 OR business_id IN (
+         SELECT id FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2
+       )) AND ($3='' OR type ILIKE $4 OR title ILIKE $4 OR content ILIKE $4)
+       ORDER BY updated_at DESC LIMIT $5`,
+      [context.workspaceId, context.userId, query.trim(), needle, Math.min(limit, 100)]
+    )).rows;
+  }
+
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
     await this.getBusiness(context, businessId); assertNoSecrets(input);
     const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.type, input.title.trim(), input.content.trim(), input.source ?? "user", input.confidence ?? null];
     const result = await this.pool.query<MemoryItem>(`INSERT INTO memory_items(id,workspace_id,business_id,user_id,type,title,content,source,confidence) VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${memoryColumns}`, values);
+    return result.rows[0]!;
+  }
+
+  async linkMemory(context: AuthContext, businessId: string, memoryId: string) {
+    await this.getBusiness(context, businessId);
+    const result = await this.pool.query<MemoryItem>(
+      `UPDATE memory_items SET business_id=$1, updated_at=now()
+       WHERE id=$2 AND workspace_id=$3 AND (user_id=$4 OR business_id IN (
+         SELECT id FROM businesses WHERE workspace_id=$3 AND owner_user_id=$4
+       ))
+       RETURNING ${memoryColumns}`,
+      [businessId, memoryId, context.workspaceId, context.userId]
+    );
+    if (!result.rowCount) throw new WorkspaceAccessError("Memory item not found or not owned by user");
     return result.rows[0]!;
   }
 

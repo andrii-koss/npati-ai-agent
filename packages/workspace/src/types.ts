@@ -216,11 +216,15 @@ export interface WorkspaceStore {
   requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number): Promise<boolean>;
   listRecoverableCompanyAgentRuns(limit?: number): Promise<Array<{ context: AuthContext; companyId: string; runId: string }>>;
   listGoals(context: AuthContext, businessId: string): Promise<Goal[]>;
+  listUserGoals(context: AuthContext): Promise<Goal[]>;
   createGoal(context: AuthContext, businessId: string, input: GoalInput): Promise<Goal>;
+  linkGoal(context: AuthContext, businessId: string, goalId: string): Promise<Goal>;
   updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>): Promise<Goal>;
   deleteGoal(context: AuthContext, businessId: string, goalId: string): Promise<boolean>;
   listMemory(context: AuthContext, businessId: string, query?: string, limit?: number): Promise<MemoryItem[]>;
+  listUserMemories(context: AuthContext, query?: string, limit?: number): Promise<MemoryItem[]>;
   createMemory(context: AuthContext, businessId: string, input: MemoryInput): Promise<MemoryItem>;
+  linkMemory(context: AuthContext, businessId: string, memoryId: string): Promise<MemoryItem>;
   updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>): Promise<MemoryItem>;
   deleteMemory(context: AuthContext, businessId: string, memoryId: string): Promise<boolean>;
   listConversations(context: AuthContext, businessId: string): Promise<Conversation[]>;
