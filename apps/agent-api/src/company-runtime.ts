@@ -75,7 +75,7 @@ function context(company: Company, includeMemory = true, linked?: LinkedBusiness
     company.industry && `Industry: ${company.industry}`,
     company.description && `Description: ${company.description}`,
     company.productsServices && `Products / Services: ${company.productsServices}`,
-    company.languages.length && `Languages: ${company.languages.join(", ")}`,
+    company.languages.length > 0 && `Languages: ${company.languages.join(", ")}`,
     company.brandTone && `Brand tone: ${company.brandTone}`,
     company.companyInstructions && `Company instructions: ${company.companyInstructions}`,
   ];
