@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 type Company = {
   id: string; businessId?: string; name: string; website?: string; industry?: string; description?: string;
@@ -54,6 +55,40 @@ const defaultToolOptions: CapabilityItem[] = [
   { id: "system.text-to-speech", name: "Text-to-Speech", description: "Generate speech audio with the selected voice.", domain: "system", risk: "low", requiresConfirmation: false, requiredPermissions: [], requiredConnections: [] },
   { id: "exec", name: "Code Mode / Exec", description: "Validate and run approved JavaScript in an isolated sandbox without host or network access.", domain: "security", risk: "critical", requiresConfirmation: true, requiredPermissions: ["business:manage"], requiredConnections: [] },
 ];
+const toolTranslationKeys: Record<string, string> = {
+  "storage.agent_knowledge_retrieval": "knowledge",
+  "storage.company_memory": "companyMemory",
+  "research.web_search": "webSearch",
+  "browser.web_fetch": "webFetch",
+  "web.crawl": "crawler",
+  mcp: "mcp",
+  files: "files",
+  "system.text-to-speech": "textToSpeech",
+  exec: "exec",
+};
+
+type Translate = (path: string, params?: Record<string, string | number>) => string;
+
+function translatedStatus(t: Translate, status: string) {
+  const translated = t(`companySettings.status.${status}`);
+  return translated === `companySettings.status.${status}` ? status : translated;
+}
+
+function translatedMode(t: Translate, mode?: string) {
+  if (!mode) return "";
+  const translated = t(`companySettings.mode.${mode}`);
+  return translated === `companySettings.mode.${mode}` ? mode : translated;
+}
+
+function translatedTool(t: Translate, tool: CapabilityItem) {
+  const key = toolTranslationKeys[tool.id];
+  if (!key) return { name: tool.name, description: tool.description };
+  return {
+    name: t(`companySettings.toolCatalog.${key}Name`),
+    description: t(`companySettings.toolCatalog.${key}Desc`),
+  };
+}
+
 const emptyCompany: CompanyDraft = { name: "", businessId: "", website: "", industry: "", description: "", productsServices: "", languages: "", brandTone: "", companyInstructions: "", status: "active" };
 const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: [], isActive: true, parentAgentId: "" };
 
@@ -95,20 +130,22 @@ function AgentModelIcon({ agent, model, working }: { agent: Agent; model?: Model
   const source = useProviderIcon
     ? `/api/ai/providers/${encodeURIComponent(providerId!)}/icon?surface=light-v2`
     : "/npati-auto.png";
-  return <span className={`company-agent-model-icon ${agent.modelId ? "provider" : "npati-auto"}`} title={`${agent.modelId ? `${model?.name ?? agent.modelId} via ${providerName}` : "NPATI Auto"} · ${working ? "Working" : "Idle"}`}>
+  const { t } = useTranslation();
+  return <span className={`company-agent-model-icon ${agent.modelId ? "provider" : "npati-auto"}`} title={`${agent.modelId ? t("companySettings.orgChart.modelVia", { model: model?.name ?? agent.modelId, provider: providerName }) : "NPATI Auto"} · ${working ? t("companySettings.orgChart.working") : t("companySettings.orgChart.idle")}`}>
     <img src={source} alt="" onError={(event) => {
       if (useProviderIcon) setProviderIconFailed(true);
       else event.currentTarget.style.visibility = "hidden";
     }} />
-    <span className={`company-agent-activity-dot ${working ? "working" : "idle"}`} aria-label={working ? "Agent is working" : "Agent is idle"} />
+    <span className={`company-agent-activity-dot ${working ? "working" : "idle"}`} aria-label={working ? t("companySettings.orgChart.working") : t("companySettings.orgChart.idle")} />
   </span>;
 }
 
 function AgentNode({ agent, main, model, working, onClick }: { agent: Agent; main: boolean; model?: Model; working: boolean; onClick(): void }) {
+  const { t } = useTranslation();
   return <button className={`company-agent-node ${main ? "main" : ""} ${agent.isActive ? "" : "inactive"} ${working ? "working" : ""}`} onClick={onClick}>
     <AgentModelIcon agent={agent} model={model} working={working} />
-    <span><strong>{agent.name}</strong><small>{agent.role}</small><em>{agent.modelId || "Auto"}</em></span>
-    {main && <b>Main</b>}
+    <span><strong>{agent.name}</strong><small>{agent.role}</small><em>{agent.modelId || t("companySettings.orgChart.auto")}</em></span>
+    {main && <b>{t("companySettings.orgChart.main")}</b>}
   </button>;
 }
 
@@ -135,7 +172,8 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
     return rows;
   }, [agents, edges, mainAgentId]);
 
-  if (!agents.length) return <div className="company-chart-empty"><strong>Your AI company has no agents yet.</strong><p>Add the first agent, then build the hierarchy with Parent Agent.</p></div>;
+  const { t } = useTranslation();
+  if (!agents.length) return <div className="company-chart-empty"><strong>{t("companySettings.orgChart.emptyTitle")}</strong><p>{t("companySettings.orgChart.emptyDesc")}</p></div>;
   return <div className="company-org-chart" key={animationKey}>
     {levels.map((level, index) => <div className="company-chart-level" key={index} style={{ "--chart-level-delay": `${Math.max(0, index - 1) * 1.5}s`, "--chart-line-inset": `calc(${50 / level.length}% - ${((level.length - 1) * 24) / (2 * level.length)}px)` } as CSSProperties}>
       {index > 0 && <span className="company-chart-trunk" aria-hidden="true" />}
@@ -156,6 +194,7 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 }
 
 export function CompanyPage() {
+  const { t } = useTranslation();
   const { overview } = useWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -255,7 +294,7 @@ export function CompanyPage() {
       const list = Array.isArray(value) ? value : (value.models ?? []);
       setModels([...new Map(list.map((model) => [model.id, model])).values()]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not load connected models";
+      const message = error instanceof Error ? error.message : t("companySettings.errors.couldNotLoadModels");
       setModelsError(message);
       if (showError) setNotice(message);
     } finally {
@@ -276,7 +315,7 @@ export function CompanyPage() {
       const first = items[0];
       if (first) await loadOrganization(first.id, undefined, false, items);
     } catch (error) {
-      setCompaniesLoadError(error instanceof Error ? error.message : "Could not load companies");
+      setCompaniesLoadError(error instanceof Error ? error.message : t("companySettings.errors.couldNotLoadCompanies"));
     } finally {
       setCompaniesLoading(false);
     }
@@ -347,10 +386,10 @@ export function CompanyPage() {
         setRunDetails(details);
         const terminal = ["completed", "failed", "cancelled"].includes(details.run.status);
         setRunning(!terminal);
-        if (terminal) setNotice(details.run.status === "completed" ? "Company run completed." : details.run.errorMessage ?? `Company run ${details.run.status}.`);
+        if (terminal) setNotice(details.run.status === "completed" ? t("companySettings.notices.runCompleted") : details.run.errorMessage ?? t("companySettings.notices.runEnded", { status: translatedStatus(t, details.run.status) }));
       }).catch((error) => {
         if (!active) return;
-        setNotice(error instanceof Error ? error.message : "Could not refresh run status");
+        setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotApply"));
         setRunning(false);
       });
     }, 1500);
@@ -381,11 +420,11 @@ export function CompanyPage() {
         });
         companyCreateKey.current = crypto.randomUUID();
       }
-      setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies(saved.id); setNotice("Company saved.");
+      setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies(saved.id); setNotice(t("companySettings.notices.companySaved"));
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Could not save company";
+      const msg = error instanceof Error ? error.message : t("companySettings.errors.couldNotSave");
       if (/changed by another request|revision|conflict/i.test(msg)) {
-        setNotice("Revision conflict detected: Another tab or user modified this company. Please reload.");
+        setNotice(t("companySettings.errors.revisionConflictCompany"));
       } else {
         setNotice(msg);
       }
@@ -415,11 +454,11 @@ export function CompanyPage() {
       await api(`/companies/${selected.id}/agents/${saved.id}/parent`, {
         method: "PUT", body: JSON.stringify({ parentAgentId: parentAgentId || null }),
       });
-      setAgentEditor(false); setEditingAgent(undefined); await loadOrganization(selected.id); setNotice("Agent saved.");
+      setAgentEditor(false); setEditingAgent(undefined); await loadOrganization(selected.id); setNotice(t("companySettings.notices.agentSaved"));
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Could not save agent";
+      const msg = error instanceof Error ? error.message : t("companySettings.errors.couldNotSaveAgent");
       if (/changed by another request|revision|conflict/i.test(msg)) {
-        setNotice("Revision conflict detected: Another tab or user modified this agent. Please reload.");
+        setNotice(t("companySettings.errors.revisionConflictAgent"));
       } else {
         setNotice(msg);
       }
@@ -434,7 +473,7 @@ export function CompanyPage() {
         method: "PUT", body: JSON.stringify({ agentId: agentId || null, expectedRevision: selected.revision }),
       });
       setCompanies((items) => items.map((item) => item.id === updated.id ? updated : item));
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not set main agent"); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotSetMain")); }
   }
 
   async function enableMainAgentKnowledge() {
@@ -448,9 +487,9 @@ export function CompanyPage() {
         body: JSON.stringify({ tools: [...mainAgent.tools, "Knowledge"], expectedRevision: mainAgent.revision }),
       });
       await loadOrganization(selected.id);
-      setNotice(`Knowledge enabled for Main Agent "${mainAgent.name}".`);
+      setNotice(t("companySettings.notices.knowledgeEnabled", { name: mainAgent.name }));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not enable Knowledge for the Main Agent");
+      setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotEnableKnowledge"));
     } finally { setKnowledgeBusy(false); }
   }
 
@@ -462,17 +501,17 @@ export function CompanyPage() {
         body: JSON.stringify({ businessId: businessId || null, expectedRevision: selected.revision }),
       });
       setCompanies((items) => items.map((item) => item.id === updated.id ? updated : item));
-      setNotice("Linked business updated.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not update linked business"); }
+      setNotice(t("companySettings.notices.businessUpdated"));
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotUpdateBusiness")); }
   }
 
   async function deleteAgent() {
     if (!selected || !editingAgent) return;
     const confirmed = await confirmModal({
-      title: "Delete agent?",
-      message: `Delete agent "${editingAgent.name}"?`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("companySettings.dialogs.deleteAgentTitle"),
+      message: t("companySettings.dialogs.deleteAgentMessage", { name: editingAgent.name }),
+      confirmText: t("companySettings.dialogs.deleteConfirm"),
+      cancelText: t("companySettings.dialogs.deleteCancel"),
       isDanger: true,
     });
     if (!confirmed) return;
@@ -484,8 +523,8 @@ export function CompanyPage() {
       setEdges((items) => items.filter((edge) => edge.parentAgentId !== deletingId && edge.childAgentId !== deletingId));
       const refreshedCompanies = await loadCompanies(selected.id);
       await loadOrganization(selected.id, undefined, false, refreshedCompanies);
-      setNotice("Agent deleted.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not delete agent"); }
+      setNotice(t("companySettings.notices.agentDeleted"));
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDeleteAgent")); }
   }
 
   async function runCompany(event: FormEvent) {
@@ -499,12 +538,12 @@ export function CompanyPage() {
         body: JSON.stringify({ task: task.trim(), mode: runMode }),
       });
       setRunDetails(result);
-      if (result.run.status === "completed") setNotice("Company run completed.");
-      else setNotice(result.run.errorMessage ?? `Company run ${result.run.status}.`);
+      if (result.run.status === "completed") setNotice(t("companySettings.notices.runCompleted"));
+      else setNotice(result.run.errorMessage ?? t("companySettings.notices.runEnded", { status: translatedStatus(t, result.run.status) }));
       const remainsActive = !["completed", "failed", "cancelled"].includes(result.run.status);
       setRunning(remainsActive);
       if (!remainsActive) setWorkingAgentIds(new Set());
-    } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : "Company run failed"); }
+    } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : t("companySettings.notices.runFailed")); }
   }
 
   const pendingApprovalId = runDetails?.run.errorCode === "APPROVAL_REQUIRED"
@@ -519,8 +558,8 @@ export function CompanyPage() {
         method: "POST", body: JSON.stringify({ decision }),
       });
       if (decision === "rejected") {
-        setRunDetails((current) => current ? { ...current, run: { ...current.run, errorCode: "APPROVAL_REJECTED", errorMessage: "Execution rejected by the user." } } : current);
-        setNotice("Execution rejected. Nothing was run.");
+        setRunDetails((current) => current ? { ...current, run: { ...current.run, errorCode: "APPROVAL_REJECTED", errorMessage: t("companySettings.errors.executionRejectedByUser") } } : current);
+        setNotice(t("companySettings.notices.executionRejected"));
         return;
       }
       setRunning(true);
@@ -530,15 +569,15 @@ export function CompanyPage() {
       setRunDetails(resumed);
       const remainsActive = !["completed", "failed", "cancelled"].includes(resumed.run.status);
       setRunning(remainsActive);
-      setNotice(resumed.run.status === "completed" ? "Approved execution completed." : resumed.run.errorMessage ?? `Company run ${resumed.run.status}.`);
+      setNotice(resumed.run.status === "completed" ? t("companySettings.notices.approvedCompleted") : resumed.run.errorMessage ?? t("companySettings.notices.runEnded", { status: translatedStatus(t, resumed.run.status) }));
     } catch (error) {
       setRunning(false);
-      setNotice(error instanceof Error ? error.message : "Could not apply approval decision");
+      setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotApply"));
     } finally { setApprovalBusy(false); }
   }
 
   async function readFileAsBase64(file:File){
-    return await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error??new Error("Could not read the document"));reader.onload=()=>resolve(String(reader.result).split(",")[1]??"");reader.readAsDataURL(file);});
+    return await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error??new Error(t("companySettings.errors.couldNotReadDocument")));reader.onload=()=>resolve(String(reader.result).split(",")[1]??"");reader.readAsDataURL(file);});
   }
   async function uploadKnowledge(files:File[]){
     if(!selected||!files.length)return;
@@ -548,84 +587,84 @@ export function CompanyPage() {
     const failures:string[]=[];
     for(const file of files){
       try{
-        if(file.size===0)throw new Error("The file is empty");
-        if(file.size>25*1024*1024)throw new Error("The 25 MB limit was exceeded");
+        if(file.size===0)throw new Error(t("companySettings.errors.fileIsEmpty"));
+        if(file.size>25*1024*1024)throw new Error(t("companySettings.errors.fileSizeLimitExceeded"));
         const data=await readFileAsBase64(file);
         const document=await api<KnowledgeDocument>(`/companies/${companyId}/knowledge/documents`,{method:"POST",headers:{"idempotency-key":crypto.randomUUID()},body:JSON.stringify({filename:file.name,mimeType:file.type||"application/octet-stream",data})});
         setDocuments(items=>[document,...items.filter(item=>item.id!==document.id)]);
         uploaded++;
-      }catch(error){failures.push(`${file.name}: ${error instanceof Error?error.message:"upload failed"}`);}
+      }catch(error){failures.push(`${file.name}: ${error instanceof Error?error.message:t("companySettings.errors.uploadFailed")}`);}
     }
     try{const value=await api<{documents:KnowledgeDocument[]}>(`/companies/${companyId}/knowledge/documents`);setDocuments(value.documents??[]);}catch{}
     setKnowledgeBusy(false);
-    setNotice(failures.length?`${uploaded} document(s) uploaded. ${failures.join("; ")}`:`${uploaded} document(s) uploaded and queued for processing.`);
+    setNotice(failures.length ? t("companySettings.notices.uploadedWithErrors", { count: String(uploaded), errors: failures.join("; ") }) : t("companySettings.notices.uploadedAndQueued", { count: String(uploaded) }));
   }
   async function addCompanyMemory(){
     const content=memoryText.trim();if(!selected||!content||memoryBusy)return;
     setMemoryBusy(true);setNotice("");
-    try{const created=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory`,{method:"POST",body:JSON.stringify({content})});setMemoryText("");setMemories(items=>[created,...items.filter(item=>item.id!==created.id)]);setNotice("Company memory added.");}
-    catch(error){setNotice(error instanceof Error?error.message:"Memory save failed");}finally{setMemoryBusy(false);}
+    try{const created=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory`,{method:"POST",body:JSON.stringify({content})});setMemoryText("");setMemories(items=>[created,...items.filter(item=>item.id!==created.id)]);setNotice(t("companySettings.notices.memoryAdded"));}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.memorySaveFailed"));}finally{setMemoryBusy(false);}
   }
   function startEditingMemory(memory:CompanyMemory){setEditingMemoryId(memory.id);setEditingMemoryText(memory.content);}
   async function updateCompanyMemory(){
     const content=editingMemoryText.trim();if(!selected||!editingMemoryId||!content||memoryBusy)return;
     setMemoryBusy(true);setNotice("");
-    try{const updated=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory/${editingMemoryId}`,{method:"PUT",body:JSON.stringify({content})});setMemories(items=>items.map(item=>item.id===updated.id?updated:item));setEditingMemoryId("");setEditingMemoryText("");setNotice("Company memory updated.");}
-    catch(error){setNotice(error instanceof Error?error.message:"Memory update failed");}finally{setMemoryBusy(false);}
+    try{const updated=await api<CompanyMemory>(`/companies/${selected.id}/knowledge/memory/${editingMemoryId}`,{method:"PUT",body:JSON.stringify({content})});setMemories(items=>items.map(item=>item.id===updated.id?updated:item));setEditingMemoryId("");setEditingMemoryText("");setNotice(t("companySettings.notices.memoryUpdated"));}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.memoryUpdateFailed"));}finally{setMemoryBusy(false);}
   }
   async function deleteKnowledge(id:string){
     if(!selected||knowledgeActionId)return;
     const confirmed = await confirmModal({
-      title: "Delete document?",
-      message: "Delete this document?",
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("companySettings.dialogs.deleteDocTitle"),
+      message: t("companySettings.dialogs.deleteDocMessage"),
+      confirmText: t("companySettings.dialogs.deleteConfirm"),
+      cancelText: t("companySettings.dialogs.deleteCancel"),
       isDanger: true,
     });
     if(!confirmed) return;
     setKnowledgeActionId(id);setNotice("");
-    try{await api(`/companies/${selected.id}/knowledge/documents/${id}`,{method:"DELETE"});setDocuments(items=>items.filter(item=>item.id!==id));setNotice("Document deleted.");}
-    catch(error){setNotice(error instanceof Error?error.message:"Document delete failed");}finally{setKnowledgeActionId("");}
+    try{await api(`/companies/${selected.id}/knowledge/documents/${id}`,{method:"DELETE"});setDocuments(items=>items.filter(item=>item.id!==id));setNotice(t("companySettings.notices.docDeleted"));}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.docDeleteFailed"));}finally{setKnowledgeActionId("");}
   }
   async function downloadKnowledge(doc:KnowledgeDocument){
     if(!selected||knowledgeActionId)return;setKnowledgeActionId(doc.id);setNotice("");
-    try{const headers=new Headers();const token=getStoredAuthToken();if(token)headers.set("authorization",`Bearer ${token}`);const response=await fetch(`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`,{headers});if(!response.ok){const body=await response.json().catch(()=>null) as {error?:{message?:string}}|null;throw new Error(body?.error?.message??`Download failed (${response.status})`);}const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=doc.filename||"company-document";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}
-    catch(error){setNotice(error instanceof Error?error.message:"Document download failed");}finally{setKnowledgeActionId("");}
+    try{const headers=new Headers();const token=getStoredAuthToken();if(token)headers.set("authorization",`Bearer ${token}`);const response=await fetch(`/api/companies/${selected.id}/knowledge/documents/${doc.id}/content`,{headers});if(!response.ok){const body=await response.json().catch(()=>null) as {error?:{message?:string}}|null;throw new Error(body?.error?.message??`${t("companySettings.errors.downloadFailedStatus")} (${response.status})`);}const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=doc.filename||"company-document";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.docDownloadFailed"));}finally{setKnowledgeActionId("");}
   }
   async function reprocessKnowledge(id:string){
     if(!selected||knowledgeActionId)return;setKnowledgeActionId(id);setNotice("");
-    try{const document=await api<KnowledgeDocument>(`/companies/${selected.id}/knowledge/documents/${id}/reprocess`,{method:"POST"});setDocuments(items=>items.map(item=>item.id===id?document:item));setNotice("Document queued for reprocessing.");}
-    catch(error){setNotice(error instanceof Error?error.message:"Document retry failed");}finally{setKnowledgeActionId("");}
+    try{const document=await api<KnowledgeDocument>(`/companies/${selected.id}/knowledge/documents/${id}/reprocess`,{method:"POST"});setDocuments(items=>items.map(item=>item.id===id?document:item));setNotice(t("companySettings.notices.docReprocessing"));}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.docRetryFailed"));}finally{setKnowledgeActionId("");}
   }
   async function deleteCompanyMemory(id:string){
     if(!selected||memoryBusy)return;
     const confirmed = await confirmModal({
-      title: "Delete memory?",
-      message: "Delete this Company memory?",
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("companySettings.dialogs.deleteMemoryTitle"),
+      message: t("companySettings.dialogs.deleteMemoryMessage"),
+      confirmText: t("companySettings.dialogs.deleteConfirm"),
+      cancelText: t("companySettings.dialogs.deleteCancel"),
       isDanger: true,
     });
     if(!confirmed) return;
     setMemoryBusy(true);setNotice("");
-    try{await api(`/companies/${selected.id}/knowledge/memory/${id}`,{method:"DELETE"});setMemories(items=>items.filter(item=>item.id!==id));if(editingMemoryId===id){setEditingMemoryId("");setEditingMemoryText("");}setNotice("Company memory deleted.");}
-    catch(error){setNotice(error instanceof Error?error.message:"Memory delete failed");}finally{setMemoryBusy(false);}
+    try{await api(`/companies/${selected.id}/knowledge/memory/${id}`,{method:"DELETE"});setMemories(items=>items.filter(item=>item.id!==id));if(editingMemoryId===id){setEditingMemoryId("");setEditingMemoryText("");}setNotice(t("companySettings.notices.memoryDeleted"));}
+    catch(error){setNotice(error instanceof Error?error.message:t("companySettings.errors.memoryDeleteFailed"));}finally{setMemoryBusy(false);}
   }
 
   async function deleteCompany() {
     if (!selected) return;
     const confirmed = await confirmModal({
-      title: "Delete company?",
-      message: `Delete company "${selected.name}" and all its agents?`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("companySettings.dialogs.deleteCompanyTitle"),
+      message: t("companySettings.dialogs.deleteCompanyMessage", { name: selected.name }),
+      confirmText: t("companySettings.dialogs.deleteConfirm"),
+      cancelText: t("companySettings.dialogs.deleteCancel"),
       isDanger: true,
     });
     if (!confirmed) return;
     try {
       await api(`/companies/${selected.id}`, { method: "DELETE" });
       setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not delete company"); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDelete")); }
   }
 
   const noticeIsSuccess = Boolean(notice)
@@ -640,21 +679,21 @@ export function CompanyPage() {
 
 
   if (companiesLoadError) return <main className="company-page company-refined company-initial-state">
-    <strong>Could not load your AI Company</strong>
+    <strong>{t("companySettings.errors.couldNotLoad")}</strong>
     <p>{companiesLoadError}</p>
-    <button className="button-primary" type="button" onClick={() => void initializeCompanies()}>Try Again</button>
+    <button className="button-primary" type="button" onClick={() => void initializeCompanies()}>{t("companySettings.errors.tryAgain")}</button>
   </main>;
 
   return <main className="company-page company-refined">
     <header className="company-page-header">
       <div>
-        <p className="eyebrow">Settings · AI Company</p>
+        <p className="eyebrow">{t("companySettings.header.eyebrow")}</p>
         <div className="company-title-row">
           <Link
             to="/settings"
             className="marketplace-back-button"
-            aria-label="Back to settings"
-            title="Back to settings"
+            aria-label={t("companySettings.header.backToSettings")}
+            title={t("companySettings.header.backToSettings")}
           >
             <svg
               width="20"
@@ -671,11 +710,11 @@ export function CompanyPage() {
           </Link>
           <h1
             className="company-header-title"
-            title={selected ? selected.name : "Build your AI company"}
+            title={selected ? selected.name : t("companySettings.header.buildTitle")}
           >
-            {selected ? selected.name : "Build your AI company"}
+            {selected ? selected.name : t("companySettings.header.buildTitle")}
           </h1>
-          {selected && <span className={`company-status ${selected.status}`}>{selected.status}</span>}
+          {selected && <span className={`company-status ${selected.status}`}>{translatedStatus(t, selected.status)}</span>}
 
           {selected && (
             <div className="company-title-actions">
@@ -683,17 +722,17 @@ export function CompanyPage() {
                 type="button"
                 className="content-action-btn edit-btn"
                 onClick={() => openCompanyEditor(selected)}
-                title="Edit company name, instructions and linked business"
+                title={t("companySettings.header.editCompanyTitle")}
               >
-                ✎ Edit Company
+                {t("companySettings.header.editCompany")}
               </button>
               <button
                 type="button"
                 className="content-action-btn delete-btn"
                 onClick={() => void deleteCompany()}
-                title="Delete this company"
+                title={t("companySettings.header.deleteTitle")}
               >
-                🗑 Delete
+                {t("companySettings.header.deleteBtn")}
               </button>
             </div>
           )}
@@ -704,11 +743,11 @@ export function CompanyPage() {
       </div>
       <div className="company-header-actions">
         <button className="button-secondary" onClick={() => openCompanyEditor()}>
-          + New Company
+          {t("companySettings.header.newCompany")}
         </button>
         {selected && (
           <button className="button-primary automations-action-primary" onClick={() => openAgentEditor()}>
-            + Add Agent
+            {t("companySettings.header.addAgent")}
           </button>
         )}
       </div>
@@ -720,14 +759,14 @@ export function CompanyPage() {
           {noticeIsSuccess ? "✓" : "⚠"}
         </span>
         <div className="company-notice-content">
-          <strong>{noticeIsSuccess ? "Update completed" : "System Alert"}</strong>
+          <strong>{noticeIsSuccess ? t("companySettings.notices.updateCompleted") : t("companySettings.notices.systemAlert")}</strong>
           <span>{notice}</span>
         </div>
         <button
           type="button"
           className="company-notice-close"
           onClick={() => setNotice("")}
-          aria-label="Dismiss notice"
+          aria-label={t("companySettings.misc.dismissNotice")}
         >
           ×
         </button>
@@ -735,20 +774,20 @@ export function CompanyPage() {
     )}
 
     {!selected ? <section className="company-first-run">
-      <span className="provider-avatar">CO</span><h2>Create your first Company</h2>
-      <p>Company is separate from Business and contains its own agents, instructions, models, tools and organization scheme.</p>
-      <button className="button-primary" onClick={() => openCompanyEditor()}>Create Company</button>
+      <span className="provider-avatar">CO</span><h2>{t("companySettings.firstRun.title")}</h2>
+      <p>{t("companySettings.firstRun.description")}</p>
+      <button className="button-primary" onClick={() => openCompanyEditor()}>{t("companySettings.firstRun.createButton")}</button>
     </section> : <>
       <section className="company-control-strip">
         {/* Block 1: Обираємо компанію */}
         <div className="company-strip-card">
           <div className="company-strip-eyebrow">
-            <span className="company-strip-label">Company</span>
-            <span className="company-strip-badge badge-active">Active</span>
+            <span className="company-strip-label">{t("companySettings.strip.company")}</span>
+            <span className="company-strip-badge badge-active">{t("companySettings.strip.active")}</span>
           </div>
           <div className="company-strip-control-row">
             <select
-              aria-label="Select company"
+              aria-label={t("companySettings.strip.selectCompany")}
               value={selectedId}
               onChange={(event) => setSelectedId(event.target.value)}
               className="company-strip-select"
@@ -762,26 +801,26 @@ export function CompanyPage() {
           </div>
           <span
             className="company-strip-footer-text"
-            title={`Main Orchestrator: ${agents.find((a) => a.id === selected.mainAgentId)?.name ?? "Add Agent"}`}
+            title={`${t("companySettings.strip.mainOrchestrator")} ${agents.find((a) => a.id === selected.mainAgentId)?.name ?? t("companySettings.header.addAgent")}`}
           >
-            Main Orchestrator: {agents.find((a) => a.id === selected.mainAgentId)?.name ?? "Add Agent"}
+            {t("companySettings.strip.mainOrchestrator")} {agents.find((a) => a.id === selected.mainAgentId)?.name ?? t("companySettings.header.addAgent")}
           </span>
         </div>
 
         {/* Block 2: Обираємо бізнес який є створений і підходить */}
         <div className="company-strip-card">
           <div className="company-strip-eyebrow">
-            <span className="company-strip-label">Linked Business</span>
-            <span className="company-strip-badge badge-linked">Linked</span>
+            <span className="company-strip-label">{t("companySettings.strip.linkedBusiness")}</span>
+            <span className="company-strip-badge badge-linked">{t("companySettings.strip.linked")}</span>
           </div>
           <div className="company-strip-control-row">
             <select
-              aria-label="Select linked business"
+              aria-label={t("companySettings.strip.selectLinkedBusiness")}
               value={selected.businessId ?? ""}
               onChange={(event) => void updateCompanyBusiness(event.target.value)}
               className="company-strip-select"
             >
-              <option value="">Independent (No business linked)</option>
+              <option value="">{t("companySettings.strip.independent")}</option>
               {overview?.businesses.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
@@ -791,23 +830,23 @@ export function CompanyPage() {
           </div>
           <span
             className="company-strip-footer-text"
-            title="Workspace business context connected"
+            title={t("companySettings.strip.contextConnected")}
           >
-            Workspace business context connected
+            {t("companySettings.strip.contextConnected")}
           </span>
         </div>
 
         {/* Block 3: Кількість агентів */}
         <div className="company-strip-card">
           <div className="company-strip-eyebrow">
-            <span className="company-strip-label">Total Agents</span>
-            <span className="company-strip-badge badge-hierarchy">Hierarchy</span>
+            <span className="company-strip-label">{t("companySettings.strip.totalAgents")}</span>
+            <span className="company-strip-badge badge-hierarchy">{t("companySettings.strip.hierarchy")}</span>
           </div>
           <div className="company-strip-control-row">
-            <strong>{agents.length} Agents</strong>
+            <strong>{t("companySettings.strip.agentsCount", { count: String(agents.length) })}</strong>
           </div>
-          <span className="company-strip-footer-text" title="Ready for delegated company tasks">
-            Ready for delegated company tasks
+          <span className="company-strip-footer-text" title={t("companySettings.strip.readyForTasks")}>
+            {t("companySettings.strip.readyForTasks")}
           </span>
         </div>
       </section>
@@ -815,10 +854,10 @@ export function CompanyPage() {
       <section className="company-run-card">
         <div className="company-section-heading">
           <div>
-            <span>Runtime</span>
-            <h2>Delegate a task</h2>
+            <span>{t("companySettings.runtime.kicker")}</span>
+            <h2>{t("companySettings.runtime.title")}</h2>
           </div>
-          <small>Main Agent plans through A2A; execution uses NPATI Auto, Pipeline or Fusion.</small>
+          <small>{t("companySettings.runtime.subtitle")}</small>
         </div>
 
         <form onSubmit={runCompany} className="company-run-form">
@@ -826,7 +865,7 @@ export function CompanyPage() {
             required
             rows={3}
             maxLength={20000}
-            placeholder="Give your AI company a task (e.g. Audit competitor offerings, synthesize buyer ICP, and generate marketing blueprints)..."
+            placeholder={t("companySettings.runtime.taskPlaceholder")}
             value={task}
             onChange={(event) => setTask(event.target.value)}
             className="company-run-textarea"
@@ -835,19 +874,19 @@ export function CompanyPage() {
           <div className="company-run-actions-bar">
             <div className="company-run-mode-field">
               <label htmlFor="company-run-mode" className="company-mode-label">
-                Execution Mode:
+                {t("companySettings.runtime.executionMode")}
               </label>
               <select
                 id="company-run-mode"
-                aria-label="Execution mode"
+                aria-label={t("companySettings.misc.executionModeAriaLabel")}
                 value={runMode}
                 onChange={(event) => setRunMode(event.target.value as typeof runMode)}
                 className="company-mode-select"
               >
-                <option value="auto">Auto by Main Agent</option>
-                <option value="single">Single Agent</option>
-                <option value="pipeline">Sequential Pipeline</option>
-                <option value="fusion">Fusion (Multi-agent Consensus)</option>
+                <option value="auto">{t("companySettings.runtime.autoMode")}</option>
+                <option value="single">{t("companySettings.runtime.singleMode")}</option>
+                <option value="pipeline">{t("companySettings.runtime.pipelineMode")}</option>
+                <option value="fusion">{t("companySettings.runtime.fusionMode")}</option>
               </select>
             </div>
 
@@ -859,14 +898,14 @@ export function CompanyPage() {
               {running ? (
                 <>
                   <span className="company-run-spinner" aria-hidden="true" />
-                  <span>Running Company...</span>
+                  <span>{t("companySettings.runtime.runningCompany")}</span>
                 </>
               ) : (
                 <>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <polygon points="5 3 19 12 5 21 5 3" />
                   </svg>
-                  <span>Run Company</span>
+                  <span>{t("companySettings.runtime.runCompany")}</span>
                 </>
               )}
             </button>
@@ -876,7 +915,7 @@ export function CompanyPage() {
         {!selected.mainAgentId && (
           <div className="company-field-notice-box">
             <span className="company-notice-bulb" aria-hidden="true">ℹ</span>
-            <span>Select a <strong>Main Agent</strong> in the control strip above before running the company.</span>
+            <span dangerouslySetInnerHTML={{ __html: t("companySettings.runtime.mainAgentNotice") }} />
           </div>
         )}
 
@@ -892,7 +931,7 @@ export function CompanyPage() {
               }`}
             />
             <span>
-              Run status: <strong>{runDetails.run.status}</strong>
+              {t("companySettings.runtime.runStatus")} <strong>{translatedStatus(t, runDetails.run.status)}</strong>
               {runDetails.run.errorMessage ? ` — ${runDetails.run.errorMessage}` : ""}
             </span>
           </div>
@@ -902,12 +941,12 @@ export function CompanyPage() {
           <div className="company-field-notice-box company-approval-box">
             <span className="company-notice-bulb" aria-hidden="true">!</span>
             <span>
-              <strong>Human approval required.</strong> Review the requested Code Mode / Exec action before it runs.
+              <span dangerouslySetInnerHTML={{ __html: t("companySettings.runtime.approvalRequired") }} />
               <code className="company-approval-preview">{JSON.stringify([...(runDetails?.toolAudit ?? [])].reverse().find((item) => item.reasonCode === "approval_required")?.inputSummary ?? {})}</code>
             </span>
             <div className="company-approval-actions">
-              <button type="button" className="button-secondary" disabled={approvalBusy} onClick={() => void decideRunApproval("rejected")}>Reject</button>
-              <button type="button" className="button-primary" disabled={approvalBusy} onClick={() => void decideRunApproval("approved")}>{approvalBusy ? "Applying..." : "Approve & continue"}</button>
+              <button type="button" className="button-secondary" disabled={approvalBusy} onClick={() => void decideRunApproval("rejected")}>{t("companySettings.runtime.reject")}</button>
+              <button type="button" className="button-primary" disabled={approvalBusy} onClick={() => void decideRunApproval("approved")}>{approvalBusy ? t("companySettings.runtime.applying") : t("companySettings.runtime.approve")}</button>
             </div>
           </div>
         )}
@@ -916,11 +955,11 @@ export function CompanyPage() {
           <div className="company-run-result">
             <div className="company-run-result-header">
               <div className="company-result-title-group">
-                <span className="company-result-badge">Result</span>
-                <strong>Final response</strong>
+                <span className="company-result-badge">{t("companySettings.runtime.result")}</span>
+                <strong>{t("companySettings.runtime.finalResponse")}</strong>
               </div>
               <small className="company-result-meta">
-                {runDetails.run.executionMode} · {runDetails.run.status}
+                {translatedMode(t, runDetails.run.executionMode)} · {translatedStatus(t, runDetails.run.status)}
               </small>
             </div>
             <div className="company-result-body">
@@ -931,8 +970,8 @@ export function CompanyPage() {
       </section>
 
       <section className="company-chart-card">
-        <div className="company-section-heading"><div><span>Organization</span><h2>AI Agent Org Chart</h2></div><small>Only 60 agents are loaded per page. Click an agent to edit it.</small></div>
-        <div className="company-chart-scroll" role="region" aria-label="Agent organization chart" tabIndex={0}>
+        <div className="company-section-heading"><div><span>{t("companySettings.orgChart.kicker")}</span><h2>{t("companySettings.orgChart.title")}</h2></div><small>{t("companySettings.orgChart.subtitle")}</small></div>
+        <div className="company-chart-scroll" role="region" aria-label={t("companySettings.misc.orgChartAriaLabel")} tabIndex={0}>
           <OrgChart agents={agents} edges={edges} mainAgentId={selected.mainAgentId} models={models} workingAgentIds={workingAgentIds} onSelect={openAgentEditor} />
         </div>
         {agentCursor && (
@@ -941,7 +980,7 @@ export function CompanyPage() {
             disabled={agentsPageLoading}
             onClick={() => void loadOrganization(selected.id, agentCursor, true)}
           >
-            {agentsPageLoading ? "Loading agents…" : "Load more agents"}
+            {agentsPageLoading ? t("companySettings.orgChart.loadingAgents") : t("companySettings.orgChart.loadMore")}
           </button>
         )}
       </section>
@@ -949,10 +988,10 @@ export function CompanyPage() {
       <section className="company-run-card company-knowledge-card">
         <div className="company-section-heading">
           <div>
-            <span>Context</span>
-            <h2>Company Knowledge</h2>
+            <span>{t("companySettings.knowledge.kicker")}</span>
+            <h2>{t("companySettings.knowledge.title")}</h2>
           </div>
-          <small>Private MinIO documents, NPATI embeddings and rerank.</small>
+          <small>{t("companySettings.knowledge.subtitle")}</small>
         </div>
 
         {/* Sub-block 1: Document Knowledge */}
@@ -960,7 +999,7 @@ export function CompanyPage() {
           <div className="company-knowledge-subhead">
             <div className="company-subhead-title">
               <span className="company-subhead-icon" aria-hidden="true">📁</span>
-              <h3>Knowledge Documents</h3>
+              <h3>{t("companySettings.knowledge.documentsTitle")}</h3>
               <small className="tab-count">{documents.length}</small>
             </div>
 
@@ -978,18 +1017,18 @@ export function CompanyPage() {
                 }}
               />
               <span className="upload-icon" aria-hidden="true">↑</span>
-              <span>{knowledgeBusy ? "Uploading..." : "Upload Document"}</span>
+              <span>{t(knowledgeBusy ? "companySettings.knowledge.uploading" : "companySettings.knowledge.uploadDoc")}</span>
             </label>
           </div>
 
           {documents.some((document) => document.status === "ready") && selected.mainAgentId && !agents.find((agent) => agent.id === selected.mainAgentId)?.tools.some((tool) => tool === "Knowledge" || tool === "storage.agent_knowledge_retrieval" || tool.toLowerCase() === "knowledge") && (
             <div className="company-knowledge-permission-alert" role="alert">
               <div>
-                <strong>Main Agent cannot search these documents yet</strong>
-                <small>Enable the Knowledge capability to use ready files from Company chat.</small>
+                <strong>{t("companySettings.knowledge.mainAgentCannotSearch")}</strong>
+                <small>{t("companySettings.knowledge.enableKnowledgeDesc")}</small>
               </div>
               <button type="button" disabled={knowledgeBusy} onClick={() => void enableMainAgentKnowledge()}>
-                {knowledgeBusy ? "Enabling…" : "Enable Knowledge for Main Agent"}
+                {knowledgeBusy ? t("companySettings.knowledge.enabling") : t("companySettings.knowledge.enableKnowledge")}
               </button>
             </div>
           )}
@@ -1000,20 +1039,20 @@ export function CompanyPage() {
                 <div className="company-doc-item-left">
                   <span className="company-doc-icon">📄</span>
                   <div className="company-doc-details">
-                    <strong title={doc.filename}>{doc.filename||"Company document"}</strong>
+                    <strong title={doc.filename}>{doc.filename||t("companySettings.knowledge.companyDocument")}</strong>
                     <div className="company-doc-meta">
                       <span className={`connection-status-pill status-${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`}>
                         <span className={`status-indicator-dot ${doc.status === "ready" ? "ok" : doc.status === "failed" ? "error" : "standby"}`} />
-                        {doc.status}
+                        {translatedStatus(t, doc.status)}
                       </span>
-                      <span className="company-chunk-badge">{doc.chunkCount} chunks</span>
+                      <span className="company-chunk-badge">{t("companySettings.knowledge.chunks", { count: String(doc.chunkCount) })}</span>
                       {typeof doc.sizeBytes==="number"&&<span className="company-doc-size">{doc.sizeBytes<1024*1024?`${Math.max(1,Math.round(doc.sizeBytes/1024))} KB`:`${(doc.sizeBytes/1024/1024).toFixed(1)} MB`}</span>}
                     </div>
                   </div>
                 </div>
                 {doc.errorMessage && <small className="company-doc-error">{doc.errorMessage}</small>}
                 <div className="company-doc-actions">
-                  <button type="button" className="company-doc-link" disabled={knowledgeActionId===doc.id} onClick={()=>void downloadKnowledge(doc)}>Download</button>
+                  <button type="button" className="company-doc-link" disabled={knowledgeActionId===doc.id} onClick={()=>void downloadKnowledge(doc)}>{t("companySettings.knowledge.download")}</button>
                   {doc.status === "failed" && (
                     <button
                       type="button"
@@ -1021,7 +1060,7 @@ export function CompanyPage() {
                       disabled={knowledgeActionId===doc.id}
                       onClick={() => void reprocessKnowledge(doc.id)}
                     >
-                      Retry
+                      {t("companySettings.knowledge.retry")}
                     </button>
                   )}
                   <button
@@ -1030,7 +1069,7 @@ export function CompanyPage() {
                     disabled={knowledgeActionId===doc.id}
                     onClick={() => void deleteKnowledge(doc.id)}
                   >
-                    Delete
+                    {t("companySettings.knowledge.delete")}
                   </button>
                 </div>
               </div>
@@ -1039,8 +1078,8 @@ export function CompanyPage() {
             {!documents.length && (
               <div className="company-empty-docs-box">
                 <span className="company-empty-icon" aria-hidden="true">📄</span>
-                <strong>No Company documents yet</strong>
-                <p>Upload PDF, DOCX, XLSX, TXT, MD, CSV, TSV, JSON, or XML files (up to 25 MB each).</p>
+                <strong>{t("companySettings.knowledge.noDocsTitle")}</strong>
+                <p>{t("companySettings.knowledge.noDocsDesc")}</p>
               </div>
             )}
           </div>
@@ -1051,7 +1090,7 @@ export function CompanyPage() {
           <div className="company-knowledge-subhead">
             <div className="company-subhead-title">
               <span className="company-subhead-icon" aria-hidden="true">💡</span>
-              <h3>Durable Company Memory</h3>
+              <h3>{t("companySettings.memory.durableTitle")}</h3>
               <small className="tab-count">{memories.length}</small>
             </div>
           </div>
@@ -1059,7 +1098,7 @@ export function CompanyPage() {
           <div className="company-memory-editor-row">
             <textarea
               rows={2}
-              placeholder="Add an important Company fact or rule (e.g. Refund terms, brand boundary, operating guidelines)..."
+              placeholder={t("companySettings.memory.addPlaceholder")}
               value={memoryText}
               onChange={(e) => setMemoryText(e.target.value)}
               disabled={memoryBusy}
@@ -1071,7 +1110,7 @@ export function CompanyPage() {
               onClick={() => void addCompanyMemory()}
               disabled={!memoryText.trim()||memoryBusy}
             >
-              {memoryBusy?"Saving...":"+ Add Memory"}
+              {memoryBusy?t("companySettings.memory.saving"):t("companySettings.memory.addMemory")}
             </button>
           </div>
 
@@ -1081,8 +1120,8 @@ export function CompanyPage() {
                 <li key={memory.id} className="company-memory-item">
                   {editingMemoryId===memory.id?<textarea rows={2} className="company-memory-textarea" value={editingMemoryText} disabled={memoryBusy} onChange={(event)=>setEditingMemoryText(event.target.value)}/>:<div className="company-memory-item-content"><span className="memory-bullet" aria-hidden="true">📌</span><p>{memory.content}</p></div>}
                   <div className="company-memory-actions">
-                    {editingMemoryId===memory.id?<><button type="button" className="button-primary company-memory-edit-btn" disabled={!editingMemoryText.trim()||memoryBusy} onClick={()=>void updateCompanyMemory()}>Save</button><button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>{setEditingMemoryId("");setEditingMemoryText("");}}>Cancel</button></>:<button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>startEditingMemory(memory)}>Edit</button>}
-                    <button type="button" className="content-action-btn delete-btn company-memory-delete-btn" disabled={memoryBusy} onClick={() => void deleteCompanyMemory(memory.id)} title="Delete fact">Delete</button>
+                    {editingMemoryId===memory.id?<><button type="button" className="button-primary company-memory-edit-btn" disabled={!editingMemoryText.trim()||memoryBusy} onClick={()=>void updateCompanyMemory()}>{t("companySettings.memory.save")}</button><button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>{setEditingMemoryId("");setEditingMemoryText("");}}>{t("companySettings.memory.cancel")}</button></>:<button type="button" className="button-secondary company-memory-edit-btn" disabled={memoryBusy} onClick={()=>startEditingMemory(memory)}>{t("companySettings.memory.edit")}</button>}
+                    <button type="button" className="content-action-btn delete-btn company-memory-delete-btn" disabled={memoryBusy} onClick={() => void deleteCompanyMemory(memory.id)} title={t("companySettings.memory.deleteFact")}>{t("companySettings.memory.delete")}</button>
                   </div>
                 </li>
               ))}
@@ -1095,8 +1134,8 @@ export function CompanyPage() {
     {companyEditor && <div className="company-drawer-backdrop" onMouseDown={() => setCompanyEditor(false)}>
       <aside className="company-drawer" onMouseDown={(event) => event.stopPropagation()}>
         <header>
-          <div><span>Company</span><h2>{editingCompany ? "Company Settings" : "New Company"}</h2></div>
-          <button type="button" className="company-drawer-close" aria-label="Close" onClick={() => setCompanyEditor(false)}>
+          <div><span>{t("companySettings.companyDrawer.company")}</span><h2>{editingCompany ? t("companySettings.companyDrawer.companySettings") : t("companySettings.companyDrawer.newCompany")}</h2></div>
+          <button type="button" className="company-drawer-close" aria-label={t("companySettings.misc.closeDrawer")} onClick={() => setCompanyEditor(false)}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -1104,20 +1143,20 @@ export function CompanyPage() {
           </button>
         </header>
         <form onSubmit={saveCompany}>
-          <section><h3>Company Context</h3>
-            <label><span>Company Name</span><input required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></label>
-            <label><span>Linked Business</span><select value={companyForm.businessId} onChange={(event) => setCompanyForm({ ...companyForm, businessId: event.target.value })}>
-              <option value="">Independent company</option>{overview?.businesses.map((business) => <option value={business.id} key={business.id}>{business.name}</option>)}
+          <section><h3>{t("companySettings.companyDrawer.companyContext")}</h3>
+            <label><span>{t("companySettings.companyDrawer.companyName")}</span><input required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></label>
+            <label><span>{t("companySettings.companyDrawer.linkedBusiness")}</span><select value={companyForm.businessId} onChange={(event) => setCompanyForm({ ...companyForm, businessId: event.target.value })}>
+              <option value="">{t("companySettings.companyDrawer.independent")}</option>{overview?.businesses.map((business) => <option value={business.id} key={business.id}>{business.name}</option>)}
             </select></label>
-            <div className="company-form-grid"><label><span>Website</span><input value={companyForm.website} onChange={(event) => setCompanyForm({ ...companyForm, website: event.target.value })} /></label>
-            <label><span>Industry</span><input value={companyForm.industry} onChange={(event) => setCompanyForm({ ...companyForm, industry: event.target.value })} /></label></div>
-            <label><span>Description</span><textarea value={companyForm.description} onChange={(event) => setCompanyForm({ ...companyForm, description: event.target.value })} /></label>
-            <label><span>Products / Services</span><textarea value={companyForm.productsServices} onChange={(event) => setCompanyForm({ ...companyForm, productsServices: event.target.value })} /></label>
-            <div className="company-form-grid"><label><span>Languages</span><input placeholder="Ukrainian, English" value={companyForm.languages} onChange={(event) => setCompanyForm({ ...companyForm, languages: event.target.value })} /></label>
-            <label><span>Brand Tone</span><input value={companyForm.brandTone} onChange={(event) => setCompanyForm({ ...companyForm, brandTone: event.target.value })} /></label></div>
-            <label><span>Company Instructions</span><textarea rows={5} value={companyForm.companyInstructions} onChange={(event) => setCompanyForm({ ...companyForm, companyInstructions: event.target.value })} /></label>
+            <div className="company-form-grid"><label><span>{t("companySettings.companyDrawer.website")}</span><input value={companyForm.website} onChange={(event) => setCompanyForm({ ...companyForm, website: event.target.value })} /></label>
+            <label><span>{t("companySettings.companyDrawer.industry")}</span><input value={companyForm.industry} onChange={(event) => setCompanyForm({ ...companyForm, industry: event.target.value })} /></label></div>
+            <label><span>{t("companySettings.companyDrawer.description")}</span><textarea value={companyForm.description} onChange={(event) => setCompanyForm({ ...companyForm, description: event.target.value })} /></label>
+            <label><span>{t("companySettings.companyDrawer.productsServices")}</span><textarea value={companyForm.productsServices} onChange={(event) => setCompanyForm({ ...companyForm, productsServices: event.target.value })} /></label>
+            <div className="company-form-grid"><label><span>{t("companySettings.companyDrawer.languages")}</span><input placeholder={t("companySettings.companyDrawer.languagesPlaceholder")} value={companyForm.languages} onChange={(event) => setCompanyForm({ ...companyForm, languages: event.target.value })} /></label>
+            <label><span>{t("companySettings.companyDrawer.brandTone")}</span><input value={companyForm.brandTone} onChange={(event) => setCompanyForm({ ...companyForm, brandTone: event.target.value })} /></label></div>
+            <label><span>{t("companySettings.companyDrawer.companyInstructions")}</span><textarea rows={5} value={companyForm.companyInstructions} onChange={(event) => setCompanyForm({ ...companyForm, companyInstructions: event.target.value })} /></label>
           </section>
-          <footer>{editingCompany && <button type="button" className="danger-button" onClick={() => void deleteCompany()}>Delete Company</button>}<span /><button type="button" className="button-secondary" onClick={() => setCompanyEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving…" : "Save Company"}</button></footer>
+          <footer>{editingCompany && <button type="button" className="danger-button" onClick={() => void deleteCompany()}>{t("companySettings.companyDrawer.deleteCompany")}</button>}<span /><button type="button" className="button-secondary" onClick={() => setCompanyEditor(false)}>{t("companySettings.companyDrawer.cancel")}</button><button className="button-primary" disabled={saving}>{saving ? t("companySettings.companyDrawer.saving") : t("companySettings.companyDrawer.save")}</button></footer>
         </form>
       </aside>
     </div>}
@@ -1125,8 +1164,8 @@ export function CompanyPage() {
     {agentEditor && selected && <div className="company-drawer-backdrop" onMouseDown={() => setAgentEditor(false)}>
       <aside className="company-drawer agent-editor" onMouseDown={(event) => event.stopPropagation()}>
         <header>
-          <div><span>AI Agent</span><h2>{editingAgent ? editingAgent.name : "Add Agent"}</h2></div>
-          <button type="button" className="company-drawer-close" aria-label="Close" onClick={() => setAgentEditor(false)}>
+          <div><span>{t("companySettings.agentDrawer.aiAgent")}</span><h2>{editingAgent ? editingAgent.name : t("companySettings.agentDrawer.addAgent")}</h2></div>
+          <button type="button" className="company-drawer-close" aria-label={t("companySettings.misc.closeDrawer")} onClick={() => setAgentEditor(false)}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -1134,35 +1173,36 @@ export function CompanyPage() {
           </button>
         </header>
         <form onSubmit={saveAgent}>
-          <section><h3>General</h3>
-            <div className="company-form-grid"><label><span>Name</span><input required value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
-            <label><span>Role</span><input required placeholder="Any custom role" value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })} /></label></div>
-            <label><span>Description</span><textarea value={agentForm.description} onChange={(event) => setAgentForm({ ...agentForm, description: event.target.value })} /></label>
+          <section><h3>{t("companySettings.agentDrawer.general")}</h3>
+            <div className="company-form-grid"><label><span>{t("companySettings.agentDrawer.name")}</span><input required value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label>
+            <label><span>{t("companySettings.agentDrawer.role")}</span><input required placeholder={t("companySettings.agentDrawer.rolePlaceholder")} value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })} /></label></div>
+            <label><span>{t("companySettings.agentDrawer.description")}</span><textarea value={agentForm.description} onChange={(event) => setAgentForm({ ...agentForm, description: event.target.value })} /></label>
           </section>
-          <section><h3>AI</h3>
-            <div className="company-form-grid"><label><span>Model</span><select value={agentForm.modelId} onChange={(event) => setAgentForm({ ...agentForm, modelId: event.target.value })}>
-              <option value="">Auto  -  NPATI</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
+          <section><h3>{t("companySettings.agentDrawer.ai")}</h3>
+            <div className="company-form-grid"><label><span>{t("companySettings.agentDrawer.model")}</span><select value={agentForm.modelId} onChange={(event) => setAgentForm({ ...agentForm, modelId: event.target.value })}>
+              <option value="">{t("companySettings.agentDrawer.autoNpati")}</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
             </select></label>
-            <label><span>Fallback Model</span><select value={agentForm.fallbackModelId} onChange={(event) => setAgentForm({ ...agentForm, fallbackModelId: event.target.value })}>
-              <option value="">Auto  -  NPATI</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
+            <label><span>{t("companySettings.agentDrawer.fallbackModel")}</span><select value={agentForm.fallbackModelId} onChange={(event) => setAgentForm({ ...agentForm, fallbackModelId: event.target.value })}>
+              <option value="">{t("companySettings.agentDrawer.autoNpati")}</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} - {model.providerName}</option>)}
             </select></label></div>
-            {modelsLoading && <small className="company-field-hint">Loading connected models...</small>}
-            {!modelsLoading && modelsError && <small className="company-field-hint">Could not load connected models: {modelsError}</small>}
-            {!modelsLoading && !modelsError && models.length === 0 && <small className="company-field-hint">No models in My Models. Auto uses NPATI routing; add models in AI Providers.</small>}
+            {modelsLoading && <small className="company-field-hint">{t("companySettings.agentDrawer.loadingModels")}</small>}
+            {!modelsLoading && modelsError && <small className="company-field-hint">{t("companySettings.agentDrawer.couldNotLoadModels")} {modelsError}</small>}
+            {!modelsLoading && !modelsError && models.length === 0 && <small className="company-field-hint">{t("companySettings.agentDrawer.noModelsHint")}</small>}
           </section>
-          <section><h3>Instructions</h3>
-            <label><span>System Instruction</span><textarea rows={5} value={agentForm.systemInstruction} onChange={(event) => setAgentForm({ ...agentForm, systemInstruction: event.target.value })} /></label>
-            <label><span>Prompt Guidelines</span><textarea rows={4} value={agentForm.promptGuidelines} onChange={(event) => setAgentForm({ ...agentForm, promptGuidelines: event.target.value })} /></label>
-            <label><span>Recommended Prompts</span><textarea rows={4} placeholder="One prompt per line" value={agentForm.recommendedPrompts} onChange={(event) => setAgentForm({ ...agentForm, recommendedPrompts: event.target.value })} /></label>
+          <section><h3>{t("companySettings.agentDrawer.instructions")}</h3>
+            <label><span>{t("companySettings.agentDrawer.systemInstruction")}</span><textarea rows={5} value={agentForm.systemInstruction} onChange={(event) => setAgentForm({ ...agentForm, systemInstruction: event.target.value })} /></label>
+            <label><span>{t("companySettings.agentDrawer.promptGuidelines")}</span><textarea rows={4} value={agentForm.promptGuidelines} onChange={(event) => setAgentForm({ ...agentForm, promptGuidelines: event.target.value })} /></label>
+            <label><span>{t("companySettings.agentDrawer.recommendedPrompts")}</span><textarea rows={4} placeholder={t("companySettings.agentDrawer.onePerLine")} value={agentForm.recommendedPrompts} onChange={(event) => setAgentForm({ ...agentForm, recommendedPrompts: event.target.value })} /></label>
           </section>
           <section>
-            <h3>Tools & Capabilities</h3>
-            <small className="company-field-hint">Knowledge searches uploaded documents. Company Memory gives this agent access to durable Company facts and rules.</small>
+            <h3>{t("companySettings.agentDrawer.toolsCapabilities")}</h3>
+            <small className="company-field-hint">{t("companySettings.agentDrawer.toolsHint")}</small>
             <div className="company-tool-grid">
               {availableTools.map((tool) => {
+                const translated = translatedTool(t, tool);
                 const isChecked = agentForm.tools.includes(tool.name) || agentForm.tools.includes(tool.id);
                 return (
-                  <label className="company-tool" key={tool.id} title={tool.description || tool.name}>
+                  <label className="company-tool" key={tool.id} title={translated.description || translated.name}>
                     <input
                       type="checkbox"
                       checked={isChecked}
@@ -1177,23 +1217,23 @@ export function CompanyPage() {
                       }}
                     />
                     <span>
-                      <strong>{tool.name}</strong>
-                      {tool.risk && tool.risk !== "low" && <span className={`risk-badge ${tool.risk}`}>{tool.risk}</span>}
-                      {tool.requiresConfirmation && <span className="confirm-badge">Approval required</span>}
+                      <strong>{translated.name}</strong>
+                      {tool.risk && tool.risk !== "low" && <span className={`risk-badge ${tool.risk}`}>{translatedStatus(t, tool.risk)}</span>}
+                      {tool.requiresConfirmation && <span className="confirm-badge">{t("companySettings.agentDrawer.approvalRequired")}</span>}
                     </span>
                   </label>
                 );
               })}
             </div>
           </section>
-          <section><h3>Organization</h3>
-            <label><span>Parent Agent</span><select value={agentForm.parentAgentId} onChange={(event) => setAgentForm({ ...agentForm, parentAgentId: event.target.value })}>
-              <option value="">No parent / top level</option>{agents.filter((agent) => agent.id !== editingAgent?.id).map((agent) => <option value={agent.id} key={agent.id}>{agent.name}  -  {agent.role}</option>)}
+          <section><h3>{t("companySettings.agentDrawer.organization")}</h3>
+            <label><span>{t("companySettings.agentDrawer.parentAgent")}</span><select value={agentForm.parentAgentId} onChange={(event) => setAgentForm({ ...agentForm, parentAgentId: event.target.value })}>
+              <option value="">{t("companySettings.agentDrawer.noParent")}</option>{agents.filter((agent) => agent.id !== editingAgent?.id).map((agent) => <option value={agent.id} key={agent.id}>{agent.name}  -  {agent.role}</option>)}
             </select></label>
-            <label className="company-switch"><input type="checkbox" checked={agentForm.isActive} onChange={(event) => setAgentForm({ ...agentForm, isActive: event.target.checked })} /><span>Agent active</span></label>
-            {editingAgent && <button type="button" className="button-secondary" onClick={() => void setMainAgent(editingAgent.id)}>Set as Main Agent</button>}
+            <label className="company-switch"><input type="checkbox" checked={agentForm.isActive} onChange={(event) => setAgentForm({ ...agentForm, isActive: event.target.checked })} /><span>{t("companySettings.agentDrawer.agentActive")}</span></label>
+            {editingAgent && <button type="button" className="button-secondary" onClick={() => void setMainAgent(editingAgent.id)}>{t("companySettings.agentDrawer.setMainAgent")}</button>}
           </section>
-          <footer>{editingAgent && <button type="button" className="danger-button" onClick={() => void deleteAgent()}>Delete Agent</button>}<span /><button type="button" className="button-secondary" onClick={() => setAgentEditor(false)}>Cancel</button><button className="button-primary" disabled={saving}>{saving ? "Saving…" : "Save Agent"}</button></footer>
+          <footer>{editingAgent && <button type="button" className="danger-button" onClick={() => void deleteAgent()}>{t("companySettings.agentDrawer.deleteAgent")}</button>}<span /><button type="button" className="button-secondary" onClick={() => setAgentEditor(false)}>{t("companySettings.agentDrawer.cancel")}</button><button className="button-primary" disabled={saving}>{saving ? t("companySettings.agentDrawer.saving") : t("companySettings.agentDrawer.save")}</button></footer>
         </form>
       </aside>
     </div>}
