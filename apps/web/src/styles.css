@@ -13469,3 +13469,221 @@ article.user .chat-message-attachment.document {
   color: #10b981;
 }
 
+/* NPATI Custom Dialog System (Confirmation, Alert, Prompt) */
+.npati-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000000;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: npatiDialogBackdropFade 0.16s ease-out;
+}
+
+@keyframes npatiDialogBackdropFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.npati-dialog-card {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 60px -12px rgba(17, 17, 17, 0.22), 0 8px 24px -4px rgba(0, 0, 0, 0.08);
+  padding: 26px 26px 22px;
+  animation: npatiDialogCardPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes npatiDialogCardPop {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.npati-dialog-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  color: #94a3b8;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.npati-dialog-close:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.npati-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.npati-dialog-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.npati-dialog-icon.danger {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: var(--npati-red, #e11d2e);
+}
+
+.npati-dialog-icon.info {
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  color: #2563eb;
+}
+
+.npati-dialog-icon.accent {
+  background: #fff1f2;
+  border: 1px solid #ffe4e6;
+  color: var(--npati-red, #e11d2e);
+}
+
+.npati-dialog-headings {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.npati-dialog-title {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #111111;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.npati-dialog-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #52525b;
+  word-break: break-word;
+}
+
+.npati-dialog-form {
+  margin-top: 14px;
+  margin-bottom: 4px;
+}
+
+.npati-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1.5px solid #e4e4e7;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.npati-dialog-input:focus {
+  outline: none;
+  border-color: var(--npati-red, #e11d2e);
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.12);
+}
+
+.npati-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.npati-dialog-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  line-height: 1.2;
+}
+
+.npati-dialog-btn-cancel {
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  color: #3f3f46;
+}
+
+.npati-dialog-btn-cancel:hover {
+  background: #f4f4f5;
+  border-color: #d4d4d8;
+  color: #18181b;
+}
+
+.npati-dialog-btn-primary {
+  background: #111111;
+  border: 1px solid #111111;
+  color: #ffffff;
+}
+
+.npati-dialog-btn-primary:hover {
+  background: #27272a;
+  border-color: #27272a;
+  transform: translateY(-1px);
+}
+
+.npati-dialog-btn-danger {
+  background: var(--npati-red, #e11d2e);
+  border: 1px solid var(--npati-red, #e11d2e);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(225, 29, 46, 0.28);
+}
+
+.npati-dialog-btn-danger:hover {
+  background: var(--npati-red-dark, #b81725);
+  border-color: var(--npati-red-dark, #b81725);
+  box-shadow: 0 4px 14px rgba(225, 29, 46, 0.38);
+  transform: translateY(-1px);
+}
+
+.npati-dialog-btn-danger:active {
+  transform: translateY(0);
+}
+

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
+import { confirmModal } from "./ConfirmDialog";
 
 export type MemoryType =
   | "business_fact"
@@ -277,7 +278,14 @@ export function MemoryPage() {
 
   const handleDeleteItem = async (item: MemoryItem) => {
     if (!businessId) return;
-    if (!window.confirm(`Видалити цей факт пам'яті "${item.title}"? Цю дію неможливо скасувати.`)) return;
+    const confirmed = await confirmModal({
+      title: "Видалити факт пам'яті?",
+      message: `Видалити цей факт пам'яті "${item.title}"? Цю дію неможливо скасувати.`,
+      confirmText: "Видалити",
+      cancelText: "Скасувати",
+      isDanger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await api(`/businesses/${businessId}/memory/${item.id}`, { method: "DELETE" });

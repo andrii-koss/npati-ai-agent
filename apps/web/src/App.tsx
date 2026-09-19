@@ -14,6 +14,7 @@ import { MemoryPage } from "./MemoryPage";
 import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
+import { ConfirmDialogContainer, confirmModal, alertModal, promptModal } from "./ConfirmDialog";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -526,12 +527,22 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
       await navigator.clipboard.writeText(url);
       setToast(`${label} link copied!`);
     } catch {
-      window.prompt(`Copy ${label} link:`, url);
+      await promptModal({
+        title: `Copy ${label} link`,
+        message: `Copy this ${label} link:`,
+        defaultValue: url,
+      });
     }
   }
 
   async function renameBusinessItem(id: string, currentName: string, isDraft?: boolean) {
-    const name = window.prompt("Rename business", currentName)?.trim();
+    const res = await promptModal({
+      title: "Rename business",
+      message: `Enter a new name for "${currentName}":`,
+      defaultValue: currentName,
+      confirmText: "Rename",
+    });
+    const name = res?.trim();
     if (!name || name === currentName) return;
     if (isDraft) {
       const draft = drafts.find((d) => d.businessId === id);
@@ -634,7 +645,13 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     navigate(`/c/${conversation.id}`, { state: conversation.businessId ? { businessId: conversation.businessId } : { neutralChat: true } });
   }
   async function renameConversation(conversation: SidebarConversation) {
-    const title = window.prompt("Rename chat", conversation.title)?.trim();
+    const res = await promptModal({
+      title: "Rename chat",
+      message: "Enter a new title for this chat:",
+      defaultValue: conversation.title,
+      confirmText: "Rename",
+    });
+    const title = res?.trim();
     if (!title || title === conversation.title) return;
     const endpoint = conversation.businessId
       ? `/api/businesses/${conversation.businessId}/conversations/${conversation.id}`
@@ -645,14 +662,25 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     if (response.ok) await loadConversations(true);
   }
   async function deleteConversation(conversation: SidebarConversation) {
-    if (!window.confirm(`Delete chat “${conversation.title}”? This cannot be undone.`)) return;
+    const confirmed = await confirmModal({
+      title: "Delete chat?",
+      message: `Delete chat “${conversation.title}”? This cannot be undone.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     const endpoint = conversation.businessId
       ? `/api/businesses/${conversation.businessId}/conversations/${conversation.id}`
       : `/api/conversations/${conversation.id}`;
     const response = await authFetch(endpoint, { method: "DELETE" });
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-      window.alert(payload?.error?.message ?? "Could not delete this chat.");
+      await alertModal({
+        title: "Delete failed",
+        message: payload?.error?.message ?? "Could not delete this chat.",
+        isDanger: true,
+      });
       return;
     }
     const remaining = conversations.filter((item) => item.id !== conversation.id);
@@ -670,7 +698,14 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     }
   }
   async function deleteBusiness(id: string, name: string) {
-    if (!window.confirm(`Delete business “${name}” and its chats, goals, and memory? This cannot be undone.`)) return;
+    const confirmed = await confirmModal({
+      title: "Delete business?",
+      message: `Delete business “${name}” and its chats, goals, and memory? This cannot be undone.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     const response = await authFetch(`/api/businesses/${id}`, { method: "DELETE" });
     if (response.ok) {
       const remainingDrafts = (cachedSidebarDrafts ?? drafts).filter((item) => item.businessId !== id);
@@ -1185,6 +1220,7 @@ export function App() {
   return (
     <AuthProvider>
       <WorkspaceProvider>
+        <ConfirmDialogContainer />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/chat" element={<LegacyChatRoute />} />

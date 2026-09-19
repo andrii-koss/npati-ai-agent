@@ -3,6 +3,7 @@ import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "
 import { Link } from "react-router-dom";
 import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
+import { confirmModal } from "./ConfirmDialog";
 
 type Company = {
   id: string; businessId?: string; name: string; website?: string; industry?: string; description?: string;
@@ -466,7 +467,15 @@ export function CompanyPage() {
   }
 
   async function deleteAgent() {
-    if (!selected || !editingAgent || !window.confirm(`Delete agent "${editingAgent.name}"?`)) return;
+    if (!selected || !editingAgent) return;
+    const confirmed = await confirmModal({
+      title: "Delete agent?",
+      message: `Delete agent "${editingAgent.name}"?`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     try {
       const deletingId = editingAgent.id;
       await api(`/companies/${selected.id}/agents/${deletingId}?expectedRevision=${editingAgent.revision}`, { method: "DELETE" });
@@ -565,7 +574,16 @@ export function CompanyPage() {
     catch(error){setNotice(error instanceof Error?error.message:"Memory update failed");}finally{setMemoryBusy(false);}
   }
   async function deleteKnowledge(id:string){
-    if(!selected||knowledgeActionId||!window.confirm("Delete this document?"))return;setKnowledgeActionId(id);setNotice("");
+    if(!selected||knowledgeActionId)return;
+    const confirmed = await confirmModal({
+      title: "Delete document?",
+      message: "Delete this document?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if(!confirmed) return;
+    setKnowledgeActionId(id);setNotice("");
     try{await api(`/companies/${selected.id}/knowledge/documents/${id}`,{method:"DELETE"});setDocuments(items=>items.filter(item=>item.id!==id));setNotice("Document deleted.");}
     catch(error){setNotice(error instanceof Error?error.message:"Document delete failed");}finally{setKnowledgeActionId("");}
   }
@@ -580,13 +598,30 @@ export function CompanyPage() {
     catch(error){setNotice(error instanceof Error?error.message:"Document retry failed");}finally{setKnowledgeActionId("");}
   }
   async function deleteCompanyMemory(id:string){
-    if(!selected||memoryBusy||!window.confirm("Delete this Company memory?"))return;setMemoryBusy(true);setNotice("");
+    if(!selected||memoryBusy)return;
+    const confirmed = await confirmModal({
+      title: "Delete memory?",
+      message: "Delete this Company memory?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if(!confirmed) return;
+    setMemoryBusy(true);setNotice("");
     try{await api(`/companies/${selected.id}/knowledge/memory/${id}`,{method:"DELETE"});setMemories(items=>items.filter(item=>item.id!==id));if(editingMemoryId===id){setEditingMemoryId("");setEditingMemoryText("");}setNotice("Company memory deleted.");}
     catch(error){setNotice(error instanceof Error?error.message:"Memory delete failed");}finally{setMemoryBusy(false);}
   }
 
   async function deleteCompany() {
-    if (!selected || !window.confirm(`Delete company "${selected.name}" and all its agents?`)) return;
+    if (!selected) return;
+    const confirmed = await confirmModal({
+      title: "Delete company?",
+      message: `Delete company "${selected.name}" and all its agents?`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     try {
       await api(`/companies/${selected.id}`, { method: "DELETE" });
       setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies();

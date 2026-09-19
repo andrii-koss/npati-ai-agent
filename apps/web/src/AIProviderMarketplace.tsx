@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import type { MarketplaceData, Model, Provider, Routing } from "./ai-marketplace-types";
+import { alertModal } from "./ConfirmDialog";
 
 const tabs = ["all", "recommended", "free", "connected"] as const;
 const RECOMMENDED_ORDER = [
@@ -188,7 +189,11 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
       onChange(updated);
       try { localStorage.setItem(ROUTING_CACHE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not update AI mode");
+      await alertModal({
+        title: "Update failed",
+        message: error instanceof Error ? error.message : "Could not update AI mode",
+        isDanger: true,
+      });
     } finally {
       setSaving(false);
     }

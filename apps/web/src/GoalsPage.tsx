@@ -2,6 +2,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
+import { confirmModal } from "./ConfirmDialog";
 
 export interface Goal {
   id: string;
@@ -219,7 +220,14 @@ export function GoalsPage() {
 
   const deleteGoal = async (goal: Goal) => {
     if (!businessId) return;
-    if (!confirm(`Are you sure you want to delete goal "${goal.title}"?`)) return;
+    const confirmed = await confirmModal({
+      title: "Delete goal?",
+      message: `Are you sure you want to delete goal "${goal.title}"?`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await api(`/businesses/${businessId}/goals/${goal.id}`, {
