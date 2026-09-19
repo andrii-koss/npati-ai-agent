@@ -119,7 +119,35 @@ export interface TranslationSchema {
     title: string;
     eyebrow: string;
     description: string;
-    languageTitle: string;
-    languageDesc: string;
+    cards: {
+      aiProviders: { title: string; desc: string };
+      business: { title: string; desc: string };
+      company: { title: string; desc: string };
+      capabilities: { title: string; desc: string };
+      activity: { title: string; desc: string };
+      automations: { title: string; desc: string };
+      goals: { title: string; desc: string };
+      content: { title: string; desc: string };
+      connections: { title: string; desc: string };
+      memory: { title: string; desc: string };
+      skills: { title: string; desc: string };
+    };
+  };
+  home: {
+    eyebrow: string;
+    heading: string;
+    subheading: string;
+    signIn: string;
+    createAccount: string;
+    chatEmptyTitle: string;
+    chatEmptySubtitle: string;
+    actions: {
+      sellSomething: { title: string; desc: string };
+      startBusiness: { title: string; desc: string };
+      growBusiness: { title: string; desc: string };
+      improveBusiness: { title: string; desc: string };
+      createContent: { title: string; desc: string };
+      askAgent: { title: string; desc: string };
+    };
   };
 }

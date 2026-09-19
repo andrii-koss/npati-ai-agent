@@ -36,14 +36,6 @@ function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   });
 }
 
-const actions = [
-  ["Sell something", "Turn a product into a clear offer"],
-  ["Start a business", "Shape an idea into a first test"],
-  ["Grow my business", "Find the next practical growth move"],
-  ["Improve my business", "Review what is working and what is not"],
-  ["Create content", "Plan useful content for your audience"],
-  ["Ask NPATI Agent", "Start with your own question"],
-] as const;
 
 const navigation = ["Settings"];
 type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
@@ -144,10 +136,20 @@ function ChatUserMenu() {
 }
 
 function Home() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { overview } = useWorkspace();
   const { isAuthenticated, user, logout } = useAuth();
   const [authModal, setAuthModal] = useState<{ open: boolean; mode: "login" | "register" }>({ open: false, mode: "login" });
+
+  const actionCards = [
+    { title: t("home.actions.sellSomething.title"), description: t("home.actions.sellSomething.desc") },
+    { title: t("home.actions.startBusiness.title"), description: t("home.actions.startBusiness.desc") },
+    { title: t("home.actions.growBusiness.title"), description: t("home.actions.growBusiness.desc") },
+    { title: t("home.actions.improveBusiness.title"), description: t("home.actions.improveBusiness.desc") },
+    { title: t("home.actions.createContent.title"), description: t("home.actions.createContent.desc") },
+    { title: t("home.actions.askAgent.title"), description: t("home.actions.askAgent.desc") },
+  ];
 
   async function startChat(prompt: string) {
     if (!isAuthenticated) {
@@ -181,23 +183,23 @@ function Home() {
           </div>
         ) : (
           <div className="home-auth-nav">
-            <button className="button-secondary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "login" })}>Sign in</button>
-            <button className="button-primary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "register" })}>Create account</button>
+            <button className="button-secondary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "login" })}>{t("home.signIn")}</button>
+            <button className="button-primary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "register" })}>{t("home.createAccount")}</button>
           </div>
         )}
       </header>
       <section className="hero">
         <div className="hero-header-block">
-          <p className="eyebrow"><span className="eyebrow-dot" aria-hidden="true" />Your AI Business Agent</p>
-          <h1>What would you like<br />to do?</h1>
-          <p className="hero-copy">Choose a starting point. We’ll use your active business, goals, and confirmed memory to build a practical next step.</p>
+          <p className="eyebrow"><span className="eyebrow-dot" aria-hidden="true" />{t("home.eyebrow")}</p>
+          <h1>{t("home.heading")}</h1>
+          <p className="hero-copy">{t("home.subheading")}</p>
         </div>
 
         <div className="action-grid">
-          {actions.map(([title, description], index) => (
-            <button key={title} className="action-card" onClick={() => void startChat(title)}>
+          {actionCards.map((card, index) => (
+            <button key={card.title} className="action-card" onClick={() => void startChat(card.title)}>
               <span className="action-number">0{index + 1}</span>
-              <span><strong>{title}</strong><small>{description}</small></span>
+              <span><strong>{card.title}</strong><small>{card.description}</small></span>
               <span className="action-arrow"><span className="action-arrow-glyph">→</span></span>
             </button>
           ))}
@@ -1182,17 +1184,17 @@ import { ContentPage } from "./ContentPage";
 function SettingsPage() {
   const { t } = useTranslation();
   const cards = [
-    { to: "/settings/ai", icon: "AI", title: t("nav.aiProviders"), description: "Connect providers, browse models, and choose AI routing." },
-    { to: "/settings/business", icon: "B", title: t("nav.business"), description: "Analyze a business idea, market, goals and strategy." },
-    { to: "/settings/company", icon: "CO", title: t("nav.company"), description: "Build your configurable AI team and agent organization." },
-    { to: "/settings/capabilities", icon: "CP", title: t("nav.capabilities"), description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
-    { to: "/settings/activity", icon: "AC", title: t("nav.activity"), description: "Inspect live execution traces, step delegations, and tool decisions." },
-    { to: "/settings/automations", icon: "AU", title: t("nav.automations"), description: "Schedule recurring cron jobs and background agent tasks." },
-    { to: "/settings/goals", icon: "G", title: t("nav.goals"), description: "Define and track measurable business outcomes." },
-    { to: "/settings/content", icon: "C", title: t("nav.content"), description: "Plan, generate, and manage content for your audience." },
-    { to: "/settings/connections", icon: "CS", title: t("nav.connections"), description: "Monitor service health, endpoints, and runtime integrations." },
-    { to: "/settings/memory", icon: "M", title: t("nav.memory"), description: "Review and edit confirmed business context." },
-    { to: "/settings/skills", icon: "S", title: t("nav.skills"), description: "Browse the capabilities NPATI Agent can use." },
+    { to: "/settings/ai", icon: "AI", title: t("settings.cards.aiProviders.title"), description: t("settings.cards.aiProviders.desc") },
+    { to: "/settings/business", icon: "B", title: t("settings.cards.business.title"), description: t("settings.cards.business.desc") },
+    { to: "/settings/company", icon: "CO", title: t("settings.cards.company.title"), description: t("settings.cards.company.desc") },
+    { to: "/settings/capabilities", icon: "CP", title: t("settings.cards.capabilities.title"), description: t("settings.cards.capabilities.desc") },
+    { to: "/settings/activity", icon: "AC", title: t("settings.cards.activity.title"), description: t("settings.cards.activity.desc") },
+    { to: "/settings/automations", icon: "AU", title: t("settings.cards.automations.title"), description: t("settings.cards.automations.desc") },
+    { to: "/settings/goals", icon: "G", title: t("settings.cards.goals.title"), description: t("settings.cards.goals.desc") },
+    { to: "/settings/content", icon: "C", title: t("settings.cards.content.title"), description: t("settings.cards.content.desc") },
+    { to: "/settings/connections", icon: "CS", title: t("settings.cards.connections.title"), description: t("settings.cards.connections.desc") },
+    { to: "/settings/memory", icon: "M", title: t("settings.cards.memory.title"), description: t("settings.cards.memory.desc") },
+    { to: "/settings/skills", icon: "S", title: t("settings.cards.skills.title"), description: t("settings.cards.skills.desc") },
   ];
 
   return (
@@ -1202,14 +1204,9 @@ function SettingsPage() {
         <h1>{t("settings.title")}</h1>
         <p>{t("settings.description")}</p>
       </div>
-      <div style={{ marginBottom: "2rem", padding: "20px 24px", background: "white", borderRadius: "16px", border: "1px solid rgba(0,0,0,0.08)" }}>
-        <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: 700 }}>{t("settings.languageTitle")}</h3>
-        <p style={{ margin: 0, fontSize: "13px", color: "#666" }}>{t("settings.languageDesc")}</p>
-        <LanguageSwitcher variant="settings" />
-      </div>
       <div className="settings-card-grid">
         {cards.map((card) => (
-          <Link className="settings-ai-card" to={card.to} key={card.title}>
+          <Link className="settings-ai-card" to={card.to} key={card.to}>
             <span className="provider-avatar">{card.icon}</span>
             <span>
               <strong>{card.title}</strong>
