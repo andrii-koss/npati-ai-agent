@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import type { MarketplaceData, Model, Provider, Routing } from "./ai-marketplace-types";
 import { alertModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
+import { getLocalizedProviderDescription } from "./i18n/providerDescriptions";
 
 const tabs = ["all", "recommended", "free", "connected"] as const;
 const RECOMMENDED_ORDER = [
@@ -41,11 +43,78 @@ function sortSearchResults(list: Provider[], needle: string): Provider[] {
     return a.name.localeCompare(b.name);
   });
 }
-const labels: Record<string, string> = {
-  api_key: "API key", oauth: "OAuth", none: "No auth", local: "Local", web_session: "Web session", other: "Other",
-  free: "Free", free_tier: "Free tier", paid: "Paid", unknown: "Cost unknown",
-  not_detected: "Not detected", needs_configuration: "Needs configuration", running: "Running",
-};
+
+function getLabel(key: string, t: (k: any) => string): string {
+  switch (key) {
+    case "api_key": return t("aiMarketplace.labels.apiKey");
+    case "oauth": return t("aiMarketplace.labels.oauth");
+    case "none":
+    case "no_auth": return t("aiMarketplace.labels.none");
+    case "local":
+    case "local_server": return t("aiMarketplace.labels.local");
+    case "web_session": return t("aiMarketplace.labels.webSession");
+    case "other": return t("aiMarketplace.labels.other");
+    case "free": return t("aiMarketplace.labels.free");
+    case "free_tier": return t("aiMarketplace.labels.freeTier");
+    case "paid": return t("aiMarketplace.labels.paid");
+    case "unknown": return t("aiMarketplace.labels.unknown");
+    default: return key;
+  }
+}
+
+function getCapabilityLabel(cap: string, t: (k: any) => string): string {
+  const capMap: Record<string, string> = {
+    text: "aiMarketplace.capabilities.text",
+    imageToText: "aiMarketplace.capabilities.imageToText",
+    "image-to-text": "aiMarketplace.capabilities.imageToText",
+    reasoning: "aiMarketplace.capabilities.reasoning",
+    tools: "aiMarketplace.capabilities.tools",
+    vision: "aiMarketplace.capabilities.vision",
+    webFetch: "aiMarketplace.capabilities.webFetch",
+    "web-fetch": "aiMarketplace.capabilities.webFetch",
+    webSearch: "aiMarketplace.capabilities.webSearch",
+    "web-search": "aiMarketplace.capabilities.webSearch",
+    embeddings: "aiMarketplace.capabilities.embeddings",
+    audio: "aiMarketplace.capabilities.audio",
+    video: "aiMarketplace.capabilities.video",
+    rerank: "aiMarketplace.capabilities.rerank",
+    code: "aiMarketplace.capabilities.code",
+  };
+  const key = capMap[cap];
+  if (key) {
+    const val = t(key as any);
+    if (val && val !== key) return val;
+  }
+  return cap;
+}
+
+function getCategoryLabel(category: string, t: (k: any) => string): string {
+  const catMap: Record<string, string> = {
+    "api-key": "aiMarketplace.categories.apiKey",
+    api_key: "aiMarketplace.categories.apiKey",
+    apiKey: "aiMarketplace.categories.apiKey",
+    oauth: "aiMarketplace.categories.oauth",
+    "no-auth": "aiMarketplace.categories.noAuth",
+    no_auth: "aiMarketplace.categories.noAuth",
+    noAuth: "aiMarketplace.categories.noAuth",
+    "web-session": "aiMarketplace.categories.webSession",
+    web_session: "aiMarketplace.categories.webSession",
+    webSession: "aiMarketplace.categories.webSession",
+    local: "aiMarketplace.categories.local",
+    cloud: "aiMarketplace.categories.cloud",
+    "upstream-proxy": "aiMarketplace.categories.upstreamProxy",
+    system: "aiMarketplace.categories.system",
+  };
+  const key = catMap[category.toLowerCase()];
+  if (key) {
+    const val = t(key as any);
+    if (val && val !== key) return val;
+  }
+  return category.replaceAll("-", " ");
+}
+
+
+
 const connectionModeLabels: Record<Provider["connectionMode"], string> = {
   api_key: "API key", oauth: "OAuth", no_auth: "No auth", web_session: "Web session",
   local: "Local server", local_cli: "Local CLI", embedded_service: "Embedded service",
@@ -57,13 +126,13 @@ const availabilityLabels: Record<Provider["availability"], string> = {
   requires_service: "Service setup required", unavailable: "Unavailable in this runtime", internal: "Internal only",
 };
 
-function providerActionLabel(provider: Provider) {
-  if (provider.connected) return "Manage";
-  if (!provider.connectable) return "View setup";
-  if (provider.connectionMode === "oauth") return "Sign in";
-  if (provider.connectionMode === "web_session") return "Add session";
-  if (provider.connectionMode === "local") return "Configure";
-  return "Connect";
+function providerActionLabel(provider: Provider, t: (k: any) => string) {
+  if (provider.connected) return t("aiMarketplace.actions.manage");
+  if (!provider.connectable) return t("aiMarketplace.actions.viewSetup");
+  if (provider.connectionMode === "oauth") return t("aiMarketplace.actions.signIn");
+  if (provider.connectionMode === "web_session") return t("aiMarketplace.actions.addSession");
+  if (provider.connectionMode === "local") return t("aiMarketplace.actions.configure");
+  return t("aiMarketplace.actions.connect");
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -99,33 +168,35 @@ function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone
 }
 
 function ProviderBadges({ provider }: { provider: Provider }) {
+  const { t } = useTranslation();
   return <div className="provider-badges">
-    {provider.freeStatus === "free" && <Badge tone="free">FREE</Badge>}
-    {provider.freeStatus === "free_tier" && <Badge tone="free">FREE TIER</Badge>}
-    {provider.local && <Badge tone="dark">LOCAL</Badge>}
-    <Badge>{connectionModeLabels[provider.connectionMode].toUpperCase()}</Badge>
-    {provider.availability === "unavailable" && <Badge>UNAVAILABLE</Badge>}
-    {provider.availability === "requires_service" && <Badge>SERVICE SETUP</Badge>}
-    {provider.connected && <Badge tone="connected">CONNECTED</Badge>}
-    {provider.recommended && <Badge tone="red">RECOMMENDED</Badge>}
-    {provider.experimental && <Badge>EXPERIMENTAL</Badge>}
+    {provider.freeStatus === "free" && <Badge tone="free">{t("aiMarketplace.labels.free").toUpperCase()}</Badge>}
+    {provider.freeStatus === "free_tier" && <Badge tone="free">{t("aiMarketplace.labels.freeTier").toUpperCase()}</Badge>}
+    {provider.local && <Badge tone="dark">{t("aiMarketplace.filters.local").toUpperCase()}</Badge>}
+    <Badge>{getLabel(provider.connectionMode, t).toUpperCase()}</Badge>
+    {provider.availability === "unavailable" && <Badge>{t("aiMarketplace.labels.unknown").toUpperCase()}</Badge>}
+    {provider.availability === "requires_service" && <Badge>{t("aiMarketplace.labels.service").toUpperCase()}</Badge>}
+    {provider.connected && <Badge tone="connected">{t("aiMarketplace.tabs.connected").toUpperCase()}</Badge>}
+    {provider.recommended && <Badge tone="red">{t("aiMarketplace.tabs.recommended").toUpperCase()}</Badge>}
+    {provider.experimental && <Badge>{t("aiMarketplace.labels.experimental").toUpperCase()}</Badge>}
   </div>;
 }
 
 function ProviderCard({ provider, busy, onOpen, onConnect }: { provider: Provider; busy?: string; onOpen: () => void; onConnect: () => void }) {
+  const { t, language } = useTranslation();
   return <article className={`provider-card ${provider.connected ? "is-connected" : ""}`}>
     <button className="provider-card-main" onClick={onOpen}>
       <ProviderIcon providerId={provider.id} name={provider.name} />
-      <span className="provider-title"><strong>{provider.name}</strong><small>{provider.local ? "Local & private AI" : provider.category.replaceAll("-", " ")}</small></span>
-      <span className={`connection-light ${provider.connected ? "on" : ""}`} aria-label={provider.connected ? "Connected" : "Not connected"} />
+      <span className="provider-title"><strong>{provider.name}</strong><small>{provider.local ? t("aiMarketplace.cards.localAi") : getCategoryLabel(provider.category, t)}</small></span>
+      <span className={`connection-light ${provider.connected ? "on" : ""}`} aria-label={provider.connected ? t("aiMarketplace.tabs.connected") : t("aiMarketplace.labels.none")} />
     </button>
     <ProviderBadges provider={provider} />
-    <p className="provider-description">{(provider.description || provider.authHint || "AI provider available through the Npati registry.").replaceAll("OmniRoute", "Npati")}</p>
-    <div className="capability-row">{provider.capabilities.slice(0, 4).map((item) => <span key={item}>{item}</span>)}</div>
+    <p className="provider-description">{getLocalizedProviderDescription(provider, t, language)}</p>
+    <div className="capability-row">{provider.capabilities.slice(0, 4).map((item) => <span key={item}>{getCapabilityLabel(item, t)}</span>)}</div>
     <div className="provider-card-footer">
-      <span><strong>{formatNumber(provider.modelCount)}</strong> registry models</span>
+      <span><strong>{formatNumber(provider.modelCount)}</strong> {t("aiMarketplace.cards.registryModels")}</span>
       <button className={provider.connected ? "button-secondary" : "button-primary"} disabled={!!busy} onClick={onConnect}>
-        {busy || providerActionLabel(provider)}
+        {busy || providerActionLabel(provider, t)}
       </button>
     </div>
   </article>;
@@ -157,6 +228,7 @@ function getCachedModels(): Model[] {
 }
 
 function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; models: Model[]; onChange: (routing: Routing) => void }) {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const activeRouting: Routing = routing || {
     mode: "manual",
@@ -190,7 +262,7 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
       try { localStorage.setItem(ROUTING_CACHE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
     } catch (error) {
       await alertModal({
-        title: "Update failed",
+        title: t("common.error"),
         message: error instanceof Error ? error.message : "Could not update AI mode",
         isDanger: true,
       });
@@ -205,49 +277,51 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
   }
 
   return <section className="routing-panel ai-policy-panel">
-    <div className="routing-panel-head"><div><p className="section-kicker">AI mode</p><h2>{activeRouting.mode === "manual" ? "Manual model" : "Automatic AI"}</h2><p>{activeRouting.mode === "manual" ? "NPATI uses your selected model and can fall back to automatic routing." : `Npati route: ${activeRouting.automaticModel ?? "auto"}`}</p></div>
+    <div className="routing-panel-head"><div><p className="section-kicker">{t("aiMarketplace.routing.kicker")}</p><h2>{activeRouting.mode === "manual" ? t("aiMarketplace.routing.manualTitle") : t("aiMarketplace.routing.autoTitle")}</h2><p>{activeRouting.mode === "manual" ? t("aiMarketplace.routing.manualDesc") : t("aiMarketplace.routing.autoDesc", { route: activeRouting.automaticModel ?? "auto" })}</p></div>
       <div className="mode-switch" aria-label="AI mode">
-        <button className={activeRouting.mode !== "manual" ? "active" : ""} disabled={saving} onClick={() => save({ mode: "automatic" })}>Automatic <small>Recommended</small></button>
-        <button className={activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>Manual <small>{models.length ? "Use default" : "Add a model first"}</small></button>
+        <button className={activeRouting.mode !== "manual" ? "active" : ""} disabled={saving} onClick={() => save({ mode: "automatic" })}>{t("aiMarketplace.routing.automatic")} <small>{t("aiMarketplace.routing.recommended")}</small></button>
+        <button className={activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.length ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
       </div>
     </div>
     <div className="ai-policy-grid">
       <div className="ai-policy-options">
-        <label><input type="checkbox" checked={activeRouting.preferFree} disabled={saving} onChange={(event) => save({ preferFree: event.target.checked })} /><span><strong>Prefer free when possible</strong><small>Uses a free auto-route and safely opens the wider pool if needed.</small></span></label>
-        <label><input type="checkbox" checked={activeRouting.fallbackOnFailure} disabled={saving} onChange={(event) => save({ fallbackOnFailure: event.target.checked })} /><span><strong>Fallback if provider fails</strong><small>Retries quota, unavailable-model and provider failures through Npati.</small></span></label>
-        <label><input type="checkbox" checked={activeRouting.balanceQualityCost} disabled={saving} onChange={(event) => save({ balanceQualityCost: event.target.checked })} /><span><strong>Balance quality and cost</strong><small>Scores health, quota, latency, quality and token price together.</small></span></label>
-        <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>Token compression</strong><small>RTK + Caveman for long business chats and research context.</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.preferFree} disabled={saving} onChange={(event) => save({ preferFree: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.preferFreeTitle")}</strong><small>{t("aiMarketplace.routing.preferFreeDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.fallbackOnFailure} disabled={saving} onChange={(event) => save({ fallbackOnFailure: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.fallbackTitle")}</strong><small>{t("aiMarketplace.routing.fallbackDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.balanceQualityCost} disabled={saving} onChange={(event) => save({ balanceQualityCost: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.balanceTitle")}</strong><small>{t("aiMarketplace.routing.balanceDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>{t("aiMarketplace.routing.compressionTitle")}</strong><small>{t("aiMarketplace.routing.compressionDesc")}</small></span></label>
       </div>
       <form className="ai-budget-settings" onSubmit={saveBudget}>
-        <p className="section-kicker">Budget guard</p>
-        <label><span>Monthly AI budget, USD</span><input type="number" min="0" step="1" value={monthlyBudget} onChange={(event) => setMonthlyBudget(event.target.value)} /></label>
-        <label><span>Warning at, %</span><input type="number" min="1" max="100" step="1" value={warningPercent} onChange={(event) => setWarningPercent(event.target.value)} /></label>
-        <label className="budget-stop"><input type="checkbox" checked={activeRouting.stopPaidWhenLimitReached} disabled={saving} onChange={(event) => save({ stopPaidWhenLimitReached: event.target.checked })} /><span>Stop paid AI at the limit</span></label>
-        <button className="button-secondary" disabled={saving}>Save budget</button>
-        <small>Npati tracks provider cost and enforces endpoint-key budgets. Free routes remain preferred.</small>
+        <p className="section-kicker">{t("aiMarketplace.budget.kicker")}</p>
+        <label><span>{t("aiMarketplace.budget.monthlyBudget")}</span><input type="number" min="0" step="1" value={monthlyBudget} onChange={(event) => setMonthlyBudget(event.target.value)} /></label>
+        <label><span>{t("aiMarketplace.budget.warningPercent")}</span><input type="number" min="1" max="100" step="1" value={warningPercent} onChange={(event) => setWarningPercent(event.target.value)} /></label>
+        <label className="budget-stop"><input type="checkbox" checked={activeRouting.stopPaidWhenLimitReached} disabled={saving} onChange={(event) => save({ stopPaidWhenLimitReached: event.target.checked })} /><span>{t("aiMarketplace.budget.stopPaid")}</span></label>
+        <button className="button-secondary" disabled={saving}>{t("aiMarketplace.budget.save")}</button>
+        <small>{t("aiMarketplace.budget.note")}</small>
       </form>
     </div>
-    <div className="ai-runtime-status"><span>✓ Circuit breakers & cooldown</span><span>✓ PII & prompt-injection guardrails</span><span>✓ Images, audio, embeddings & rerank available</span></div>
+    <div className="ai-runtime-status"><span>✓ {t("aiMarketplace.routing.statusCircuitBreakers")}</span><span>✓ {t("aiMarketplace.routing.statusGuardrails")}</span><span>✓ {t("aiMarketplace.routing.statusCapabilities")}</span></div>
   </section>;
 }
 
 function MyModels({ models, routing, onChanged }: { models: Model[]; routing: Routing | null; onChanged: () => void }) {
+  const { t } = useTranslation();
   async function setDefault(modelId: string) { await api("/api/ai/models/default", { method: "PUT", body: JSON.stringify({ modelId }) }); onChanged(); }
   async function remove(modelId: string) { await api("/api/ai/models", { method: "DELETE", body: JSON.stringify({ modelId }) }); onChanged(); }
   return <section className="my-models">
-    <div className="section-heading"><div><p className="section-kicker">Library</p><h2>My Models</h2></div><span>{models.length} added</span></div>
-    {models.length === 0 ? <div className="empty-inline"><strong>No models added yet.</strong><span>Connect a provider, browse its models, and add the ones NPATI should use.</span></div> :
+    <div className="section-heading"><div><p className="section-kicker">{t("aiMarketplace.myModels.kicker")}</p><h2>{t("aiMarketplace.myModels.heading")}</h2></div><span>{t("aiMarketplace.myModels.addedCount", { count: String(models.length) })}</span></div>
+    {models.length === 0 ? <div className="empty-inline"><strong>{t("aiMarketplace.myModels.emptyTitle")}</strong><span>{t("aiMarketplace.myModels.emptyDesc")}</span></div> :
       <div className="my-model-list">{models.map((model) => <div key={model.id} className="my-model-row">
         <ProviderIcon providerId={model.providerId} name={model.providerName} size="small" />
-        <span><strong>{model.name}</strong><small>via {model.providerName}{model.local ? " · Local" : ""}</small></span>
-        {routing?.defaultModelId === model.id && <Badge tone="red">DEFAULT</Badge>}
-        <button disabled={routing?.defaultModelId === model.id} onClick={() => setDefault(model.id)}>Set as default</button>
-        <button className="text-danger" onClick={() => remove(model.id)}>Remove</button>
+        <span><strong>{model.name}</strong><small>via {model.providerName}{model.local ? ` · ${t("aiMarketplace.filters.local")}` : ""}</small></span>
+        {routing?.defaultModelId === model.id && <Badge tone="red">{t("aiMarketplace.myModels.defaultBadge")}</Badge>}
+        <button disabled={routing?.defaultModelId === model.id} onClick={() => setDefault(model.id)}>{t("aiMarketplace.myModels.setDefault")}</button>
+        <button className="text-danger" onClick={() => remove(model.id)}>{t("aiMarketplace.myModels.remove")}</button>
       </div>)}</div>}
   </section>;
 }
 
 function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { provider: Provider; addedIds: Set<string>; onClose: () => void; onChanged: () => void; onReady: () => void }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"details" | "models" | "connect">(provider.connected ? "details" : "connect");
   const [models, setModels] = useState<Model[]>([]);
   const [modelSearch, setModelSearch] = useState("");
@@ -337,26 +411,41 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
 
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="provider-drawer" aria-label="Provider details">
-      <button className="drawer-close" onClick={onClose} aria-label="Close"><span>×</span></button>
-      <header className="drawer-header"><ProviderIcon providerId={provider.id} name={provider.name} size="large" /><div><p className="section-kicker">Provider details</p><h2>{provider.name}</h2></div></header>
+      <button className="drawer-close" onClick={onClose} aria-label={t("common.close")}><span>×</span></button>
+      <header className="drawer-header"><ProviderIcon providerId={provider.id} name={provider.name} size="large" /><div><p className="section-kicker">{t("aiMarketplace.drawer.kicker")}</p><h2>{provider.name}</h2></div></header>
       <ProviderBadges provider={provider} />
-      <div className="drawer-tabs"><button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>Overview</button><button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>Available Models</button><button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? "Settings" : "Setup"}</button></div>
+      <div className="drawer-tabs">
+        <button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>{t("aiMarketplace.drawer.overview")}</button>
+        <button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>{t("aiMarketplace.drawer.models")}</button>
+        <button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? t("common.settings") : t("aiMarketplace.drawer.setup")}</button>
+      </div>
       {message && <div className="inline-message">{message}</div>}
       {mode === "details" && <div className="details-body">
-        <dl><div><dt>Status</dt><dd>{availabilityLabels[provider.availability]}</dd></div><div><dt>Type</dt><dd>{provider.local ? "Local" : "Cloud"}</dd></div><div><dt>Setup</dt><dd>{connectionModeLabels[provider.connectionMode]}</dd></div><div><dt>Registry models</dt><dd>{provider.modelCount}</dd></div>{provider.localStatus && <div><dt>Local status</dt><dd>{labels[provider.localStatus] || provider.localStatus}</dd></div>}</dl>
+        <dl>
+          <div><dt>{t("aiMarketplace.drawer.status")}</dt><dd>{availabilityLabels[provider.availability] || provider.availability}</dd></div>
+          <div><dt>{t("aiMarketplace.drawer.type")}</dt><dd>{provider.local ? t("aiMarketplace.filters.local") : t("aiMarketplace.filters.cloud")}</dd></div>
+          <div><dt>{t("aiMarketplace.drawer.setupTitle")}</dt><dd>{connectionModeLabels[provider.connectionMode] || provider.connectionMode}</dd></div>
+          <div><dt>{t("aiMarketplace.drawer.registryModels")}</dt><dd>{provider.modelCount}</dd></div>
+          {provider.localStatus && <div><dt>{t("aiMarketplace.drawer.localStatus")}</dt><dd>{getLabel(provider.localStatus, t)}</dd></div>}
+        </dl>
         {provider.availabilityReason && <p className="provider-availability-note">{provider.availabilityReason}</p>}
-        <div className="drawer-actions">{provider.connected ? <><button className="button-primary" onClick={() => setMode("models")}>Browse models</button><button className="button-secondary" disabled={!!busy} onClick={() => action("test")}>Test connection</button><button className="button-secondary" disabled={!!busy} onClick={() => action("refresh-models")}>Refresh models</button><button className="button-danger" disabled={!!busy} onClick={() => action("disconnect")}>Disconnect</button></> : <button className="button-primary" onClick={() => setMode("connect")}>{providerActionLabel(provider)}</button>}</div>
+        <div className="drawer-actions">{provider.connected ? <>
+          <button className="button-primary" onClick={() => setMode("models")}>{t("aiMarketplace.drawer.browseModels")}</button>
+          <button className="button-secondary" disabled={!!busy} onClick={() => action("test")}>{t("aiMarketplace.drawer.testConnection")}</button>
+          <button className="button-secondary" disabled={!!busy} onClick={() => action("refresh-models")}>{t("aiMarketplace.drawer.refreshModels")}</button>
+          <button className="button-danger" disabled={!!busy} onClick={() => action("disconnect")}>{t("aiMarketplace.drawer.disconnect")}</button>
+        </> : <button className="button-primary" onClick={() => setMode("connect")}>{providerActionLabel(provider, t)}</button>}</div>
       </div>}
       {mode === "connect" && <div className="connect-body">
         {provider.authHint && <p className="auth-hint">{provider.authHint.replaceAll("OmniRoute", "Npati")}</p>}
-        {!provider.connectable ? <div className="provider-setup-note"><strong>{availabilityLabels[provider.availability]}</strong><span>{provider.availabilityReason ?? "This provider cannot be configured from the current NPATI runtime."}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider documentation ↗</a>}</div> : provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || `Continue with ${provider.name}`}</button>{oauth && <><div className="oauth-instructions"><strong>Complete authorization in the new window.</strong>{oauth.userCode && <p>Your code: <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">Open authorization page ↗</a></div>{oauth.method === "authorization_code" && <div className="field"><label>Authorization code or callback URL</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>Complete connection</button></div>}</>}</div> :
-          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>No API key required.</strong><span>Npati supports this provider without credentials.</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>Sign in, then return here with the session credential.</strong><span>Opening the provider website does not connect it automatically. Copy the Bearer token or cookie described above and paste it below.</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider sign-in ↗</a>}</div>}{provider.local && <div className="field"><label>Server URL</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? "Bearer token or session cookie" : "API key"}{provider.credentialOptional ? " (optional)" : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>The credential is sent directly to Npati and is never stored in the browser.</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || "Connect provider"}</button></form>}
+        {!provider.connectable ? <div className="provider-setup-note"><strong>{availabilityLabels[provider.availability] || provider.availability}</strong><span>{provider.availabilityReason ?? "This provider cannot be configured from the current NPATI runtime."}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider documentation ↗</a>}</div> : provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || `Continue with ${provider.name}`}</button>{oauth && <><div className="oauth-instructions"><strong>Complete authorization in the new window.</strong>{oauth.userCode && <p>Your code: <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">Open authorization page ↗</a></div>{oauth.method === "authorization_code" && <div className="field"><label>Authorization code or callback URL</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>Complete connection</button></div>}</>}</div> :
+          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>{t("aiMarketplace.drawer.noAuthNote")}</strong><span>Npati supports this provider without credentials.</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>Sign in, then return here with the session credential.</strong><span>Opening the provider website does not connect it automatically. Copy the Bearer token or cookie described above and paste it below.</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider sign-in ↗</a>}</div>}{provider.local && <div className="field"><label>{t("aiMarketplace.drawer.serverUrl")}</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? t("aiMarketplace.drawer.sessionToken") : t("aiMarketplace.drawer.apiKey")}{provider.credentialOptional ? " (optional)" : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>{t("aiMarketplace.drawer.credentialSecurity")}</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || t("aiMarketplace.drawer.connectProvider")}</button></form>}
       </div>}
       {mode === "models" && <div className="models-body">
-        <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="Search models…" /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(true, true)}>Refresh models</button></div>
-        <p className="showing-copy">Showing {models.length} of {modelTotal} models</p>
-        {loadingModels && models.length === 0 ? <div className="loading-state">Loading models…</div> : models.length === 0 ? <div className="empty-inline"><strong>No models returned.</strong><span>{provider.connected ? "Try Refresh models or check the provider connection." : "Connect this provider to discover live models."}</span></div> : <div className="model-list">{models.map((model) => <div className="model-row" key={model.id}><span><strong>{model.name}</strong><small>{model.upstreamId}</small><span className="capability-row">{model.capabilities.slice(0, 4).map((capability) => <i key={capability}>{capability}</i>)}</span></span><button disabled={!provider.connected || model.added || addedIds.has(model.id)} onClick={() => addModel(model)}>{model.added || addedIds.has(model.id) ? "Added" : provider.connected ? "Add to NPATI" : "Connect first"}</button></div>)}</div>}
-        {models.length < modelTotal && <button className="load-more" disabled={loadingModels} onClick={() => loadModels(false)}>{loadingModels ? "Loading…" : "Load more"}</button>}
+        <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder={t("aiMarketplace.drawer.searchModels")} /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(true, true)}>{t("aiMarketplace.drawer.refreshModels")}</button></div>
+        <p className="showing-copy">{t("aiMarketplace.drawer.showingModels", { current: String(models.length), total: String(modelTotal) })}</p>
+        {loadingModels && models.length === 0 ? <div className="loading-state">{t("aiMarketplace.drawer.loadingModels")}</div> : models.length === 0 ? <div className="empty-inline"><strong>{t("aiMarketplace.drawer.noModelsTitle")}</strong><span>{provider.connected ? t("aiMarketplace.drawer.noModelsDescConnected") : t("aiMarketplace.drawer.noModelsDescNotConnected")}</span></div> : <div className="model-list">{models.map((model) => <div className="model-row" key={model.id}><span><strong>{model.name}</strong><small>{model.upstreamId}</small><span className="capability-row">{model.capabilities.slice(0, 4).map((capability) => <i key={capability}>{getCapabilityLabel(capability, t)}</i>)}</span></span><button disabled={!provider.connected || model.added || addedIds.has(model.id)} onClick={() => addModel(model)}>{model.added || addedIds.has(model.id) ? t("aiMarketplace.drawer.added") : provider.connected ? t("aiMarketplace.drawer.addToNpati") : t("aiMarketplace.drawer.connectFirst")}</button></div>)}</div>}
+        {models.length < modelTotal && <button className="load-more" disabled={loadingModels} onClick={() => loadModels(false)}>{loadingModels ? t("common.loading") : t("aiMarketplace.explore.loadMore")}</button>}
       </div>}
     </aside>
   </div>;
@@ -376,6 +465,7 @@ function getCachedOverview(): { providers: number; models: number; connectedProv
 }
 
 export function AIProviderMarketplace() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [tab, setTab] = useState<(typeof tabs)[number]>("all");
   const [search, setSearch] = useState("");
@@ -518,30 +608,93 @@ export function AIProviderMarketplace() {
   return <main className="ai-marketplace">
     <header className="marketplace-hero">
       <div>
-        <p className="eyebrow">Settings · AI</p>
+        <p className="eyebrow">{t("aiMarketplace.eyebrow")}</p>
         <h1>
-          <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+          <Link to="/settings" className="marketplace-back-button" aria-label={t("common.back")} title={t("common.back")}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </Link>
-          <span>AI Provider</span>
+          <span>{t("aiMarketplace.title")}</span>
         </h1>
-        <p>Connect AI providers and choose the models NPATI Agent can use.</p>
+        <p>{t("aiMarketplace.description")}</p>
       </div>
     </header>
     <section className="overview-grid">
-      <div><strong>{overview ? formatNumber(overview.providers) : (data ? formatNumber(data.overview.providers) : "—")}</strong><span>providers available</span></div>
-      <div><strong>{overview ? formatNumber(overview.models) : (data ? formatNumber(data.overview.models) : "—")}</strong><span>models available</span></div>
-      <div><strong>{overview ? overview.connectedProviders : (data ? data.overview.connectedProviders : "—")}</strong><span>providers connected</span></div>
-      <div><strong>{overview ? overview.addedModels : (data ? data.overview.addedModels : "—")}</strong><span>models added</span></div>
+      <div><strong>{overview ? formatNumber(overview.providers) : (data ? formatNumber(data.overview.providers) : "—")}</strong><span>{t("aiMarketplace.stats.providersAvailable")}</span></div>
+      <div><strong>{overview ? formatNumber(overview.models) : (data ? formatNumber(data.overview.models) : "—")}</strong><span>{t("aiMarketplace.stats.modelsAvailable")}</span></div>
+      <div><strong>{overview ? overview.connectedProviders : (data ? data.overview.connectedProviders : "—")}</strong><span>{t("aiMarketplace.stats.providersConnected")}</span></div>
+      <div><strong>{overview ? overview.addedModels : (data ? data.overview.addedModels : "—")}</strong><span>{t("aiMarketplace.stats.modelsAdded")}</span></div>
     </section>
     <RoutingPanel routing={routing} models={models} onChange={setRouting} />
     {(overview?.connectedProviders || data?.overview.connectedProviders || models.length > 0) ? <MyModels models={models} routing={routing} onChanged={changed} /> : null}
-    <section className="explore-section"><div className="section-heading"><div><p className="section-kicker">Discovery</p><h2>Explore AI Providers</h2></div></div>
-      <div className="marketplace-controls"><div className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setDebouncedSearch(search); }} placeholder="Search providers or models..." />{search && (<button type="button" className="search-clear-btn" onClick={() => { setSearch(""); setDebouncedSearch(""); }} aria-label="Clear search" title="Clear search">×</button>)}</div><div className="marketplace-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => switchTab(item)}><span>{item.charAt(0).toUpperCase() + item.slice(1)}</span><small>{data?.counts[item] ?? "—"}</small></button>)}</div></div>
-      {tab === "all" && data && <div className="filter-row"><select value={type} onChange={(event) => setType(event.target.value)}><option value="">All types</option><option value="cloud">Cloud</option><option value="local">Local</option></select><select value={auth} onChange={(event) => setAuth(event.target.value)}><option value="">All authentication</option>{data.availableFilters.auth.map((item) => <option value={item} key={item}>{labels[item]}</option>)}</select><select value={cost} onChange={(event) => setCost(event.target.value)}><option value="">All costs</option>{data.availableFilters.cost.map((item) => <option value={item} key={item}>{labels[item]}</option>)}</select><select value={capability} onChange={(event) => setCapability(event.target.value)}><option value="">All capabilities</option>{data.availableFilters.capabilities.map((item) => <option value={item} key={item}>{item}</option>)}</select></div>}
-      {error ? <div className="engine-error"><strong>AI Engine unavailable</strong><p>NPATI Agent cannot load providers right now. {error}</p><button className="button-primary" onClick={() => load()}>Retry</button></div> : (loading && !data && providers.length === 0) ? <div className="loading-state">Loading providers…</div> : providers.length === 0 ? <div className="engine-error"><strong>{tab === "connected" ? "No AI providers connected yet." : "No providers found."}</strong><p>{tab === "connected" ? "Explore the marketplace and connect your first provider." : "Try a different search or filter."}</p>{tab === "connected" && <button className="button-primary" onClick={() => switchTab("recommended")}>Explore providers</button>}</div> : <><p className="showing-copy">Showing {providers.length} of {data?.pagination.total ?? providers.length} providers</p><div className="provider-grid">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} onOpen={() => setSelected(provider)} onConnect={() => setSelected(provider)} />)}</div>{data?.pagination.hasMore && <button className="load-more" disabled={loadingMore} onClick={() => load(providers.length)}>{loadingMore ? "Loading…" : "Load more providers"}</button>}</>}
+    <section className="explore-section">
+      <div className="section-heading"><div><p className="section-kicker">{t("aiMarketplace.explore.kicker")}</p><h2>{t("aiMarketplace.explore.heading")}</h2></div></div>
+      <div className="marketplace-controls">
+        <div className="search-box">
+          <span>⌕</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setDebouncedSearch(search); }} placeholder={t("aiMarketplace.explore.searchPlaceholder")} />
+          {search && (<button type="button" className="search-clear-btn" onClick={() => { setSearch(""); setDebouncedSearch(""); }} aria-label={t("common.delete")} title={t("common.delete")}>×</button>)}
+        </div>
+        <div className="marketplace-tabs">
+          {tabs.map((item) => (
+            <button key={item} className={tab === item ? "active" : ""} onClick={() => switchTab(item)}>
+              <span>{t(`aiMarketplace.tabs.${item}` as any)}</span>
+              <small>{data?.counts[item] ?? "—"}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      {tab === "all" && data && (
+        <div className="filter-row">
+          <select value={type} onChange={(event) => setType(event.target.value)}>
+            <option value="">{t("aiMarketplace.filters.allTypes")}</option>
+            <option value="cloud">{t("aiMarketplace.filters.cloud")}</option>
+            <option value="local">{t("aiMarketplace.filters.local")}</option>
+          </select>
+          <select value={auth} onChange={(event) => setAuth(event.target.value)}>
+            <option value="">{t("aiMarketplace.filters.allAuth")}</option>
+            {data.availableFilters.auth.map((item) => <option value={item} key={item}>{getLabel(item, t)}</option>)}
+          </select>
+          <select value={cost} onChange={(event) => setCost(event.target.value)}>
+            <option value="">{t("aiMarketplace.filters.allCosts")}</option>
+            {data.availableFilters.cost.map((item) => <option value={item} key={item}>{getLabel(item, t)}</option>)}
+          </select>
+          <select value={capability} onChange={(event) => setCapability(event.target.value)}>
+            <option value="">{t("aiMarketplace.filters.allCapabilities")}</option>
+            {data.availableFilters.capabilities.map((item) => <option value={item} key={item}>{getCapabilityLabel(item, t)}</option>)}
+          </select>
+        </div>
+      )}
+      {error ? (
+        <div className="engine-error">
+          <strong>{t("aiMarketplace.explore.engineUnavailable")}</strong>
+          <p>{t("aiMarketplace.explore.engineErrorPrefix")} {error}</p>
+          <button className="button-primary" onClick={() => load()}>{t("aiMarketplace.explore.retry")}</button>
+        </div>
+      ) : (loading && !data && providers.length === 0) ? (
+        <div className="loading-state">{t("aiMarketplace.explore.loadingProviders")}</div>
+      ) : providers.length === 0 ? (
+        <div className="engine-error">
+          <strong>{tab === "connected" ? t("aiMarketplace.explore.noConnectedTitle") : t("aiMarketplace.explore.noFoundTitle")}</strong>
+          <p>{tab === "connected" ? t("aiMarketplace.explore.noConnectedDesc") : t("aiMarketplace.explore.noFoundDesc")}</p>
+          {tab === "connected" && <button className="button-primary" onClick={() => switchTab("recommended")}>{t("aiMarketplace.explore.exploreProviders")}</button>}
+        </div>
+      ) : (
+        <>
+          <p className="showing-copy">{t("aiMarketplace.explore.showingProviders", { current: String(providers.length), total: String(data?.pagination.total ?? providers.length) })}</p>
+          <div className="provider-grid">
+            {providers.map((provider) => (
+              <ProviderCard key={provider.id} provider={provider} onOpen={() => setSelected(provider)} onConnect={() => setSelected(provider)} />
+            ))}
+          </div>
+          {data?.pagination.hasMore && (
+            <button className="load-more" disabled={loadingMore} onClick={() => load(providers.length)}>
+              {loadingMore ? t("common.loading") : t("aiMarketplace.explore.loadMore")}
+            </button>
+          )}
+        </>
+      )}
     </section>
     {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
   </main>;
