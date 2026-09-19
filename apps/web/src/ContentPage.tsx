@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { ChatMessageContent } from "./ChatMessageContent";
+import { confirmModal } from "./ConfirmDialog";
 
 export interface ContentItem {
   id: string;
@@ -214,13 +215,20 @@ export function ContentPage() {
     setTimeout(() => setToast(null), 2500);
   };
 
-  const handleDeleteItem = (idToDelete?: string) => {
+  const handleDeleteItem = async (idToDelete?: string) => {
     const targetId = idToDelete || selectedItem?.id;
     if (!targetId) return;
     const targetItem = items.find((i) => i.id === targetId);
     const title = targetItem?.title || "this document";
 
-    if (!window.confirm(`Are you sure you want to delete "${title}"?`)) {
+    const confirmed = await confirmModal({
+      title: "Delete content?",
+      message: `Are you sure you want to delete "${title}"?`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) {
       return;
     }
 

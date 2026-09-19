@@ -8,6 +8,7 @@ import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } 
 import { SPEECH_VOICES } from "./speech-voices";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
+import { confirmModal, alertModal } from "./ConfirmDialog";
 
 type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -507,13 +508,25 @@ export function BusinessPage() {
   }
 
   async function removeBusiness(id: string, name: string) {
-    if (!window.confirm(`Delete ${name} and its goals, memory, and conversations? This cannot be undone.`)) return;
+    if (!await confirmModal({
+      title: "Delete business?",
+      message: `Delete ${name} and its goals, memory, and conversations? This cannot be undone.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    })) return;
     await api(`/businesses/${id}`, { method: "DELETE" });
     await refresh();
   }
 
   async function convertToCompany(business: Business) {
-    if (!window.confirm(`Create a company from ${business.name} and transfer its profile, goals, and confirmed memory?`)) return;
+    if (!await confirmModal({
+      title: "Create company?",
+      message: `Create a company from ${business.name} and transfer its profile, goals, and confirmed memory?`,
+      confirmText: "Create company",
+      cancelText: "Cancel",
+      isDanger: false,
+    })) return;
     setConvertingId(business.id);
     try {
       await api(`/businesses/${business.id}/convert-to-company`, {
@@ -529,7 +542,11 @@ export function BusinessPage() {
       });
       navigate("/company");
     } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : "Could not create company from this business");
+      await alertModal({
+        title: "Company creation failed",
+        message: reason instanceof Error ? reason.message : "Could not create company from this business",
+        isDanger: true,
+      });
     } finally {
       setConvertingId(null);
     }

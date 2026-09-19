@@ -2,6 +2,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
+import { confirmModal } from "./ConfirmDialog";
 
 interface Company {
   id: string;
@@ -242,7 +243,14 @@ export function AutomationsPage() {
   };
 
   const deleteAutomation = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this automation?")) return;
+    const confirmed = await confirmModal({
+      title: "Delete automation?",
+      message: "Are you sure you want to delete this automation?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     try {
       await api(`/companies/${selectedCompanyId}/automations/${id}`, { method: "DELETE" });
       setAutomations((prev) => prev.filter((a) => a.id !== id));

@@ -6,6 +6,7 @@ import { BusinessChatPage, ChatContextSwitcherContext, FloatingNotice, useWorksp
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { cancelChatStream, streamChat } from "./chat-stream";
+import { confirmModal } from "./ConfirmDialog";
 
 type Message = { id: string; role: "user" | "assistant" | "system"; content: string };
 type Scenario = "existing" | "starting" | "seller";
@@ -151,7 +152,15 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
   }
 
   async function startOver() {
-    if (!session || sending || !window.confirm("Start business setup over? The current draft and its chat history will be deleted. This cannot be undone.")) return;
+    if (!session || sending) return;
+    const confirmed = await confirmModal({
+      title: "Restart business setup?",
+      message: "Start business setup over? The current draft and its chat history will be deleted. This cannot be undone.",
+      confirmText: "Restart setup",
+      cancelText: "Cancel",
+      isDanger: true,
+    });
+    if (!confirmed) return;
     setSending(true);
     setError("");
     try {
