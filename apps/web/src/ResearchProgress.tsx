@@ -27,12 +27,12 @@ type PageState = {
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
 const generationStatuses = [
-  "Готую відповідь із джерелами…",
-  "Опрацьовую результати…",
-  "Формую основні висновки…",
-  "Уточнюю формулювання…",
-  "Збираю все у зрозумілу відповідь…",
-  "Майже все готово…",
+  "Preparing answer with sources…",
+  "Processing research results…",
+  "Formulating key conclusions…",
+  "Refining wording…",
+  "Assembling final response…",
+  "Almost ready…",
 ];
 
 function GenerationStatus() {
@@ -82,7 +82,7 @@ function cleanLabel(text: string): string {
 
 function pageLabel(page: PageState) {
   if (page.domain === "file" || page.url.startsWith("file://")) {
-    return page.title || "Файл";
+    return page.title || "File";
   }
   const cleanTitle = page.title ? cleanLabel(page.title) : "";
   if (cleanTitle && cleanTitle.toLowerCase() !== page.domain.toLowerCase()) {
@@ -97,14 +97,14 @@ function pageLabel(page: PageState) {
       if (cleanRp) return cleanRp.charAt(0).toUpperCase() + cleanRp.slice(1);
     }
     if (!pathname || /^(?:index|default)\.(?:php|html|htm|aspx)$/i.test(pathname)) {
-      return "Головна сторінка";
+      return "Home page";
     }
     const lastSegment = pathname.split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ");
     const cleanSegment = lastSegment ? cleanLabel(lastSegment) : "";
     if (cleanSegment) return cleanSegment.charAt(0).toUpperCase() + cleanSegment.slice(1);
-    return "Головна сторінка";
+    return "Home page";
   } catch {
-    return cleanTitle || "Сторінка";
+    return cleanTitle || "Page";
   }
 }
 
@@ -189,17 +189,17 @@ export function ResearchProgressPanel({
 
   if (collapsed) {
     return <article className="assistant research-progress collapsed">
-      <button className="research-history-toggle" type="button" title="Показати історію аналізу" aria-label="Показати історію аналізу" onClick={() => setCollapsed(false)}>✓</button>
+      <button className="research-history-toggle" type="button" title="Show analysis history" aria-label="Show analysis history" onClick={() => setCollapsed(false)}>✓</button>
     </article>;
   }
 
   return <article className="assistant research-progress" aria-live="polite">
-    {autoCollapsed && <button className="research-history-toggle expanded" type="button" title="Приховати історію аналізу" aria-label="Приховати історію аналізу" onClick={() => setCollapsed(true)}>✓</button>}
+    {autoCollapsed && <button className="research-history-toggle expanded" type="button" title="Hide analysis history" aria-label="Hide analysis history" onClick={() => setCollapsed(true)}>✓</button>}
 
     {!model.searchComplete && model.query && <div className="research-search-row active">
       <span className="research-progress-state">●</span>
       <GlobeIcon />
-      <span className="research-active-text">Шукаю інформацію: {model.query}</span>
+      <span className="research-active-text">Searching web: {model.query}</span>
     </div>}
 
     <div className="research-page-list">{model.pages.map((page) => <div className={"research-page-row " + page.status} key={page.key}>
@@ -207,7 +207,7 @@ export function ResearchProgressPanel({
       <DomainIcon domain={page.domain} />
       <span className={page.status === "active" ? "research-active-text" : undefined}>
         <strong>{page.domain}</strong>
-        <small>{pageLabel(page)}{page.status === "failed" ? " — не вдалося відкрити" : ""}</small>
+        <small>{pageLabel(page)}{page.status === "failed" ? " — failed to open" : ""}</small>
       </span>
     </div>)}</div>
 
@@ -216,7 +216,7 @@ export function ResearchProgressPanel({
       <GenerationStatus />
     </div>}
     {model.generationFailed && <div className="research-generation-row failed">
-      <span className="research-progress-state">!</span><span>Не вдалося підготувати відповідь</span>
+      <span className="research-progress-state">!</span><span>Failed to prepare response</span>
     </div>}
   </article>;
 }

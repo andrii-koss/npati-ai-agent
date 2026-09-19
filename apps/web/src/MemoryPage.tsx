@@ -279,17 +279,17 @@ export function MemoryPage() {
   const handleDeleteItem = async (item: MemoryItem) => {
     if (!businessId) return;
     const confirmed = await confirmModal({
-      title: "Видалити факт пам'яті?",
-      message: `Видалити цей факт пам'яті "${item.title}"? Цю дію неможливо скасувати.`,
-      confirmText: "Видалити",
-      cancelText: "Скасувати",
+      title: "Delete memory fact?",
+      message: `Delete memory item "${item.title}"? This cannot be undone.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
       isDanger: true,
     });
     if (!confirmed) return;
 
     try {
       await api(`/businesses/${businessId}/memory/${item.id}`, { method: "DELETE" });
-      showToast(`Видалено: "${item.title}"`);
+      showToast(`Deleted: "${item.title}"`);
       await loadMemory();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not delete memory item";
