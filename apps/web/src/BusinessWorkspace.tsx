@@ -1,4 +1,5 @@
 import { getStoredAuthToken } from "./AuthContext";
+import { useTranslation } from "./i18n";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -340,56 +341,57 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       }
 
       await onSaved();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save business"); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : t("businessSettings.form.couldNotSave")); }
     finally { setSaving(false); }
   }
 
+  const { t } = useTranslation();
   return (
     <form className="workspace-form business-profile-form" onSubmit={submit}>
-      <div className="form-section-title"><span>Business profile</span><p>Give NPATI enough context to make relevant recommendations. You can refine this later.</p></div>
+      <div className="form-section-title"><span>{t("businessSettings.form.sectionTitle")}</span><p>{t("businessSettings.form.sectionDesc")}</p></div>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="field-grid">
-        <label className="field"><span>Business name</span><input {...field("name")} required={mode === "existing"} placeholder={mode === "starting" ? "Optional for now" : "Business name"} /></label>
-        <label className="field"><span>Stage</span><select {...field("businessStage")}><option value="idea">Idea</option><option value="starting">Starting</option><option value="operating">Operating</option><option value="growing">Growing</option><option value="scaling">Scaling</option></select></label>
-        <label className="field"><span>Industry</span><input {...field("industry")} placeholder="E-commerce, consulting, food…" /></label>
-        <label className="field"><span>Niche</span><input {...field("niche")} placeholder="Your specific focus" /></label>
-        <label className="field"><span>Country</span><input {...field("country")} placeholder="Primary country" /></label>
-        <label className="field"><span>Market</span><input {...field("market")} placeholder="Local, national, global…" /></label>
-        <label className="field"><span>Team</span><select {...field("teamType")}><option value="solo">Solo</option><option value="team">Team</option></select></label>
-        <label className="field"><span>Presence</span><select {...field("presenceType")}><option value="online">Online</option><option value="local">Local</option><option value="both">Online & local</option></select></label>
-        <label className="field"><span>Business model</span><input {...field("businessModel")} placeholder="Services, products, subscription…" /></label>
-        <label className="field"><span>Website</span><input {...field("website")} type="url" placeholder="https://" /></label>
+        <label className="field"><span>{t("businessSettings.form.businessName")}</span><input {...field("name")} required={mode === "existing"} placeholder={mode === "starting" ? t("businessSettings.form.optionalForNow") : t("businessSettings.form.businessNamePlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.stage")}</span><select {...field("businessStage")}><option value="idea">{t("businessSettings.form.stageIdea")}</option><option value="starting">{t("businessSettings.form.stageStarting")}</option><option value="operating">{t("businessSettings.form.stageOperating")}</option><option value="growing">{t("businessSettings.form.stageGrowing")}</option><option value="scaling">{t("businessSettings.form.stageScaling")}</option></select></label>
+        <label className="field"><span>{t("businessSettings.form.industry")}</span><input {...field("industry")} placeholder={t("businessSettings.form.industryPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.niche")}</span><input {...field("niche")} placeholder={t("businessSettings.form.nichePlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.country")}</span><input {...field("country")} placeholder={t("businessSettings.form.countryPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.market")}</span><input {...field("market")} placeholder={t("businessSettings.form.marketPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.team")}</span><select {...field("teamType")}><option value="solo">{t("businessSettings.form.teamSolo")}</option><option value="team">{t("businessSettings.form.teamTeam")}</option></select></label>
+        <label className="field"><span>{t("businessSettings.form.presence")}</span><select {...field("presenceType")}><option value="online">{t("businessSettings.form.presenceOnline")}</option><option value="local">{t("businessSettings.form.presenceLocal")}</option><option value="both">{t("businessSettings.form.presenceBoth")}</option></select></label>
+        <label className="field"><span>{t("businessSettings.form.businessModel")}</span><input {...field("businessModel")} placeholder={t("businessSettings.form.businessModelPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.website")}</span><input {...field("website")} type="url" placeholder="https://" /></label>
       </div>
 
       <div className="form-section-title" style={{ marginTop: "1.5rem" }}>
-        <span>Alignment & Linkages</span>
-        <p>Link a user goal and memory fact to this business idea.</p>
+        <span>{t("businessSettings.form.alignmentTitle")}</span>
+        <p>{t("businessSettings.form.alignmentDesc")}</p>
       </div>
 
       <div className="field-grid">
         <label className="field">
-          <span>User Goal</span>
+          <span>{t("businessSettings.form.userGoal")}</span>
           <select value={selectedGoalId} onChange={(e) => setSelectedGoalId(e.target.value)}>
-            <option value="none">-- No goal --</option>
+            <option value="none">{t("businessSettings.form.noGoal")}</option>
             {availableGoals.map((g) => (
               <option key={g.id} value={g.id}>
                 [{g.status}] {g.title}
               </option>
             ))}
-            <option value="create_new">+ Create new goal…</option>
+            <option value="create_new">{t("businessSettings.form.createNewGoal")}</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Memory for Business Idea</span>
+          <span>{t("businessSettings.form.memoryForIdea")}</span>
           <select value={selectedMemoryId} onChange={(e) => setSelectedMemoryId(e.target.value)}>
-            <option value="none">-- No memory --</option>
+            <option value="none">{t("businessSettings.form.noMemory")}</option>
             {availableMemories.map((m) => (
               <option key={m.id} value={m.id}>
                 [{m.type}] {m.title}: {m.content.slice(0, 35)}...
               </option>
             ))}
-            <option value="create_new">+ Add new memory fact…</option>
+            <option value="create_new">{t("businessSettings.form.addNewMemory")}</option>
           </select>
         </label>
       </div>
@@ -397,20 +399,20 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       {selectedGoalId === "create_new" && (
         <div className="field-grid" style={{ marginTop: "0.5rem" }}>
           <label className="field">
-            <span>New Goal Title</span>
+            <span>{t("businessSettings.form.newGoalTitle")}</span>
             <input
               value={newGoalTitle}
               onChange={(e) => setNewGoalTitle(e.target.value)}
-              placeholder="e.g. Acquire 100 recurring clients"
+              placeholder={t("businessSettings.form.newGoalTitlePlaceholder")}
               required
             />
           </label>
           <label className="field">
-            <span>Description or Expected Result</span>
+            <span>{t("businessSettings.form.goalDescription")}</span>
             <input
               value={newGoalDescription}
               onChange={(e) => setNewGoalDescription(e.target.value)}
-              placeholder="e.g. $2,000 monthly net profit"
+              placeholder={t("businessSettings.form.goalDescPlaceholder")}
             />
           </label>
         </div>
@@ -420,32 +422,32 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <div className="business-narrative-fields" style={{ marginTop: "0.5rem" }}>
           <div className="field-grid">
             <label className="field">
-              <span>Memory Category</span>
+              <span>{t("businessSettings.form.memoryCategory")}</span>
               <select value={newMemoryType} onChange={(e) => setNewMemoryType(e.target.value)}>
-                <option value="business_fact">Business fact</option>
-                <option value="audience">Audience</option>
-                <option value="brand">Brand</option>
-                <option value="preference">Preference</option>
-                <option value="decision">Decision</option>
-                <option value="product">Product</option>
+                <option value="business_fact">{t("businessSettings.form.memBusinessFact")}</option>
+                <option value="audience">{t("businessSettings.form.memAudience")}</option>
+                <option value="brand">{t("businessSettings.form.memBrand")}</option>
+                <option value="preference">{t("businessSettings.form.memPreference")}</option>
+                <option value="decision">{t("businessSettings.form.memDecision")}</option>
+                <option value="product">{t("businessSettings.form.memProduct")}</option>
               </select>
             </label>
             <label className="field">
-              <span>Fact Title</span>
+              <span>{t("businessSettings.form.factTitle")}</span>
               <input
                 value={newMemoryTitle}
                 onChange={(e) => setNewMemoryTitle(e.target.value)}
-                placeholder="e.g. Key local supplier"
+                placeholder={t("businessSettings.form.factTitlePlaceholder")}
                 required
               />
             </label>
           </div>
           <label className="field">
-            <span>Memory Content</span>
+            <span>{t("businessSettings.form.memoryContent")}</span>
             <textarea
               value={newMemoryContent}
               onChange={(e) => setNewMemoryContent(e.target.value)}
-              placeholder="Specify an important fact or detail that the agent should remember about this business"
+              placeholder={t("businessSettings.form.memoryContentPlaceholder")}
               required
             />
           </label>
@@ -453,32 +455,34 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       )}
 
       <div className="business-narrative-fields">
-        <label className="field"><span>What does the business do?</span><textarea {...field("description")} placeholder="Products, services, value proposition…" /></label>
-        <label className="field"><span>Products or services</span><textarea {...field("productsServicesSummary")} placeholder="What you sell or plan to offer…" /></label>
-        <label className="field"><span>Target audience</span><textarea {...field("audienceSummary")} placeholder="Who you serve and what problem they have…" /></label>
+        <label className="field"><span>{t("businessSettings.form.whatDoes")}</span><textarea {...field("description")} placeholder={t("businessSettings.form.whatDoesPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.productsServices")}</span><textarea {...field("productsServicesSummary")} placeholder={t("businessSettings.form.productsPlaceholder")} /></label>
+        <label className="field"><span>{t("businessSettings.form.targetAudience")}</span><textarea {...field("audienceSummary")} placeholder={t("businessSettings.form.audiencePlaceholder")} /></label>
       </div>
-      <div className="form-actions">{onCancel && <button type="button" className="button-secondary" onClick={onCancel} disabled={saving}>Cancel</button>}<button className="button-primary" disabled={saving}>{saving ? "Saving…" : initial ? "Save changes" : "Create business"}</button></div>
+      <div className="form-actions">{onCancel && <button type="button" className="button-secondary" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>}<button className="button-primary" disabled={saving}>{saving ? t("businessSettings.form.saving") : initial ? t("businessSettings.form.saveChanges") : t("businessSettings.form.createBusiness")}</button></div>
     </form>
   );
 }
 
-function BusinessSettingsHeader({ title = "Business Profiles", copy, action, backTo = "/settings", onBack }: { title?: string; copy: string; action?: ReactNode; backTo?: string; onBack?: () => void }) {
+function BusinessSettingsHeader({ title, copy, action, backTo = "/settings", onBack }: { title?: string; copy: string; action?: ReactNode; backTo?: string; onBack?: () => void }) {
+  const { t } = useTranslation();
+  const displayTitle = title || t("businessSettings.title");
   return (
     <header className="inspector-header automations-header business-settings-header">
       <div className="automations-header-top">
         <div>
-          <p className="eyebrow">Settings · Business</p>
+          <p className="eyebrow">{t("businessSettings.eyebrow")}</p>
           <h1>
-            {onBack ? <button type="button" className="marketplace-back-button" aria-label="Back to business profiles" title="Back to business profiles" onClick={onBack}>
+            {onBack ? <button type="button" className="marketplace-back-button" aria-label={t("businessSettings.backToProfiles")} title={t("businessSettings.backToProfiles")} onClick={onBack}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
-            </button> : <Link to={backTo} className="marketplace-back-button" aria-label={backTo === "/settings" ? "Back to settings" : "Back to business profiles"} title={backTo === "/settings" ? "Back to settings" : "Back to business profiles"}>
+            </button> : <Link to={backTo} className="marketplace-back-button" aria-label={backTo === "/settings" ? t("businessSettings.backToSettings") : t("businessSettings.backToProfiles")} title={backTo === "/settings" ? t("businessSettings.backToSettings") : t("businessSettings.backToProfiles")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
             </Link>}
-            <span>{title}</span>
+            <span>{displayTitle}</span>
           </h1>
           <p className="hero-copy">{copy}</p>
         </div>
@@ -497,6 +501,7 @@ export function BusinessPage() {
   const current = overview?.currentBusiness;
   const editDraft = editBusinessId ? overview?.onboardings.find((session) => session.businessId === editBusinessId) ?? null : null;
   const editTarget = editBusinessId ? overview?.businesses.find((business) => business.id === editBusinessId) : undefined;
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (!editTarget || current?.id === editTarget.id) return;
@@ -509,10 +514,10 @@ export function BusinessPage() {
 
   async function removeBusiness(id: string, name: string) {
     if (!await confirmModal({
-      title: "Delete business?",
-      message: `Delete ${name} and its goals, memory, and conversations? This cannot be undone.`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("businessSettings.dialogs.deleteTitle"),
+      message: t("businessSettings.dialogs.deleteMessage", { name }),
+      confirmText: t("businessSettings.dialogs.deleteConfirm"),
+      cancelText: t("businessSettings.dialogs.deleteCancel"),
       isDanger: true,
     })) return;
     await api(`/businesses/${id}`, { method: "DELETE" });
@@ -521,10 +526,10 @@ export function BusinessPage() {
 
   async function convertToCompany(business: Business) {
     if (!await confirmModal({
-      title: "Create company?",
-      message: `Create a company from ${business.name} and transfer its profile, goals, and confirmed memory?`,
-      confirmText: "Create company",
-      cancelText: "Cancel",
+      title: t("businessSettings.dialogs.createCompanyTitle"),
+      message: t("businessSettings.dialogs.createCompanyMessage", { name: business.name }),
+      confirmText: t("businessSettings.dialogs.createCompanyConfirm"),
+      cancelText: t("businessSettings.dialogs.createCompanyCancel"),
       isDanger: false,
     })) return;
     setConvertingId(business.id);
@@ -543,8 +548,8 @@ export function BusinessPage() {
       navigate("/company");
     } catch (reason) {
       await alertModal({
-        title: "Company creation failed",
-        message: reason instanceof Error ? reason.message : "Could not create company from this business",
+        title: t("businessSettings.dialogs.companyCreationFailed"),
+        message: reason instanceof Error ? reason.message : t("businessSettings.dialogs.companyCreationError"),
         isDanger: true,
       });
     } finally {
@@ -552,13 +557,13 @@ export function BusinessPage() {
     }
   }
 
-  if (loading && editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo="/settings/business" /></main>;
-  if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
+  if (loading && editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /></main>;
+  if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
 
   if (creatingManually) {
     return (
       <main className="automations-container business-settings-page">
-        <BusinessSettingsHeader title="New Business" copy="Create a complete business profile manually. You can update every field later." onBack={() => setCreatingManually(false)} />
+        <BusinessSettingsHeader title={t("businessSettings.newBusinessTitle")} copy={t("businessSettings.newBusinessCopy")} onBack={() => setCreatingManually(false)} />
         <BusinessForm
           mode="existing"
           onCancel={() => setCreatingManually(false)}
@@ -569,13 +574,13 @@ export function BusinessPage() {
   }
 
   if (editDraft) {
-    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editDraft.business.name} copy="Edit the saved details for this business idea." backTo="/settings/business" /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></main>;
+    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editDraft.business.name} copy={t("businessSettings.editDraftCopy")} backTo="/settings/business" /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></main>;
   }
-  if (editTarget && current?.id !== editTarget.id) return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy="Opening this business profile and its active context." backTo="/settings/business" /><div className="workspace-loading">Opening business profile…</div></main>;
+  if (editTarget && current?.id !== editTarget.id) return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy={t("businessSettings.openingCopy")} backTo="/settings/business" /><div className="workspace-loading">{t("businessSettings.openingProfile")}</div></main>;
   if (editTarget) {
-    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy="Keep the business facts NPATI relies on accurate and complete." backTo="/settings/business" /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></main>;
+    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy={t("businessSettings.editCopy")} backTo="/settings/business" /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></main>;
   }
-  if (editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy="Manage the business context NPATI uses across chats and recommendations." backTo="/settings/business" /><Notice tone="error">This business does not exist or is not available to your user.</Notice></main>;
+  if (editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /><Notice tone="error">{t("businessSettings.notFoundError")}</Notice></main>;
 
   const businesses = overview?.businesses ?? [];
   const drafts = overview?.onboardings ?? [];
@@ -583,27 +588,27 @@ export function BusinessPage() {
   return (
     <main className="automations-container business-settings-page">
       <BusinessSettingsHeader
-        copy="Manage the business profiles, markets, audiences, and operating context NPATI uses across chats and recommendations."
-        action={<button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Add Business</button>}
+        copy={t("businessSettings.description")}
+        action={<button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>{t("businessSettings.addBusiness")}</button>}
       />
 
       <section className="overview-grid inspector-stats-grid business-stats-grid">
-        <div><strong>{ideaCount}</strong><span>business profiles</span><small>All active profiles and drafts</small></div>
-        <div><strong>{businesses.length}</strong><span>active businesses</span><small>Ready to use with NPATI Agent</small></div>
-        <div><strong>{drafts.length}</strong><span>setup drafts</span><small>Profiles awaiting completion</small></div>
-        <div><strong>{current ? 1 : 0}</strong><span>current context</span><small>{current?.name || "No business selected"}</small></div>
+        <div><strong>{ideaCount}</strong><span>{t("businessSettings.stats.businessProfiles")}</span><small>{t("businessSettings.stats.allActiveDesc")}</small></div>
+        <div><strong>{businesses.length}</strong><span>{t("businessSettings.stats.activeBusinesses")}</span><small>{t("businessSettings.stats.readyToUse")}</small></div>
+        <div><strong>{drafts.length}</strong><span>{t("businessSettings.stats.setupDrafts")}</span><small>{t("businessSettings.stats.awaitingCompletion")}</small></div>
+        <div><strong>{current ? 1 : 0}</strong><span>{t("businessSettings.stats.currentContext")}</span><small>{current?.name || t("businessSettings.stats.noBusinessSelected")}</small></div>
       </section>
 
       <div className="inspector-table-status business-list-status">
-        <div className="status-left"><span>Showing <strong>{ideaCount}</strong> business {ideaCount === 1 ? "profile" : "profiles"}</span></div>
+        <div className="status-left"><span>{t("businessSettings.list.showingProfiles")} <strong>{ideaCount}</strong> {ideaCount === 1 ? t("businessSettings.list.profile") : t("businessSettings.list.profiles")}</span></div>
       </div>
 
       {ideaCount === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">B</div>
-          <h3>No Business Profiles Yet</h3>
-          <p>Create the first business profile to give NPATI the context it needs for relevant recommendations.</p>
-          <button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>+ Create First Business</button>
+          <h3>{t("businessSettings.empty.title")}</h3>
+          <p>{t("businessSettings.empty.description")}</p>
+          <button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>{t("businessSettings.createFirstBusiness")}</button>
         </div>
       ) : (
         <div className="record-list business-profile-list">
@@ -611,12 +616,12 @@ export function BusinessPage() {
             <article className="record-card business-profile-card" key={draft.businessId} onClick={() => navigate(`/b/${draft.businessId}`)}>
               <div className="business-card-main">
                 <span className="business-card-icon">{draft.business.name.charAt(0).toUpperCase() || "B"}</span>
-                <div><span className="record-status">Setup draft</span><h3>{draft.business.name}</h3><p>{draft.completedFields.length} of {draft.totalFields} setup steps completed</p></div>
+                <div><span className="record-status">{t("businessSettings.card.setupDraft")}</span><h3>{draft.business.name}</h3><p>{t("businessSettings.card.stepsCompleted", { completed: String(draft.completedFields.length), total: String(draft.totalFields) })}</p></div>
               </div>
               <div className="record-actions">
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${draft.businessId}`); }}>Continue setup</button>
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${draft.businessId}`); }}>Edit</button>
-                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(draft.businessId, draft.business.name); }}>Delete</button>
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${draft.businessId}`); }}>{t("businessSettings.card.continueSetup")}</button>
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${draft.businessId}`); }}>{t("businessSettings.card.edit")}</button>
+                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(draft.businessId, draft.business.name); }}>{t("businessSettings.card.delete")}</button>
               </div>
             </article>
           ))}
@@ -625,9 +630,9 @@ export function BusinessPage() {
               <div className="business-card-main">
                 <span className="business-card-icon">{business.name.charAt(0).toUpperCase() || "B"}</span>
                 <div>
-                  <span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? "Current" : business.businessStage}</span>
+                  <span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? t("businessSettings.card.current") : business.businessStage}</span>
                   <h3>{business.name}</h3>
-                  <p>{business.description || business.industry || "Business profile"}</p>
+                  <p>{business.description || business.industry || t("businessSettings.card.businessProfile")}</p>
                   <div className="business-card-meta">
                     {business.industry && <span>{business.industry}</span>}
                     {business.market && <span>{business.market}</span>}
@@ -636,9 +641,9 @@ export function BusinessPage() {
                 </div>
               </div>
               <div className="record-actions">
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>Edit</button>
-                <button disabled={convertingId === business.id} onClick={(event) => { event.stopPropagation(); void convertToCompany(business); }}>{convertingId === business.id ? "Converting..." : "Create company"}</button>
-                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>Delete</button>
+                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>{t("businessSettings.card.edit")}</button>
+                <button disabled={convertingId === business.id} onClick={(event) => { event.stopPropagation(); void convertToCompany(business); }}>{convertingId === business.id ? t("businessSettings.card.converting") : t("businessSettings.card.createCompany")}</button>
+                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>{t("businessSettings.card.delete")}</button>
               </div>
             </article>
           ))}
