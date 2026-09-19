@@ -37,6 +37,11 @@ export interface TranslationSchema {
     language: string;
     languageSelect: string;
     options: string;
+    ok: string;
+    notification: string;
+    deleteConfirmation: string;
+    confirmation: string;
+    inputRequired: string;
   };
   nav: {
     chat: string;
@@ -182,6 +187,7 @@ export interface TranslationSchema {
       statusCircuitBreakers: string;
       statusGuardrails: string;
       statusCapabilities: string;
+      couldNotUpdateMode: string;
     };
     budget: {
       kicker: string;
@@ -244,6 +250,10 @@ export interface TranslationSchema {
       unknown: string;
       service: string;
       experimental: string;
+      localCli: string;
+      embeddedService: string;
+      cloudAgent: string;
+      internal: string;
     };
     actions: {
       manage: string;
@@ -322,6 +332,51 @@ export interface TranslationSchema {
       addToNpati: string;
       added: string;
       connectFirst: string;
+      connectionHealthy: string;
+      connectionTestFailed: string;
+      providerDisconnected: string;
+      modelsSynchronized: string;
+      connectedSuccess: string;
+      connectionFailed: string;
+      connecting: string;
+      testing: string;
+      disconnecting: string;
+      refreshing: string;
+      actionFailed: string;
+      couldNotLoadModels: string;
+      startingOAuth: string;
+      waitingAuth: string;
+      oauthFailed: string;
+      oauthCouldNotStart: string;
+      completing: string;
+      continueWith: string;
+      completeAuthInWindow: string;
+      yourCode: string;
+      openAuthPage: string;
+      authCodeOrUrl: string;
+      completeConnection: string;
+      noAuthSupport: string;
+      webSessionNotice: string;
+      webSessionDesc: string;
+      openProviderSignIn: string;
+      openProviderDoc: string;
+      optional: string;
+      notConfiguredRuntime: string;
+      readyToConnect: string;
+      credentialsRequired: string;
+      loginRequired: string;
+      localRuntimeRequired: string;
+      serviceRequired: string;
+      unavailableRuntime: string;
+      internalOnly: string;
+    };
+    oauthCallback: {
+      completing: string;
+      missingCode: string;
+      success: string;
+      failed: string;
+      closeWindow: string;
+      backToMarketplace: string;
     };
   };
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useTranslation } from "./i18n";
 
 export interface DialogOptions {
   title?: string;
@@ -101,6 +102,7 @@ export function promptModal(
 }
 
 export function ConfirmDialogContainer() {
+  const { t } = useTranslation();
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +154,26 @@ export function ConfirmDialogContainer() {
 
   if (!dialog || !dialog.isOpen) return null;
 
+  const defaultTitle = dialog.isDanger
+    ? t("common.deleteConfirmation")
+    : dialog.type === "alert"
+    ? t("common.notification")
+    : dialog.type === "prompt"
+    ? t("common.inputRequired")
+    : t("common.confirmation");
+
+  const dialogTitle = (!dialog.title || ["Delete confirmation", "Confirmation", "Notification", "Input required"].includes(dialog.title))
+    ? defaultTitle
+    : dialog.title;
+
+  const confirmLabel = (!dialog.confirmText || ["Delete", "OK", "Confirm", "Save"].includes(dialog.confirmText))
+    ? (dialog.isDanger ? t("common.delete") : dialog.type === "alert" ? t("common.ok") : dialog.type === "prompt" ? t("common.save") : t("common.confirm"))
+    : dialog.confirmText;
+
+  const cancelLabel = (!dialog.cancelText || dialog.cancelText === "Cancel")
+    ? t("common.cancel")
+    : dialog.cancelText;
+
   const handleCancel = () => {
     const res = dialog.resolve;
     setDialog(null);
@@ -191,7 +213,7 @@ export function ConfirmDialogContainer() {
         <button
           className="npati-dialog-close"
           onClick={handleCancel}
-          aria-label="Close dialog"
+          aria-label={t("common.close")}
           type="button"
         >
           &times;
@@ -233,7 +255,7 @@ export function ConfirmDialogContainer() {
 
           <div className="npati-dialog-headings">
             <h3 id="npati-dialog-title" className="npati-dialog-title">
-              {dialog.title}
+              {dialogTitle}
             </h3>
             <p className="npati-dialog-message">{dialog.message}</p>
           </div>
@@ -265,7 +287,7 @@ export function ConfirmDialogContainer() {
               className="npati-dialog-btn npati-dialog-btn-cancel"
               onClick={handleCancel}
             >
-              {dialog.cancelText || "Cancel"}
+              {cancelLabel}
             </button>
           )}
 
@@ -277,7 +299,7 @@ export function ConfirmDialogContainer() {
             }`}
             onClick={handleConfirm}
           >
-            {dialog.confirmText || (dialog.isDanger ? "Delete" : "OK")}
+            {confirmLabel}
           </button>
         </div>
       </div>

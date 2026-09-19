@@ -115,16 +115,34 @@ function getCategoryLabel(category: string, t: (k: any) => string): string {
 
 
 
-const connectionModeLabels: Record<Provider["connectionMode"], string> = {
-  api_key: "API key", oauth: "OAuth", no_auth: "No auth", web_session: "Web session",
-  local: "Local server", local_cli: "Local CLI", embedded_service: "Embedded service",
-  cloud_agent: "Cloud agent", internal: "Internal",
-};
-const availabilityLabels: Record<Provider["availability"], string> = {
-  connected: "Connected", ready: "Ready to connect", requires_credentials: "Credentials required",
-  requires_login: "Sign-in required", requires_local_runtime: "Local runtime required",
-  requires_service: "Service setup required", unavailable: "Unavailable in this runtime", internal: "Internal only",
-};
+function getConnectionModeLabel(mode: Provider["connectionMode"] | string, t: (k: any) => string): string {
+  switch (mode) {
+    case "api_key": return t("aiMarketplace.labels.apiKey");
+    case "oauth": return t("aiMarketplace.labels.oauth");
+    case "no_auth": return t("aiMarketplace.labels.none");
+    case "web_session": return t("aiMarketplace.labels.webSession");
+    case "local": return t("aiMarketplace.labels.local");
+    case "local_cli": return t("aiMarketplace.labels.localCli");
+    case "embedded_service": return t("aiMarketplace.labels.embeddedService");
+    case "cloud_agent": return t("aiMarketplace.labels.cloudAgent");
+    case "internal": return t("aiMarketplace.labels.internal");
+    default: return getLabel(mode, t);
+  }
+}
+
+function getAvailabilityLabel(availability: Provider["availability"] | string, t: (k: any) => string): string {
+  switch (availability) {
+    case "connected": return t("aiMarketplace.tabs.connected");
+    case "ready": return t("aiMarketplace.drawer.readyToConnect");
+    case "requires_credentials": return t("aiMarketplace.drawer.credentialsRequired");
+    case "requires_login": return t("aiMarketplace.drawer.loginRequired");
+    case "requires_local_runtime": return t("aiMarketplace.drawer.localRuntimeRequired");
+    case "requires_service": return t("aiMarketplace.drawer.serviceRequired");
+    case "unavailable": return t("aiMarketplace.drawer.unavailableRuntime");
+    case "internal": return t("aiMarketplace.drawer.internalOnly");
+    default: return availability;
+  }
+}
 
 function providerActionLabel(provider: Provider, t: (k: any) => string) {
   if (provider.connected) return t("aiMarketplace.actions.manage");
@@ -263,7 +281,7 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
     } catch (error) {
       await alertModal({
         title: t("common.error"),
-        message: error instanceof Error ? error.message : "Could not update AI mode",
+        message: error instanceof Error ? error.message : t("aiMarketplace.routing.couldNotUpdateMode"),
         isDanger: true,
       });
     } finally {
@@ -344,9 +362,9 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
       const result = await api<{ models: Model[]; pagination: { total: number; hasMore: boolean } }>(`/api/ai/providers/${encodeURIComponent(provider.id)}/models?${query}`);
       setModels((current) => reset ? result.models : [...current, ...result.models]);
       setModelOffset(offset + result.models.length); setModelTotal(result.pagination.total);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not load models"); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.couldNotLoadModels")); }
     finally { setLoadingModels(false); }
-  }, [modelOffset, modelSearch, provider.id]);
+  }, [modelOffset, modelSearch, provider.id, t]);
 
   useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
   useEffect(() => { if (mode === "models") void loadModels(true); }, [mode, modelSearch]);
@@ -357,16 +375,16 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
   }, [message]);
 
   async function connect(event?: FormEvent) {
-    event?.preventDefault(); setBusy("Connecting…"); setMessage("");
+    event?.preventDefault(); setBusy(t("aiMarketplace.drawer.connecting")); setMessage("");
     try {
       await api(`/api/ai/providers/${encodeURIComponent(provider.id)}/connect`, { method: "POST", body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) }) });
-      setApiKey(""); setMessage("Connected successfully — choose a model below"); setMode("models"); onChanged();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Connection failed"); }
+      setApiKey(""); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setMode("models"); onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.connectionFailed")); }
     finally { setBusy(""); }
   }
 
   async function startOauth() {
-    setBusy("Starting OAuth…"); setMessage("");
+    setBusy(t("aiMarketplace.drawer.startingOAuth")); setMessage("");
     try {
       const flow = await api<typeof oauth>(`/api/ai/providers/${encodeURIComponent(provider.id)}/oauth/start`, { method: "POST" });
       if (!flow) return; setOauth(flow); window.open(flow.authorizationUrl, "_blank", "noopener,noreferrer");
@@ -374,30 +392,30 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
         const poll = async () => {
           try {
             const result = await api<{ status: string; message?: string }>(`/api/ai/oauth/${flow.flowId}/poll`, { method: "POST" });
-            setMessage(result.message || "Waiting for authorization…");
-            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); setMessage("Connected successfully — choose a model below"); setMode("models"); onChanged(); }
-          } catch (error) { setMessage(error instanceof Error ? error.message : "OAuth failed"); if (pollRef.current) window.clearInterval(pollRef.current); }
+            setMessage(result.message || t("aiMarketplace.drawer.waitingAuth"));
+            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setMode("models"); onChanged(); }
+          } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.oauthFailed")); if (pollRef.current) window.clearInterval(pollRef.current); }
         };
         pollRef.current = window.setInterval(poll, Math.max(3, flow.interval || 5) * 1000); void poll();
       }
-    } catch (error) { setMessage(error instanceof Error ? error.message : "OAuth could not start"); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.oauthCouldNotStart")); }
     finally { setBusy(""); }
   }
 
   async function completeOauth() {
-    if (!oauth) return; setBusy("Completing…");
-    try { await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage("Connected successfully — choose a model below"); setOauth(null); setMode("models"); onChanged(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "OAuth failed"); }
+    if (!oauth) return; setBusy(t("aiMarketplace.drawer.completing"));
+    try { await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setOauth(null); setMode("models"); onChanged(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.oauthFailed")); }
     finally { setBusy(""); }
   }
 
   async function action(kind: "test" | "disconnect" | "refresh-models") {
-    setBusy(kind === "test" ? "Testing…" : kind === "disconnect" ? "Disconnecting…" : "Refreshing models…"); setMessage("");
+    setBusy(kind === "test" ? t("aiMarketplace.drawer.testing") : kind === "disconnect" ? t("aiMarketplace.drawer.disconnecting") : t("aiMarketplace.drawer.refreshing")); setMessage("");
     try {
       const result = await api<Record<string, unknown>>(`/api/ai/providers/${encodeURIComponent(provider.id)}${kind === "disconnect" ? "" : `/${kind}`}`, { method: kind === "disconnect" ? "DELETE" : "POST" });
-      setMessage(kind === "test" ? (result.valid ? "Connection is healthy" : String(result.error || "Connection test failed")) : kind === "disconnect" ? "Provider disconnected" : `Models synchronized${result.syncedModels ? `: ${result.syncedModels}` : ""}`);
+      setMessage(kind === "test" ? (result.valid ? t("aiMarketplace.drawer.connectionHealthy") : String(result.error || t("aiMarketplace.drawer.connectionTestFailed"))) : kind === "disconnect" ? t("aiMarketplace.drawer.providerDisconnected") : t("aiMarketplace.drawer.modelsSynchronized", { details: result.syncedModels ? `: ${result.syncedModels}` : "" }));
       onChanged(); if (kind === "disconnect") setMode("connect");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Action failed"); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.actionFailed")); }
     finally { setBusy(""); }
   }
 
@@ -422,9 +440,9 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
       {message && <div className="inline-message">{message}</div>}
       {mode === "details" && <div className="details-body">
         <dl>
-          <div><dt>{t("aiMarketplace.drawer.status")}</dt><dd>{availabilityLabels[provider.availability] || provider.availability}</dd></div>
+          <div><dt>{t("aiMarketplace.drawer.status")}</dt><dd>{getAvailabilityLabel(provider.availability, t)}</dd></div>
           <div><dt>{t("aiMarketplace.drawer.type")}</dt><dd>{provider.local ? t("aiMarketplace.filters.local") : t("aiMarketplace.filters.cloud")}</dd></div>
-          <div><dt>{t("aiMarketplace.drawer.setupTitle")}</dt><dd>{connectionModeLabels[provider.connectionMode] || provider.connectionMode}</dd></div>
+          <div><dt>{t("aiMarketplace.drawer.setupTitle")}</dt><dd>{getConnectionModeLabel(provider.connectionMode, t)}</dd></div>
           <div><dt>{t("aiMarketplace.drawer.registryModels")}</dt><dd>{provider.modelCount}</dd></div>
           {provider.localStatus && <div><dt>{t("aiMarketplace.drawer.localStatus")}</dt><dd>{getLabel(provider.localStatus, t)}</dd></div>}
         </dl>
@@ -438,8 +456,8 @@ function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { p
       </div>}
       {mode === "connect" && <div className="connect-body">
         {provider.authHint && <p className="auth-hint">{provider.authHint.replaceAll("OmniRoute", "Npati")}</p>}
-        {!provider.connectable ? <div className="provider-setup-note"><strong>{availabilityLabels[provider.availability] || provider.availability}</strong><span>{provider.availabilityReason ?? "This provider cannot be configured from the current NPATI runtime."}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider documentation ↗</a>}</div> : provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || `Continue with ${provider.name}`}</button>{oauth && <><div className="oauth-instructions"><strong>Complete authorization in the new window.</strong>{oauth.userCode && <p>Your code: <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">Open authorization page ↗</a></div>{oauth.method === "authorization_code" && <div className="field"><label>Authorization code or callback URL</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>Complete connection</button></div>}</>}</div> :
-          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>{t("aiMarketplace.drawer.noAuthNote")}</strong><span>Npati supports this provider without credentials.</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>Sign in, then return here with the session credential.</strong><span>Opening the provider website does not connect it automatically. Copy the Bearer token or cookie described above and paste it below.</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">Open provider sign-in ↗</a>}</div>}{provider.local && <div className="field"><label>{t("aiMarketplace.drawer.serverUrl")}</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? t("aiMarketplace.drawer.sessionToken") : t("aiMarketplace.drawer.apiKey")}{provider.credentialOptional ? " (optional)" : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>{t("aiMarketplace.drawer.credentialSecurity")}</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || t("aiMarketplace.drawer.connectProvider")}</button></form>}
+        {!provider.connectable ? <div className="provider-setup-note"><strong>{getAvailabilityLabel(provider.availability, t)}</strong><span>{provider.availabilityReason ?? t("aiMarketplace.drawer.notConfiguredRuntime")}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">{t("aiMarketplace.drawer.openProviderDoc")}</a>}</div> : provider.authType === "oauth" ? <div className="oauth-flow"><button className="button-primary wide" disabled={!!busy} onClick={startOauth}>{busy || t("aiMarketplace.drawer.continueWith", { name: provider.name })}</button>{oauth && <><div className="oauth-instructions"><strong>{t("aiMarketplace.drawer.completeAuthInWindow")}</strong>{oauth.userCode && <p>{t("aiMarketplace.drawer.yourCode")} <code>{oauth.userCode}</code></p>}<a href={oauth.authorizationUrl} target="_blank" rel="noreferrer">{t("aiMarketplace.drawer.openAuthPage")}</a></div>{oauth.method === "authorization_code" && <div className="field"><label>{t("aiMarketplace.drawer.authCodeOrUrl")}</label><textarea value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} /><button className="button-primary" disabled={!oauthCode || !!busy} onClick={completeOauth}>{t("aiMarketplace.drawer.completeConnection")}</button></div>}</>}</div> :
+          <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>{t("aiMarketplace.drawer.noAuthNote")}</strong><span>{t("aiMarketplace.drawer.noAuthSupport")}</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>{t("aiMarketplace.drawer.webSessionNotice")}</strong><span>{t("aiMarketplace.drawer.webSessionDesc")}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">{t("aiMarketplace.drawer.openProviderSignIn")}</a>}</div>}{provider.local && <div className="field"><label>{t("aiMarketplace.drawer.serverUrl")}</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? t("aiMarketplace.drawer.sessionToken") : t("aiMarketplace.drawer.apiKey")}{provider.credentialOptional ? ` (${t("aiMarketplace.drawer.optional")})` : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>{t("aiMarketplace.drawer.credentialSecurity")}</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || t("aiMarketplace.drawer.connectProvider")}</button></form>}
       </div>}
       {mode === "models" && <div className="models-body">
         <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder={t("aiMarketplace.drawer.searchModels")} /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(true, true)}>{t("aiMarketplace.drawer.refreshModels")}</button></div>
@@ -701,16 +719,17 @@ export function AIProviderMarketplace() {
 }
 
 export function OAuthCallback() {
+  const { t } = useTranslation();
   const location = useLocation();
-  const [status, setStatus] = useState("Completing provider connection…");
+  const [status, setStatus] = useState(() => t("aiMarketplace.oauthCallback.completing"));
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const flowId = query.get("npati_flow");
     const code = query.get("code");
-    if (!flowId || !code) { setStatus("The callback is missing its flow or authorization code. Return to NPATI and paste the callback URL."); return; }
+    if (!flowId || !code) { setStatus(t("aiMarketplace.oauthCallback.missingCode")); return; }
     api<{ message?: string }>(`/api/ai/oauth/${encodeURIComponent(flowId)}/complete`, { method: "POST", body: JSON.stringify({ code: window.location.href }) })
-      .then((result) => { setStatus(result.message || "Connected successfully"); window.opener?.postMessage("npati-oauth-success", window.location.origin); window.setTimeout(() => window.close(), 900); })
-      .catch((error) => setStatus(error instanceof Error ? error.message : "OAuth connection failed"));
-  }, [location.search]);
-  return <main className="oauth-callback-page"><span className="provider-avatar large">AI</span><h1>{status}</h1><p>You can close this window and return to the AI Provider Marketplace.</p><Link to="/settings/ai">Back to Marketplace</Link></main>;
+      .then((result) => { setStatus(result.message || t("aiMarketplace.oauthCallback.success")); window.opener?.postMessage("npati-oauth-success", window.location.origin); window.setTimeout(() => window.close(), 900); })
+      .catch((error) => setStatus(error instanceof Error ? error.message : t("aiMarketplace.oauthCallback.failed")));
+  }, [location.search, t]);
+  return <main className="oauth-callback-page"><span className="provider-avatar large">AI</span><h1>{status}</h1><p>{t("aiMarketplace.oauthCallback.closeWindow")}</p><Link to="/settings/ai">{t("aiMarketplace.oauthCallback.backToMarketplace")}</Link></main>;
 }
