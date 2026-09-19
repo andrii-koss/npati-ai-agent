@@ -108,7 +108,7 @@ function SourceLink({ rawUrl, href, title, label }: { rawUrl: string; href: stri
       onMouseEnter={checkAlignment}
       onFocus={checkAlignment}
     >
-      <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Відкрити посилання " + (domain || displayLabel)}>
+      <a className="source-link-chip" href={href} target="_blank" rel="noopener noreferrer" aria-label={"Open link " + (domain || displayLabel)}>
         <SourceFavicon domain={domain} />
         <span>{displayLabel}</span>
       </a>
@@ -451,16 +451,16 @@ const RenderedTableBlock = React.memo(function RenderedTableBlock({
             <line x1="9" y1="9" x2="9" y2="21" />
             <line x1="15" y1="9" x2="15" y2="21" />
           </svg>
-          <span>Таблиця ({rows.length} {rows.length === 1 ? "рядок" : rows.length < 5 ? "рядки" : "рядків"})</span>
+          <span>Table ({rows.length} {rows.length === 1 ? "row" : "rows"})</span>
         </div>
         <div className="chat-table-actions">
-          <button type="button" className={`chat-action-btn ${copied ? "copied" : ""}`} onClick={copyCsv} title="Скопіювати CSV">
+          <button type="button" className={`chat-action-btn ${copied ? "copied" : ""}`} onClick={copyCsv} title="Copy CSV">
             {copied ? (
               <>
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
-                <span>Скопійовано!</span>
+                <span>Copied!</span>
               </>
             ) : (
               <>
@@ -468,17 +468,17 @@ const RenderedTableBlock = React.memo(function RenderedTableBlock({
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                 </svg>
-                <span>Копіювати CSV</span>
+                <span>Copy CSV</span>
               </>
             )}
           </button>
-          <button type="button" className="chat-action-btn download" onClick={exportCsv} title="Завантажити таблицю як Excel / CSV">
+          <button type="button" className="chat-action-btn download" onClick={exportCsv} title="Download table as Excel / CSV">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <span>Завантажити Excel / CSV</span>
+            <span>Download Excel / CSV</span>
           </button>
         </div>
       </div>
@@ -564,16 +564,16 @@ function RenderedCodeBlock({ code, lang, filename }: { code: string; lang: strin
       <div className="chat-code-header">
         <span className="chat-code-lang">{filename || lang || "code"}</span>
         <div className="chat-code-actions">
-          <button type="button" className="chat-action-btn" onClick={copyText} title="Скопіювати код">
-            {copied ? "Скопійовано!" : "Копіювати"}
+          <button type="button" className="chat-action-btn" onClick={copyText} title="Copy code">
+            {copied ? "Copied!" : "Copy"}
           </button>
-          <button type="button" className="chat-action-btn download" onClick={downloadFile} title="Завантажити файл">
+          <button type="button" className="chat-action-btn download" onClick={downloadFile} title="Download file">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <span>Завантажити {lang === "csv" ? "CSV / Excel" : "файл"}</span>
+            <span>Download {lang === "csv" ? "CSV / Excel" : "file"}</span>
           </button>
         </div>
       </div>
@@ -779,8 +779,8 @@ function EditableContentCard({
               type="button"
               className={`editable-card-action-btn ${copied ? "copied" : ""}`}
               onClick={handleCopy}
-              title={copied ? "Скопійовано!" : "Скопіювати весь текст"}
-              aria-label="Скопіювати весь текст"
+              title={copied ? "Copied!" : "Copy entire text"}
+              aria-label="Copy entire text"
             >
               {copied ? (
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -797,8 +797,8 @@ function EditableContentCard({
               type="button"
               className="editable-card-action-btn"
               onClick={handleDownload}
-              title="Завантажити файл"
-              aria-label="Завантажити файл"
+              title="Download file"
+              aria-label="Download file"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -810,8 +810,8 @@ function EditableContentCard({
               type="button"
               className="editable-card-action-btn"
               onClick={toggleFullscreen}
-              title="Розгорнути на весь екран"
-              aria-label="Розгорнути на весь екран"
+              title="Expand to fullscreen"
+              aria-label="Expand to fullscreen"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="15 3 21 3 21 9" />
@@ -852,8 +852,8 @@ function EditableContentCard({
                   type="button"
                   className={`editable-card-action-btn ${copied ? "copied" : ""}`}
                   onClick={handleCopy}
-                  title={copied ? "Скопійовано!" : "Скопіювати весь текст"}
-                  aria-label="Скопіювати весь текст"
+                  title={copied ? "Copied!" : "Copy entire text"}
+                  aria-label="Copy entire text"
                 >
                   {copied ? (
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -870,8 +870,8 @@ function EditableContentCard({
                   type="button"
                   className="editable-card-action-btn"
                   onClick={handleDownload}
-                  title="Завантажити файл"
-                  aria-label="Завантажити файл"
+                  title="Download file"
+                  aria-label="Download file"
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -883,8 +883,8 @@ function EditableContentCard({
                   type="button"
                   className="editable-card-action-btn"
                   onClick={toggleFullscreen}
-                  title="Згорнути"
-                  aria-label="Згорнути"
+                  title="Collapse"
+                  aria-label="Collapse"
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="4 14 10 14 10 20" />
@@ -960,7 +960,7 @@ export function ChatMessageContent({ content }: { content: string }) {
           <EditableContentCard
             key={`card-${elements.length}`}
             initialContent={codeLines.join("\n")}
-            title={filename || (lang === "idea" ? "Бізнес-ідея" : lang === "goal" ? "Ціль бізнесу" : "Бізнес-ідея")}
+            title={filename || (lang === "idea" ? "Business Idea" : lang === "goal" ? "Business Goal" : "Business Document")}
           />
         );
         continue;

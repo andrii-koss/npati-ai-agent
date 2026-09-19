@@ -15,6 +15,8 @@ import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
 import { ConfirmDialogContainer, confirmModal, alertModal, promptModal } from "./ConfirmDialog";
+import { I18nProvider, useTranslation } from "./i18n";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -661,12 +663,14 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     });
     if (response.ok) await loadConversations(true);
   }
+  const { t } = useTranslation();
+
   async function deleteConversation(conversation: SidebarConversation) {
     const confirmed = await confirmModal({
-      title: "Delete chat?",
-      message: `Delete chat “${conversation.title}”? This cannot be undone.`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("dialogs.deleteChatTitle"),
+      message: t("dialogs.deleteChatMessage", { title: conversation.title }),
+      confirmText: t("common.delete"),
+      cancelText: t("common.cancel"),
       isDanger: true,
     });
     if (!confirmed) return;
@@ -699,10 +703,10 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
   }
   async function deleteBusiness(id: string, name: string) {
     const confirmed = await confirmModal({
-      title: "Delete business?",
-      message: `Delete business “${name}” and its chats, goals, and memory? This cannot be undone.`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("dialogs.deleteBusinessTitle"),
+      message: t("dialogs.deleteBusinessMessage", { name }),
+      confirmText: t("common.delete"),
+      cancelText: t("common.cancel"),
       isDanger: true,
     });
     if (!confirmed) return;
@@ -871,28 +875,28 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
       <nav>
         <div className={`sidebar-group ${location.pathname === "/chat" || location.pathname.startsWith("/c/") || window.location.pathname === "/chat" || window.location.pathname.startsWith("/c/") ? "active" : ""}`}>
           <div className="sidebar-group-head">
-            <button className="sidebar-main-action" onClick={() => void openNewChat()}>+ New Chat</button>
+            <button className="sidebar-main-action" onClick={() => void openNewChat()}>{t("sidebar.newChat")}</button>
             <button className="sidebar-chevron" aria-label="Show chat history" aria-expanded={chatOpen} onClick={() => setChatOpen((open) => { const next = !open; cachedChatOpen = next; return next; })}></button>
           </div>
           {chatOpen && (
             <div className="sidebar-dropdown">
-              {!hasSavedChats && hasLoaded && <small className="sidebar-empty">No saved chats yet</small>}
+              {!hasSavedChats && hasLoaded && <small className="sidebar-empty">{t("sidebar.noSavedChats")}</small>}
               {pinnedChats.length > 0 && (
                 <>
-                  <div className="sidebar-section-header">Pinned</div>
+                  <div className="sidebar-section-header">{t("sidebar.pinned")}</div>
                   {pinnedChats.map((conversation) => renderConversationRow(conversation, true))}
                 </>
               )}
               {unpinnedChats.length > 0 && (
                 <>
-                  {pinnedChats.length > 0 && <div className="sidebar-section-header">Recent</div>}
+                  {pinnedChats.length > 0 && <div className="sidebar-section-header">{t("sidebar.recent")}</div>}
                   {unpinnedChats.map((conversation) => renderConversationRow(conversation, false))}
                 </>
               )}
             </div>
           )}
         </div>
-        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href} onClick={onClose}>{item}</Link>; })}
+        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href} onClick={onClose}>{item === "Settings" ? t("common.settings") : item}</Link>; })}
       </nav>
 
       {menuTarget &&
@@ -986,6 +990,9 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
           document.body
         )}
       {toast && <div className="sidebar-toast">{toast}</div>}
+      <div className="sidebar-footer-row">
+        <LanguageSwitcher variant="full" />
+      </div>
     </aside>
   );
 }
@@ -1173,26 +1180,32 @@ import { ConnectionsPage } from "./ConnectionsPage";
 import { ContentPage } from "./ContentPage";
 
 function SettingsPage() {
+  const { t } = useTranslation();
   const cards = [
-    { to: "/settings/ai", icon: "AI", title: "AI Providers", description: "Connect providers, browse models, and choose AI routing." },
-    { to: "/settings/business", icon: "B", title: "Business", description: "Analyze a business idea, market, goals and strategy." },
-    { to: "/settings/company", icon: "CO", title: "Company", description: "Build your configurable AI team and agent organization." },
-    { to: "/settings/capabilities", icon: "CP", title: "Capability Inspector", description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
-    { to: "/settings/activity", icon: "AC", title: "Activity & Run Trace", description: "Inspect live execution traces, step delegations, and tool decisions." },
-    { to: "/settings/automations", icon: "AU", title: "Automations", description: "Schedule recurring cron jobs and background agent tasks." },
-    { to: "/settings/goals", icon: "G", title: "Goals", description: "Define and track measurable business outcomes." },
-    { to: "/settings/content", icon: "C", title: "Content", description: "Plan, generate, and manage content for your audience." },
-    { to: "/settings/connections", icon: "CS", title: "Connected Services", description: "Monitor service health, endpoints, and runtime integrations." },
-    { to: "/settings/memory", icon: "M", title: "Memory", description: "Review and edit confirmed business context." },
-    { to: "/settings/skills", icon: "S", title: "Skills", description: "Browse the capabilities NPATI Agent can use." },
+    { to: "/settings/ai", icon: "AI", title: t("nav.aiProviders"), description: "Connect providers, browse models, and choose AI routing." },
+    { to: "/settings/business", icon: "B", title: t("nav.business"), description: "Analyze a business idea, market, goals and strategy." },
+    { to: "/settings/company", icon: "CO", title: t("nav.company"), description: "Build your configurable AI team and agent organization." },
+    { to: "/settings/capabilities", icon: "CP", title: t("nav.capabilities"), description: "Audit 306 canonical capabilities, tool visibility, and risk policies." },
+    { to: "/settings/activity", icon: "AC", title: t("nav.activity"), description: "Inspect live execution traces, step delegations, and tool decisions." },
+    { to: "/settings/automations", icon: "AU", title: t("nav.automations"), description: "Schedule recurring cron jobs and background agent tasks." },
+    { to: "/settings/goals", icon: "G", title: t("nav.goals"), description: "Define and track measurable business outcomes." },
+    { to: "/settings/content", icon: "C", title: t("nav.content"), description: "Plan, generate, and manage content for your audience." },
+    { to: "/settings/connections", icon: "CS", title: t("nav.connections"), description: "Monitor service health, endpoints, and runtime integrations." },
+    { to: "/settings/memory", icon: "M", title: t("nav.memory"), description: "Review and edit confirmed business context." },
+    { to: "/settings/skills", icon: "S", title: t("nav.skills"), description: "Browse the capabilities NPATI Agent can use." },
   ];
 
   return (
     <Workspace>
       <div className="page-heading settings-page-heading">
-        <p className="eyebrow">NPATI workspace</p>
-        <h1>Settings</h1>
-        <p>Manage the services and preferences NPATI Agent uses locally.</p>
+        <p className="eyebrow">{t("settings.eyebrow")}</p>
+        <h1>{t("settings.title")}</h1>
+        <p>{t("settings.description")}</p>
+      </div>
+      <div style={{ marginBottom: "2rem", padding: "20px 24px", background: "white", borderRadius: "16px", border: "1px solid rgba(0,0,0,0.08)" }}>
+        <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: 700 }}>{t("settings.languageTitle")}</h3>
+        <p style={{ margin: 0, fontSize: "13px", color: "#666" }}>{t("settings.languageDesc")}</p>
+        <LanguageSwitcher variant="settings" />
       </div>
       <div className="settings-card-grid">
         {cards.map((card) => (
@@ -1218,43 +1231,45 @@ function HealthBadge() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <WorkspaceProvider>
-        <ConfirmDialogContainer />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/chat" element={<LegacyChatRoute />} />
-          <Route path="/c/:conversationId" element={<CanonicalChatRoute />} />
-          <Route path="/business" element={<Workspace><BusinessPage /></Workspace>} />
-          <Route path="/b/:businessId" element={<BusinessRoute />} />
-          <Route path="/settings/business" element={<Workspace><BusinessPage /></Workspace>} />
-          <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
-          <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
-          <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
-          <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
-          <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />
-          <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
-          <Route path="/settings/activity" element={<Workspace><ActivityPage /></Workspace>} />
-          <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />
-          <Route path="/settings/content" element={<Workspace><ContentPage /></Workspace>} />
-          <Route path="/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
-          <Route path="/settings/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
-          <Route path="/automations" element={<Workspace><AutomationsPage /></Workspace>} />
-          <Route path="/settings/automations" element={<Workspace><AutomationsPage /></Workspace>} />
-          <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
-          <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
-          <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
-          <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />
-          <Route path="/memory" element={<Workspace><MemoryPage /></Workspace>} />
-          <Route path="/settings/memory" element={<Workspace><MemoryPage /></Workspace>} />
-          <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
-          <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
-          <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </WorkspaceProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <WorkspaceProvider>
+          <ConfirmDialogContainer />
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/chat" element={<LegacyChatRoute />} />
+            <Route path="/c/:conversationId" element={<CanonicalChatRoute />} />
+            <Route path="/business" element={<Workspace><BusinessPage /></Workspace>} />
+            <Route path="/b/:businessId" element={<BusinessRoute />} />
+            <Route path="/settings/business" element={<Workspace><BusinessPage /></Workspace>} />
+            <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
+            <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
+            <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
+            <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
+            <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />
+            <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
+            <Route path="/settings/activity" element={<Workspace><ActivityPage /></Workspace>} />
+            <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />
+            <Route path="/settings/content" element={<Workspace><ContentPage /></Workspace>} />
+            <Route path="/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
+            <Route path="/settings/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
+            <Route path="/automations" element={<Workspace><AutomationsPage /></Workspace>} />
+            <Route path="/settings/automations" element={<Workspace><AutomationsPage /></Workspace>} />
+            <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
+            <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
+            <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
+            <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />
+            <Route path="/memory" element={<Workspace><MemoryPage /></Workspace>} />
+            <Route path="/settings/memory" element={<Workspace><MemoryPage /></Workspace>} />
+            <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
+            <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
+            <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </WorkspaceProvider>
+      </AuthProvider>
+    </I18nProvider>
   );
 }

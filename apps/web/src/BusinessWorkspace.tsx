@@ -362,34 +362,34 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       </div>
 
       <div className="form-section-title" style={{ marginTop: "1.5rem" }}>
-        <span>Alignment & Linkages (Зв'язки бізнес-ідеї)</span>
-        <p>Підв'яжіть створену ціль користувача та пам'ять (memory) до цієї бізнес-ідеї.</p>
+        <span>Alignment & Linkages</span>
+        <p>Link a user goal and memory fact to this business idea.</p>
       </div>
 
       <div className="field-grid">
         <label className="field">
-          <span>Ціль користувача (Goal)</span>
+          <span>User Goal</span>
           <select value={selectedGoalId} onChange={(e) => setSelectedGoalId(e.target.value)}>
-            <option value="none">-- Без цілі (No goal) --</option>
+            <option value="none">-- No goal --</option>
             {availableGoals.map((g) => (
               <option key={g.id} value={g.id}>
                 [{g.status}] {g.title}
               </option>
             ))}
-            <option value="create_new">+ Створити нову ціль...</option>
+            <option value="create_new">+ Create new goal…</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Memory для бізнес-ідеї</span>
+          <span>Memory for Business Idea</span>
           <select value={selectedMemoryId} onChange={(e) => setSelectedMemoryId(e.target.value)}>
-            <option value="none">-- Без memory (No memory) --</option>
+            <option value="none">-- No memory --</option>
             {availableMemories.map((m) => (
               <option key={m.id} value={m.id}>
                 [{m.type}] {m.title}: {m.content.slice(0, 35)}...
               </option>
             ))}
-            <option value="create_new">+ Додати новий факт (Memory)...</option>
+            <option value="create_new">+ Add new memory fact…</option>
           </select>
         </label>
       </div>
@@ -397,20 +397,20 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       {selectedGoalId === "create_new" && (
         <div className="field-grid" style={{ marginTop: "0.5rem" }}>
           <label className="field">
-            <span>Назва нової цілі</span>
+            <span>New Goal Title</span>
             <input
               value={newGoalTitle}
               onChange={(e) => setNewGoalTitle(e.target.value)}
-              placeholder="e.g. Залучити 100 постійних клієнтів"
+              placeholder="e.g. Acquire 100 recurring clients"
               required
             />
           </label>
           <label className="field">
-            <span>Опис або очікуваний результат</span>
+            <span>Description or Expected Result</span>
             <input
               value={newGoalDescription}
               onChange={(e) => setNewGoalDescription(e.target.value)}
-              placeholder="e.g. $2 000 чистого прибутку щомісяця"
+              placeholder="e.g. $2,000 monthly net profit"
             />
           </label>
         </div>
@@ -420,7 +420,7 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <div className="business-narrative-fields" style={{ marginTop: "0.5rem" }}>
           <div className="field-grid">
             <label className="field">
-              <span>Категорія пам'яті</span>
+              <span>Memory Category</span>
               <select value={newMemoryType} onChange={(e) => setNewMemoryType(e.target.value)}>
                 <option value="business_fact">Business fact</option>
                 <option value="audience">Audience</option>
@@ -431,21 +431,21 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
               </select>
             </label>
             <label className="field">
-              <span>Заголовок факту</span>
+              <span>Fact Title</span>
               <input
                 value={newMemoryTitle}
                 onChange={(e) => setNewMemoryTitle(e.target.value)}
-                placeholder="e.g. Сировина з Карпат"
+                placeholder="e.g. Key local supplier"
                 required
               />
             </label>
           </div>
           <label className="field">
-            <span>Зміст (Memory fact)</span>
+            <span>Memory Content</span>
             <textarea
               value={newMemoryContent}
               onChange={(e) => setNewMemoryContent(e.target.value)}
-              placeholder="Вкажіть важливий факт або деталі, які агент має пам'ятати про цю бізнес-ідею"
+              placeholder="Specify an important fact or detail that the agent should remember about this business"
               required
             />
           </label>
@@ -855,13 +855,13 @@ function AssistantMessageToolbar({
   };
 
   return (
-    <div className="assistant-message-toolbar" aria-label="Дії з відповіддю">
+    <div className="assistant-message-toolbar" aria-label="Message actions">
       <button
         type="button"
         className={`assistant-toolbar-btn ${copied ? "copied" : ""}`}
         onClick={handleCopy}
-        title={copied ? "Скопійовано!" : "Скопіювати всю відповідь"}
-        aria-label="Скопіювати всю відповідь"
+        title={copied ? "Copied!" : "Copy entire response"}
+        aria-label="Copy entire response"
       >
         {copied ? (
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -878,8 +878,8 @@ function AssistantMessageToolbar({
         type="button"
         className={`assistant-toolbar-btn ${liked === true ? "active" : ""}`}
         onClick={() => setLiked((prev) => (prev === true ? null : true))}
-        title="Корисна відповідь"
-        aria-label="Корисна відповідь"
+        title="Helpful response"
+        aria-label="Helpful response"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
@@ -889,8 +889,8 @@ function AssistantMessageToolbar({
         type="button"
         className={`assistant-toolbar-btn ${liked === false ? "active" : ""}`}
         onClick={() => setLiked((prev) => (prev === false ? null : false))}
-        title="Не корисна відповідь"
-        aria-label="Не корисна відповідь"
+        title="Not helpful response"
+        aria-label="Not helpful response"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
@@ -900,8 +900,8 @@ function AssistantMessageToolbar({
         type="button"
         className="assistant-toolbar-btn"
         onClick={handleShare}
-        title="Поділитися відповіддю"
-        aria-label="Поділитися відповіддю"
+        title="Share response"
+        aria-label="Share response"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
@@ -914,8 +914,8 @@ function AssistantMessageToolbar({
           type="button"
           className="assistant-toolbar-btn"
           onClick={onRegenerate}
-          title="Згенерувати знову"
-          aria-label="Згенерувати знову"
+          title="Regenerate"
+          aria-label="Regenerate"
         >
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
@@ -1554,8 +1554,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   const active = streamControllerRef.current;
                   if (active) void cancelChatStream(active.streamId).finally(() => active.controller.abort(new DOMException("Stopped", "AbortError")));
                 }}
-                aria-label="Зупинити генерацію"
-                title="Зупинити генерацію"
+                aria-label="Stop generating"
+                title="Stop generating"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
                   <rect x="5" y="5" width="14" height="14" rx="2.5" />
@@ -1566,8 +1566,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 type="submit"
                 className="chat-send-btn"
                 disabled={!input.trim() && attachments.length === 0}
-                aria-label="Надіслати"
-                title="Надіслати"
+                aria-label="Send"
+                title="Send"
               >
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <line x1="4" y1="12" x2="20" y2="12" />
