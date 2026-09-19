@@ -150,4 +150,178 @@ export interface TranslationSchema {
       askAgent: { title: string; desc: string };
     };
   };
+  aiMarketplace: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    stats: {
+      providersAvailable: string;
+      modelsAvailable: string;
+      providersConnected: string;
+      modelsAdded: string;
+    };
+    routing: {
+      kicker: string;
+      manualTitle: string;
+      autoTitle: string;
+      manualDesc: string;
+      autoDesc: string;
+      automatic: string;
+      recommended: string;
+      manual: string;
+      useDefault: string;
+      addModelFirst: string;
+      preferFreeTitle: string;
+      preferFreeDesc: string;
+      fallbackTitle: string;
+      fallbackDesc: string;
+      balanceTitle: string;
+      balanceDesc: string;
+      compressionTitle: string;
+      compressionDesc: string;
+      statusCircuitBreakers: string;
+      statusGuardrails: string;
+      statusCapabilities: string;
+    };
+    budget: {
+      kicker: string;
+      monthlyBudget: string;
+      warningPercent: string;
+      stopPaid: string;
+      save: string;
+      note: string;
+    };
+    myModels: {
+      kicker: string;
+      heading: string;
+      addedCount: string;
+      emptyTitle: string;
+      emptyDesc: string;
+      defaultBadge: string;
+      setDefault: string;
+      remove: string;
+    };
+    explore: {
+      kicker: string;
+      heading: string;
+      searchPlaceholder: string;
+      showingProviders: string;
+      loadMore: string;
+      noConnectedTitle: string;
+      noConnectedDesc: string;
+      noFoundTitle: string;
+      noFoundDesc: string;
+      exploreProviders: string;
+      engineUnavailable: string;
+      engineErrorPrefix: string;
+      retry: string;
+      loadingProviders: string;
+    };
+    tabs: {
+      all: string;
+      recommended: string;
+      free: string;
+      connected: string;
+    };
+    filters: {
+      allTypes: string;
+      cloud: string;
+      local: string;
+      allAuth: string;
+      allCosts: string;
+      allCapabilities: string;
+    };
+    labels: {
+      apiKey: string;
+      oauth: string;
+      none: string;
+      local: string;
+      webSession: string;
+      other: string;
+      free: string;
+      freeTier: string;
+      paid: string;
+      unknown: string;
+      service: string;
+      experimental: string;
+    };
+    actions: {
+      manage: string;
+      viewSetup: string;
+      signIn: string;
+      addSession: string;
+      configure: string;
+      connect: string;
+    };
+    cards: {
+      registryModels: string;
+      localAi: string;
+      defaultProviderDesc: string;
+    };
+    capabilities: {
+      text: string;
+      imageToText: string;
+      reasoning: string;
+      tools: string;
+      vision: string;
+      webFetch: string;
+      webSearch: string;
+      embeddings: string;
+      audio: string;
+      video: string;
+      rerank: string;
+      code: string;
+    };
+    categories: {
+      apiKey: string;
+      oauth: string;
+      noAuth: string;
+      webSession: string;
+      local: string;
+      cloud: string;
+      upstreamProxy: string;
+      system: string;
+    };
+    providers: {
+      gemini: { desc: string };
+      openai: { desc: string };
+      groq: { desc: string };
+      mistral: { desc: string };
+      anthropic: { desc: string };
+      ollamaLocal: { desc: string };
+      openCode: { desc: string };
+      openRouter: { desc: string };
+      deepseek: { desc: string };
+    };
+    drawer: {
+      kicker: string;
+      overview: string;
+      models: string;
+      setup: string;
+      status: string;
+      type: string;
+      setupTitle: string;
+      registryModels: string;
+      localStatus: string;
+      browseModels: string;
+      testConnection: string;
+      refreshModels: string;
+      disconnect: string;
+      noAuthNote: string;
+      serverUrl: string;
+      apiKey: string;
+      sessionToken: string;
+      connectProvider: string;
+      credentialSecurity: string;
+      searchModels: string;
+      showingModels: string;
+      loadingModels: string;
+      noModelsTitle: string;
+      noModelsDescConnected: string;
+      noModelsDescNotConnected: string;
+      addToNpati: string;
+      added: string;
+      connectFirst: string;
+    };
+  };
 }
