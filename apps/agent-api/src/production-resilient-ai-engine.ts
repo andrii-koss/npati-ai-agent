@@ -109,7 +109,11 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
       const channel = new AsyncChunkChannel();
       const admission = request.admission;
       const completion = queue.enqueue(async () => {
-        const models = [request.model ?? "auto", request.fallbackModel]
+        const models = [
+          request.model ?? "auto",
+          request.fallbackModel,
+          ...(request.model && request.model !== "auto" && !request.fallbackModel ? ["auto"] : []),
+        ]
           .filter((model): model is string => Boolean(model))
           .filter((model, index, values) => values.indexOf(model) === index);
         let emitted = false;

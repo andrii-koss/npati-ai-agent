@@ -454,14 +454,18 @@ export function buildApp(config: AppConfig = {}) {
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
-    const automaticModel = preferences.routing.automaticModel;
+    const automaticModel = preferences.routing.automaticModel || "auto";
     const manualModel = preferences.routing.mode === "manual" && preferences.routing.defaultModelId
       ? preferences.routing.defaultModelId
       : undefined;
+    const primaryModel = manualModel ?? automaticModel;
+    const fallbackModel = preferences.routing.fallbackOnFailure
+      ? (primaryModel === "auto" ? (manualModel ?? "auto/smart") : "auto")
+      : undefined;
     return {
       mode: preferences.routing.mode,
-      model: manualModel ?? automaticModel,
-      fallbackModel: manualModel && preferences.routing.fallbackOnFailure ? automaticModel : undefined,
+      model: primaryModel,
+      fallbackModel: fallbackModel !== primaryModel ? fallbackModel : undefined,
       compression: preferences.routing.compression,
     };
   };

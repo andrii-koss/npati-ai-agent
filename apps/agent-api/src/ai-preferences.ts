@@ -26,14 +26,14 @@ const SETTINGS_KEY = 'ai.preferences';
 const MAX_CONCURRENT_UPDATE_RETRIES = 8;
 
 function automaticModel(preferFree: boolean, balanceQualityCost: boolean) {
-  if (preferFree) return 'auto/chat:free';
+  if (preferFree) return 'auto/chat';
   return balanceQualityCost ? 'auto' : 'auto/smart';
 }
 
 const defaultRouting = (): AIRoutingPreferences => ({
   mode: 'automatic',
   defaultModelId: null,
-  automaticModel: 'auto/chat:free',
+  automaticModel: 'auto',
   preferFree: true,
   fallbackOnFailure: true,
   balanceQualityCost: true,

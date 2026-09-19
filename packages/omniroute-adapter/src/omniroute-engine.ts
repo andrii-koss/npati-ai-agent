@@ -257,12 +257,18 @@ export class OmniRouteEngine implements AIEngine {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let pending = "";
+      let yieldedAny = false;
+      let streamError: Error | null = null;
       const emitLine = function* (line: string) {
         if (!line.startsWith("data:")) return;
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") return;
         let payload: any;
         try { payload = JSON.parse(data); } catch { return; }
+        if (payload?.error) {
+          const message = typeof payload.error === "string" ? payload.error : payload.error.message || JSON.stringify(payload.error);
+          throw new Error(message);
+        }
         const delta = useResponses
           ? payload.type === "response.output_text.delta" ? payload.delta : payload.output_text?.delta
           : payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.text;
@@ -275,11 +281,32 @@ export class OmniRouteEngine implements AIEngine {
           pending += decoder.decode(value, { stream: true });
           const lines = pending.split(/\r?\n/);
           pending = lines.pop() ?? "";
-          for (const line of lines) yield* emitLine(line);
+          for (const line of lines) {
+            for (const chunk of emitLine(line)) {
+              yieldedAny = true;
+              yield chunk;
+            }
+          }
         }
         pending += decoder.decode();
-        if (pending) yield* emitLine(pending);
-      } finally { reader.releaseLock(); }
+        if (pending) {
+          for (const chunk of emitLine(pending)) {
+            yieldedAny = true;
+            yield chunk;
+          }
+        }
+      } catch (err) {
+        streamError = err instanceof Error ? err : new Error(String(err));
+      } finally {
+        reader.releaseLock();
+      }
+      if (streamError) {
+        if (!yieldedAny && index < models.length - 1) continue;
+        throw streamError;
+      }
+      if (!yieldedAny && index < models.length - 1) {
+        continue;
+      }
       return;
     }
   }
