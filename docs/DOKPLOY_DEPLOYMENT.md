@@ -21,8 +21,10 @@ openssl rand -hex 32
 
 Use hexadecimal values for `NPATI_POSTGRES_PASSWORD`, because it is embedded in a database
 URL. Do not set `NPATI_JWT_SECRET` on a self-hosted installation: access tokens are verified
-through the central NPATI backend. Do not set `NPATI_HOSTED_REGISTRATION_TOKEN`; that secret
-is only for the official `ai.npati.com` deployment.
+through the central NPATI backend. For ordinary self-hosting, keep `NPATI_DEPLOYMENT_TYPE=self_hosted` and do not set
+`NPATI_HOSTED_REGISTRATION_TOKEN`. For the official `ai.npati.com` deployment, set
+`NPATI_DEPLOYMENT_TYPE=npati_hosted` and set the hosted registration token to the same
+server-only value configured in the central NPATI backend.
 
 ## 2. Configure the domain
 
