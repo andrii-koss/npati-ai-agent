@@ -165,6 +165,40 @@ describe("PHASE 10: Background Jobs, Automations and Context-Safe Execution", ()
   });
 
   describe("Fair Scheduling & Cancellation", () => {
+    it("waits for in-flight recovery before closing Redis during shutdown", async () => {
+      const worker = new CompanyRunQueueWorker(
+        "redis://127.0.0.1:6379",
+        store,
+        runtime,
+        { workerId: "test-shutdown-worker" }
+      );
+      const order: string[] = [];
+      let finishRecovery!: () => void;
+      const recovery = new Promise<void>((resolve) => {
+        finishRecovery = () => {
+          order.push("recovery-finished");
+          resolve();
+        };
+      });
+      const fakeClient = {
+        isOpen: true,
+        quit: vi.fn(async () => { order.push("client-closed"); }),
+        destroy: vi.fn(),
+      };
+      (worker as any).client = fakeClient;
+      (worker as any).recoveryInFlight = recovery;
+      (worker as any).recoveryTimer = setInterval(() => undefined, 60_000);
+
+      const stopping = worker.stop();
+      await Promise.resolve();
+      expect(fakeClient.quit).not.toHaveBeenCalled();
+      finishRecovery();
+      await stopping;
+
+      expect(order).toEqual(["recovery-finished", "client-closed"]);
+      expect((worker as any).recoveryTimer).toBeUndefined();
+    });
+
     it("Noisy tenant does not starve other tenants (per-tenant concurrency limit)", async () => {
       // Create a queue worker with maxConcurrentPerTenant = 2
       const worker = new CompanyRunQueueWorker(

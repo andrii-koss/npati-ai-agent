@@ -62,6 +62,8 @@ export class CompanyRunQueueWorker {
   private stopped = false;
   private client?: RedisClient;
   private subscriber?: RedisClient;
+  private recoveryTimer?: NodeJS.Timeout;
+  private recoveryInFlight?: Promise<void>;
   constructor(private readonly redisUrl: string, private readonly store: WorkspaceStore,
     private readonly runtime: CompanyDelegationRuntime, options: WorkerOptions = {}) {
     this.workerId = options.workerId ?? `worker-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -71,6 +73,7 @@ export class CompanyRunQueueWorker {
     this.maxConcurrentPerTenant = Math.max(1, options.maxConcurrentPerTenant ?? 10);
   }
   async start() {
+    this.stopped = false;
     this.client = createClient({ url: this.redisUrl });
     this.client.on("error", () => undefined);
     await this.client.connect();
@@ -85,22 +88,43 @@ export class CompanyRunQueueWorker {
         void this.runtime.cancel(job.context, job.companyId, job.runId);
       } catch { /* malformed cancellation is ignored */ }
     });
-    await this.recover();
-    const recovery = setInterval(() => void this.recover(), this.recoveryMs);
-    recovery.unref();
-    await Promise.all(Array.from({ length: this.concurrency }, (_, index) => this.loop(index)));
-    clearInterval(recovery);
+    await this.runRecovery();
+    this.recoveryTimer = setInterval(() => {
+      void this.runRecovery().catch(() => undefined);
+    }, this.recoveryMs);
+    this.recoveryTimer.unref();
+    try {
+      await Promise.all(Array.from({ length: this.concurrency }, (_, index) => this.loop(index)));
+    } finally {
+      if (this.recoveryTimer) clearInterval(this.recoveryTimer);
+      this.recoveryTimer = undefined;
+    }
   }
   async stop() {
     this.stopped = true;
-    if (this.subscriber?.isOpen) await this.subscriber.quit();
-    if (this.client?.isOpen) await this.client.quit();
+    if (this.recoveryTimer) clearInterval(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    // Do not close Redis underneath a recovery pass that already started.
+    await this.recoveryInFlight?.catch(() => undefined);
+    if (this.subscriber?.isOpen) await this.subscriber.quit().catch(() => this.subscriber?.destroy());
+    if (this.client?.isOpen) await this.client.quit().catch(() => this.client?.destroy());
+  }
+  private runRecovery() {
+    if (this.recoveryInFlight) return this.recoveryInFlight;
+    let operation: Promise<void>;
+    operation = this.recover().finally(() => {
+      if (this.recoveryInFlight === operation) this.recoveryInFlight = undefined;
+    });
+    this.recoveryInFlight = operation;
+    return operation;
   }
   private async recover() {
-    if (!this.client?.isReady) return;
-    await this.client.set('npati:company-worker:heartbeat', new Date().toISOString(), { PX: Math.max(30_000, this.recoveryMs * 3) });
+    const client = this.client;
+    if (this.stopped || !client?.isReady) return;
+    await client.set('npati:company-worker:heartbeat', new Date().toISOString(), { PX: Math.max(30_000, this.recoveryMs * 3) });
     for (const job of await this.store.listRecoverableCompanyAgentRuns(500)) {
-      await this.client.sendCommand(["XADD",STREAM,"*","payload",JSON.stringify(job)]);
+      if (this.stopped || !client.isReady) return;
+      await client.sendCommand(["XADD",STREAM,"*","payload",JSON.stringify(job)]);
     }
   }
   private parse(reply: unknown): Array<{ id: string; job: CompanyRunJob }> {
