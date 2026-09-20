@@ -7,6 +7,10 @@ interface PersistedInstallationAuth {
   installationToken?: string;
   installationTokenExpiresAt?: string;
   browserSessionHash?: string;
+  browserSessions?: Record<string, {
+    installationToken: string;
+    installationTokenExpiresAt: string;
+  }>;
 }
 
 const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
@@ -42,36 +46,64 @@ export class InstallationAuthStore {
 
   async authorize(installationToken: string, expiresAt: string) {
     const state = await this.load();
-    this.state = { ...state, installationToken, installationTokenExpiresAt: expiresAt };
+    const browserSessions = Object.fromEntries(Object.keys(state.browserSessions ?? {}).map((sessionHash) => [
+      sessionHash,
+      { installationToken, installationTokenExpiresAt: expiresAt },
+    ]));
+    this.state = {
+      ...state,
+      installationToken,
+      installationTokenExpiresAt: expiresAt,
+      browserSessions,
+    };
     await this.persist();
   }
 
-  async createBrowserSession(): Promise<string> {
+  async createBrowserSession(installationToken: string, installationTokenExpiresAt: string): Promise<string> {
     const value = randomBytes(32).toString("base64url");
     const state = await this.load();
-    this.state = { ...state, browserSessionHash: hash(value) };
+    const now = Date.now();
+    const browserSessions = Object.fromEntries(Object.entries(state.browserSessions ?? {})
+      .filter(([, session]) => Date.parse(session.installationTokenExpiresAt) > now));
+    browserSessions[hash(value)] = { installationToken, installationTokenExpiresAt };
+    this.state = { ...state, browserSessions };
     await this.persist();
     return value;
   }
 
-  async verifyBrowserSession(value?: string): Promise<boolean> {
-    if (!value) return false;
-    const expected = (await this.load()).browserSessionHash;
-    if (!expected) return false;
+  async getBrowserSession(value?: string): Promise<{ installationToken: string; installationTokenExpiresAt: string } | null> {
+    if (!value) return null;
+    const state = await this.load();
+    const session = state.browserSessions?.[hash(value)];
+    if (session && Date.parse(session.installationTokenExpiresAt) > Date.now()) return session;
+
+    // Backwards compatibility for installations connected before per-browser sessions.
+    const expected = state.browserSessionHash;
+    if (!expected || !state.installationToken || !state.installationTokenExpiresAt) return null;
     const actualBuffer = Buffer.from(hash(value));
     const expectedBuffer = Buffer.from(expected);
-    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+    if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+    return {
+      installationToken: state.installationToken,
+      installationTokenExpiresAt: state.installationTokenExpiresAt,
+    };
   }
 
-  async clearBrowserSession() {
+  async clearBrowserSession(value?: string) {
     const state = await this.load();
-    this.state = { ...state, browserSessionHash: undefined };
+    const browserSessions = { ...(state.browserSessions ?? {}) };
+    if (value) delete browserSessions[hash(value)];
+    this.state = {
+      ...state,
+      browserSessionHash: value ? state.browserSessionHash : undefined,
+      browserSessions: value ? browserSessions : {},
+    };
     await this.persist();
   }
 
   async clearAuthorization() {
     const state = await this.load();
-    this.state = { installationId: state.installationId };
+    this.state = { installationId: state.installationId, browserSessions: {} };
     await this.persist();
   }
 }

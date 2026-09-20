@@ -28,11 +28,30 @@ export interface AuthState {
   beginInstallationConnection(): Promise<InstallationPairing>;
   pollInstallationConnection(deviceCode: string): Promise<boolean>;
   logout(): Promise<void>;
+  disconnect(): Promise<void>;
 }
 
 const STORAGE_TOKEN_KEY = "npati_agent_access_token";
 const STORAGE_REFRESH_KEY = "npati_agent_refresh_token";
 const STORAGE_USER_KEY = "npati_agent_user";
+const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
+const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
+
+type PendingPairing = { deviceCode: string; verificationUriComplete: string; expiresAt: number };
+
+function readPendingPairing(): PendingPairing | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(PENDING_PAIRING_KEY) || "null") as PendingPairing | null;
+    if (!value?.deviceCode || value.expiresAt <= Date.now()) {
+      sessionStorage.removeItem(PENDING_PAIRING_KEY);
+      return null;
+    }
+    return value;
+  } catch {
+    sessionStorage.removeItem(PENDING_PAIRING_KEY);
+    return null;
+  }
+}
 
 export function getStoredAuthToken(): string | null {
   try {
@@ -115,6 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).catch(() => null);
       }
     } finally {
+      sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
+      sessionStorage.removeItem(PENDING_PAIRING_KEY);
       setStoredAuthToken(null);
       setStoredRefreshToken(null);
       setStoredAuthUser(null);
@@ -125,9 +146,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const disconnect = useCallback(async () => {
+    const currentToken = getStoredAuthToken();
+    if (!currentToken) throw new Error("An authenticated NPATI session is required.");
+    const response = await fetch("/api/auth/installation/disconnect", {
+      method: "POST",
+      headers: { authorization: "Bearer " + currentToken },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+      throw new Error(payload?.error?.message || "Could not disconnect this NPATI account.");
+    }
+    setStoredAuthToken(null);
+    setStoredRefreshToken(null);
+    setStoredAuthUser(null);
+    setToken(null);
+    setUser(null);
+    setError(null);
+    sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
+    sessionStorage.removeItem(PENDING_PAIRING_KEY);
+    window.dispatchEvent(new Event("npati:auth-changed"));
+  }, []);
+
+  const completeInstallationConnection = useCallback(async (deviceCode: string): Promise<boolean> => {
+    const response = await fetch("/api/auth/installation/poll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceCode }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (response.status === 202 || payload?.data?.status === "authorization_pending") return false;
+    if (!response.ok || !payload?.success || !payload.data?.accessToken || !payload.data?.user) {
+      const message = payload?.error?.message || "NPATI account connection failed.";
+      setError(message);
+      throw new Error(message);
+    }
+    sessionStorage.removeItem(PENDING_PAIRING_KEY);
+    sessionStorage.removeItem(SSO_SUPPRESSED_KEY);
+    setStoredAuthToken(payload.data.accessToken);
+    setStoredRefreshToken(null);
+    setStoredAuthUser(payload.data.user);
+    setToken(payload.data.accessToken);
+    setUser(payload.data.user);
+    window.dispatchEvent(new Event("npati:auth-changed"));
+    return true;
+  }, []);
+
   const checkAuth = useCallback(async () => {
     const currentToken = getStoredAuthToken();
     if (!currentToken) {
+      const pendingPairing = readPendingPairing();
+      if (pendingPairing) {
+        try {
+          if (await completeInstallationConnection(pendingPairing.deviceCode)) {
+            setIsLoading(false);
+            return;
+          }
+        } catch {
+          sessionStorage.removeItem(PENDING_PAIRING_KEY);
+        }
+      }
       try {
         const response = await fetch("/api/auth/installation/session", { method: "POST" });
         const payload = await response.json().catch(() => null);
@@ -141,6 +219,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         // An unconnected installation is handled by the connect dialog.
+      }
+      try {
+        const statusResponse = await fetch("/api/auth/installation/status");
+        const statusPayload = await statusResponse.json().catch(() => null);
+        if (statusResponse.ok
+          && statusPayload?.data?.deploymentType === "npati_hosted"
+          && sessionStorage.getItem(SSO_SUPPRESSED_KEY) !== "1"
+          && !readPendingPairing()) {
+          const startResponse = await fetch("/api/auth/installation/start", { method: "POST" });
+          const startPayload = await startResponse.json().catch(() => null);
+          if (!startResponse.ok || !startPayload?.success) {
+            throw new Error(startPayload?.error?.message || "Could not start NPATI SSO.");
+          }
+          const pairing = startPayload.data as InstallationPairing;
+          sessionStorage.setItem(PENDING_PAIRING_KEY, JSON.stringify({
+            deviceCode: pairing.deviceCode,
+            verificationUriComplete: pairing.verificationUriComplete,
+            expiresAt: Date.now() + pairing.expiresIn * 1000,
+          } satisfies PendingPairing));
+          const verificationUrl = new URL(pairing.verificationUriComplete);
+          verificationUrl.searchParams.set("return_to", `${window.location.origin}/chat?npati_agent_connected=1`);
+          window.location.assign(verificationUrl.toString());
+          return;
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not start NPATI SSO.");
       }
       setUser(null);
       setToken(null);
@@ -230,7 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [logout]);
+  }, [completeInstallationConnection, logout]);
 
   useEffect(() => {
     void checkAuth();
@@ -358,6 +462,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const beginInstallationConnection = async (): Promise<InstallationPairing> => {
     setError(null);
+    sessionStorage.removeItem(SSO_SUPPRESSED_KEY);
     const response = await fetch("/api/auth/installation/start", { method: "POST" });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) {
@@ -369,25 +474,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const pollInstallationConnection = async (deviceCode: string): Promise<boolean> => {
-    const response = await fetch("/api/auth/installation/poll", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ deviceCode }),
-    });
-    const payload = await response.json().catch(() => null);
-    if (response.status === 202 || payload?.data?.status === "authorization_pending") return false;
-    if (!response.ok || !payload?.success || !payload.data?.accessToken || !payload.data?.user) {
-      const message = payload?.error?.message || "NPATI account connection failed.";
-      setError(message);
-      throw new Error(message);
-    }
-    setStoredAuthToken(payload.data.accessToken);
-    setStoredRefreshToken(null);
-    setStoredAuthUser(payload.data.user);
-    setToken(payload.data.accessToken);
-    setUser(payload.data.user);
-    window.dispatchEvent(new Event("npati:auth-changed"));
-    return true;
+    return completeInstallationConnection(deviceCode);
   };
 
   return (
@@ -403,6 +490,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         beginInstallationConnection,
         pollInstallationConnection,
         logout,
+        disconnect,
       }}
     >
       {children}

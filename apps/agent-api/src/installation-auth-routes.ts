@@ -35,12 +35,14 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     app.post<{ Body: Body }>(`/api${path}`, handler);
   };
 
-  registerGet("/auth/installation/status", async (_request, reply) => {
+  registerGet("/auth/installation/status", async (request, reply) => {
     const state = await store.load();
+    const browserSession = await store.getBrowserSession(cookie(request));
     return reply.send({ success: true, data: {
       installationId: state.installationId,
-      connected: Boolean(state.installationToken),
-      expiresAt: state.installationTokenExpiresAt ?? null,
+      connected: Boolean(browserSession || (options.deploymentType !== "npati_hosted" && state.installationToken)),
+      expiresAt: browserSession?.installationTokenExpiresAt ?? state.installationTokenExpiresAt ?? null,
+      deploymentType: options.deploymentType ?? "self_hosted",
     } });
   });
 
@@ -65,9 +67,11 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     try {
       const exchange = await authClient!.exchangeInstallationDeviceCode!(request.body.deviceCode);
       if (exchange.status === "authorization_pending") return reply.code(202).send({ success: true, data: exchange });
-      await store.authorize(exchange.installationToken, exchange.expiresAt);
+      if (options.deploymentType !== "npati_hosted") {
+        await store.authorize(exchange.installationToken, exchange.expiresAt);
+      }
       const session = await authClient!.createInstallationSession!(exchange.installationToken);
-      const localSession = await store.createBrowserSession();
+      const localSession = await store.createBrowserSession(exchange.installationToken, exchange.expiresAt);
       const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
       reply.header("set-cookie", `${COOKIE}=${localSession}; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=7776000${secure}`);
       return reply.send({ success: true, data: session });
@@ -76,17 +80,16 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
 
   registerPost("/auth/installation/session", async (request, reply) => {
     if (unavailable(reply)) return;
-    if (!await store.verifyBrowserSession(cookie(request))) return reply.code(401).send({
+    const browserSession = await store.getBrowserSession(cookie(request));
+    if (!browserSession) return reply.code(401).send({
       success: false, error: { code: "LOCAL_SESSION_REQUIRED", message: "Reconnect this browser to the NPATI installation." },
     });
-    const state = await store.load();
-    if (!state.installationToken) return reply.code(401).send({ success: false, error: { code: "INSTALLATION_NOT_CONNECTED", message: "Installation is not connected." } });
-    try { return reply.send({ success: true, data: await authClient!.createInstallationSession!(state.installationToken) }); }
+    try { return reply.send({ success: true, data: await authClient!.createInstallationSession!(browserSession.installationToken) }); }
     catch (error) { return failure(reply, error); }
   });
 
-  registerPost("/auth/installation/browser-logout", async (_request, reply) => {
-    await store.clearBrowserSession();
+  registerPost("/auth/installation/browser-logout", async (request, reply) => {
+    await store.clearBrowserSession(cookie(request));
     reply.header("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`);
     return reply.send({ success: true });
   });
@@ -95,10 +98,12 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     if (unavailable(reply)) return;
     const state = await store.load();
     const accessToken = bearer(request);
-    if (!accessToken || !state.installationToken) return reply.code(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "An authenticated owner session is required." } });
+    const browserSession = await store.getBrowserSession(cookie(request));
+    if (!accessToken || !browserSession) return reply.code(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "An authenticated account session is required." } });
     try {
       await authClient!.revokeInstallation!(accessToken, state.installationId);
-      await store.clearAuthorization();
+      await store.clearBrowserSession(cookie(request));
+      if (options.deploymentType !== "npati_hosted") await store.clearAuthorization();
       reply.header("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`);
       return reply.send({ success: true });
     } catch (error) { return failure(reply, error); }
@@ -107,6 +112,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
   let timer: NodeJS.Timeout | undefined;
   app.addHook("onReady", async () => {
     if (!authClient?.heartbeatInstallation) return;
+    if (options.deploymentType === "npati_hosted") return;
     const heartbeat = async () => {
       let state = await store.load();
       const expiresSoon = state.installationTokenExpiresAt

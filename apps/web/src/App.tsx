@@ -65,7 +65,7 @@ function NpatiAgentLogo() {
 function ChatUserMenu() {
   const location = useLocation();
   const { overview } = useWorkspace();
-  const { user, logout } = useAuth();
+  const { user, logout, disconnect } = useAuth();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const displayName = overview?.user.displayName?.trim() || user?.displayName || "User";
@@ -127,6 +127,19 @@ function ChatUserMenu() {
               }}
             >
               Sign out <span aria-hidden="true">&rarr;</span>
+            </button>
+            <button
+              type="button"
+              className="chat-user-signout"
+              onClick={() => {
+                if (!window.confirm("Disconnect this NPATI account from the Agent? You can then connect another account.")) return;
+                closeMenu();
+                void disconnect()
+                  .then(() => window.location.assign("/"))
+                  .catch((cause) => window.alert(cause instanceof Error ? cause.message : "Could not disconnect account."));
+              }}
+            >
+              Disconnect account <span aria-hidden="true">&rarr;</span>
             </button>
           </nav>
         </aside>
