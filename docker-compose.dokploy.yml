@@ -184,7 +184,8 @@ services:
     networks: [npati-agent]
 
   qdrant:
-    image: qdrant/qdrant:v1.15.4
+    image: docker.io/qdrant/qdrant:v1.15.4
+    pull_policy: always
     restart: unless-stopped
     volumes:
       - qdrant-data:/qdrant/storage
