@@ -47,7 +47,7 @@ describe('NPATI AI preferences', () => {
   it('16. stores Automatic mode using the verified auto model', async () => {
     await store.setRouting(owner, 'automatic');
     expect((await store.get(owner)).routing).toMatchObject({
-      mode: 'automatic', defaultModelId: null, automaticModel: 'auto/chat:free', preferFree: true,
+      mode: 'automatic', defaultModelId: null, automaticModel: 'auto/chat', preferFree: true,
       fallbackOnFailure: true, balanceQualityCost: true, compression: 'stacked', monthlyBudgetUsd: 20,
       warningPercent: 80, stopPaidWhenLimitReached: true,
     });
@@ -76,7 +76,7 @@ describe('NPATI AI preferences', () => {
       monthlyBudgetUsd: 35, warningPercent: 75, stopPaidWhenLimitReached: false,
     });
     expect((await store.get(owner)).routing).toMatchObject({ automaticModel: 'auto/smart', monthlyBudgetUsd: 35 });
-    expect(await store.get(otherTenant)).toMatchObject({ addedModels: [], routing: { automaticModel: 'auto/chat:free', monthlyBudgetUsd: 20 } });
+    expect(await store.get(otherTenant)).toMatchObject({ addedModels: [], routing: { automaticModel: 'auto', monthlyBudgetUsd: 20 } });
   });
 
   it('19. isolates users inside the same workspace', async () => {

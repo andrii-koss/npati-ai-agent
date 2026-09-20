@@ -1,5 +1,5 @@
 // Auto-generated Tool Test Matrix for agent-callable capabilities
-// Generated according to Section 11 of NPATI_AGENT_CAPABILITY_INTEGRATION_MASTER_PLAN.md
+// Generated from the canonical agent-callable capability inventory.
 
 export interface ToolTestMatrixEntry {
   tool_id: string;

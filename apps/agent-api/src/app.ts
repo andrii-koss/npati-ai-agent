@@ -18,6 +18,8 @@ import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
 import { registerAuthRoutes } from "./auth-routes";
+import { registerInstallationAuthRoutes } from "./installation-auth-routes";
+import { InstallationAuthStore } from "./installation-auth";
 import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
@@ -118,6 +120,11 @@ export interface AppConfig {
   npatiBackendUrl?: string;
   npatiJwtSecret?: string;
   strictAuth?: boolean;
+  agentPublicDomain?: string;
+  agentVersion?: string;
+  deploymentType?: "self_hosted" | "npati_hosted";
+  hostedRegistrationToken?: string;
+  allowLegacyPasswordAuth?: boolean;
   aiEngine?: AIEngine;
   marketplace?: OmniRouteMarketplace;
   crawlerBaseUrl?: string;
@@ -981,7 +988,21 @@ export function buildApp(config: AppConfig = {}) {
     if(error instanceof SecurityPolicyViolation)return reply.code(error.status).send({error:{code:error.code,reasonCode:error.reasonCode,message:error.message}});
     return reply.send(error);
   });
-  registerAuthRoutes(app, { authClient, workspaceStore, authProvider });
+  registerAuthRoutes(app, {
+    authClient,
+    workspaceStore,
+    authProvider,
+    allowLegacyPasswordAuth: config.allowLegacyPasswordAuth ?? false,
+    localJwtSigningSecret: npatiJwtSecret,
+  });
+  registerInstallationAuthRoutes(app, {
+    authClient,
+    store: new InstallationAuthStore(config.dataDirectory),
+    publicDomain: config.agentPublicDomain,
+    version: config.agentVersion,
+    deploymentType: config.deploymentType,
+    hostedRegistrationToken: config.hostedRegistrationToken,
+  });
   registerSessionStreamRoutes(app, authProvider, activeSessionRegistry);
   registerAIRoutes(app, marketplace, aiPreferences, authProvider, aiEngine);
   registerRuntimeCompatRoutes(app, aiEngine, authProvider);

@@ -47,14 +47,15 @@ describe("production runtime capabilities #8-#15", () => {
     expect(response.rawPayload).toEqual(Buffer.from([0x49, 0x44, 0x33, 1, 2, 3]));
   });
 
-  it("has distinct WebChat transport and Dashboard routes in the production app", async () => {
+  it("has WebChat transport, a dashboard compatibility redirect, and speech controls", async () => {
     const source = await readFile(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8");
     expect(source).toContain('path="/chat"');
-    expect(source).toContain('path="/settings/dashboard"');
-    const dashboard = await readFile(new URL("../apps/web/src/DashboardPage.tsx", import.meta.url), "utf8");
-    expect(dashboard).toContain('aria-label="Speech voice"');
-    expect(dashboard).toContain('voice: speechVoice');
-    expect(dashboard).toContain('{ id: "nova"');
+    expect(source).toContain('path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />}');
+    const attachments = await readFile(new URL("../apps/web/src/ChatAttachments.tsx", import.meta.url), "utf8");
+    const voices = await readFile(new URL("../apps/web/src/speech-voices.ts", import.meta.url), "utf8");
+    expect(attachments).toContain('aria-label="Speech voice"');
+    expect(attachments).toContain('SPEECH_VOICES.map');
+    expect(voices).toContain('{ id: "nova"');
     const api = await readFile(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
     expect(api).toContain('"/chat/stream"');
   });

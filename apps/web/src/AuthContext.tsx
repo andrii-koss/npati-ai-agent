@@ -8,6 +8,15 @@ export interface AuthUser {
   role?: string;
 }
 
+export interface InstallationPairing {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+  expiresIn: number;
+  interval: number;
+}
+
 export interface AuthState {
   user: AuthUser | null;
   token: string | null;
@@ -16,6 +25,8 @@ export interface AuthState {
   error: string | null;
   login(email: string, password: string): Promise<void>;
   register(params: { email: string; password: string; username: string; displayName?: string }): Promise<void>;
+  beginInstallationConnection(): Promise<InstallationPairing>;
+  pollInstallationConnection(deviceCode: string): Promise<boolean>;
   logout(): Promise<void>;
 }
 
@@ -95,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     const refreshToken = getStoredRefreshToken();
     try {
+      await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
       if (refreshToken) {
         await fetch("/api/auth/logout", {
           method: "POST",
@@ -116,6 +128,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const checkAuth = useCallback(async () => {
     const currentToken = getStoredAuthToken();
     if (!currentToken) {
+      try {
+        const response = await fetch("/api/auth/installation/session", { method: "POST" });
+        const payload = await response.json().catch(() => null);
+        if (response.ok && payload?.success && payload.data?.accessToken && payload.data?.user) {
+          setStoredAuthToken(payload.data.accessToken);
+          setStoredAuthUser(payload.data.user);
+          setToken(payload.data.accessToken);
+          setUser(payload.data.user);
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        // An unconnected installation is handled by the connect dialog.
+      }
       setUser(null);
       setToken(null);
       setStoredAuthUser(null);
@@ -184,6 +210,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+        const installationSession = await fetch("/api/auth/installation/session", { method: "POST" }).catch(() => null);
+        if (installationSession?.ok) {
+          const installationData = await installationSession.json().catch(() => null);
+          if (installationData?.data?.accessToken && installationData.data?.user) {
+            setStoredAuthToken(installationData.data.accessToken);
+            setStoredAuthUser(installationData.data.user);
+            setToken(installationData.data.accessToken);
+            setUser(installationData.data.user);
+            return;
+          }
+        }
         await logout();
       } else {
         // Server response other than 401: preserve session
@@ -221,6 +258,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // ignore refresh error
         }
+      }
+      try {
+        const sessionResponse = await fetch("/api/auth/installation/session", { method: "POST" });
+        const sessionData = await sessionResponse.json().catch(() => null);
+        if (sessionResponse.ok && sessionData?.data?.accessToken && sessionData.data?.user) {
+          setStoredAuthToken(sessionData.data.accessToken);
+          setStoredAuthUser(sessionData.data.user);
+          setToken(sessionData.data.accessToken);
+          setUser(sessionData.data.user);
+          return;
+        }
+      } catch {
+        // Installation session is not available.
       }
       void logout();
     };
@@ -306,6 +356,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const beginInstallationConnection = async (): Promise<InstallationPairing> => {
+    setError(null);
+    const response = await fetch("/api/auth/installation/start", { method: "POST" });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+      const message = payload?.error?.message || "Could not start NPATI account connection.";
+      setError(message);
+      throw new Error(message);
+    }
+    return payload.data;
+  };
+
+  const pollInstallationConnection = async (deviceCode: string): Promise<boolean> => {
+    const response = await fetch("/api/auth/installation/poll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceCode }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (response.status === 202 || payload?.data?.status === "authorization_pending") return false;
+    if (!response.ok || !payload?.success || !payload.data?.accessToken || !payload.data?.user) {
+      const message = payload?.error?.message || "NPATI account connection failed.";
+      setError(message);
+      throw new Error(message);
+    }
+    setStoredAuthToken(payload.data.accessToken);
+    setStoredRefreshToken(null);
+    setStoredAuthUser(payload.data.user);
+    setToken(payload.data.accessToken);
+    setUser(payload.data.user);
+    window.dispatchEvent(new Event("npati:auth-changed"));
+    return true;
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -316,6 +400,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         error,
         login,
         register,
+        beginInstallationConnection,
+        pollInstallationConnection,
         logout,
       }}
     >

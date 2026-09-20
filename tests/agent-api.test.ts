@@ -51,7 +51,7 @@ describe("Agent API", () => {
 
     active = { workspaceId: "workspace-b", userId: "user-b", permissions: ["workspace:read"] };
     const isolated = await app.inject({ method: "GET", url: "/ai/routing" });
-    expect(isolated.json()).toMatchObject({ automaticModel: "auto/chat:free", preferFree: true });
+    expect(isolated.json()).toMatchObject({ automaticModel: "auto", preferFree: true });
     const denied = await app.inject({ method: "PUT", url: "/ai/routing", payload: { mode: "automatic", preferFree: false } });
     expect(denied.statusCode).toBe(403);
   });
@@ -502,7 +502,7 @@ describe("Agent API", () => {
     const started = await app.inject({ method: "POST", url: "/chat", payload: { onboardingAction: "start", scenario: "existing" } });
     expect(started.statusCode).toBe(200);
     expect(started.json().onboarding).toMatchObject({ currentField: "businessSnapshot", status: "active" });
-    expect(calls[0]?.model).toBe("auto/chat:free");
+    expect(calls[0]?.model).toBe("auto");
 
     const invalid = await app.inject({ method: "POST", url: "/chat", payload: { message: "asdf qwer zzzz" } });
     expect(invalid.statusCode).toBe(200);
