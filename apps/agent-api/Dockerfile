@@ -6,6 +6,7 @@ COPY packages ./packages
 RUN apk add --no-cache python3 make g++
 RUN npm ci
 RUN npm run build --workspace @npati/agent-api
+RUN npm prune --omit=dev
 
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production

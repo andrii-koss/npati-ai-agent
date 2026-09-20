@@ -9,9 +9,6 @@ services:
     restart: unless-stopped
     ports:
       - "${NPATI_WEB_PORT:-3000}:3000"
-    volumes:
-      - ./apps/web/dist:/usr/share/nginx/html:ro
-      - ./apps/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       agent-api:
         condition: service_healthy
@@ -52,7 +49,7 @@ services:
       NPATI_COMPANY_WORKER_CONCURRENCY: ${NPATI_COMPANY_WORKER_CONCURRENCY:-2}
       NPATI_COMPANY_RUN_LEASE_MS: ${NPATI_COMPANY_RUN_LEASE_MS:-180000}
       NPATI_COMPANY_RECOVERY_INTERVAL_MS: ${NPATI_COMPANY_RECOVERY_INTERVAL_MS:-30000}
-      NPATI_WEB_ORIGIN: http://localhost:${NPATI_WEB_PORT:-3000}
+      NPATI_WEB_ORIGIN: ${NPATI_WEB_ORIGIN:-http://localhost:${NPATI_WEB_PORT:-3000}}
       OMNIROUTE_BASE_URL: http://omniroute:20128
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-npati-agent-internal-local}
       OMNIROUTE_MANAGEMENT_PASSWORD: ${OMNIROUTE_MANAGEMENT_PASSWORD:-}
@@ -97,7 +94,6 @@ services:
       - "${NPATI_AGENT_API_PORT:-3001}:3001"
     volumes: &agent-api-volumes
       - npati-agent-data:/app/data
-      - ./apps/agent-api/dist:/app/dist:ro
     depends_on:
       omniroute:
         condition: service_healthy
@@ -192,6 +188,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks: [npati-agent-network]
 
   qdrant:
@@ -239,7 +241,7 @@ services:
     restart: unless-stopped
     command: redis-server --save 60 1 --loglevel warning
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${NPATI_REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -254,7 +256,7 @@ services:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${NPATI_POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${NPATI_POSTGRES_USER:-npati}
       POSTGRES_PASSWORD: ${NPATI_POSTGRES_PASSWORD:-npati}
