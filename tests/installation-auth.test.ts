@@ -74,6 +74,14 @@ describe("central installation authorization", () => {
     expect(second).toBe(first);
   });
 
+  it("supports routes after the production proxy strips the /api prefix", async () => {
+    const { app } = await fixture();
+    const status = await app.inject({ method: "GET", url: "/auth/installation/status" });
+    expect(status.statusCode).toBe(200);
+    const start = await app.inject({ method: "POST", url: "/auth/installation/start" });
+    expect(start.statusCode).toBe(201);
+    await app.close();
+  });
   it("starts device pairing without collecting an NPATI password", async () => {
     const { app, client } = await fixture();
     const response = await app.inject({ method: "POST", url: "/api/auth/installation/start" });
@@ -88,18 +96,19 @@ describe("central installation authorization", () => {
     const { app, client } = await fixture();
     await app.inject({ method: "POST", url: "/api/auth/installation/start" });
     const pending = await app.inject({
-      method: "POST", url: "/api/auth/installation/poll", payload: { deviceCode: "d".repeat(43) },
+      method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) },
     });
     expect(pending.statusCode).toBe(202);
 
     client.pending = false;
     const authorized = await app.inject({
-      method: "POST", url: "/api/auth/installation/poll", payload: { deviceCode: "d".repeat(43) },
+      method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) },
     });
     expect(authorized.statusCode).toBe(200);
     expect(authorized.json().data.accessToken).toBe("central-access");
     const setCookie = String(authorized.headers["set-cookie"]);
     expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("Secure");
     const cookie = setCookie.split(";")[0];
 
     const noCookie = await app.inject({ method: "POST", url: "/api/auth/installation/session" });
@@ -115,7 +124,7 @@ describe("central installation authorization", () => {
     const { app, client } = await fixture();
     await app.inject({ method: "POST", url: "/api/auth/installation/start" });
     client.pending = false;
-    await app.inject({ method: "POST", url: "/api/auth/installation/poll", payload: { deviceCode: "d".repeat(43) } });
+    await app.inject({ method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) } });
     const revoked = await app.inject({
       method: "POST", url: "/api/auth/installation/disconnect", headers: { authorization: "Bearer owner-access" },
     });

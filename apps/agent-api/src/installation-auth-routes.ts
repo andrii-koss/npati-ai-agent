@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { NpatiAuthClient } from "@npati/hub-connector";
 import { InstallationAuthStore } from "./installation-auth";
 
@@ -7,7 +7,7 @@ const cookie = (request: FastifyRequest) => (request.headers.cookie ?? "").split
   .map((part) => part.trim().split("="))
   .find(([name]) => name === COOKIE)?.slice(1).join("=");
 const bearer = (request: FastifyRequest) => request.headers.authorization?.replace(/^Bearer /, "");
-const failure = (reply: any, error: unknown) => reply.code(Number((error as any)?.status ?? 502)).send({
+const failure = (reply: FastifyReply, error: unknown) => reply.code(Number((error as any)?.status ?? 502)).send({
   success: false,
   error: { code: "INSTALLATION_AUTH_FAILED", message: error instanceof Error ? error.message : "Installation authorization failed" },
 });
@@ -21,13 +21,21 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
   hostedRegistrationToken?: string;
 }) {
   const { authClient, store } = options;
-  const unavailable = (reply: any) => {
+  const unavailable = (reply: FastifyReply) => {
     if (authClient?.startInstallationPairing && authClient.exchangeInstallationDeviceCode && authClient.createInstallationSession) return false;
     reply.code(503).send({ success: false, error: { code: "NPATI_BACKEND_UNAVAILABLE", message: "Central NPATI backend is not configured." } });
     return true;
   };
+  const registerGet = (path: string, handler: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>) => {
+    app.get(path, handler);
+    app.get(`/api${path}`, handler);
+  };
+  const registerPost = <Body = unknown>(path: string, handler: (request: FastifyRequest<{ Body: Body }>, reply: FastifyReply) => Promise<unknown>) => {
+    app.post<{ Body: Body }>(path, handler);
+    app.post<{ Body: Body }>(`/api${path}`, handler);
+  };
 
-  app.get("/api/auth/installation/status", async (_request, reply) => {
+  registerGet("/auth/installation/status", async (_request, reply) => {
     const state = await store.load();
     return reply.send({ success: true, data: {
       installationId: state.installationId,
@@ -36,7 +44,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     } });
   });
 
-  app.post("/api/auth/installation/start", async (_request, reply) => {
+  registerPost("/auth/installation/start", async (_request, reply) => {
     if (unavailable(reply)) return;
     const state = await store.load();
     try {
@@ -51,7 +59,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     } catch (error) { return failure(reply, error); }
   });
 
-  app.post<{ Body: { deviceCode?: string } }>("/api/auth/installation/poll", async (request, reply) => {
+  registerPost<{ deviceCode?: string }>("/auth/installation/poll", async (request, reply) => {
     if (unavailable(reply)) return;
     if (!request.body?.deviceCode) return reply.code(400).send({ success: false, error: { code: "DEVICE_CODE_REQUIRED", message: "Device code is required." } });
     try {
@@ -66,7 +74,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     } catch (error) { return failure(reply, error); }
   });
 
-  app.post("/api/auth/installation/session", async (request, reply) => {
+  registerPost("/auth/installation/session", async (request, reply) => {
     if (unavailable(reply)) return;
     if (!await store.verifyBrowserSession(cookie(request))) return reply.code(401).send({
       success: false, error: { code: "LOCAL_SESSION_REQUIRED", message: "Reconnect this browser to the NPATI installation." },
@@ -77,12 +85,13 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
     catch (error) { return failure(reply, error); }
   });
 
-  app.post("/api/auth/installation/browser-logout", async (_request, reply) => {
+  registerPost("/auth/installation/browser-logout", async (_request, reply) => {
     await store.clearBrowserSession();
     reply.header("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`);
     return reply.send({ success: true });
   });
-  app.post("/api/auth/installation/disconnect", async (request, reply) => {
+
+  registerPost("/auth/installation/disconnect", async (request, reply) => {
     if (unavailable(reply)) return;
     const state = await store.load();
     const accessToken = bearer(request);
