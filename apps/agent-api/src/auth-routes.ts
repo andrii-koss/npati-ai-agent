@@ -9,6 +9,8 @@ export interface AuthRoutesOptions {
   authClient?: NpatiAuthClient;
   workspaceStore: WorkspaceStore;
   authProvider: AuthProvider;
+  allowLegacyPasswordAuth?: boolean;
+  localJwtSigningSecret?: string;
 }
 
 export function registerAuthRoutes(
@@ -16,6 +18,15 @@ export function registerAuthRoutes(
   options: AuthRoutesOptions
 ) {
   const { authClient, workspaceStore, authProvider } = options;
+
+  const rejectDisabledLegacyAuth = (reply: FastifyReply) =>
+    reply.code(410).send({
+      success: false,
+      error: {
+        code: "CENTRAL_ACCOUNT_CONNECTION_REQUIRED",
+        message: "Connect your NPATI account through the official authorization flow.",
+      },
+    });
 
   const handleRegister = async (request: FastifyRequest<{
     Body: {
@@ -27,6 +38,8 @@ export function registerAuthRoutes(
       country?: string;
     };
   }>, reply: FastifyReply) => {
+    if (!options.allowLegacyPasswordAuth) return rejectDisabledLegacyAuth(reply);
+
     if (!authClient) {
       return reply.code(503).send({
         success: false,
@@ -122,6 +135,8 @@ export function registerAuthRoutes(
       password?: string;
     };
   }>, reply: FastifyReply) => {
+    if (!options.allowLegacyPasswordAuth) return rejectDisabledLegacyAuth(reply);
+
     const { email, password } = request.body || {};
 
     if (!email || !password) {
@@ -133,56 +148,7 @@ export function registerAuthRoutes(
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Offline development fallback for local test user when external backend is down
-    const handleDevTestUserLogin = async () => {
-      const isAdmin = normalizedEmail.includes("admin") || normalizedEmail === "webuser1@example.com";
-      const role = isAdmin ? "admin" : "user";
-      const jwtSecret = process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET || "pati-backend-jwt-secret-key-2024-min-32-chars-long";
-      const accessToken = createMockNpatiJwt(
-        { userId: "dev-user", email: normalizedEmail, role },
-        jwtSecret,
-        86400 * 30
-      );
-      const refreshToken = `mock-refresh-dev-user-${Date.now()}`;
-      const tokens = { accessToken, refreshToken, expiresIn: 86400 * 30 };
-      const userPayload = {
-        id: "dev-user",
-        email: normalizedEmail,
-        username: "webuser1",
-        displayName: isAdmin ? "Admin User" : "User",
-        name: isAdmin ? "Admin User" : "User",
-        role,
-      };
-      const authContext = {
-        userId: "dev-user",
-        externalSubject: "npati:dev-user",
-        workspaceId: "workspace:dev-user",
-        permissions: isAdmin
-          ? ["workspace:read", "workspace:write", "business:manage", "chat:use", "admin:all", "audit:read"]
-          : ["workspace:read", "workspace:write", "business:manage", "chat:use"],
-      };
-
-      try {
-        await workspaceStore.initialize(authContext);
-      } catch {
-        // Workspace store lazy initialization
-      }
-
-      return reply.code(200).send({
-        success: true,
-        tokens,
-        user: userPayload,
-        data: {
-          user: userPayload,
-          tokens,
-        },
-      });
-    };
-
     if (!authClient) {
-      if ((normalizedEmail === "webuser1@example.com" || normalizedEmail.includes("admin")) && (password === "Password123!" || password.includes("Password123!"))) {
-        return handleDevTestUserLogin();
-      }
       return reply.code(503).send({
         success: false,
         error: { code: "NPATI_BACKEND_UNAVAILABLE", message: "NPATI main backend is not configured or unavailable." },
@@ -228,21 +194,6 @@ export function registerAuthRoutes(
         },
       });
     } catch (err: any) {
-      const isNetworkError =
-        err?.message?.includes("fetch failed") ||
-        err?.code === "ECONNREFUSED" ||
-        err?.code === "ENOTFOUND" ||
-        err?.code === "ETIMEDOUT" ||
-        err?.cause?.code === "ECONNREFUSED";
-
-      if (
-        isNetworkError &&
-        (normalizedEmail === "webuser1@example.com" || normalizedEmail.includes("admin")) &&
-        (password === "Password123!" || password.includes("Password123!"))
-      ) {
-        return handleDevTestUserLogin();
-      }
-
       const status = err.status || 401;
       return reply.code(status).send({
         success: false,
@@ -267,20 +218,7 @@ export function registerAuthRoutes(
       });
     }
 
-    if (refreshToken.startsWith("mock-refresh-dev-user")) {
-      const jwtSecret = process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET || "pati-backend-jwt-secret-key-2024-min-32-chars-long";
-      const accessToken = createMockNpatiJwt(
-        { userId: "dev-user", email: "webuser1@example.com", role: "user" },
-        jwtSecret,
-        86400 * 30
-      );
-      const newRefreshToken = `mock-refresh-dev-user-${Date.now()}`;
-      return reply.code(200).send({
-        success: true,
-        tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 86400 * 30 },
-        data: { tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 86400 * 30 } },
-      });
-    }
+    if (!options.allowLegacyPasswordAuth) return rejectDisabledLegacyAuth(reply);
 
     if (!authClient) {
       return reply.code(503).send({
@@ -364,6 +302,8 @@ export function registerAuthRoutes(
     request: FastifyRequest<{ Body: { idToken?: string; token?: string } }>,
     reply: FastifyReply
   ) => {
+    if (!options.allowLegacyPasswordAuth) return rejectDisabledLegacyAuth(reply);
+
     const rawToken = request.body?.idToken || request.body?.token;
     if (!rawToken) {
       return reply.code(400).send({
@@ -394,12 +334,16 @@ export function registerAuthRoutes(
     const role = claims.roles?.includes("admin") || claims.roles?.includes("superadmin") ? "admin" : "user";
     const tenantId = claims.tenantId || `comp-${userId}`;
 
-    const accessToken = createMockNpatiJwt({
-      userId,
-      email,
-      role,
-      source: "oidc",
-    });
+    if (!options.localJwtSigningSecret) {
+      return reply.code(503).send({
+        success: false,
+        error: { code: "JWT_SIGNING_SECRET_REQUIRED", message: "OIDC token exchange is not configured." },
+      });
+    }
+    const accessToken = createMockNpatiJwt(
+      { userId, email, role, source: "oidc" },
+      options.localJwtSigningSecret
+    );
 
     return reply.code(200).send({
       success: true,

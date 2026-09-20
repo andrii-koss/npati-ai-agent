@@ -13,7 +13,8 @@ const userId = `scale-cert-${Date.now()}`;
 const batchSize = Number.parseInt(process.env.NPATI_SCALE_BATCH_SIZE ?? "250", 10);
 const holdMs = Number.parseInt(process.env.NPATI_SCALE_HOLD_MS ?? (smoke ? "250" : "16000"), 10);
 const connectTimeoutMs = Number.parseInt(process.env.NPATI_SCALE_CONNECT_TIMEOUT_MS ?? "90000", 10);
-const reportPath = path.join(rootDir, "packages", "shared", "src", "scale-certification-report.json");
+const reportPath = path.join(rootDir, "artifacts", "scale-certification-report.json");
+fs.mkdirSync(path.dirname(reportPath), { recursive: true });
 
 function token() {
   const now = Math.floor(Date.now() / 1000);

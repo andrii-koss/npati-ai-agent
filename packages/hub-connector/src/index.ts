@@ -16,6 +16,7 @@ export interface NpatiUser {
 export interface NpatiAuthTokens {
   accessToken: string;
   refreshToken?: string;
+  expiresIn?: number;
 }
 
 export interface NpatiAuthResponse {
@@ -42,6 +43,39 @@ export interface NpatiAuthClient {
   refresh(refreshToken: string): Promise<{ tokens: NpatiAuthTokens }>;
   logout(refreshToken?: string): Promise<{ success: boolean; message?: string }>;
   getCurrentUser(accessToken: string): Promise<NpatiUser>;
+  startInstallationPairing?(input: NpatiInstallationPairingInput): Promise<NpatiInstallationPairing>;
+  exchangeInstallationDeviceCode?(deviceCode: string): Promise<NpatiInstallationExchange>;
+  createInstallationSession?(installationToken: string): Promise<NpatiInstallationSession>;
+  refreshInstallationToken?(installationToken: string): Promise<{ installationId: string; installationToken: string; expiresAt: string }>;
+  heartbeatInstallation?(installationToken: string, input?: { domain?: string | null; version?: string | null }): Promise<unknown>;
+  revokeInstallation?(accessToken: string, installationId: string): Promise<void>;
+}
+
+export interface NpatiInstallationPairingInput {
+  installationId: string;
+  domain?: string | null;
+  version?: string | null;
+  deploymentType?: "self_hosted" | "npati_hosted";
+  hostedRegistrationToken?: string;
+}
+
+export interface NpatiInstallationPairing {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export type NpatiInstallationExchange =
+  | { status: "authorization_pending" }
+  | { status: "authorized"; installationId: string; installationToken: string; expiresAt: string };
+
+export interface NpatiInstallationSession {
+  installationId: string;
+  accessToken: string;
+  user: NpatiUser;
 }
 
 export class NpatiHttpAuthClient implements NpatiAuthClient {
@@ -167,6 +201,54 @@ export class NpatiHttpAuthClient implements NpatiAuthClient {
     }
     return payload.data;
   }
+
+  private async installationRequest<T>(path: string, body: unknown, bearer?: string, extraHeaders: Record<string, string> = {}): Promise<T> {
+    const response = await fetch(this.normalizeUrl(`/api/v1/agent-installations${path}`), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok || !payload?.success) {
+      const message = payload?.message || payload?.error?.message || payload?.error || `Installation request failed with HTTP ${response.status}`;
+      const error = new Error(typeof message === "string" ? message : JSON.stringify(message));
+      (error as any).status = response.status;
+      throw error;
+    }
+    return payload.data as T;
+  }
+
+  startInstallationPairing(input: NpatiInstallationPairingInput): Promise<NpatiInstallationPairing> {
+    return this.installationRequest("/pairing/start", input, undefined, input.hostedRegistrationToken ? { "x-npati-hosted-token": input.hostedRegistrationToken } : {});
+  }
+
+  exchangeInstallationDeviceCode(deviceCode: string): Promise<NpatiInstallationExchange> {
+    return this.installationRequest("/pairing/token", { deviceCode });
+  }
+
+  createInstallationSession(installationToken: string): Promise<NpatiInstallationSession> {
+    return this.installationRequest("/session", {}, installationToken);
+  }
+
+  refreshInstallationToken(installationToken: string): Promise<{ installationId: string; installationToken: string; expiresAt: string }> {
+    return this.installationRequest("/token/refresh", {}, installationToken);
+  }
+
+  heartbeatInstallation(installationToken: string, input: { domain?: string | null; version?: string | null } = {}): Promise<unknown> {
+    return this.installationRequest("/heartbeat", input, installationToken);
+  }
+
+  async revokeInstallation(accessToken: string, installationId: string): Promise<void> {
+    const response = await fetch(this.normalizeUrl(`/api/v1/agent-installations/${encodeURIComponent(installationId)}`), {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw Object.assign(new Error(`Installation revoke failed with HTTP ${response.status}`), { status: response.status });
+  }
 }
 
 export interface HubClient {
@@ -227,5 +309,4 @@ export function createHubClient(config: { baseUrl?: string; apiKey?: string } = 
 export function createNpatiAuthClient(baseUrl: string): NpatiAuthClient {
   return new NpatiHttpAuthClient(baseUrl);
 }
-
 

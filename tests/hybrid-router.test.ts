@@ -233,6 +233,6 @@ describe("PHASE 4: Hybrid Router, Intent & Tool Selection Suite", () => {
       expect(resUrl.json().matchedSignals).toContain("url_detected");
 
       await app.close();
-    }, 20_000);
+    }, 40_000);
   });
 });

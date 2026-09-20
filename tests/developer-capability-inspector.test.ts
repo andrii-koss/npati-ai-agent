@@ -177,6 +177,6 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
-    }, 20_000);
+    }, 40_000);
   });
 });

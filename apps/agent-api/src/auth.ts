@@ -318,7 +318,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
 
 export function createMockNpatiJwt(
   claims: Partial<NpatiJwtPayload> & { userId: string },
-  secret = "pati-backend-jwt-secret-key-2024-min-32-chars-long",
+  secret: string,
   expiresInSeconds?: number
 ): string {
   const now = Math.floor(Date.now() / 1000);

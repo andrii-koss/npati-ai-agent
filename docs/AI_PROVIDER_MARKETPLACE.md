@@ -10,24 +10,24 @@ The implementation was checked against both `vendor/omniroute/docs/openapi.yaml`
 and the route handlers under `vendor/omniroute/src/app/api`. Route source takes
 precedence where generated OpenAPI and implementation differ.
 
-The pinned provider registry contains 299 entries across these actual source
-categories:
+The generated compatibility catalog currently contains 352 provider definitions across
+these source categories:
 
-- `api-key`: 195
-- `oauth`: 23
-- `web-cookie`: 31
-- `noauth`: 9
-- `local`: 12
-- `search`: 12
-- `audio`: 11
+- `api-key`: 233
+- `oauth`: 25
+- `web-cookie`: 35
+- `noauth`: 13
+- `local`: 14
+- `search`: 14
+- `audio`: 12
 - `upstream-proxy`: 2
 - `cloud-agent`: 3
 - `system`: 1
 
-The live provider plugin manifest currently exposes 222 routable providers and
-1,940 provider-model entries. Its raw auth types are `apikey`, `cookie`, `none`,
-`oauth`, and `optional`. The adapter normalizes these plus the source category to
-`api_key`, `oauth`, `none`, `local`, `web_session`, or `other`.
+Routable providers and provider-model entries are read from OmniRoute's live plugin
+manifest and can differ by version and runtime configuration. The adapter normalizes raw
+auth types and source categories to `api_key`, `oauth`, `none`, `local`, `web_session`,
+or `other`.
 
 The complete provider list is not copied into React. A build-time AST extractor
 reads the pinned OmniRoute TypeScript registry and produces the adapter-owned

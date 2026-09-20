@@ -15,7 +15,14 @@ import { afterEach, describe, expect, it } from "vitest";
 const JWT_SECRET = "test-npati-jwt-secret-key-32chars!!";
 
 class MockNpatiAuthBackend implements NpatiAuthClient {
-  public registeredUsers = new Map<string, { id: string; email: string; name?: string; password: string; role: string }>();
+  public registeredUsers = new Map<string, {
+    id: string;
+    email: string;
+    username: string;
+    name?: string;
+    password: string;
+    role: string;
+  }>();
   public revokedTokens = new Set<string>();
 
   async register(input: NpatiRegisterInput): Promise<NpatiAuthResponse> {
@@ -26,7 +33,8 @@ class MockNpatiAuthBackend implements NpatiAuthClient {
     const userRecord = {
       id,
       email: input.email.toLowerCase(),
-      name: input.name || input.displayName,
+      username: input.username,
+      name: input.displayName,
       password: input.password,
       role: "user",
     };
@@ -36,7 +44,14 @@ class MockNpatiAuthBackend implements NpatiAuthClient {
     const refreshToken = `mock-refresh-${id}`;
     return {
       tokens: { accessToken, refreshToken, expiresIn: 3600 },
-      user: { id, email: input.email, name: userRecord.name, role: "user" },
+      user: {
+        id,
+        email: input.email,
+        username: userRecord.username,
+        displayName: userRecord.name,
+        name: userRecord.name,
+        role: "user",
+      },
     };
   }
 
@@ -51,7 +66,14 @@ class MockNpatiAuthBackend implements NpatiAuthClient {
     const refreshToken = `mock-refresh-${user.id}`;
     return {
       tokens: { accessToken, refreshToken, expiresIn: 3600 },
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        displayName: user.name,
+        name: user.name,
+        role: user.role,
+      },
     };
   }
 
@@ -77,7 +99,7 @@ class MockNpatiAuthBackend implements NpatiAuthClient {
       (err as unknown as { status: number }).status = 401;
       throw err;
     }
-    return { id: "user-test", email: "user@test.com", role: "user" };
+    return { id: "user-test", email: "user@test.com", username: "user-test", role: "user" };
   }
 }
 
@@ -111,7 +133,7 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     await Promise.all(apps.splice(0).map((app) => app.close()));
   });
 
-  function setupApp(options?: { strictAuth?: boolean }) {
+  function setupApp(options?: { strictAuth?: boolean; allowLegacyPasswordAuth?: boolean }) {
     const mockBackend = new MockNpatiAuthBackend();
     const workspaceStore = new InMemoryWorkspaceStore();
     const authProvider = new NpatiBackendAuthProvider({
@@ -127,6 +149,7 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
       authClient: mockBackend,
       strictAuth: options?.strictAuth ?? true,
       npatiJwtSecret: JWT_SECRET,
+      allowLegacyPasswordAuth: options?.allowLegacyPasswordAuth ?? true,
       aiEngine: createTestAiEngine(),
       marketplace: { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace,
     });
@@ -135,6 +158,18 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     return { app, mockBackend, workspaceStore, authProvider };
   }
 
+  it("rejects direct password collection when legacy auth is disabled", async () => {
+    const { app, mockBackend } = setupApp({ allowLegacyPasswordAuth: false });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: "owner@example.com", password: "should-not-leave-browser" },
+    });
+
+    expect(res.statusCode).toBe(410);
+    expect(res.json().error.code).toBe("CENTRAL_ACCOUNT_CONNECTION_REQUIRED");
+    expect(mockBackend.registeredUsers.size).toBe(0);
+  });
   it("registers a new user via NPATI backend and returns tokens and user info", async () => {
     const { app } = setupApp();
 
@@ -164,7 +199,8 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     await mockBackend.register({
       email: "bob@example.com",
       password: "bobPassword456!",
-      name: "Bob Builder",
+      username: "bob",
+      displayName: "Bob Builder",
     });
 
     const res = await app.inject({
@@ -229,7 +265,8 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     await mockBackend.register({
       email: "carol@example.com",
       password: "correctPassword",
-      name: "Carol Danvers",
+      username: "carol",
+      displayName: "Carol Danvers",
     });
 
     const res = await app.inject({
@@ -424,14 +461,18 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     const reg = await mockBackend.register({
       email: "dave@example.com",
       password: "password123",
-      name: "Dave",
+      username: "dave",
+      displayName: "Dave",
     });
+
+    const refreshToken = reg.tokens.refreshToken;
+    expect(refreshToken).toBeDefined();
 
     // Refresh token
     const refreshRes = await app.inject({
       method: "POST",
       url: "/auth/refresh",
-      payload: { refreshToken: reg.tokens.refreshToken },
+      payload: { refreshToken },
     });
     expect(refreshRes.statusCode).toBe(200);
     expect(refreshRes.json().tokens.accessToken).toBeDefined();
@@ -440,12 +481,12 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     const logoutRes = await app.inject({
       method: "POST",
       url: "/auth/logout",
-      payload: { refreshToken: reg.tokens.refreshToken },
+      payload: { refreshToken },
       headers: { authorization: `Bearer ${reg.tokens.accessToken}` },
     });
     expect(logoutRes.statusCode).toBe(200);
     expect(logoutRes.json().success).toBe(true);
-    expect(mockBackend.revokedTokens.has(reg.tokens.refreshToken)).toBe(true);
+    expect(mockBackend.revokedTokens.has(refreshToken!)).toBe(true);
   });
 
   it("runs chat and stream with valid Bearer token and rejects unauthenticated chat under strictAuth", async () => {

@@ -1,6 +1,6 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "./AuthContext";
+import { type InstallationPairing, useAuth } from "./AuthContext";
 
 export interface AuthModalProps {
   isOpen: boolean;
@@ -9,188 +9,90 @@ export interface AuthModalProps {
   onSuccess?: () => void;
 }
 
-export function AuthModal({
-  isOpen,
-  initialMode = "login",
-  onClose,
-  onSuccess,
-}: AuthModalProps) {
+export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const navigate = useNavigate();
-  const { login, register } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">(initialMode);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const { beginInstallationConnection, pollInstallationConnection } = useAuth();
+  const [pairing, setPairing] = useState<InstallationPairing | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setMode(initialMode);
+    if (!isOpen) {
+      setPairing(null);
+      setBusy(false);
       setError(null);
-      setPassword("");
-      setUsername("");
-      setDisplayName("");
     }
-  }, [isOpen, initialMode]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!pairing) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const connected = await pollInstallationConnection(pairing.deviceCode);
+        if (connected && !stopped) {
+          onSuccess?.();
+          if (!onSuccess) navigate("/chat");
+          onClose();
+        }
+      } catch (cause) {
+        if (!stopped) {
+          setError(cause instanceof Error ? cause.message : "NPATI account connection failed.");
+          setBusy(false);
+        }
+      }
+    };
+    const timer = window.setInterval(poll, Math.max(5, pairing.interval) * 1000);
+    void poll();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [navigate, onClose, onSuccess, pairing, pollInstallationConnection]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const start = async () => {
     setBusy(true);
-
+    setError(null);
     try {
-      if (mode === "login") {
-        await login(email, password);
-      } else {
-        await register({
-          email,
-          password,
-          username: username.trim(),
-          displayName: displayName.trim() || undefined,
-        });
-      }
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        navigate("/chat");
-      }
-      onClose();
-    } catch (err: any) {
-      setError(err.message || "Authentication failed. Please check your credentials.");
-    } finally {
+      const next = await beginInstallationConnection();
+      setPairing(next);
+      window.open(next.verificationUriComplete, "_blank", "noopener,noreferrer");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not connect to NPATI.");
       setBusy(false);
     }
   };
 
   return (
     <div className="auth-modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="auth-modal-card" onClick={(e) => e.stopPropagation()}>
-        <button
-          className="auth-modal-close"
-          onClick={onClose}
-          aria-label="Close authentication dialog"
-        >
-          &times;
-        </button>
-
+      <div className="auth-modal-card" onClick={(event) => event.stopPropagation()}>
+        <button className="auth-modal-close" onClick={onClose} aria-label="Close authentication dialog">&times;</button>
         <div className="auth-modal-header">
-          <h2>{mode === "login" ? "Sign in to NPATI" : "Create NPATI Account"}</h2>
-          <p>
-            {mode === "login"
-              ? "Access your AI business workspace, memory, and companies."
-              : "Register your single NPATI account to unlock NPATI Agent."}
-          </p>
+          <h2>Connect your NPATI Account</h2>
+          <p>Authentication happens only on the official NPATI website. This installation never receives your password.</p>
         </div>
 
-        <div className="auth-tab-group" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "login"}
-            className={`auth-tab ${mode === "login" ? "active" : ""}`}
-            onClick={() => {
-              setMode("login");
-              setError(null);
-            }}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "register"}
-            className={`auth-tab ${mode === "register" ? "active" : ""}`}
-            onClick={() => {
-              setMode("register");
-              setError(null);
-            }}
-          >
-            Create account
-          </button>
-        </div>
+        {error && <div className="auth-error-notice" role="alert"><span>{error}</span></div>}
 
-        {error && (
-          <div className="auth-error-notice" role="alert">
-            <span className="auth-error-icon">&times;</span>
-            <span>{error}</span>
+        {pairing ? (
+          <div className="auth-modal-form">
+            <p>Enter this one-time code on NPATI:</p>
+            <strong style={{ fontSize: "1.4rem", letterSpacing: "0.08em", textAlign: "center" }}>{pairing.userCode}</strong>
+            <a className="button-primary auth-submit-button" href={pairing.verificationUriComplete} target="_blank" rel="noreferrer">
+              Open NPATI and approve
+            </a>
+            <small>Waiting for approval. This code expires in {Math.ceil(pairing.expiresIn / 60)} minutes.</small>
           </div>
+        ) : (
+          <button type="button" className="button-primary auth-submit-button" disabled={busy} onClick={start}>
+            {busy ? "Connecting to NPATI..." : "Connect NPATI Account"}
+          </button>
         )}
 
-        <form onSubmit={handleSubmit} className="auth-modal-form">
-          <label className="auth-field">
-            <span>Email</span>
-            <input
-              type="email"
-              required
-              autoFocus
-              placeholder="user@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          {mode === "register" && (
-            <>
-              <label className="auth-field">
-                <span>Username</span>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. alex_biz"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={busy}
-                />
-              </label>
-
-              <label className="auth-field">
-                <span>Display name (optional)</span>
-                <input
-                  type="text"
-                  placeholder="e.g. Alex Johnson"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  disabled={busy}
-                />
-              </label>
-            </>
-          )}
-
-          <label className="auth-field">
-            <span>Password</span>
-            <input
-              type="password"
-              required
-              placeholder={mode === "register" ? "At least 8 characters" : "Your password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-              minLength={mode === "register" ? 8 : undefined}
-            />
-          </label>
-
-          <button
-            type="submit"
-            className="button-primary auth-submit-button"
-            disabled={busy}
-          >
-            {busy
-              ? "Connecting to NPATI…"
-              : mode === "login"
-              ? "Sign in"
-              : "Create account"}
-          </button>
-        </form>
-
         <div className="auth-modal-footer">
-          <small>
-            NPATI Agent connects securely to the unified NPATI backend. Passwords are never stored locally.
-          </small>
+          <small>One NPATI account works on npati.com, ai.npati.com and self-hosted NPATI Agent.</small>
         </div>
       </div>
     </div>

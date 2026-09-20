@@ -1,91 +1,110 @@
 # NPATI Agent
 
-**Open Source AI Business Agent**
+NPATI Agent is an open-source, self-hostable AI workspace for chat, business planning,
+company agents, knowledge, memory, web research, and AI-provider routing.
 
-NPATI Agent is an early local foundation for a business-focused AI assistant.
-Milestone one provides an independent NPATI web interface, a central Agent API,
-clear domain boundaries, and an isolated OmniRoute AI engine. It does not yet
-claim marketplace publishing, autonomous planning, payments, or production readiness.
+The project is under active development. Capability status is reported honestly as
+verified, partial, or not implemented; see [Capabilities](docs/CAPABILITIES.md).
+
+## What works today
+
+- Central NPATI account connection and installation authorization.
+- Neutral chat plus isolated Business and Company contexts.
+- AI-provider discovery and routing through the pinned OmniRoute adapter.
+- Business profiles, goals, conversations, and explicit Business-to-Company transition.
+- Company agents, hierarchy, per-agent models/instructions/tools, and delegated runs.
+- Persistent conversations, scoped memory, company knowledge, and private object storage.
+- Web search, URL fetch, bounded website research, citations, and background research jobs.
+- Text-to-speech, speech-to-text, audio understanding, file upload, and document processing.
+- Capability policies, approval gates, audit events, rate limits, and tenant isolation.
+- Live capability inspection at `/settings/capabilities`.
+
+Some UI surfaces and integrations are partial, and some catalogued capabilities are
+reserved but not implemented. The capability document and inspector make that distinction
+explicit.
+
+## Requirements
+
+- Docker with Compose v2
+- Git with submodule support
+- For host-side commands: Node.js `>=22.22.2 <23` or `>=24 <27`
+
+## Start locally
+
+```bash
+git clone --recurse-submodules <repository-url>
+cd npati-agent
+cp .env.example .env
+docker compose up --build
+```
+
+On Windows Command Prompt, use `copy .env.example .env`.
+
+Open:
+
+- Web: <http://localhost:3000>
+- Agent API health: <http://localhost:3001/health>
+- Capability Inspector: <http://localhost:3000/settings/capabilities>
+
+Empty optional provider keys are acceptable for initial startup. Features that require an
+external provider remain unavailable until that provider is connected.
 
 ## Architecture
 
 ```text
-NPATI Web
-    ↓
-NPATI Agent API
-    ↓
-NPATI Agent orchestration
-    ├── Business Brain
-    ├── Business Memory
-    ├── Skills
-    ├── OmniRoute Adapter → OmniRoute
-    └── Hub Connector → NPATI Hub (optional, not configured)
+React Web
+   |
+Fastify Agent API
+   |-- Agent orchestration and policy
+   |-- Business and Company workspace
+   |-- Memory, knowledge, files, jobs
+   |-- OmniRoute adapter --> pinned OmniRoute submodule
+   `-- NPATI backend / Hub connectors
 ```
 
-NPATI code never imports OmniRoute internals. The adapter is the single boundary
-that knows its verified HTTP endpoints. OmniRoute remains an unmodified Git submodule.
+See [Architecture](docs/ARCHITECTURE.md) for ownership boundaries.
 
-## Local Development
-
-Requirements: Docker Desktop with Compose v2. For host-only checks, use a Node.js
-version accepted by OmniRoute (`22.22.2` or a supported Node 24 release).
-
-```bash
-git submodule update --init --recursive
-copy .env.example .env
-docker compose up --build
-```
-
-On macOS/Linux, use `cp .env.example .env`. Empty API keys are valid for the
-foundation health check; NPATI Hub is optional and reports `not_configured`.
-
-## Docker
-
-The stack uses the single internal network `npati-agent-network` and starts:
-
-- `npati-agent-web`
-- `npati-agent-api`
-- `npati-agent-omniroute`
-- `npati-agent-redis` (required by the verified OmniRoute base setup)
-
-Open NPATI Web at <http://localhost:3000>. Check the Agent API at
-<http://localhost:3001/health>. OmniRoute is intentionally not published to the
-host; the Agent API reaches it on the internal network.
-
-Open the AI Provider Marketplace at <http://localhost:3000/settings/ai>.
-Its audited architecture, actual OmniRoute endpoints, security model, and known
-limitations are documented in
-[`docs/AI_PROVIDER_MARKETPLACE.md`](docs/AI_PROVIDER_MARKETPLACE.md).
-
-## OmniRoute
-
-The pinned upstream version is recorded in `OMNIROUTE_VERSION`, the versioned
-Docker image, and the Git submodule reference at `vendor/omniroute`. The current
-pin is `v3.8.49`.
-See `docs/OMNIROUTE_UPDATES.md` before changing it.
-
-## Project Structure
+## Repository layout
 
 ```text
-apps/web                 NPATI React frontend
-apps/agent-api           central Fastify API
-packages/agent           orchestration
-packages/business-brain  business domain foundation
-packages/memory          business memory abstraction
-packages/skills          skill registry and demonstration skill
-packages/branding        centralized brand configuration and theme
-packages/omniroute-adapter AI engine boundary
-packages/hub-connector   NPATI Hub boundary
-packages/shared          shared contracts
-vendor/omniroute         pinned upstream submodule
+apps/web                    React user interface
+apps/agent-api              Fastify API and application composition
+packages/agent              agent orchestration
+packages/business-brain     business-domain logic
+packages/memory             memory abstractions and engines
+packages/skills             skill registry
+packages/shared             contracts, capability catalog, policies
+packages/omniroute-adapter  isolated OmniRoute boundary
+packages/hub-connector      NPATI backend and Hub boundary
+services/crawler            bounded Crawl4AI service
+tests                       automated regression and security tests
+vendor/omniroute            pinned upstream submodule
 ```
 
-## Verification
+## Development checks
 
 ```bash
 npm install
 npm run typecheck
 npm test
 npm run build
+npm run audit:capabilities
 docker compose config --quiet
 ```
+
+Generated test evidence belongs in `artifacts/`, which is gitignored.
+
+## Documentation
+
+- [Capabilities](docs/CAPABILITIES.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [AI Provider Marketplace](docs/AI_PROVIDER_MARKETPLACE.md)
+- [Web Research](docs/WEB_RESEARCH.md)
+- [Object Storage](docs/OBJECT_STORAGE.md)
+- [Updating OmniRoute](docs/OMNIROUTE_UPDATES.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+## Security
+
+Never commit `.env`, credentials, provider tokens, signing keys, database passwords, or
+NPATI internal service keys. The open-source Agent must be treated as a public client.

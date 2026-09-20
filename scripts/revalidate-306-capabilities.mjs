@@ -82,7 +82,8 @@ console.log(`  Total Capabilities Processed           : ${matrix.length}/306`);
 console.log("============================================================\n");
 
 // Write artifact
-const reportPath = path.join(rootDir, "packages/shared/src/capability-classification-report.json");
+const reportPath = path.join(rootDir, "artifacts", "capability-classification-report.json");
+fs.mkdirSync(path.dirname(reportPath), { recursive: true });
 fs.writeFileSync(
   reportPath,
   JSON.stringify(
