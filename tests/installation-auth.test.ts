@@ -74,10 +74,33 @@ describe("central installation authorization", () => {
     expect(second).toBe(first);
   });
 
+  it("keeps hosted browser credentials isolated and logs out only one browser", async () => {
+    const { store } = await fixture();
+    const first = await store.createBrowserSession("npati_inst_first", "2099-01-01T00:00:00.000Z");
+    const second = await store.createBrowserSession("npati_inst_second", "2099-01-01T00:00:00.000Z");
+    expect((await store.getBrowserSession(first))?.installationToken).toBe("npati_inst_first");
+    expect((await store.getBrowserSession(second))?.installationToken).toBe("npati_inst_second");
+
+    await store.clearBrowserSession(first);
+    expect(await store.getBrowserSession(first)).toBeNull();
+    expect((await store.getBrowserSession(second))?.installationToken).toBe("npati_inst_second");
+  });
+
+  it("updates self-hosted browser sessions when the installation token rotates", async () => {
+    const { store } = await fixture();
+    const browser = await store.createBrowserSession("npati_inst_old", "2099-01-01T00:00:00.000Z");
+    await store.authorize("npati_inst_rotated", "2099-02-01T00:00:00.000Z");
+    expect(await store.getBrowserSession(browser)).toMatchObject({
+      installationToken: "npati_inst_rotated",
+      installationTokenExpiresAt: "2099-02-01T00:00:00.000Z",
+    });
+  });
+
   it("supports routes after the production proxy strips the /api prefix", async () => {
     const { app } = await fixture();
     const status = await app.inject({ method: "GET", url: "/auth/installation/status" });
     expect(status.statusCode).toBe(200);
+    expect(status.json().data.deploymentType).toBe("self_hosted");
     const start = await app.inject({ method: "POST", url: "/auth/installation/start" });
     expect(start.statusCode).toBe(201);
     await app.close();
@@ -124,9 +147,10 @@ describe("central installation authorization", () => {
     const { app, client } = await fixture();
     await app.inject({ method: "POST", url: "/api/auth/installation/start" });
     client.pending = false;
-    await app.inject({ method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) } });
+    const authorized = await app.inject({ method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) } });
+    const cookie = String(authorized.headers["set-cookie"]).split(";")[0];
     const revoked = await app.inject({
-      method: "POST", url: "/api/auth/installation/disconnect", headers: { authorization: "Bearer owner-access" },
+      method: "POST", url: "/api/auth/installation/disconnect", headers: { authorization: "Bearer owner-access", cookie },
     });
     expect(revoked.statusCode).toBe(200);
     expect(client.revoked).toBe(true);
