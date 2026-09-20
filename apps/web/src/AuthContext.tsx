@@ -220,32 +220,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // An unconnected installation is handled by the connect dialog.
       }
-      try {
-        const statusResponse = await fetch("/api/auth/installation/status");
-        const statusPayload = await statusResponse.json().catch(() => null);
-        if (statusResponse.ok
-          && statusPayload?.data?.deploymentType === "npati_hosted"
-          && sessionStorage.getItem(SSO_SUPPRESSED_KEY) !== "1"
-          && !readPendingPairing()) {
-          const startResponse = await fetch("/api/auth/installation/start", { method: "POST" });
-          const startPayload = await startResponse.json().catch(() => null);
-          if (!startResponse.ok || !startPayload?.success) {
-            throw new Error(startPayload?.error?.message || "Could not start NPATI SSO.");
-          }
-          const pairing = startPayload.data as InstallationPairing;
-          sessionStorage.setItem(PENDING_PAIRING_KEY, JSON.stringify({
-            deviceCode: pairing.deviceCode,
-            verificationUriComplete: pairing.verificationUriComplete,
-            expiresAt: Date.now() + pairing.expiresIn * 1000,
-          } satisfies PendingPairing));
-          const verificationUrl = new URL(pairing.verificationUriComplete);
-          verificationUrl.searchParams.set("return_to", `${window.location.origin}/chat?npati_agent_connected=1`);
-          window.location.assign(verificationUrl.toString());
-          return;
-        }
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Could not start NPATI SSO.");
-      }
       setUser(null);
       setToken(null);
       setStoredAuthUser(null);
