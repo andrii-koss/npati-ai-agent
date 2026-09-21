@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { getTokenRefreshDelayMs } from "./auth-token-refresh";
+import { waitForPairingCompletion } from "./auth-pairing";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 
 export interface AuthUser {
@@ -130,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const renewalInFlight = useRef<Promise<"ok" | "unauthorized" | "temporary"> | null>(null);
+  const authCheckInFlight = useRef(false);
 
   const logout = useCallback(async () => {
     const refreshToken = getStoredRefreshToken();
@@ -214,7 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const checkAuth = useCallback(async () => {
+  const runCheckAuth = useCallback(async () => {
     let officialHosted = false;
     try {
       const statusResponse = await fetch("/api/auth/installation/status");
@@ -224,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Continue with the existing local-session check when status is unavailable.
     }
 
-    if (officialHosted) {
+    if (officialHosted && !getStoredAuthToken() && sessionStorage.getItem(SSO_SUPPRESSED_KEY) !== "1") {
       try {
         const startResponse = await fetch("/api/auth/installation/start", { method: "POST" });
         const startPayload = await startResponse.json().catch(() => null);
@@ -254,7 +256,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!approveResponse.ok || !approvePayload?.success) {
           throw new Error(approvePayload?.error?.message || "Could not synchronize the current NPATI account.");
         }
-        if (!await completeInstallationConnection(pairing.deviceCode)) {
+        const pollIntervalMs = Math.max(500, Math.min(pairing.interval * 1000 || 1000, 2000));
+        const connected = await waitForPairingCompletion(() => completeInstallationConnection(pairing.deviceCode), pollIntervalMs);
+        if (!connected) {
           throw new Error("NPATI account synchronization is still pending.");
         }
         setIsLoading(false);
@@ -389,6 +393,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, [completeInstallationConnection, logout]);
+
+  // Focus and visibility events can overlap with the initial hosted pairing.
+  const checkAuth = useCallback(async () => {
+    if (authCheckInFlight.current) return;
+    authCheckInFlight.current = true;
+    try {
+      await runCheckAuth();
+    } finally {
+      authCheckInFlight.current = false;
+    }
+  }, [runCheckAuth]);
 
   useEffect(() => {
     void checkAuth();
