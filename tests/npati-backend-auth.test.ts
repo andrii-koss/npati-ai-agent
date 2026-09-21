@@ -133,6 +133,7 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     const source = await readFile(new URL("../apps/web/src/AuthContext.tsx", import.meta.url), "utf8");
     const ssoStart = source.indexOf("if (officialHosted)");
     const localSessionRead = source.indexOf("const currentToken = getStoredAuthToken()", ssoStart);
+    const ssoSource = source.slice(ssoStart, localSessionRead);
 
     expect(ssoStart).toBeGreaterThan(-1);
     expect(localSessionRead).toBeGreaterThan(ssoStart);
@@ -141,8 +142,8 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(source).toContain('"x-npati-agent-sso": "1"');
     expect(source).toContain("approveResponse.status === 401");
     expect(source).toContain("/api/auth/installation/browser-logout");
-    expect(source).not.toContain("window.location.assign");
-    expect(source).not.toContain("window.location.replace");
+    expect(ssoSource).not.toContain("window.location.assign");
+    expect(ssoSource).not.toContain("window.location.replace");
   });
 
   it("routes pairing through central sign-in and keeps the NPATI avatar in the Agent session", () => {
@@ -159,6 +160,21 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(modalSource).toContain('signInUrl.searchParams.set("redirectUrl"');
     expect(appSource).toContain("resolveNpatiAvatarUrl(user?.avatar)");
     expect(appSource).toContain("<img src={avatarUrl}");
+  });
+
+  it("shows the central account profile and only redirects on explicit sign out", () => {
+    const app = readFileSync(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8");
+    const auth = readFileSync(new URL("../apps/web/src/AuthContext.tsx", import.meta.url), "utf8");
+    const localLogout = auth.slice(auth.indexOf("const logout ="), auth.indexOf("const signOutEverywhere ="));
+    const globalLogout = auth.slice(auth.indexOf("const signOutEverywhere ="), auth.indexOf("const disconnect ="));
+
+    expect(app).toContain("user?.firstName");
+    expect(app).toContain("user?.lastName");
+    expect(app).toContain("<small>{email}</small>");
+    expect(app).not.toContain("Disconnect account");
+    expect(localLogout).not.toContain("window.location.assign");
+    expect(globalLogout).toContain("/agent/logout");
+    expect(globalLogout).toContain('credentials: "include"');
   });
 
   const apps: Array<ReturnType<typeof buildApp>> = [];
