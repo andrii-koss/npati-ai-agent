@@ -36,6 +36,7 @@ const STORAGE_REFRESH_KEY = "npati_agent_refresh_token";
 const STORAGE_USER_KEY = "npati_agent_user";
 const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
 const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
+const NPATI_CENTRAL_API_URL = (import.meta.env.VITE_NPATI_BACKEND_URL || "https://api.npati.com").replace(/\/+$/, "");
 
 type PendingPairing = { deviceCode: string; verificationUriComplete: string; expiresAt: number };
 
@@ -193,6 +194,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const checkAuth = useCallback(async () => {
+    let officialHosted = false;
+    try {
+      const statusResponse = await fetch("/api/auth/installation/status");
+      const statusPayload = await statusResponse.json().catch(() => null);
+      officialHosted = statusResponse.ok && statusPayload?.data?.deploymentType === "npati_hosted";
+    } catch {
+      // Continue with the existing local-session check when status is unavailable.
+    }
+
+    if (officialHosted) {
+      try {
+        const startResponse = await fetch("/api/auth/installation/start", { method: "POST" });
+        const startPayload = await startResponse.json().catch(() => null);
+        if (!startResponse.ok || !startPayload?.success) {
+          throw new Error(startPayload?.error?.message || "Could not start NPATI SSO.");
+        }
+        const pairing = startPayload.data as InstallationPairing;
+        const approveResponse = await fetch(`${NPATI_CENTRAL_API_URL}/api/v1/auth/agent/pairing/approve`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json", "x-npati-agent-sso": "1" },
+          body: JSON.stringify({ userCode: pairing.userCode }),
+        });
+        const approvePayload = await approveResponse.json().catch(() => null);
+        if (approveResponse.status === 401) {
+          await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
+          sessionStorage.removeItem(PENDING_PAIRING_KEY);
+          setStoredAuthToken(null);
+          setStoredRefreshToken(null);
+          setStoredAuthUser(null);
+          setToken(null);
+          setUser(null);
+          setError(null);
+          setIsLoading(false);
+          return;
+        }
+        if (!approveResponse.ok || !approvePayload?.success) {
+          throw new Error(approvePayload?.error?.message || "Could not synchronize the current NPATI account.");
+        }
+        if (!await completeInstallationConnection(pairing.deviceCode)) {
+          throw new Error("NPATI account synchronization is still pending.");
+        }
+        setIsLoading(false);
+        return;
+      } catch (cause) {
+        await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
+        setStoredAuthToken(null);
+        setStoredRefreshToken(null);
+        setStoredAuthUser(null);
+        setToken(null);
+        setUser(null);
+        setError(cause instanceof Error ? cause.message : "Could not synchronize the current NPATI account.");
+        setIsLoading(false);
+        return;
+      }
+    }
     const currentToken = getStoredAuthToken();
     if (!currentToken) {
       const pendingPairing = readPendingPairing();
