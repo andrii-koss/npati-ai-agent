@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { getTokenRefreshDelayMs } from "./auth-token-refresh";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 
 export interface AuthUser {
@@ -5,6 +7,8 @@ export interface AuthUser {
   email: string;
   username: string;
   displayName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
   avatar?: string | null;
   role?: string;
 }
@@ -29,6 +33,7 @@ export interface AuthState {
   beginInstallationConnection(): Promise<InstallationPairing>;
   pollInstallationConnection(deviceCode: string): Promise<boolean>;
   logout(): Promise<void>;
+  signOutEverywhere(): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -38,6 +43,7 @@ const STORAGE_USER_KEY = "npati_agent_user";
 const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
 const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
 const NPATI_CENTRAL_API_URL = (import.meta.env.VITE_NPATI_BACKEND_URL || "https://api.npati.com").replace(/\/+$/, "");
+const NPATI_CENTRAL_WEB_URL = (import.meta.env.VITE_NPATI_WEB_URL || "https://www.npati.com").replace(/\/+$/, "");
 
 type PendingPairing = { deviceCode: string; verificationUriComplete: string; expiresAt: number };
 
@@ -121,8 +127,9 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(getStoredAuthToken());
   const [user, setUser] = useState<AuthUser | null>(getStoredAuthUser());
-  const [isLoading, setIsLoading] = useState<boolean>(!getStoredAuthToken());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const renewalInFlight = useRef<Promise<"ok" | "unauthorized" | "temporary"> | null>(null);
 
   const logout = useCallback(async () => {
     const refreshToken = getStoredRefreshToken();
@@ -147,6 +154,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.dispatchEvent(new Event("npati:auth-changed"));
     }
   }, []);
+
+  const signOutEverywhere = useCallback(async () => {
+    await logout();
+    if (window.location.hostname === "ai.npati.com") {
+      await fetch(`${NPATI_CENTRAL_API_URL}/api/v1/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }).catch(() => null);
+      window.location.assign(new URL("/agent/logout", NPATI_CENTRAL_WEB_URL).toString());
+    }
+  }, [logout]);
 
   const disconnect = useCallback(async () => {
     const currentToken = getStoredAuthToken();
@@ -296,6 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const payload = await response.json();
         if (payload.success && payload.data?.user) {
           const verifiedUser: AuthUser = {
+            ...payload.data.user,
             id: payload.data.user.id || "dev-user",
             displayName: payload.data.user.displayName || "User",
             email: payload.data.user.email || getStoredAuthUser()?.email || "webuser1@example.com",
@@ -332,6 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (meRes.ok) {
                 const meData = await meRes.json();
                 const refreshedUser: AuthUser = {
+                  ...meData.data?.user,
                   id: meData.data?.user?.id || "dev-user",
                   displayName: meData.data?.user?.displayName || "User",
                   email: meData.data?.user?.email || getStoredAuthUser()?.email || "webuser1@example.com",
@@ -384,47 +406,89 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [checkAuth]);
 
 
+  const renewAccessToken = useCallback((): Promise<"ok" | "unauthorized" | "temporary"> => {
+    if (renewalInFlight.current) return renewalInFlight.current;
+    const currentToken = getStoredAuthToken();
+    if (!currentToken) return Promise.resolve("unauthorized");
+
+    const renewal = (async (): Promise<"ok" | "unauthorized" | "temporary"> => {
+      try {
+        const response = await fetch("/api/auth/installation/session", { method: "POST" });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          if (!payload?.data?.accessToken || !payload.data?.user) return "temporary";
+          if (getStoredAuthToken() !== currentToken) return "temporary";
+          setStoredAuthToken(payload.data.accessToken);
+          setStoredAuthUser(payload.data.user);
+          setToken(payload.data.accessToken);
+          setUser(payload.data.user);
+          return "ok";
+        }
+        if (response.status !== 401 && response.status !== 403) return "temporary";
+      } catch {
+        return "temporary";
+      }
+
+      const refreshToken = getStoredRefreshToken();
+      if (!refreshToken) return "unauthorized";
+      try {
+        const response = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!response.ok) return response.status === 401 || response.status === 403 ? "unauthorized" : "temporary";
+        const payload = await response.json().catch(() => null);
+        const tokens = payload?.data?.tokens || payload?.tokens;
+        if (!tokens?.accessToken) return "temporary";
+        if (getStoredAuthToken() !== currentToken) return "temporary";
+        setStoredAuthToken(tokens.accessToken);
+        setToken(tokens.accessToken);
+        if (tokens.refreshToken) setStoredRefreshToken(tokens.refreshToken);
+        return "ok";
+      } catch {
+        return "temporary";
+      }
+    })();
+
+    renewalInFlight.current = renewal;
+    void renewal.finally(() => {
+      if (renewalInFlight.current === renewal) renewalInFlight.current = null;
+    });
+    return renewal;
+  }, []);
+
+  useEffect(() => {
+    if (isLoading || !token) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = (delayMs: number) => {
+      timer = setTimeout(async () => {
+        const result = await renewAccessToken();
+        if (cancelled) return;
+        if (result === "unauthorized") {
+          void checkAuth();
+        } else {
+          schedule(result === "ok" ? getTokenRefreshDelayMs(getStoredAuthToken() || token) : 5000);
+        }
+      }, delayMs);
+    };
+    schedule(getTokenRefreshDelayMs(token));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [token, isLoading, renewAccessToken, checkAuth]);
+
   useEffect(() => {
     const handleUnauthorized = async () => {
-      const refreshToken = getStoredRefreshToken();
-      if (refreshToken) {
-        try {
-          const refreshRes = await fetch("/api/auth/refresh", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ refreshToken }),
-          });
-          if (refreshRes.ok) {
-            const refreshData = await refreshRes.json();
-            const newAccess = refreshData.data?.tokens?.accessToken || refreshData.tokens?.accessToken;
-            if (newAccess) {
-              setStoredAuthToken(newAccess);
-              setToken(newAccess);
-              return;
-            }
-          }
-        } catch {
-          // ignore refresh error
-        }
-      }
-      try {
-        const sessionResponse = await fetch("/api/auth/installation/session", { method: "POST" });
-        const sessionData = await sessionResponse.json().catch(() => null);
-        if (sessionResponse.ok && sessionData?.data?.accessToken && sessionData.data?.user) {
-          setStoredAuthToken(sessionData.data.accessToken);
-          setStoredAuthUser(sessionData.data.user);
-          setToken(sessionData.data.accessToken);
-          setUser(sessionData.data.user);
-          return;
-        }
-      } catch {
-        // Installation session is not available.
-      }
-      void logout();
+      if (!getStoredAuthToken()) return;
+      const result = await renewAccessToken();
+      if (result === "unauthorized") void checkAuth();
     };
     window.addEventListener("npati:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("npati:unauthorized", handleUnauthorized);
-  }, [logout]);
+  }, [renewAccessToken, checkAuth]);
 
   const login = async (email: string, password: string) => {
     setError(null);
@@ -534,6 +598,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         beginInstallationConnection,
         pollInstallationConnection,
         logout,
+        signOutEverywhere,
         disconnect,
       }}
     >

@@ -74,11 +74,13 @@ function NpatiAgentLogo() {
 function ChatUserMenu() {
   const location = useLocation();
   const { overview } = useWorkspace();
-  const { user, logout, disconnect } = useAuth();
+  const { user, signOutEverywhere } = useAuth();
   const [open, setOpen] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const displayName = overview?.user.displayName?.trim() || user?.displayName || "User";
+  const accountName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  const displayName = accountName || user?.displayName?.trim() || overview?.user.displayName?.trim() || user?.username || "User";
+  const email = user?.email || "";
   const initials = displayName
     .split(/\s+/)
     .slice(0, 2)
@@ -124,7 +126,7 @@ function ChatUserMenu() {
             <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">
               {avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : initials}
             </span>
-            <span><strong>{displayName}</strong><small>{overview?.workspace.name || "Workspace"}</small></span>
+            <span><strong>{displayName}</strong><small>{email}</small></span>
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
@@ -137,23 +139,10 @@ function ChatUserMenu() {
               className="chat-user-signout"
               onClick={() => {
                 closeMenu();
-                void logout();
+                void signOutEverywhere();
               }}
             >
               Sign out <span aria-hidden="true">&rarr;</span>
-            </button>
-            <button
-              type="button"
-              className="chat-user-signout"
-              onClick={() => {
-                if (!window.confirm("Disconnect this NPATI account from the Agent? You can then connect another account.")) return;
-                closeMenu();
-                void disconnect()
-                  .then(() => window.location.assign("/"))
-                  .catch((cause) => window.alert(cause instanceof Error ? cause.message : "Could not disconnect account."));
-              }}
-            >
-              Disconnect account <span aria-hidden="true">&rarr;</span>
             </button>
           </nav>
         </aside>
