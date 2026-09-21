@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { buildApp } from "../apps/agent-api/src/app";
 import { createMockNpatiJwt, NpatiBackendAuthProvider } from "../apps/agent-api/src/auth";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -142,6 +143,22 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(source).toContain("/api/auth/installation/browser-logout");
     expect(source).not.toContain("window.location.assign");
     expect(source).not.toContain("window.location.replace");
+  });
+
+  it("routes pairing through central sign-in and keeps the NPATI avatar in the Agent session", () => {
+    const modalSource = readFileSync(
+      new URL("../apps/web/src/AuthModal.tsx", import.meta.url),
+      "utf8",
+    );
+    const appSource = readFileSync(
+      new URL("../apps/web/src/App.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(modalSource).toContain('new URL(`${marketPrefix}/sign-in`, connectUrl.origin)');
+    expect(modalSource).toContain('signInUrl.searchParams.set("redirectUrl"');
+    expect(appSource).toContain("resolveNpatiAvatarUrl(user?.avatar)");
+    expect(appSource).toContain("<img src={avatarUrl}");
   });
 
   const apps: Array<ReturnType<typeof buildApp>> = [];
