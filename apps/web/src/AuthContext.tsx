@@ -5,6 +5,7 @@ export interface AuthUser {
   email: string;
   username: string;
   displayName?: string;
+  avatar?: string | null;
   role?: string;
 }
 
@@ -370,6 +371,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void checkAuth();
   }, [checkAuth]);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void checkAuth();
+    };
+    window.addEventListener("focus", checkAuth);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", checkAuth);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [checkAuth]);
+
 
   useEffect(() => {
     const handleUnauthorized = async () => {

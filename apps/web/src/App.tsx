@@ -35,6 +35,15 @@ function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     return res;
   });
 }
+const NPATI_API_BASE = (import.meta.env.VITE_NPATI_BACKEND_URL || "https://api.npati.com").replace(/\/+$/, "");
+
+function resolveNpatiAvatarUrl(value?: string | null): string | null {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  const normalized = value.replace(/^\/+/, "");
+  const path = normalized.startsWith("assets/") || normalized.startsWith("uploads/") ? normalized : `assets/${normalized}`;
+  return `${NPATI_API_BASE}/${path}`;
+}
 
 
 const navigation = ["Settings"];
@@ -67,6 +76,7 @@ function ChatUserMenu() {
   const { overview } = useWorkspace();
   const { user, logout, disconnect } = useAuth();
   const [open, setOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const displayName = overview?.user.displayName?.trim() || user?.displayName || "User";
   const initials = displayName
@@ -75,6 +85,8 @@ function ChatUserMenu() {
     .map((part) => part.charAt(0))
     .join("")
     .toUpperCase() || "U";
+  const avatarUrl = resolveNpatiAvatarUrl(user?.avatar);
+  useEffect(() => setAvatarFailed(false), [avatarUrl]);
 
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
@@ -104,12 +116,14 @@ function ChatUserMenu() {
         aria-controls="chat-user-popover"
         onClick={() => setOpen((current) => !current)}
       >
-        {initials}
+        {avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : initials}
       </button>
       {open && (
         <aside className="chat-user-popover" id="chat-user-popover" aria-label="User links">
           <div className="chat-user-summary">
-            <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">{initials}</span>
+            <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">
+              {avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : initials}
+            </span>
             <span><strong>{displayName}</strong><small>{overview?.workspace.name || "Workspace"}</small></span>
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>

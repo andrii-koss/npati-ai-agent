@@ -8,6 +8,16 @@ export interface AuthModalProps {
   onClose: () => void;
   onSuccess?: () => void;
 }
+function buildNpatiSignInUrl(verificationUriComplete: string): string {
+  const connectUrl = new URL(verificationUriComplete);
+  const segments = connectUrl.pathname.split("/").filter(Boolean);
+  const marketPrefix = segments.at(-2) === "agent" && segments.length > 2 ? `/${segments[0]}` : "";
+  const signInUrl = new URL(`${marketPrefix}/sign-in`, connectUrl.origin);
+  signInUrl.searchParams.set("redirectUrl", `${connectUrl.pathname}${connectUrl.search}${connectUrl.hash}`);
+  return signInUrl.toString();
+}
+
+
 
 export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const navigate = useNavigate();
@@ -58,7 +68,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     try {
       const next = await beginInstallationConnection();
       setPairing(next);
-      window.open(next.verificationUriComplete, "_blank", "noopener,noreferrer");
+      window.open(buildNpatiSignInUrl(next.verificationUriComplete), "_blank", "noopener,noreferrer");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not connect to NPATI.");
       setBusy(false);
@@ -80,7 +90,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           <div className="auth-modal-form">
             <p>Enter this one-time code on NPATI:</p>
             <strong style={{ fontSize: "1.4rem", letterSpacing: "0.08em", textAlign: "center" }}>{pairing.userCode}</strong>
-            <a className="button-primary auth-submit-button" href={pairing.verificationUriComplete} target="_blank" rel="noreferrer">
+            <a className="button-primary auth-submit-button" href={buildNpatiSignInUrl(pairing.verificationUriComplete)} target="_blank" rel="noreferrer">
               Open NPATI and approve
             </a>
             <small>Waiting for approval. This code expires in {Math.ceil(pairing.expiresIn / 60)} minutes.</small>
