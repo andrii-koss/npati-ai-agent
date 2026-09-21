@@ -11,6 +11,7 @@ import type {
   NpatiUser,
 } from "@npati/hub-connector";
 import { afterEach, describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 const JWT_SECRET = "test-npati-jwt-secret-key-32chars!!";
 
@@ -127,6 +128,22 @@ function createTestAiEngine(): AIEngine {
 }
 
 describe("NPATI Backend Authentication & Single Source of Truth Integration", () => {
+  it("synchronizes the official hosted Agent with the central session without redirects", async () => {
+    const source = await readFile(new URL("../apps/web/src/AuthContext.tsx", import.meta.url), "utf8");
+    const ssoStart = source.indexOf("if (officialHosted)");
+    const localSessionRead = source.indexOf("const currentToken = getStoredAuthToken()", ssoStart);
+
+    expect(ssoStart).toBeGreaterThan(-1);
+    expect(localSessionRead).toBeGreaterThan(ssoStart);
+    expect(source).toContain("/api/v1/auth/agent/pairing/approve");
+    expect(source).toContain('credentials: "include"');
+    expect(source).toContain('"x-npati-agent-sso": "1"');
+    expect(source).toContain("approveResponse.status === 401");
+    expect(source).toContain("/api/auth/installation/browser-logout");
+    expect(source).not.toContain("window.location.assign");
+    expect(source).not.toContain("window.location.replace");
+  });
+
   const apps: Array<ReturnType<typeof buildApp>> = [];
 
   afterEach(async () => {
