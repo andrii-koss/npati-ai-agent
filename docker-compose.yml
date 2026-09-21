@@ -33,8 +33,8 @@ services:
       NPATI_ENV: ${NPATI_ENV:-development}
       NPATI_AGENT_API_PORT: 3001
       NPATI_AUTH_STRICT: ${NPATI_AUTH_STRICT:-true}
-      NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:-http://host.docker.internal:4000}
-      NPATI_JWT_SECRET: ${NPATI_JWT_SECRET:-pati-backend-jwt-secret-key-2024-min-32-chars-long}
+      NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:-https://www.npati.com}
+      NPATI_JWT_SECRET: ${NPATI_JWT_SECRET:-}
       NPATI_ENCRYPTION_KEY: ${NPATI_ENCRYPTION_KEY:-npati-local-development-encryption-key-change-before-production}
       NPATI_REMOTE_ACCESS_TOKEN_SECRET: ${NPATI_REMOTE_ACCESS_TOKEN_SECRET:-npati-local-development-remote-token-key-change-before-production}
       OIDC_ISSUER: ${OIDC_ISSUER:-https://auth.npati.ai}
