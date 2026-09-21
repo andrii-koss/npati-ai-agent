@@ -46,7 +46,7 @@ NPATI_AGENT_PUBLIC_DOMAIN=https://agent.example.com
 ```
 
 `NPATI_BACKEND_URL` must point to the reachable central NPATI backend origin, for example
-`https://api.npati.com`. It must not point to `localhost` from inside the deployment.
+`https://www.npati.com`. It must not point to `localhost` from inside the deployment.
 
 After changing a domain in Dokploy, redeploy the Compose service so its Traefik routing is
 regenerated.

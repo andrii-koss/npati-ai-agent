@@ -1,0 +1,21 @@
+diff --git a/backend/src/routes/users/index.ts b/backend/src/routes/users/index.ts
+--- a/backend/src/routes/users/index.ts
++++ b/backend/src/routes/users/index.ts
+@@ -17,3 +17,3 @@
+ // Get current user profile (optional auth for check endpoint)
+-userRoutes.get('/me', auth({ optional: true }), async (c) => {
++userRoutes.get('/me', auth({ optional: true, allowInstallationSession: true }), async (c) => {
+   // Якщо немає авторизації - повертаємо 401
+@@ -27,4 +27,11 @@
+   }
+ 
+-  const { user } = c.get('auth');
++  const { user, payload } = c.get('auth');
++  if (payload.tokenType === 'installation_session') {
++    const { id, email, username, displayName, avatar, role, status, country, createdAt, updatedAt } = user;
++    return c.json({
++      success: true,
++      data: { id, email, username, displayName, avatar, role, status, country, createdAt, updatedAt },
++    });
++  }
+   const { password, ...userWithoutPassword } = user;

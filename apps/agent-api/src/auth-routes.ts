@@ -276,10 +276,24 @@ export function registerAuthRoutes(
     try {
       const auth = await authProvider.authenticate(request);
       const overview = await workspaceStore.overview(auth);
+      const bearerToken = request.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+      const centralUser = bearerToken && authClient && !bearerToken.startsWith("npati_live_") && !bearerToken.startsWith("rat_")
+        ? await authClient.getCurrentUser(bearerToken).catch(() => null)
+        : null;
+      const profile = centralUser?.id === auth.userId ? centralUser : null;
       return reply.code(200).send({
         success: true,
         data: {
-          user: overview.user,
+          user: profile ? {
+            id: profile.id,
+            email: profile.email,
+            username: profile.username,
+            displayName: profile.displayName,
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            avatar: profile.avatar,
+            role: profile.role,
+          } : overview.user,
           workspace: overview.workspace,
           permissions: auth.permissions,
         },

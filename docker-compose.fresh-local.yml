@@ -1,0 +1,31 @@
+﻿# Fresh local installation for Docker Desktop testing.
+# Use with docker-compose.yml. Existing local volumes remain available for rollback.
+# This tests central token validation against the same backend used in production.
+services:
+  agent-api:
+    environment:
+      NPATI_BACKEND_URL: https://www.npati.com
+      NPATI_JWT_SECRET: ""
+      JWT_SECRET: ""
+      NPATI_DEPLOYMENT_TYPE: self_hosted
+  company-worker:
+    environment:
+      NPATI_BACKEND_URL: https://www.npati.com
+      NPATI_JWT_SECRET: ""
+      JWT_SECRET: ""
+      NPATI_DEPLOYMENT_TYPE: self_hosted
+volumes:
+  npati-agent-data:
+    name: npati-agent-clean-20260921-data
+  postgres-data:
+    name: npati-agent-clean-20260921-postgres
+  minio-data:
+    name: npati-agent-clean-20260921-minio
+  omniroute-data:
+    name: npati-agent-clean-20260921-omniroute
+  qdrant-data:
+    name: npati-agent-clean-20260921-qdrant
+  redis-data:
+    name: npati-agent-clean-20260921-redis
+  crawler-state:
+    name: npati-agent-clean-20260921-crawler

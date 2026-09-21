@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 const JWT_SECRET = "test-npati-jwt-secret-key-32chars!!";
 
 class MockNpatiAuthBackend implements NpatiAuthClient {
+  public currentUser: NpatiUser = { id: "user-test", email: "user@test.com", username: "user-test", role: "user" };
   public registeredUsers = new Map<string, {
     id: string;
     email: string;
@@ -101,7 +102,7 @@ class MockNpatiAuthBackend implements NpatiAuthClient {
       (err as unknown as { status: number }).status = 401;
       throw err;
     }
-    return { id: "user-test", email: "user@test.com", username: "user-test", role: "user" };
+    return this.currentUser;
   }
 }
 
@@ -207,6 +208,26 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
 
     return { app, mockBackend, workspaceStore, authProvider };
   }
+
+  it("reads current name and avatar from the central profile on each authenticated profile request", async () => {
+    const { app, mockBackend } = setupApp();
+    const token = createMockNpatiJwt({ userId: "user-test" }, JWT_SECRET);
+    const headers = { authorization: `Bearer ${token}` };
+
+    mockBackend.currentUser = {
+      id: "user-test", email: "user@test.com", username: "user-test",
+      firstName: "Olena", lastName: "Koval", displayName: "Olena Koval",
+      avatar: "first-avatar-id", role: "user",
+    };
+    const first = await app.inject({ method: "GET", url: "/auth/me", headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().data.user).toMatchObject({ firstName: "Olena", lastName: "Koval", avatar: "first-avatar-id" });
+
+    mockBackend.currentUser = { ...mockBackend.currentUser, avatar: "new-avatar-id" };
+    const updated = await app.inject({ method: "GET", url: "/auth/me", headers });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().data.user.avatar).toBe("new-avatar-id");
+  });
 
   it("rejects direct password collection when legacy auth is disabled", async () => {
     const { app, mockBackend } = setupApp({ allowLegacyPasswordAuth: false });
