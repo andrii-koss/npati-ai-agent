@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 interface PersistedInstallationAuth {
@@ -17,6 +17,8 @@ const hash = (value: string) => createHash("sha256").update(value, "utf8").diges
 
 export class InstallationAuthStore {
   private state?: PersistedInstallationAuth;
+  private loading?: Promise<PersistedInstallationAuth>;
+  private writeQueue: Promise<void> = Promise.resolve();
   private readonly filePath: string;
 
   constructor(dataDirectory?: string) {
@@ -24,51 +26,68 @@ export class InstallationAuthStore {
     this.filePath = path.join(directory, "installation-auth.json");
   }
 
-  private async persist() {
-    if (!this.state) return;
+  private async persist(state: PersistedInstallationAuth) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(this.state, null, 2), { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, this.filePath);
+    const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+      await rename(temporary, this.filePath);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.writeQueue.then(operation);
+    this.writeQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   async load(): Promise<PersistedInstallationAuth> {
     if (this.state) return this.state;
-    try {
-      const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as PersistedInstallationAuth;
-      this.state = { ...parsed, installationId: parsed.installationId || randomUUID() };
-    } catch {
-      this.state = { installationId: randomUUID() };
-      await this.persist();
+    if (!this.loading) {
+      this.loading = (async () => {
+        try {
+          const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as PersistedInstallationAuth;
+          this.state = { ...parsed, installationId: parsed.installationId || randomUUID() };
+        } catch {
+          const initial = { installationId: randomUUID() };
+          await this.persist(initial);
+          this.state = initial;
+        }
+        return this.state;
+      })().finally(() => { this.loading = undefined; });
     }
-    return this.state;
+    return this.loading;
   }
 
   async authorize(installationToken: string, expiresAt: string) {
-    const state = await this.load();
-    const browserSessions = Object.fromEntries(Object.keys(state.browserSessions ?? {}).map((sessionHash) => [
-      sessionHash,
-      { installationToken, installationTokenExpiresAt: expiresAt },
-    ]));
-    this.state = {
-      ...state,
-      installationToken,
-      installationTokenExpiresAt: expiresAt,
-      browserSessions,
-    };
-    await this.persist();
+    return this.mutate(async () => {
+      const state = await this.load();
+      const browserSessions = Object.fromEntries(Object.keys(state.browserSessions ?? {}).map((sessionHash) => [
+        sessionHash,
+        { installationToken, installationTokenExpiresAt: expiresAt },
+      ]));
+      const next = { ...state, installationToken, installationTokenExpiresAt: expiresAt, browserSessions };
+      await this.persist(next);
+      this.state = next;
+    });
   }
 
   async createBrowserSession(installationToken: string, installationTokenExpiresAt: string): Promise<string> {
-    const value = randomBytes(32).toString("base64url");
-    const state = await this.load();
-    const now = Date.now();
-    const browserSessions = Object.fromEntries(Object.entries(state.browserSessions ?? {})
-      .filter(([, session]) => Date.parse(session.installationTokenExpiresAt) > now));
-    browserSessions[hash(value)] = { installationToken, installationTokenExpiresAt };
-    this.state = { ...state, browserSessions };
-    await this.persist();
-    return value;
+    return this.mutate(async () => {
+      const value = randomBytes(32).toString("base64url");
+      const state = await this.load();
+      const now = Date.now();
+      const browserSessions = Object.fromEntries(Object.entries(state.browserSessions ?? {})
+        .filter(([, session]) => Date.parse(session.installationTokenExpiresAt) > now));
+      browserSessions[hash(value)] = { installationToken, installationTokenExpiresAt };
+      const next = { ...state, browserSessions };
+      await this.persist(next);
+      this.state = next;
+      return value;
+    });
   }
 
   async getBrowserSession(value?: string): Promise<{ installationToken: string; installationTokenExpiresAt: string } | null> {
@@ -90,20 +109,23 @@ export class InstallationAuthStore {
   }
 
   async clearBrowserSession(value?: string) {
-    const state = await this.load();
-    const browserSessions = { ...(state.browserSessions ?? {}) };
-    if (value) delete browserSessions[hash(value)];
-    this.state = {
-      ...state,
-      browserSessionHash: value ? state.browserSessionHash : undefined,
-      browserSessions: value ? browserSessions : {},
-    };
-    await this.persist();
+    if (!value) return;
+    return this.mutate(async () => {
+      const state = await this.load();
+      const browserSessions = { ...(state.browserSessions ?? {}) };
+      delete browserSessions[hash(value)];
+      const next = { ...state, browserSessions };
+      await this.persist(next);
+      this.state = next;
+    });
   }
 
   async clearAuthorization() {
-    const state = await this.load();
-    this.state = { installationId: state.installationId, browserSessions: {} };
-    await this.persist();
+    return this.mutate(async () => {
+      const state = await this.load();
+      const next = { installationId: state.installationId, browserSessions: {} };
+      await this.persist(next);
+      this.state = next;
+    });
   }
 }

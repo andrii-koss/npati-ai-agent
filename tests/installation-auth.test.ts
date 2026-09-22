@@ -86,6 +86,26 @@ describe("central installation authorization", () => {
     expect((await store.getBrowserSession(second))?.installationToken).toBe("npati_inst_second");
   });
 
+  it("handles simultaneous browser logouts without losing another browser session", async () => {
+    const { app, store, directory } = await fixture();
+    const [first, second] = await Promise.all([
+      store.createBrowserSession("npati_inst_first", "2099-01-01T00:00:00.000Z"),
+      store.createBrowserSession("npati_inst_second", "2099-01-01T00:00:00.000Z"),
+    ]);
+    const requests = [
+      app.inject({ method: "POST", url: "/auth/installation/browser-logout", headers: { cookie: `npati_agent_session=${first}` } }),
+      app.inject({ method: "POST", url: "/auth/installation/browser-logout", headers: { cookie: `npati_agent_session=${first}` } }),
+      app.inject({ method: "POST", url: "/auth/installation/browser-logout" }),
+    ];
+    const responses = await Promise.all(requests);
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200, 200]);
+
+    const reloaded = new InstallationAuthStore(directory);
+    expect(await reloaded.getBrowserSession(first)).toBeNull();
+    expect((await reloaded.getBrowserSession(second))?.installationToken).toBe("npati_inst_second");
+    await app.close();
+  });
+
   it("updates self-hosted browser sessions when the installation token rotates", async () => {
     const { store } = await fixture();
     const browser = await store.createBrowserSession("npati_inst_old", "2099-01-01T00:00:00.000Z");
