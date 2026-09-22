@@ -1401,6 +1401,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if ((result as any)?.businessAction) {
         window.dispatchEvent(new CustomEvent("npati:business-changed", { detail: (result as any).businessAction }));
       }
+      if (result.companyAction) {
+        window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: result.companyAction }));
+      }
       if ((result as any)?.goalAction) {
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
@@ -1411,7 +1414,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           "",
           `/c/${result.conversationId}`
         );
-        if (window.location.pathname.startsWith("/b/")) {
+        if (companyId && result.activeContext?.contextType === "none") {
+          navigate(`/c/${result.conversationId}`, { replace: true, state: { neutralChat: true } });
+        } else if (window.location.pathname.startsWith("/b/")) {
           navigate(`/c/${result.conversationId}`, { replace: true });
         }
         window.dispatchEvent(new Event("npati:conversations-changed"));

@@ -12,7 +12,7 @@ const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document
 const voiceMessageRegex = /^(?:🎤\s*)?Voice message:\s*([^\n\r]+)$/i;
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
-const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile"];
+const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile", "company-action"];
 
 export function stripInternalChatActions(content: string, streaming = false): string {
   let visible = "";
@@ -985,7 +985,7 @@ export function ChatMessageContent({ content }: { content: string }) {
         i++;
       }
       if (i < lines.length) i++;
-      if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit" || lang === "business-action" || lang === "business-profile" || lang === "goal-action" || lang === "goal-profile") {
+      if (lang === "spreadsheet-edit" || lang === "table-edit" || lang === "excel-edit" || internalActionFences.includes(lang)) {
         continue;
       }
       const isCardBlock = /^(?:card|artifact|document|idea|draft|canvas|box|post|text-block|goal)$/i.test(lang);
