@@ -43,7 +43,6 @@ const STORAGE_USER_KEY = "npati_agent_user";
 const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
 const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
 const NPATI_CENTRAL_API_URL = (import.meta.env.VITE_NPATI_BACKEND_URL || "https://api.npati.com").replace(/\/+$/, "");
-const NPATI_CENTRAL_WEB_URL = (import.meta.env.VITE_NPATI_WEB_URL || "https://www.npati.com").replace(/\/+$/, "");
 
 type PendingPairing = { deviceCode: string; verificationUriComplete: string; expiresAt: number };
 
@@ -160,13 +159,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOutEverywhere = useCallback(async () => {
     await logout();
     if (window.location.hostname === "ai.npati.com") {
-      await fetch(`${NPATI_CENTRAL_API_URL}/api/v1/auth/logout`, {
+      const response = await fetch(`${NPATI_CENTRAL_API_URL}/api/v1/auth/logout`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
         body: "{}",
       }).catch(() => null);
-      window.location.assign(new URL("/agent/logout", NPATI_CENTRAL_WEB_URL).toString());
+      if (!response?.ok) {
+        throw new Error("Signed out of NPATI Agent, but could not sign out of npati.com. Please sign out there manually.");
+      }
     }
   }, [logout]);
 
