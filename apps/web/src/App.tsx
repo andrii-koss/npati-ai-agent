@@ -1,6 +1,6 @@
 import { brandConfig } from "@npati/branding";
 import type { HealthResponse } from "@npati/shared";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AIProviderMarketplace, OAuthCallback } from "./AIProviderMarketplace";
@@ -160,6 +160,8 @@ function Home() {
   const { overview } = useWorkspace();
   const { isAuthenticated, user, logout } = useAuth();
   const [authModal, setAuthModal] = useState<{ open: boolean; mode: "login" | "register" }>({ open: false, mode: "login" });
+  const closeAuthModal = useCallback(() => setAuthModal((prev) => ({ ...prev, open: false })), []);
+  const handleAuthSuccess = useCallback(() => navigate("/chat"), [navigate]);
 
   const actionCards = [
     { title: t("home.actions.sellSomething.title"), description: t("home.actions.sellSomething.desc") },
@@ -233,8 +235,8 @@ function Home() {
       <AuthModal
         isOpen={authModal.open}
         initialMode={authModal.mode}
-        onClose={() => setAuthModal((prev) => ({ ...prev, open: false }))}
-        onSuccess={() => navigate("/chat")}
+        onClose={closeAuthModal}
+        onSuccess={handleAuthSuccess}
       />
     </main>
   );

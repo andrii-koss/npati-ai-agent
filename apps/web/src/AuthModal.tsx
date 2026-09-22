@@ -21,7 +21,7 @@ function buildNpatiSignInUrl(verificationUriComplete: string): string {
 
 export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const navigate = useNavigate();
-  const { beginInstallationConnection, pollInstallationConnection } = useAuth();
+  const { beginInstallationConnection, pollInstallationConnection, isAuthenticated } = useAuth();
   const [pairing, setPairing] = useState<InstallationPairing | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +35,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!pairing) return;
+    if (isOpen && isAuthenticated) onClose();
+  }, [isOpen, isAuthenticated, onClose]);
+
+  useEffect(() => {
+    if (!isOpen || isAuthenticated || !pairing) return;
     let stopped = false;
     let timer: number | undefined;
     const poll = async () => {
@@ -62,9 +66,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       stopped = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [navigate, onClose, onSuccess, pairing, pollInstallationConnection]);
+  }, [isOpen, isAuthenticated, navigate, onClose, onSuccess, pairing, pollInstallationConnection]);
 
-  if (!isOpen) return null;
+  if (!isOpen || isAuthenticated) return null;
 
   const start = async () => {
     setBusy(true);
@@ -93,7 +97,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         {pairing ? (
           <div className="auth-modal-form">
             <p>Enter this one-time code on NPATI:</p>
-            <strong style={{ fontSize: "1.4rem", letterSpacing: "0.08em", textAlign: "center" }}>{pairing.userCode}</strong>
+            <strong className="auth-modal-code">{pairing.userCode}</strong>
             <a className="button-primary auth-submit-button" href={buildNpatiSignInUrl(pairing.verificationUriComplete)} target="_blank" rel="noreferrer">
               Open NPATI and approve
             </a>
