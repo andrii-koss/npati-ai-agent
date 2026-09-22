@@ -37,26 +37,30 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   useEffect(() => {
     if (!pairing) return;
     let stopped = false;
+    let timer: number | undefined;
     const poll = async () => {
       try {
         const connected = await pollInstallationConnection(pairing.deviceCode);
-        if (connected && !stopped) {
+        if (stopped) return;
+        if (connected) {
           onSuccess?.();
           if (!onSuccess) navigate("/chat");
           onClose();
+        } else {
+          timer = window.setTimeout(poll, Math.max(5, pairing.interval) * 1000);
         }
       } catch (cause) {
         if (!stopped) {
           setError(cause instanceof Error ? cause.message : "NPATI account connection failed.");
           setBusy(false);
+          setPairing(null);
         }
       }
     };
-    const timer = window.setInterval(poll, Math.max(5, pairing.interval) * 1000);
     void poll();
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [navigate, onClose, onSuccess, pairing, pollInstallationConnection]);
 

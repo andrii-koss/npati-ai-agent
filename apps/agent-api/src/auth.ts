@@ -258,7 +258,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
       return authContext;
     } catch (error) {
       if (error instanceof AuthenticationError) throw error;
-      throw new AuthenticationError("Token verification failed", 401, "INVALID_TOKEN");
+      throw new AuthenticationError("Authentication is temporarily unavailable", 503, "AUTH_BACKEND_UNAVAILABLE");
     }
   }
 
@@ -300,7 +300,11 @@ export class NpatiBackendAuthProvider implements AuthProvider {
 
     if (this.authClient && !this.jwtSecret) {
       const user = await this.authClient.getCurrentUser(token).catch((err) => {
-        throw new AuthenticationError(err.message || "Failed to verify user with NPATI backend", 401, "UNAUTHORIZED");
+        const status = Number(err?.status);
+        if (status === 401 || status === 403) {
+          throw new AuthenticationError(err.message || "NPATI session is invalid", status, "UNAUTHORIZED");
+        }
+        throw new AuthenticationError("NPATI authentication service is temporarily unavailable", 503, "AUTH_BACKEND_UNAVAILABLE");
       });
       if (user.status === "banned" || user.status === "inactive") {
         throw new AuthenticationError(`Account is ${user.status}`, 403, "ACCOUNT_DISABLED");
@@ -337,4 +341,3 @@ export function createMockNpatiJwt(
   const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${signature}`;
 }
-

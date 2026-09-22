@@ -130,8 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const renewalInFlight = useRef<Promise<"ok" | "unauthorized" | "temporary"> | null>(null);
+  const authCheckInFlight = useRef<Promise<void> | null>(null);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (waitForCheck = true) => {
+    sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
+    if (waitForCheck) await authCheckInFlight.current?.catch(() => undefined);
     const refreshToken = getStoredRefreshToken();
     try {
       await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
@@ -143,7 +146,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).catch(() => null);
       }
     } finally {
-      sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
       sessionStorage.removeItem(PENDING_PAIRING_KEY);
       setStoredAuthToken(null);
       setStoredRefreshToken(null);
@@ -169,6 +171,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout]);
 
   const disconnect = useCallback(async () => {
+    sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
+    await authCheckInFlight.current?.catch(() => undefined);
     const currentToken = getStoredAuthToken();
     if (!currentToken) throw new Error("An authenticated NPATI session is required.");
     const response = await fetch("/api/auth/installation/disconnect", {
@@ -185,7 +189,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setError(null);
-    sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
     sessionStorage.removeItem(PENDING_PAIRING_KEY);
     window.dispatchEvent(new Event("npati:auth-changed"));
   }, []);
@@ -214,17 +217,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback((forceSession = false): Promise<void> => {
+    if (authCheckInFlight.current) {
+      const inFlight = authCheckInFlight.current;
+      return forceSession ? inFlight.then(() => checkAuth(true)) : inFlight;
+    }
+    const check = (async () => {
     let officialHosted = false;
     try {
       const statusResponse = await fetch("/api/auth/installation/status");
       const statusPayload = await statusResponse.json().catch(() => null);
-      officialHosted = statusResponse.ok && statusPayload?.data?.deploymentType === "npati_hosted";
+      if (!statusResponse.ok || !statusPayload?.success || !statusPayload.data?.deploymentType) {
+        setIsLoading(false);
+        return;
+      }
+      officialHosted = statusPayload.data.deploymentType === "npati_hosted";
     } catch {
-      // Continue with the existing local-session check when status is unavailable.
+      // Deployment mode is unknown; a temporary status failure must not log the user out.
+      setIsLoading(false);
+      return;
     }
 
     if (officialHosted) {
+      const currentToken = getStoredAuthToken();
+      let tokenRejected = false;
+      if (currentToken && !forceSession) {
+        try {
+          const meResponse = await fetch("/api/auth/me", {
+            headers: { authorization: `Bearer ${currentToken}` },
+          });
+          if (meResponse.ok) {
+            const mePayload = await meResponse.json().catch(() => null);
+            if (!mePayload?.success || !mePayload.data?.user) {
+              setIsLoading(false);
+              return;
+            }
+            setStoredAuthUser(mePayload.data.user);
+            setToken(currentToken);
+            setUser(mePayload.data.user);
+            setError(null);
+            setIsLoading(false);
+            return;
+          }
+          if (meResponse.status !== 401 && meResponse.status !== 403) {
+            setIsLoading(false);
+            return;
+          }
+          tokenRejected = true;
+        } catch {
+          // A temporary backend failure must not remove a usable browser session.
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      try {
+        const sessionResponse = await fetch("/api/auth/installation/session", { method: "POST" });
+        if (sessionResponse.ok) {
+          const sessionPayload = await sessionResponse.json().catch(() => null);
+          if (sessionPayload?.success && sessionPayload.data?.accessToken && sessionPayload.data?.user) {
+            setStoredAuthToken(sessionPayload.data.accessToken);
+            setStoredRefreshToken(null);
+            setStoredAuthUser(sessionPayload.data.user);
+            setToken(sessionPayload.data.accessToken);
+            setUser(sessionPayload.data.user);
+            setError(null);
+            setIsLoading(false);
+            return;
+          }
+          setIsLoading(false);
+          return;
+        }
+        if (sessionResponse.status !== 401 && sessionResponse.status !== 403) {
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        setIsLoading(false);
+        return;
+      }
+
+      if (sessionStorage.getItem(SSO_SUPPRESSED_KEY) === "1") {
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const startResponse = await fetch("/api/auth/installation/start", { method: "POST" });
         const startPayload = await startResponse.json().catch(() => null);
@@ -240,13 +317,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         const approvePayload = await approveResponse.json().catch(() => null);
         if (approveResponse.status === 401) {
-          await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
-          sessionStorage.removeItem(PENDING_PAIRING_KEY);
-          setStoredAuthToken(null);
-          setStoredRefreshToken(null);
-          setStoredAuthUser(null);
-          setToken(null);
-          setUser(null);
+          if (!currentToken || tokenRejected) {
+            sessionStorage.removeItem(PENDING_PAIRING_KEY);
+            setStoredAuthToken(null);
+            setStoredRefreshToken(null);
+            setStoredAuthUser(null);
+            setToken(null);
+            setUser(null);
+          }
           setError(null);
           setIsLoading(false);
           return;
@@ -254,18 +332,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!approveResponse.ok || !approvePayload?.success) {
           throw new Error(approvePayload?.error?.message || "Could not synchronize the current NPATI account.");
         }
-        if (!await completeInstallationConnection(pairing.deviceCode)) {
+        let connected = false;
+        for (let attempt = 0; attempt < 4 && !connected; attempt++) {
+          if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 750));
+          connected = await completeInstallationConnection(pairing.deviceCode);
+        }
+        if (!connected) {
           throw new Error("NPATI account synchronization is still pending.");
         }
         setIsLoading(false);
         return;
       } catch (cause) {
-        await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
-        setStoredAuthToken(null);
-        setStoredRefreshToken(null);
-        setStoredAuthUser(null);
-        setToken(null);
-        setUser(null);
+        // Only discard credentials when /auth/me explicitly rejected the token.
+        if (tokenRejected) {
+          setStoredAuthToken(null);
+          setStoredRefreshToken(null);
+          setStoredAuthUser(null);
+          setToken(null);
+          setUser(null);
+        }
         setError(cause instanceof Error ? cause.message : "Could not synchronize the current NPATI account.");
         setIsLoading(false);
         return;
@@ -327,7 +412,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setStoredAuthUser(verifiedUser);
           setToken(currentToken);
         } else {
-          await logout();
+          await logout(false);
         }
       } else if (response.status === 401) {
         // Try refresh token if available
@@ -379,7 +464,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-        await logout();
+        await logout(false);
       } else {
         // Server response other than 401: preserve session
       }
@@ -388,6 +473,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
+    })().catch((cause) => {
+      console.error("NPATI authorization check failed", cause);
+      setIsLoading(false);
+    });
+    authCheckInFlight.current = check;
+    void check.finally(() => {
+      if (authCheckInFlight.current === check) authCheckInFlight.current = null;
+    });
+    return check;
   }, [completeInstallationConnection, logout]);
 
   useEffect(() => {
@@ -397,10 +491,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") void checkAuth();
     };
-    window.addEventListener("focus", checkAuth);
+    const onFocus = () => { void checkAuth(); };
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener("focus", checkAuth);
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [checkAuth]);
@@ -467,7 +562,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const result = await renewAccessToken();
         if (cancelled) return;
         if (result === "unauthorized") {
-          void checkAuth();
+          await checkAuth(true);
+          if (!cancelled && getStoredAuthToken() === token) schedule(30_000);
         } else {
           schedule(result === "ok" ? getTokenRefreshDelayMs(getStoredAuthToken() || token) : 5000);
         }
@@ -484,7 +580,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleUnauthorized = async () => {
       if (!getStoredAuthToken()) return;
       const result = await renewAccessToken();
-      if (result === "unauthorized") void checkAuth();
+      if (result === "unauthorized") void checkAuth(true);
     };
     window.addEventListener("npati:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("npati:unauthorized", handleUnauthorized);
@@ -568,8 +664,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const beginInstallationConnection = async (): Promise<InstallationPairing> => {
+  const beginInstallationConnection = useCallback(async (): Promise<InstallationPairing> => {
     setError(null);
+    await authCheckInFlight.current?.catch(() => undefined);
     sessionStorage.removeItem(SSO_SUPPRESSED_KEY);
     const response = await fetch("/api/auth/installation/start", { method: "POST" });
     const payload = await response.json().catch(() => null);
@@ -579,11 +676,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(message);
     }
     return payload.data;
-  };
+  }, []);
 
-  const pollInstallationConnection = async (deviceCode: string): Promise<boolean> => {
+  const pollInstallationConnection = useCallback(async (deviceCode: string): Promise<boolean> => {
     return completeInstallationConnection(deviceCode);
-  };
+  }, [completeInstallationConnection]);
 
   return (
     <AuthContext.Provider
