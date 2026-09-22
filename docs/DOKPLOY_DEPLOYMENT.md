@@ -70,6 +70,22 @@ The Agent's PostgreSQL schema migrations are idempotent and run automatically wh
 initializes its workspace store. No separate migration command is required for a new Agent
 deployment.
 
+### Redis host setting
+
+Redis requires `vm.overcommit_memory=1` on the **Linux host** for reliable background
+saves. On the Dokploy server itself (via SSH or its server terminal, not a container
+terminal), run:
+
+```bash
+sudo sysctl -w vm.overcommit_memory=1
+printf 'vm.overcommit_memory = 1\n' | sudo tee /etc/sysctl.d/99-npati-redis.conf
+sysctl vm.overcommit_memory
+```
+
+The final command should print `vm.overcommit_memory = 1`. The sysctl file preserves
+the setting after a reboot. This setting belongs to the host kernel and cannot be
+fixed by reinstalling Redis or adding `sysctls` to the Compose service.
+
 Verify externally:
 
 ```bash

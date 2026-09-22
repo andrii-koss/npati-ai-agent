@@ -89,6 +89,7 @@ export class CompanyRunQueueWorker {
       } catch { /* malformed cancellation is ignored */ }
     });
     await this.runRecovery();
+    console.info(`[company-worker] Company run queue ready (workerId=${this.workerId}, concurrency=${this.concurrency})`);
     this.recoveryTimer = setInterval(() => {
       void this.runRecovery().catch(() => undefined);
     }, this.recoveryMs);
@@ -175,6 +176,7 @@ export class CompanyRunQueueWorker {
         return;
       }
       if (!claimed) { await this.client!.sendCommand(["XACK",STREAM,GROUP,message.id]); return; }
+      console.info(`[company-worker] Company run claimed (companyId=${companyId}, runId=${runId})`);
       const claimedRun = (await this.runtime.get(context, companyId, runId)).run;
       await this.runtime.recordBackgroundEvent(context, companyId, runId, {
         eventKey: `attempt:${claimedRun.attemptCount}:claimed`, eventType: "claimed", runStatus: "planning",
@@ -189,6 +191,7 @@ export class CompanyRunQueueWorker {
           workerId: consumer, attemptCount: claimedRun.attemptCount, message: "Background worker started Company execution",
         });
         const result = await this.runtime.process(context, companyId, runId);
+        console.info(`[company-worker] Company run finished (companyId=${companyId}, runId=${runId}, status=${result.run.status}, errorCode=${result.run.errorCode ?? "none"})`);
         const nonRetryable = new Set(["TOOL_FORBIDDEN","APPROVAL_REQUIRED","APPROVAL_INVALID","APPROVAL_ALREADY_USED","APPROVAL_EXPIRED","RUN_CANCELLED","INVALID_DELEGATION_PLAN","CROSS_COMPANY_AGENT_SELECTION","PERMISSION_REVOKED","CONTEXT_DELETED","COMPANY_INACTIVE","MAIN_AGENT_INACTIVE","AGENT_DELETED"]);
         if (result.run.status === "failed" && !nonRetryable.has(result.run.errorCode ?? "")
           && result.run.attemptCount < result.run.maxAttempts) {
