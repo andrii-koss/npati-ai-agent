@@ -584,11 +584,33 @@ export function buildApp(config: AppConfig = {}) {
     await fileRepository.purgeCompany(context, companyId);
   }
 
-  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string) {
-    if (!/```company-action/i.test(content)) return { cleanText: content, companyAction: undefined };
-    const allowedModelIds = (await aiPreferences.get(auth)).addedModels.map((model) => model.id);
-    return CompanyChatActions.extractAndExecute(auth, content, workspaceStore, conversationId ?? crypto.randomUUID(), {
-      allowedModelIds,
+  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
+    const managementRequest = Boolean(requestMessage && CompanyChatActions.isManagementRequest(requestMessage));
+    if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
+    const addedModels = (await aiPreferences.get(auth)).addedModels;
+    let actionText = content;
+    if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
+      try {
+        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels);
+        const planned = await aiEngine.chat({
+          model: route?.model,
+          fallbackModel: route?.fallbackModel,
+          admission: admissionFor(auth),
+          timeoutMs: 90_000,
+          signal: route?.signal,
+          messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
+        });
+        actionText = planned.content;
+      } catch (error) {
+        app.log.warn({ err: error }, "Company action planning failed");
+      }
+    }
+    if (!/```company-action/i.test(actionText)) return {
+      cleanText: managementRequest ? "I couldn't complete the company change. No company or agent changes were saved. Please clarify the request or try again." : content,
+      companyAction: undefined,
+    };
+    return CompanyChatActions.extractAndExecute(auth, actionText, workspaceStore, conversationId ?? crypto.randomUUID(), {
+      allowedModelIds: addedModels.map((model) => model.id),
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       requestMessage,
     });
@@ -721,7 +743,7 @@ export function buildApp(config: AppConfig = {}) {
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt);
+    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
     result.message = companyAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
@@ -932,7 +954,8 @@ export function buildApp(config: AppConfig = {}) {
       for await(const chunk of aiEngine.stream(chatRequest)){
         if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
         const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
-        content+=cleanChunk;onDelta(cleanChunk);
+        content+=cleanChunk;
+        if (!CompanyChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
       }
     }else {
       chatResult=await aiEngine.chat(chatRequest);
@@ -943,7 +966,7 @@ export function buildApp(config: AppConfig = {}) {
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;
-        onDelta?.(extra);
+        if (!CompanyChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
       }
     }
     progress?.({ type: "final_generation_completed" });
@@ -1014,7 +1037,7 @@ export function buildApp(config: AppConfig = {}) {
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt);
+    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
     content = companyAction.cleanText;
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
