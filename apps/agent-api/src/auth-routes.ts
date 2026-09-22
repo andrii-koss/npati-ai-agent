@@ -305,9 +305,10 @@ export function registerAuthRoutes(
           error: { code: err.code, message: err.message },
         });
       }
-      return reply.code(401).send({
+      request.log.error({ err }, "Could not load authenticated profile");
+      return reply.code(503).send({
         success: false,
-        error: { code: "UNAUTHORIZED", message: "Authentication required." },
+        error: { code: "AUTH_BACKEND_UNAVAILABLE", message: "Authentication is temporarily unavailable." },
       });
     }
   };
