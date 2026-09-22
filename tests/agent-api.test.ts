@@ -10,6 +10,11 @@ import path from "node:path";
 
 const apps: Array<ReturnType<typeof buildApp>> = [];
 const tempDirectories: string[] = [];
+function chatContentText(content: ChatRequest["messages"][number]["content"] | undefined): string {
+  return Array.isArray(content)
+    ? content.map((part) => part.type === "text" ? part.text : "").join("\n")
+    : content ?? "";
+}
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
   await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -215,10 +220,10 @@ describe("Agent API", () => {
       chat: async () => ({
         content: "Researched NPATI website successfully.",
         model: "openai/gpt-4.1-mini",
-        usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
       }),
       async *stream(request) {
-        receivedSystemPrompt = (request.messages.find((m) => m.role === "system")?.content as string) ?? "";
+        receivedSystemPrompt = chatContentText(request.messages.find((m) => m.role === "system")?.content);
         yield "NPATI "; yield "is an online marketplace.";
       },
       listModels: async () => [], getModel: async () => undefined,
@@ -289,6 +294,28 @@ describe("Agent API", () => {
     expect(deltas).toEqual(["First ","live ","tokens"]);
     expect(response.body.indexOf("event: delta")).toBeLessThan(response.body.indexOf("event: result"));
     expect(response.body).toContain('"message":"First live tokens"');
+  });
+
+  it("names the selected automatic route when chat inference fails", async () => {
+    const unavailable = new Error("OmniRoute failed with HTTP 502");
+    const aiEngine: AIEngine = {
+      chat: async () => { throw unavailable; },
+      async *stream() { throw unavailable; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace });
+    apps.push(app);
+    const routing = await app.inject({ method: "PUT", url: "/ai/routing", payload: { mode: "automatic", preferFree: true } });
+    expect(routing.statusCode).toBe(200);
+
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello", contextType: "none" } });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('NPATI route \\"auto/chat\\"');
+    expect(response.body).toContain("Switch to another AI mode");
+    expect(response.body).not.toContain("OmniRoute");
   });
 
   it("aborts Business provider work on client disconnect and never persists a late assistant reply", async () => {
@@ -438,7 +465,7 @@ describe("Agent API", () => {
   it("starts rapid onboarding directly from a free-text business brief", async () => {
     const aiEngine: AIEngine = {
       chat: async (request) => {
-        const instruction = request.messages[0]?.content ?? "";
+        const instruction = chatContentText(request.messages[0]?.content);
         if (instruction.includes("answer validator")) {
           return { content: '{"valid":true,"feedback":"","business":{"name":"Language Lab","description":"online Ukrainian lessons","market":"Poland","businessStage":"idea","teamType":"solo","businessModel":"subscription","presenceType":"online","audienceSummary":"Ukrainian families","productsServicesSummary":"weekly lessons and printable materials"}}' };
         }
@@ -468,7 +495,7 @@ describe("Agent API", () => {
     const aiEngine: AIEngine = {
       chat: async (request) => {
         calls.push(request);
-        const instruction = request.messages[0]?.content ?? "";
+        const instruction = chatContentText(request.messages[0]?.content);
         if (instruction.includes("answer validator")) {
           if (instruction.includes("Target field: businessGoal")) {
             return { content: '{"valid":true,"feedback":"Ціль збережено.","goalTitle":"Отримати перших 1,000 клієнтів"}' };
@@ -584,7 +611,7 @@ describe("Agent API", () => {
   it("accepts a short useful business description without requesting optional details", async () => {
     const aiEngine: AIEngine = {
       chat: async (request) => {
-        const instruction = request.messages[0]?.content ?? "";
+        const instruction = chatContentText(request.messages[0]?.content);
         if (instruction.includes("answer validator")) {
           return { content: JSON.stringify({ valid: false, feedback: "Потрібно більше деталей.", business: { market: "Ukraine", teamType: "solo", presenceType: "online", productsServicesSummary: "tables" } }) };
         }
@@ -611,7 +638,7 @@ describe("Agent API", () => {
   it("rejects an invalid onboarding goal without saving it and continues to traffic guidance", async () => {
     const aiEngine: AIEngine = {
       chat: async (request) => {
-        const instruction = request.messages[0]?.content ?? "";
+        const instruction = chatContentText(request.messages[0]?.content);
         if (instruction.includes("answer validator") && instruction.includes("Target field: businessGoal")) {
           return { content: '{"valid":false,"feedback":"Ця відповідь не підходить для цілі. Додайте ціль вручну в розділі Goals."}' };
         }
@@ -653,7 +680,7 @@ describe("Agent API", () => {
   it("stores Business and Goal from one short message without asking optional questions", async () => {
     const aiEngine: AIEngine = {
       chat: async (request) => {
-        const instruction = request.messages[0]?.content ?? "";
+        const instruction = chatContentText(request.messages[0]?.content);
         if (instruction.includes("answer validator")) {
           return {
             content: JSON.stringify({

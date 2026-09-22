@@ -163,7 +163,7 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(appSource).toContain("<img src={avatarUrl}");
   });
 
-  it("shows the central account profile and only redirects on explicit sign out", () => {
+  it("shows the central account profile and signs out without redirecting", () => {
     const app = readFileSync(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8");
     const auth = readFileSync(new URL("../apps/web/src/AuthContext.tsx", import.meta.url), "utf8");
     const localLogout = auth.slice(auth.indexOf("const logout ="), auth.indexOf("const signOutEverywhere ="));
@@ -174,7 +174,8 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(app).toContain("<small>{email}</small>");
     expect(app).not.toContain("Disconnect account");
     expect(localLogout).not.toContain("window.location.assign");
-    expect(globalLogout).toContain("/agent/logout");
+    expect(globalLogout).not.toContain("/agent/logout");
+    expect(globalLogout).not.toContain("window.location.assign");
     expect(globalLogout).toContain('credentials: "include"');
   });
 

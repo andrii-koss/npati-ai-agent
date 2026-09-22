@@ -205,7 +205,7 @@ export class CompanyDelegationRuntime {
     this.controllers.set(created.run.id, controller);
     try {
       if (!this.ai.a2aSend || !this.ai.ensureCombo || !this.ai.ensureA2AEnabled)
-        throw new CompanyRuntimeError("OMNIROUTE_ORCHESTRATION_UNAVAILABLE", "OmniRoute A2A and combo APIs are unavailable", 503);
+        throw new CompanyRuntimeError("OMNIROUTE_ORCHESTRATION_UNAVAILABLE", "NPATI AI orchestration is unavailable", 503);
       // Check permissions prior to planning and tool execution
       if (!ctx.permissions.includes("business:manage") && !ctx.permissions.includes("workspace:write") && !ctx.permissions.includes("workspace:read")) {
         await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
@@ -415,7 +415,7 @@ export class CompanyDelegationRuntime {
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
         status: cancelled ? "cancelled" : "failed",
         errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : error instanceof SecurityPolicyViolation ? error.code : "RUN_FAILED",
-        errorMessage: cancelled ? "Company run was cancelled" : timedOut ? "Company run exceeded its timeout" : error instanceof Error ? error.message : String(error),
+        errorMessage: cancelled ? "Company run was cancelled" : timedOut ? "Company run exceeded its timeout" : (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI"),
         totalCost,
         totalTokens,
         totalDurationMs: Math.max(0, Date.now() - runStartedAt),
@@ -676,15 +676,15 @@ export class CompanyDelegationRuntime {
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool,
           decision: "allowed", status: "failed", inputSummary: summary(plan.input), latencyMs, sequenceNumber: sequenceNumber++,
-          errorMessage: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) });
-        evidence.push(`${agent.name} / ${tool} (failed): ${error instanceof Error ? error.message : String(error)}`);
+          errorMessage: (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI").slice(0, 500) });
+        evidence.push(`${agent.name} / ${tool} (failed): ${(error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI")}`);
       }
     }
     return evidence.join("\n\n");
   }
 
   private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext) {
-    if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "OmniRoute combos are unavailable", 503);
+    if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "NPATI AI routing combinations are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();
     for (const agent of unique) {
       const primary = comboModel(agent.modelId), fallback = comboModel(agent.fallbackModelId);

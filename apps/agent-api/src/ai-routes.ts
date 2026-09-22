@@ -8,10 +8,10 @@ import { ResilientEmbeddingPipeline } from "./resilient-inference-pipeline";
 
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof OmniRouteError) {
-    return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
+    return reply.code(error.status).send({ error: { code: error.code, message: error.message.replace(/OmniRoute/gi, "NPATI AI") } });
   }
   if (error instanceof AIAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
-  const message = error instanceof Error ? error.message : "Unexpected AI marketplace error";
+  const message = error instanceof Error ? error.message.replace(/OmniRoute/gi, "NPATI AI") : "Unexpected AI marketplace error";
   const explicitStatus = Number((error as { status?: unknown; statusCode?: unknown } | undefined)?.status ?? (error as { statusCode?: unknown } | undefined)?.statusCode);
   const status = Number.isInteger(explicitStatus) && explicitStatus >= 400 && explicitStatus <= 599
     ? explicitStatus
@@ -167,7 +167,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   app.get("/ai/resilience", async (request, reply) => {
     try {
       await authorize(auth, request, "workspace:read");
-      if (!ai.resilienceStatus) return reply.code(503).send({ error: { code: "OMNIROUTE_RESILIENCE_UNAVAILABLE", message: "OmniRoute resilience API is unavailable" } });
+      if (!ai.resilienceStatus) return reply.code(503).send({ error: { code: "OMNIROUTE_RESILIENCE_UNAVAILABLE", message: "NPATI AI routing status is unavailable" } });
       return await ai.resilienceStatus();
     } catch (error) { return sendError(reply, error); }
   });
