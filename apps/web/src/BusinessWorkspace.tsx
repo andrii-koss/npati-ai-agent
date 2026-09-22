@@ -814,6 +814,10 @@ const businessThinkingSteps = [
   "Preparing a response…",
 ];
 
+function isWebsiteAnalysisRequest(message: string) {
+  return /https?:\/\/|www\.|\b(?:website|webpage|site|scan|crawl)\b|сайт|вебсторінк|проскануй/iu.test(message);
+}
+
 const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
 function AssistantMessageToolbar({
@@ -1471,8 +1475,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                     events={progressEvents}
                     visibleCount={visibleProgressCount}
                     presentingEvent={presentingProgressEvent}
-                    completed={progressComplete}
-                    failed={progressFailed}
+                    completed={!sending && progressComplete}
+                    failed={!sending && progressFailed}
                   />
                 )}
                 <article
@@ -1511,11 +1515,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               events={progressEvents}
               visibleCount={visibleProgressCount}
               presentingEvent={presentingProgressEvent}
-              completed={progressComplete}
-              failed={progressFailed}
+              completed={!sending && progressComplete}
+              failed={!sending && progressFailed}
             />
           )}
-          {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
