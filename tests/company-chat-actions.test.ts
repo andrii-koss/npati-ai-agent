@@ -16,6 +16,17 @@ describe("company management from chat", () => {
     expect(CompanyChatActions.isManagementRequest("Зроби таку сітку агентів")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Create a company with an agent team")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Create a marketing plan for my company")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Компанію мені створи з агентами")).toBe(true);
+  });
+
+  it("includes the selected company even beyond the first prompt page", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let selectedId = "";
+    for (let index = 0; index < 31; index++) {
+      selectedId = (await store.createCompany(alice, { name: `Company ${index}` }, `company-${index}`)).id;
+    }
+    const prompt = await CompanyChatActions.buildActionPlannerPrompt(alice, store, "Update this company", selectedId);
+    expect(prompt).toContain(selectedId);
   });
 
   it("creates a company, agents, their reporting edge and main agent", async () => {
@@ -122,6 +133,53 @@ describe("company management from chat", () => {
       const companies = (await store.listCompanies(alice)).items;
       expect(companies.map((company) => company.name)).toEqual(["Stream Studio"]);
       expect((await store.listCompanyAgents(alice, companies[0]!.id)).map((agent) => agent.name)).toEqual(["Lead"]);
+    } finally { await app.close(); }
+  });
+
+  it("does not trust a streamed claim of creation and plans a real write", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const claim = "I created your company and agents.";
+    const action = directive({ action: "create", fields: { name: "Verified Studio" }, agents: [{ action: "create", fields: { name: "Lead", role: "Coordinator" }, main: true }] });
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: action }), async *stream() { yield claim; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Створи компанію і агента", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain("event: delta");
+      expect(response.body).toContain('"companyAction":{"action":"create"');
+      expect(response.body).toContain("Created company Verified Studio with 1 agent");
+      const companies = (await store.listCompanies(alice)).items;
+      expect(companies).toHaveLength(1);
+      expect((await store.listCompanyAgents(alice, companies[0]!.id)).map((agent) => agent.name)).toEqual(["Lead"]);
+      const page = await app.inject({ method: "GET", url: "/companies?limit=100" });
+      expect(page.statusCode).toBe(200);
+      expect(page.json().companies).toEqual([expect.objectContaining({ id: companies[0]!.id, name: "Verified Studio" })]);
+    } finally { await app.close(); }
+  });
+
+  it("reports no saved change when a claimed creation cannot produce an executable action", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: "NO_ACTION" }), async *stream() { yield "I created your company."; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Створи компанію і агента", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain("event: delta");
+      expect(response.body).toContain("No company or agent changes were saved");
+      expect(response.body).not.toContain("companyAction");
+      expect((await store.listCompanies(alice)).items).toHaveLength(0);
     } finally { await app.close(); }
   });
 
