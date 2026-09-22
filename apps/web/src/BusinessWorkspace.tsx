@@ -3,7 +3,7 @@ import { useTranslation } from "./i18n";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChatMessageContent } from "./ChatMessageContent";
+import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { SPEECH_VOICES } from "./speech-voices";
@@ -1323,12 +1323,16 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     });
     const assistantId = crypto.randomUUID();
     let receivedDelta = false;
+    let rawAssistantContent = "";
     const controller = new AbortController(), streamId = crypto.randomUUID();
     streamControllerRef.current = { controller, streamId };
 
     const deltaBuffer: string[] = [];
 
     const appendDelta = (chunk: string) => {
+      rawAssistantContent += chunk;
+      const visibleContent = stripInternalChatActions(rawAssistantContent, true);
+      if (!visibleContent.trim()) return;
       if (!receivedDelta) {
         receivedDelta = true;
         activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1337,8 +1341,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       setMessages((current) => {
         const found = current.some((item) => item.id === assistantId);
         return found
-          ? current.map((item) => (item.id === assistantId ? { ...item, content: item.content + chunk } : item))
-          : [...current, { id: assistantId, role: "assistant", content: chunk, createdAt: new Date().toISOString() }];
+          ? current.map((item) => (item.id === assistantId ? { ...item, content: visibleContent } : item))
+          : [...current, { id: assistantId, role: "assistant", content: visibleContent, createdAt: new Date().toISOString() }];
       });
       // Do NOT scroll to bottom! Keep user reading from the top!
     };
@@ -1377,15 +1381,21 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
       flushDeltas();
       setReplyMeta(result);
+      setMessages((current) => {
+        const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
+        const found = current.some((item) => item.id === assistantId);
+        if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
+        return found
+          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item)
+          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, createdAt: new Date().toISOString() }];
+      });
       if ((result as any)?.businessAction) {
         window.dispatchEvent(new CustomEvent("npati:business-changed", { detail: (result as any).businessAction }));
       }
       if ((result as any)?.goalAction) {
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
-      if (privateRequest) {
-        if (!receivedDelta) setMessages((current) => [...current, { id: assistantId, role: "assistant", content: result.message, createdAt: new Date().toISOString() }]);
-      } else if (result.conversationId) {
+      if (!privateRequest && result.conversationId) {
         setSelected(result.conversationId);
         window.history.replaceState(
           { ...window.history.state, usr: business ? { businessId: business.id } : { neutralChat: true } },

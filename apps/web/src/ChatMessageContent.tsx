@@ -12,6 +12,40 @@ const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document
 const voiceMessageRegex = /^(?:🎤\s*)?Voice message:\s*([^\n\r]+)$/i;
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
+const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile"];
+
+export function stripInternalChatActions(content: string, streaming = false): string {
+  let visible = "";
+  let cursor = 0;
+  while (cursor < content.length) {
+    const opening = content.indexOf("```", cursor);
+    if (opening < 0) {
+      visible += content.slice(cursor);
+      break;
+    }
+    visible += content.slice(cursor, opening);
+    const headerStart = opening + 3;
+    const lineEnd = content.indexOf("\n", headerStart);
+    const header = content.slice(headerStart, lineEnd < 0 ? undefined : lineEnd).trim().toLowerCase();
+    const actionFence = lineEnd < 0
+      ? internalActionFences.some((label) => label.startsWith(header))
+      : internalActionFences.includes(header);
+    if (!actionFence) {
+      const closing = lineEnd < 0 ? -1 : content.indexOf("```", lineEnd + 1);
+      if (closing < 0) {
+        visible += content.slice(opening);
+        break;
+      }
+      visible += content.slice(opening, closing + 3);
+      cursor = closing + 3;
+      continue;
+    }
+    const closing = lineEnd < 0 ? -1 : content.indexOf("```", lineEnd + 1);
+    if (closing < 0) return streaming ? visible.replace(/(^|[^`])`{1,2}$/, "$1") : visible;
+    cursor = closing + 3;
+  }
+  return streaming ? visible.replace(/(^|[^`])`{1,2}$/, "$1") : visible;
+}
 
 function cleanLabel(value: string) {
   return value.replace(/\*\*/g, "").replace(/__/g, "").trim();
@@ -912,7 +946,7 @@ function EditableContentCard({
 }
 
 export function ChatMessageContent({ content }: { content: string }) {
-  const safeContent = content
+  const safeContent = stripInternalChatActions(content)
     .replace(/[\u2014\u2013]/g, " - ")
     .replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "")
     .replace(/\[([\s\S]*?)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g, (_full, label: string, url: string) => {

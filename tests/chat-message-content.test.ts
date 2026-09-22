@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectSourceTitles, isSourceCitationLine, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
+import { collectSourceTitles, isSourceCitationLine, stripInternalChatActions, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
 
 describe("chat source links", () => {
   it("uses the real source-list title for a generic inline citation", () => {
@@ -26,5 +26,22 @@ describe("chat source links", () => {
     expect(isSourceCitationLine("Джерело: [**відеоінструкція NPATI**](https://www.npati.com/videos/example)")).toBe(true);
     expect(isSourceCitationLine("Source: [NPATI video](https://www.npati.com/videos/example)")).toBe(true);
     expect(isSourceCitationLine("Перегляньте [відеоінструкцію](https://www.npati.com/videos/example)")).toBe(false);
+  });
+});
+
+describe("streamed chat actions", () => {
+  it("never exposes a partial business deletion directive", () => {
+    const prefix = "I deleted the test business idea.\n\n";
+    const response = prefix + '```business-action\n{"action":"delete","businessName":"Test"}\n```';
+    for (let end = prefix.length + 1; end <= response.length; end++) {
+      expect(stripInternalChatActions(response.slice(0, end), true).trim()).toBe(prefix.trim());
+    }
+    expect(stripInternalChatActions(response + "\nDone.").trim()).toBe(prefix.trim() + "\n\n\nDone.");
+  });
+
+  it("keeps ordinary code blocks visible", () => {
+    expect(stripInternalChatActions("Example:\n```js\nconsole.log(1)\n```"))
+      .toBe("Example:\n```js\nconsole.log(1)\n```");
+    expect(stripInternalChatActions("Use `code`")).toBe("Use `code`");
   });
 });
