@@ -1063,9 +1063,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   );
   const prevBusinessIdRef = useRef(business?.id);
   const selectedRef = useRef(selected);
+  const historyLoadVersionRef = useRef(0);
   selectedRef.current = selected;
 
   async function loadConversations(preferred?: string, preserveActiveTurn = false) {
+    const loadVersion = ++historyLoadVersionRef.current;
     const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
     let rows: Conversation[] = [];
     try {
@@ -1075,6 +1077,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         try { rows = await api<Conversation[]>("/conversations"); } catch {}
       }
     }
+    if (loadVersion !== historyLoadVersionRef.current) return [] as Message[];
     setConversations(rows);
     const next = preferred ?? null; setSelected(next);
     if (next) {
@@ -1088,7 +1091,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           } catch {}
         }
       }
+      if (loadVersion !== historyLoadVersionRef.current) return [] as Message[];
       if (loaded.length > 0) {
+        // The active turn already has stable React keys and the final streamed text.
+        // Replacing it with persisted message IDs remounts both bubbles and flashes.
+        if (preserveActiveTurn) return loaded;
         setMessages((current) => {
           if (current.length === loaded.length) {
             const allMatch = current.every((cur, i) => loaded[i]?.role === cur.role);
@@ -1269,6 +1276,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
+    // An earlier history request must not replace the optimistic turn after it starts.
+    historyLoadVersionRef.current += 1;
     const privateRequest = noMemory;
     const optimisticId = `pending-${Date.now()}`;
     let sentAttachments = [...attachments];
@@ -1406,7 +1415,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           navigate(`/c/${result.conversationId}`, { replace: true });
         }
         window.dispatchEvent(new Event("npati:conversations-changed"));
-        void loadConversations(result.conversationId, true);
       }
       progressCompleteRef.current = true;
       setProgressComplete(true);
