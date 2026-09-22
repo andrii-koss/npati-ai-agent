@@ -26,6 +26,12 @@ through the central NPATI backend. For ordinary self-hosting, keep `NPATI_DEPLOY
 `NPATI_DEPLOYMENT_TYPE=npati_hosted` and set the hosted registration token to the same
 server-only value configured in the central NPATI backend.
 
+Set `OMNIROUTE_MANAGEMENT_PASSWORD` to a unique, strong password before first deployment.
+The Compose file supplies it as OmniRoute's `INITIAL_PASSWORD`, and Agent API uses the
+same value for provider management. On an existing installation, `INITIAL_PASSWORD` does
+not replace a password already stored in OmniRoute's database. Change that password
+through OmniRoute's Security settings, and keep the Dokploy variable in sync.
+
 ## 2. Configure the domain
 
 In the Compose service's **Domains** tab, add the public HTTPS domain with:
@@ -85,6 +91,38 @@ sysctl vm.overcommit_memory
 The final command should print `vm.overcommit_memory = 1`. The sysctl file preserves
 the setting after a reboot. This setting belongs to the host kernel and cannot be
 fixed by reinstalling Redis or adding `sysctls` to the Compose service.
+
+### OmniRoute startup messages
+
+The bundled OmniRoute image may report that Antigravity or Qoder OAuth client secrets
+are absent. These are optional integrations; they do not affect other connected
+providers.
+
+If OmniRoute 3.8.50 reports `no such table: compression_run_telemetry` during its
+cleanup cycle, the optional telemetry table has not yet been created. This does not
+stop model requests. After backing up the `omniroute-data` volume, run the following
+once in the **OmniRoute container terminal** to create the table with OmniRoute's
+own schema:
+
+```bash
+node <<'NODE'
+const Database = require('better-sqlite3');
+const db = new Database('/app/data/storage.sqlite');
+db.exec(`CREATE TABLE IF NOT EXISTS compression_run_telemetry (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp INTEGER NOT NULL,
+  request_id TEXT, model TEXT, provider TEXT, source TEXT,
+  tokens_before INTEGER NOT NULL, tokens_after INTEGER NOT NULL,
+  ratio REAL, cost_delta REAL, output_styles TEXT,
+  output_style_bypass TEXT, output_tokens INTEGER
+)`);
+console.log('Compression telemetry table is ready');
+db.close();
+NODE
+```
+
+Previous error lines remain in Dokploy's `All time` view; the next cleanup cycle
+should no longer report this missing table.
 
 Verify externally:
 
