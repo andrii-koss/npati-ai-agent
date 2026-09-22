@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
 import { AdaptiveAdmissionQueue, AdmissionError } from "../apps/agent-api/src/resilience-admission-queue";
-import { createProductionResilientAIEngine } from "../apps/agent-api/src/production-resilient-ai-engine";
+import { createProductionResilientAIEngine, InferenceRouteFailure } from "../apps/agent-api/src/production-resilient-ai-engine";
 
 function deferred() {
   let release!: () => void;
@@ -122,5 +122,26 @@ describe("Production adaptive admission and self-healing", () => {
     })) chunks.push(chunk);
     expect(calls).toEqual(["broken/primary", "working/fallback"]);
     expect(chunks).toEqual(["first", "second"]);
+  });
+
+  it("retains the selected model failure when its fallback also fails", async () => {
+    const base = fakeEngine({
+      stream: async function* (request) {
+        throw new Error(`OmniRoute stream failed with HTTP ${request.model === "ollama-cloud/gemma4:31b" ? 429 : 403}`);
+      },
+    });
+    const resilient = createProductionResilientAIEngine(base);
+    const consume = async () => {
+      for await (const _chunk of resilient.stream({
+        model: "ollama-cloud/gemma4:31b", fallbackModel: "auto", messages: [{ role: "user", content: "hello" }],
+      })) { /* consume the stream */ }
+    };
+    await expect(consume()).rejects.toMatchObject({
+      name: "InferenceRouteFailure",
+      attempts: [
+        { modelId: "ollama-cloud/gemma4:31b", httpStatus: 429 },
+        { modelId: "auto", httpStatus: 403 },
+      ],
+    } satisfies Partial<InferenceRouteFailure>);
   });
 });

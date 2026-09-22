@@ -30,8 +30,8 @@ import { ProductionQdrantClient } from "./qdrant-client";
 import { ProductionMemoryEngineRegistry, QdrantMemoryEngineAdapter, SqliteFts5MemoryEngine } from "./knowledge-memory-engine";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
 import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
-import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
-import { AdmissionError, type PriorityTier } from "./resilience-admission-queue";
+import { createProductionResilientAIEngine, InferenceRouteFailure } from "./production-resilient-ai-engine";
+import { AdmissionError, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
 import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
@@ -302,11 +302,36 @@ function publicChatError(error: unknown, route?: string) {
   if (/audio transcription|transcribe|transcription/i.test(raw)) {
     return "The voice message could not be transcribed. Check the audio file and try again.";
   }
-  if (/OmniRoute|fetch|timeout|HTTP/i.test(raw)) {
-    const routeLabel = route && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(route)
-      ? `NPATI route "${route}"`
+  if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError) {
+    const attempts = error instanceof InferenceRouteFailure
+      ? error.attempts
+      : error instanceof SelfHealingExhaustedError
+        ? error.attempts.filter((attempt) => !attempt.success).map((attempt) => ({
+            modelId: attempt.modelId,
+            httpStatus: Number(/\bHTTP\s+(\d{3})\b/i.exec(attempt.error ?? "")?.[1]) || undefined,
+          }))
+        : [];
+    const selected = attempts[0]?.modelId ?? route;
+    const routeLabel = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected)
+      ? `NPATI route "${selected}"`
       : "The selected NPATI AI route";
-    return `${routeLabel} is unavailable right now. Switch to another AI mode or connect a provider and model in AI Marketplace, then try again.`;
+    const status = attempts[0]?.httpStatus ?? (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
+    const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
+    const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId)
+      ? ` Fallback route "${fallback.modelId}" also failed${fallback.httpStatus ? ` (HTTP ${fallback.httpStatus})` : ""}.`
+      : "";
+    const reason = status === 401 || status === 403
+      ? "The provider denied the request. Check its connection and permissions in AI Marketplace."
+      : status === 404
+        ? "The provider could not find this model. Check the model ID in AI Marketplace."
+        : status === 429
+          ? "The provider rate limit or quota was reached. Try again later or choose another model."
+          : status === 400
+            ? "The provider rejected the request. Check the model settings in AI Marketplace."
+            : selected?.startsWith("auto")
+              ? "Switch to another AI mode or choose a model in AI Marketplace."
+              : "Try again or choose another model in AI Marketplace.";
+    return `${routeLabel} failed${status ? ` (HTTP ${status})` : ""}.${fallbackLabel} ${reason}`;
   }
   return "NPATI Agent could not complete this message. Please try again.";
 }

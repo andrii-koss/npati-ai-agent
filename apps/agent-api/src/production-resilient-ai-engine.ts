@@ -1,9 +1,27 @@
 import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
-import { AdaptiveAdmissionQueue, SelfHealingAutoCombo, type PriorityTier } from "./resilience-admission-queue";
+import { AdaptiveAdmissionQueue, SelfHealingAutoCombo, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 
 function providerFromModel(model: string) {
   const separator = model.indexOf("/");
   return separator > 0 ? model.slice(0, separator) : "npati-auto";
+}
+
+export interface InferenceRouteAttempt {
+  modelId: string;
+  httpStatus?: number;
+}
+
+export class InferenceRouteFailure extends Error {
+  constructor(readonly attempts: InferenceRouteAttempt[], cause: unknown) {
+    super(`AI inference failed for ${attempts.map((attempt) => `${attempt.modelId}${attempt.httpStatus ? ` (HTTP ${attempt.httpStatus})` : ""}`).join(", then ")}`, { cause });
+    this.name = "InferenceRouteFailure";
+  }
+}
+
+function failedAttempt(modelId: string, error: unknown): InferenceRouteAttempt {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /\bHTTP\s+(\d{3})\b/i.exec(message);
+  return { modelId, httpStatus: status ? Number(status[1]) : undefined };
 }
 
 export function isRetryableInferenceFailure(error: unknown) {
@@ -77,7 +95,10 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
         execute: () => base.chat({ ...request, model, fallbackModel: undefined }),
       })),
       { shouldRetry: isRetryableInferenceFailure, signal: request.signal },
-    );
+    ).catch((error: unknown) => {
+      if (request.signal?.aborted || error instanceof SelfHealingExhaustedError) throw error;
+      throw new InferenceRouteFailure([failedAttempt(models[0] ?? "auto", error)], error);
+    });
     const telemetry = healed.result.telemetry;
     return {
       ...healed.result,
@@ -118,6 +139,7 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
           .filter((model, index, values) => values.indexOf(model) === index);
         let emitted = false;
         let lastError: unknown;
+        const failedRoutes: InferenceRouteAttempt[] = [];
         try {
           for (let index = 0; index < models.length; index += 1) {
             const model = models[index]!;
@@ -130,8 +152,11 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
               return;
             } catch (error) {
               lastError = error;
+              failedRoutes.push(failedAttempt(model, error));
               if (request.signal?.aborted) throw request.signal.reason ?? error;
-              if (emitted || index === models.length - 1 || !isRetryableInferenceFailure(error)) throw error;
+              if (emitted || index === models.length - 1 || !isRetryableInferenceFailure(error)) {
+                throw new InferenceRouteFailure(failedRoutes, error);
+              }
             }
           }
           throw lastError ?? new Error("SELF_HEALING_EXHAUSTED");
