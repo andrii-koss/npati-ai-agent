@@ -36,4 +36,5 @@ const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.
 const runWorker=new CompanyRunQueueWorker(redisUrl,store,runtime,{concurrency:Number.parseInt(process.env.NPATI_COMPANY_WORKER_CONCURRENCY??"2",10),leaseMs:Number.parseInt(process.env.NPATI_COMPANY_RUN_LEASE_MS??"180000",10),recoveryMs:Number.parseInt(process.env.NPATI_COMPANY_RECOVERY_INTERVAL_MS??"30000",10)});
 const knowledgeWorker=new CompanyKnowledgeWorker(redisUrl,knowledge,knowledgeProcessor);
 for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close()]));
+console.info("[company-worker] Starting company run and knowledge workers");
 await Promise.all([runWorker.start(),knowledgeWorker.start()]);
