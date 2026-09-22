@@ -34,6 +34,7 @@ export interface AgentMessage {
 export interface AgentReply {
   message: string;
   suggestedActions: string[];
+  companyAction?: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number };
   conversationId?: string;
   noMemory?: boolean;
   model?: string;

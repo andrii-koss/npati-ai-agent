@@ -375,7 +375,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
         .then((v) => {
           if (!active) return;
           setCompanies(v.companies);
-          if (!businessRoute && !businessSetup) {
+          if (!businessRoute && !businessSetup && !neutralChat) {
             setSelection((curr) => {
               if (curr.startsWith("company:") && v.companies.some((c) => "company:" + c.id === curr)) {
                 return curr;
@@ -401,7 +401,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
         });
     }
     return () => { active = false; };
-  }, [userId, key, businessRoute, businessSetup]);
+  }, [userId, key, businessRoute, businessSetup, neutralChat]);
 
   async function choose(value: string) {
     setSwitching(true);

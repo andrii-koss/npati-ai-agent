@@ -1,6 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
@@ -195,6 +195,8 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 
 export function CompanyPage() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const requestedCompanyId = searchParams.get("company") ?? "";
   const { overview } = useWorkspace();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -251,6 +253,9 @@ export function CompanyPage() {
   async function loadCompanies(preferredId?: string) {
     const data = await api<{ companies: Company[] }>("/companies?limit=100");
     const list = data.companies ?? [];
+    if (preferredId && !list.some((item) => item.id === preferredId)) {
+      try { list.push(await api<Company>(`/companies/${encodeURIComponent(preferredId)}`)); } catch { /* Deleted or inaccessible companies are never selected. */ }
+    }
     setCompanies(list);
     const nextId = preferredId && list.some((item) => item.id === preferredId) ? preferredId : (list[0]?.id ?? "");
     setSelectedId(nextId);
@@ -307,12 +312,25 @@ export function CompanyPage() {
     void loadAddedModels();
   }, []);
 
+  useEffect(() => {
+    if (requestedCompanyId && companies.some((company) => company.id === requestedCompanyId)) setSelectedId(requestedCompanyId);
+  }, [requestedCompanyId, companies]);
+
+  useEffect(() => {
+    const refreshCompanies = () => { void loadCompanies(selectedId || requestedCompanyId).then((items) => {
+      const active = items.find((company) => company.id === (selectedId || requestedCompanyId));
+      if (active) void loadOrganization(active.id, undefined, false, items);
+    }).catch(() => undefined); };
+    window.addEventListener("npati:company-changed", refreshCompanies);
+    return () => window.removeEventListener("npati:company-changed", refreshCompanies);
+  }, [selectedId, requestedCompanyId]);
+
   async function initializeCompanies() {
     setCompaniesLoading(true);
     setCompaniesLoadError("");
     try {
-      const items = await loadCompanies();
-      const first = items[0];
+      const items = await loadCompanies(requestedCompanyId);
+      const first = items.find((company) => company.id === requestedCompanyId) ?? items[0];
       if (first) await loadOrganization(first.id, undefined, false, items);
     } catch (error) {
       setCompaniesLoadError(error instanceof Error ? error.message : t("companySettings.errors.couldNotLoadCompanies"));
