@@ -98,7 +98,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.ai.executeTool(tool, { ...input, text: speechText });
     }
     if (tool === "mcp") {
-      if (!this.ai.mcpCall) throw new Error("OmniRoute MCP runtime is unavailable");
+      if (!this.ai.mcpCall) throw new Error("NPATI AI tools are unavailable");
       const name = text(input.name ?? input.toolName, "MCP tool name", 200);
       authorizeCompanyMcp(context,name);
       return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });

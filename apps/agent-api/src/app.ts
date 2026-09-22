@@ -291,7 +291,7 @@ function decodeAttachment(input: ChatAttachmentInput) {
   return { ...input, mimeType, name: safeAttachmentName(input.name), data };
 }
 
-function publicChatError(error: unknown) {
+function publicChatError(error: unknown, route?: string) {
   const raw = error instanceof Error ? error.message : String();
   if (/Invalid file format/i.test(raw)) {
     return "The audio container does not match the file extension. Convert or export the file as M4A/AAC, MP3, WAV, WEBM, OGG, or FLAC and try again.";
@@ -303,7 +303,10 @@ function publicChatError(error: unknown) {
     return "The voice message could not be transcribed. Check the audio file and try again.";
   }
   if (/OmniRoute|fetch|timeout|HTTP/i.test(raw)) {
-    return "The AI engine is unavailable right now. Check OmniRoute and the connected provider, then try again.";
+    const routeLabel = route && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(route)
+      ? `NPATI route "${route}"`
+      : "The selected NPATI AI route";
+    return `${routeLabel} is unavailable right now. Switch to another AI mode or connect a provider and model in AI Marketplace, then try again.`;
   }
   return "NPATI Agent could not complete this message. Please try again.";
 }
@@ -1257,8 +1260,10 @@ export function buildApp(config: AppConfig = {}) {
       },
     },
   }, async (request, reply): Promise<AgentReply | unknown> => {
+    let authForError: AuthContext | undefined;
     try {
       const auth = await authProvider.authenticate(request);
+      authForError = auth;
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
       if (connected.overview.connectedProviders === 0) {
@@ -1453,7 +1458,8 @@ export function buildApp(config: AppConfig = {}) {
       if (error instanceof StorageRateLimitError) return reply.header("retry-after",String(Math.ceil(error.retryAfterMs/1000))).code(429).send({error:{code:error.code,message:error.message}});
       if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))).code(429).send({ error: { code: error.code, message: error.message } });
       request.log.error(error);
-      const message = publicChatError(error);
+      const route = authForError ? await getAIContext(authForError).then((ai) => ai.model).catch(() => undefined) : undefined;
+      const message = publicChatError(error, route);
       return reply.code(502).send({ error: { code: "AGENT_UNAVAILABLE", message } });
     }
   });
@@ -1576,7 +1582,8 @@ export function buildApp(config: AppConfig = {}) {
       } catch (error) {
         request.log.error(error);
         const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError;
-        const detail = expected ? error.message : publicChatError(error);
+        const route = expected ? undefined : await getAIContext(auth).then((ai) => ai.model).catch(() => undefined);
+        const detail = expected ? error.message : publicChatError(error, route);
         progress({ type: "final_generation_failed", error: detail });
         send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {

@@ -34,7 +34,7 @@ export function ConnectionsPage() {
       const items: ServiceStatus[] = [
         {
           id: "omniroute",
-          name: "OmniRoute AI Engine",
+          name: "NPATI AI Routing",
           icon: "⚡",
           category: "internal",
           status: data?.services?.omniroute === "ok" ? "ok" : "error",
