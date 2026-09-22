@@ -139,7 +139,10 @@ function ChatUserMenu() {
               className="chat-user-signout"
               onClick={() => {
                 closeMenu();
-                void signOutEverywhere();
+                void signOutEverywhere().catch((cause) => alertModal({
+                  title: "Sign out incomplete",
+                  message: cause instanceof Error ? cause.message : "Could not sign out of npati.com.",
+                }));
               }}
             >
               Sign out <span aria-hidden="true">&rarr;</span>
