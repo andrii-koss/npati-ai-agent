@@ -831,6 +831,8 @@ export function buildApp(config: AppConfig = {}) {
   ) {
     const media = await prepareChatAttachments(aiEngine, message, attachments, progress);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
+    const companySettingsRequest = CompanyChatActions.isManagementRequest(safePrompt)
+      || Boolean(managementCompany && CompanyChatActions.isPotentialMutationRequest(safePrompt));
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -871,9 +873,11 @@ export function buildApp(config: AppConfig = {}) {
     }
     let research: ResearchOutcome | undefined;
     let researchJob;
-    const webResearchRequested = !media.images.length
+    const webResearchRequested = !companySettingsRequest && (
+      !media.images.length
       || Boolean(extractTargetUrlOrDomain(message))
-      || /https?:|web|internet|website|site|search|online|веб|інтернет|сайт|пошук|скануй/iu.test(message);
+      || /https?:|web|internet|website|site|search|online|веб|інтернет|сайт|пошук|скануй/iu.test(message)
+    );
     if (webResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
       try {
@@ -915,7 +919,7 @@ export function buildApp(config: AppConfig = {}) {
       messages: protectedHistory,
       signal,
     });
-    progress?.({ type: "final_generation_started" });
+    if (!companySettingsRequest) progress?.({ type: "final_generation_started" });
     const neutralMemoryContext = memoryPolicy.readAllowed ? memoryDocumentPrompt(await memoryDocuments.context(auth)) : "";
     const mediaInstruction = [
       media.images.length
@@ -1016,8 +1020,6 @@ export function buildApp(config: AppConfig = {}) {
       ],
       signal,
     };
-    const companySettingsRequest = CompanyChatActions.isManagementRequest(safePrompt)
-      || Boolean(managementCompany && CompanyChatActions.isPotentialMutationRequest(safePrompt));
     let content="";
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
     if (!companySettingsRequest) {
@@ -1114,7 +1116,6 @@ export function buildApp(config: AppConfig = {}) {
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
     content = workspaceAction.cleanText;
-    if (companySettingsRequest) progress?.({ type: "final_generation_completed" });
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
     return {

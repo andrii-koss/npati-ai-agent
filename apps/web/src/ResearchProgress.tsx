@@ -4,6 +4,7 @@ export type ChatProgressEvent = {
   type:
     | "search_started" | "search_results_received" | "source_discovered"
     | "page_fetch_started" | "page_fetch_completed" | "page_fetch_failed"
+    | "action_started" | "action_completed"
     | "research_completed" | "final_generation_started" | "final_generation_completed" | "final_generation_failed";
   timestamp: string;
   query?: string;
@@ -113,11 +114,14 @@ function progressModel(events: ChatProgressEvent[]) {
   let searchComplete = false;
   let generationActive = false;
   let generationFailed = false;
+  let action: PageState | undefined;
   const pages = new Map<string, PageState>();
 
   for (const event of events) {
     if (event.type === "search_started") query = event.query ?? query;
     if (event.type === "search_results_received") searchComplete = true;
+    if (event.type === "action_started" && event.url && event.domain) action = { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" };
+    if (event.type === "action_completed" && event.url && event.domain) action = { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "completed" };
     if (event.type === "page_fetch_started" && event.url && event.domain) {
       for (const [key, page] of pages) if (page.status === "active") pages.delete(key);
       pages.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" });
@@ -150,7 +154,7 @@ function progressModel(events: ChatProgressEvent[]) {
     }
   }
 
-  return { query, searchComplete, generationActive, generationFailed, pages: [...pages.values()] };
+  return { query, searchComplete, generationActive, generationFailed, action, pages: [...pages.values()] };
 }
 
 export function ResearchProgressPanel({
@@ -200,6 +204,15 @@ export function ResearchProgressPanel({
       <span className="research-progress-state">●</span>
       <GlobeIcon />
       <span className="research-active-text">Searching web: {model.query}</span>
+    </div>}
+
+    {model.action && <div className={"research-page-row " + model.action.status}>
+      <span className="research-progress-state">{model.action.status === "completed" ? "✓" : "●"}</span>
+      <DomainIcon domain={model.action.domain} />
+      <a className={model.action.status === "active" ? "research-active-text" : undefined} href={model.action.url}>
+        <strong>{model.action.domain}</strong>
+        <small>{pageLabel(model.action)}</small>
+      </a>
     </div>}
 
     <div className="research-page-list">{model.pages.map((page) => <div className={"research-page-row " + page.status} key={page.key}>
