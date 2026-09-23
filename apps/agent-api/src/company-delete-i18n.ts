@@ -5,11 +5,12 @@ type CompanyDeleteCopy = {
   none: string;
   choose: string;
   command: string;
+  completedAll?: string;
 };
 
 const copies: Record<CompanyChatLanguage, CompanyDeleteCopy> = {
-  en: { selected: "Do you want to delete the selected company **{name}**? This action cannot be undone. To confirm, write: **Yes, delete company {name}**.", none: "You do not have any companies to delete.", choose: "Which company do you want to delete?", command: "Write: **Delete company <name>**. I will then ask for confirmation." },
-  uk: { selected: "Ви хочете видалити вибрану компанію **{name}**? Цю дію неможливо скасувати. Для підтвердження напишіть: **Так, видали компанію {name}**.", none: "У вас немає компаній для видалення.", choose: "Яку компанію ви хочете видалити?", command: "Напишіть: **Видали компанію <назва>**. Після цього я попрошу підтвердження." },
+  en: { selected: "Do you want to delete the selected company **{name}**? This action cannot be undone. To confirm, write: **Yes, delete company {name}**.", none: "You do not have any companies to delete.", choose: "Which company do you want to delete?", command: "Write: **Delete company <name>**. I will then ask for confirmation.", completedAll: "Done. I deleted company **{company}**, business idea **{business}**, its goals ({goals}), and Business Memory ({memories})." },
+  uk: { selected: "Ви хочете видалити вибрану компанію **{name}**? Цю дію неможливо скасувати. Для підтвердження напишіть: **Так, видали компанію {name}**.", none: "У вас немає компаній для видалення.", choose: "Яку компанію ви хочете видалити?", command: "Напишіть: **Видали компанію <назва>**. Після цього я попрошу підтвердження.", completedAll: "Готово. Я видалив компанію **{company}**, бізнес-ідею **{business}**, її цілі ({goals}) та Business Memory ({memories})." },
   fr: { selected: "Voulez-vous supprimer l’entreprise sélectionnée **{name}** ? Cette action est irréversible. Pour confirmer, écrivez : **Oui, supprime l’entreprise {name}**.", none: "Vous n’avez aucune entreprise à supprimer.", choose: "Quelle entreprise souhaitez-vous supprimer ?", command: "Écrivez : **Supprime l’entreprise <nom>**. Je demanderai ensuite une confirmation." },
   de: { selected: "Möchten Sie das ausgewählte Unternehmen **{name}** löschen? Diese Aktion kann nicht rückgängig gemacht werden. Schreiben Sie zur Bestätigung: **Ja, lösche das Unternehmen {name}**.", none: "Sie haben keine Unternehmen zum Löschen.", choose: "Welches Unternehmen möchten Sie löschen?", command: "Schreiben Sie: **Lösche das Unternehmen <Name>**. Danach bitte ich um eine Bestätigung." },
   es: { selected: "¿Quieres eliminar la empresa seleccionada **{name}**? Esta acción no se puede deshacer. Para confirmar, escribe: **Sí, elimina la empresa {name}**.", none: "No tienes empresas para eliminar.", choose: "¿Qué empresa quieres eliminar?", command: "Escribe: **Elimina la empresa <nombre>**. Después pediré confirmación." },
@@ -29,6 +30,33 @@ const copies: Record<CompanyChatLanguage, CompanyDeleteCopy> = {
 export function companyDeleteCopy(language: CompanyChatLanguage, companyName?: string): CompanyDeleteCopy {
   const selected = companyName ? copies[language].selected.replaceAll("{name}", companyName) : copies[language].selected;
   return { ...copies[language], selected };
+}
+
+const completedAllCopies: Record<CompanyChatLanguage, string> = {
+  en: "Done. I deleted company **{company}**, business idea **{business}**, its goals ({goals}), and Business Memory ({memories}).",
+  uk: "Готово. Я видалив компанію **{company}**, бізнес-ідею **{business}**, її цілі ({goals}) та Business Memory ({memories}).",
+  fr: "Terminé. J’ai supprimé l’entreprise **{company}**, l’idée d’entreprise **{business}**, ses objectifs ({goals}) et sa mémoire métier ({memories}).",
+  de: "Erledigt. Ich habe das Unternehmen **{company}**, die Geschäftsidee **{business}**, ihre Ziele ({goals}) und den Geschäftsspeicher ({memories}) gelöscht.",
+  es: "Listo. Eliminé la empresa **{company}**, la idea de negocio **{business}**, sus objetivos ({goals}) y la memoria del negocio ({memories}).",
+  it: "Fatto. Ho eliminato l’azienda **{company}**, l’idea imprenditoriale **{business}**, i suoi obiettivi ({goals}) e la memoria aziendale ({memories}).",
+  pl: "Gotowe. Usunąłem firmę **{company}**, pomysł na biznes **{business}**, jego cele ({goals}) i pamięć biznesową ({memories}).",
+  pt: "Concluído. Excluí a empresa **{company}**, a ideia de negócio **{business}**, suas metas ({goals}) e a memória do negócio ({memories}).",
+  nl: "Klaar. Ik heb bedrijf **{company}**, businessidee **{business}**, de doelen ({goals}) en het bedrijfsgeheugen ({memories}) verwijderd.",
+  tr: "Tamamlandı. **{company}** şirketini, **{business}** iş fikrini, hedeflerini ({goals}) ve işletme hafızasını ({memories}) sildim.",
+  ru: "Готово. Я удалил компанию **{company}**, бизнес-идею **{business}**, её цели ({goals}) и память бизнеса ({memories}).",
+  zh: "已完成。我删除了公司 **{company}**、业务构想 **{business}**、相关目标（{goals}）和业务记忆（{memories}）。",
+  ja: "完了しました。会社 **{company}**、ビジネスアイデア **{business}**、その目標（{goals}件）、ビジネスメモリ（{memories}件）を削除しました。",
+  ko: "완료했습니다. 회사 **{company}**, 비즈니스 아이디어 **{business}**, 관련 목표({goals}개), 비즈니스 메모리({memories}개)를 삭제했습니다.",
+  ar: "تم. حذفت الشركة **{company}** وفكرة العمل **{business}** وأهدافها ({goals}) وذاكرة النشاط التجاري ({memories}).",
+  hi: "पूरा हुआ। मैंने कंपनी **{company}**, व्यवसाय विचार **{business}**, उसके लक्ष्य ({goals}) और बिज़नेस मेमोरी ({memories}) हटा दिए।",
+};
+
+export function companyDeleteCompletedAll(language: CompanyChatLanguage, values: { company: string; business: string; goals: number; memories: number }): string {
+  return completedAllCopies[language]
+    .replaceAll("{company}", values.company)
+    .replaceAll("{business}", values.business)
+    .replaceAll("{goals}", String(values.goals))
+    .replaceAll("{memories}", String(values.memories));
 }
 
 export function isCompanyDeleteConfirmed(message: string): boolean {
