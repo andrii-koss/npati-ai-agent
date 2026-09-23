@@ -377,6 +377,7 @@ describe("company management from chat", () => {
   it("asks for confirmation before deleting the selected company and deletes it only after explicit confirmation", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(alice, { name: "Тестова студія" }, "delete-confirm-company");
+    let researchCalls = 0;
     const aiEngine: AIEngine = {
       chat: async () => { throw new Error("Deletion confirmation must not call an AI model"); }, async *stream() { throw new Error("Deletion confirmation must not call an AI model"); },
       listModels: async () => [], getModel: async () => undefined,
@@ -384,7 +385,11 @@ describe("company management from chat", () => {
       getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
     };
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
-    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    const webResearch = {
+      shouldResearch: () => true,
+      run: async () => { researchCalls += 1; return { kind: "web_search" as const, context: "unexpected", sources: [] }; },
+    } as any;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace, webResearch });
     try {
       const question = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Тепер видали її, для теста", contextType: "company", companyId: company.id } });
       expect(question.statusCode).toBe(200);
@@ -392,11 +397,13 @@ describe("company management from chat", () => {
       expect(question.body).toContain("Тестова студія");
       expect(question.body).not.toContain('"companyAction"');
       expect((await store.listCompanies(alice)).items).toHaveLength(1);
+      expect(researchCalls).toBe(0);
 
       const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Так, видали компанію Тестова студія", contextType: "company", companyId: company.id } });
       expect(confirmed.statusCode).toBe(200);
       expect(confirmed.body).toContain('"companyAction":{"action":"delete"');
       expect((await store.listCompanies(alice)).items).toHaveLength(0);
+      expect(researchCalls).toBe(0);
     } finally { await app.close(); }
   });
 
