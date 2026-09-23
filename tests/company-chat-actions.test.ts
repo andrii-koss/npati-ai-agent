@@ -46,10 +46,25 @@ describe("company management from chat", () => {
     }
     const conversation = await store.createNeutralConversation(alice, "Контекстне підтвердження");
     await store.appendNeutralMessage(alice, conversation.id, "assistant", `Готово.\n\n\`\`\`card:Компанія: Тестова компанія\n[Відкрити налаштування компанії →](/settings/company?company=${company.id})\n\`\`\`\n\n**Наступний крок:** хочете, щоб я детальніше налаштував ролі, інструкції та моделі для цих агентів?`);
+    const existingAgents = await store.listCompanyAgents(alice, company.id);
+    const aiAnswer = `На основі завдань цієї компанії я рекомендую окремі ролі для координації, досліджень, маркетингу, контенту й операцій. Я також підготував для кожної ролі власну системну інструкцію та робочі запити.\n\nХочете, щоб я наступним кроком підібрав доступну модель для кожного агента?\n\n\`\`\`company-action\n${JSON.stringify({
+      action: "update",
+      companyId: company.id,
+      agents: existingAgents.map((agent, index) => ({
+        action: "update",
+        agentId: agent.id,
+        fields: {
+          role: ["Керівник команди", "Аналітик-дослідник", "Маркетолог", "Контент-стратег", "Операційний аналітик"][index],
+          systemInstruction: `AI-інструкція для агента ${index + 1}`,
+          promptGuidelines: `AI-правила промптів для агента ${index + 1}`,
+          recommendedPrompts: [`AI-запит ${index + 1}.1`, `AI-запит ${index + 1}.2`],
+        },
+      })),
+    })}\n\`\`\``;
     let modelCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { modelCalls += 1; throw new Error("Contextual company follow-up must not call an AI model"); },
-      async *stream() { modelCalls += 1; throw new Error("Contextual company follow-up must not call an AI model"); },
+      chat: async () => { modelCalls += 1; return { content: aiAnswer }; },
+      async *stream() { throw new Error("Contextual company follow-up uses one validated AI planning call"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
@@ -60,12 +75,17 @@ describe("company management from chat", () => {
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "так", conversationId: conversation.id, contextType: "none" } });
       expect(response.statusCode).toBe(200);
       expect(response.body).toContain('"companyAction":{"action":"update"');
-      expect(response.body).toContain("Готово, я оновив компанію");
+      expect(response.body).toContain("На основі завдань цієї компанії я рекомендую");
+      expect(response.body).toContain("підібрав доступну модель");
+      expect(response.body).not.toContain("company-action");
+      expect(response.body).not.toContain("Ось що зараз налаштовано");
+      expect(response.body).not.toContain("хочете, щоб я детальніше налаштував ролі");
       expect(response.body).not.toContain("Не удалось выполнить задачу компании");
       const agents = await store.listCompanyAgents(alice, company.id);
       expect(agents).toHaveLength(5);
+      expect(new Set(agents.map((agent) => agent.role)).size).toBe(5);
       expect(agents.every((agent) => Boolean(agent.systemInstruction) && Boolean(agent.promptGuidelines) && agent.recommendedPrompts.length >= 2)).toBe(true);
-      expect(modelCalls).toBe(0);
+      expect(modelCalls).toBe(1);
     } finally { await app.close(); }
   });
 
