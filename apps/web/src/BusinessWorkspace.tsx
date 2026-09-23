@@ -1356,6 +1356,22 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       // Do NOT scroll to bottom! Keep user reading from the top!
     };
 
+    const revealVerifiedResponse = async (content: string) => {
+      const step = content.length > 2400 ? 36 : content.length > 1200 ? 24 : 14;
+      setStreamingResponse(true);
+      for (let end = step; end < content.length; end += step) {
+        if (controller.signal.aborted) break;
+        const visible = content.slice(0, end);
+        setMessages((current) => {
+          const found = current.some((item) => item.id === assistantId);
+          return found
+            ? current.map((item) => item.id === assistantId ? { ...item, content: visible } : item)
+            : [...current, { id: assistantId, role: "assistant", content: visible, createdAt: new Date().toISOString() }];
+        });
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
+      }
+    };
+
     const flushDeltas = () => {
       flushDeltasRef.current = null;
       if (deltaBuffer.length > 0) {
@@ -1390,14 +1406,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
       flushDeltas();
       setReplyMeta(result);
-      setMessages((current) => {
-        const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
-        const found = current.some((item) => item.id === assistantId);
-        if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
-        return found
-          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item)
-          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, createdAt: new Date().toISOString() }];
-      });
+      const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
       if ((result as any)?.businessAction) {
         window.dispatchEvent(new CustomEvent("npati:business-changed", { detail: (result as any).businessAction }));
       }
@@ -1407,6 +1416,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if ((result as any)?.goalAction) {
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
+      if (!receivedDelta && cleanedMessage) await revealVerifiedResponse(cleanedMessage);
+      setMessages((current) => {
+        const found = current.some((item) => item.id === assistantId);
+        if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
+        return found
+          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item)
+          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, createdAt: new Date().toISOString() }];
+      });
       if (!privateRequest && result.conversationId) {
         setSelected(result.conversationId);
         window.history.replaceState(

@@ -1429,7 +1429,7 @@ export function buildApp(config: AppConfig = {}) {
         if (prompt && (CompanyChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
           const result = await runNeutralMessage(auth, prompt, undefined, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
-          return { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } };
+          return { ...result, activeContext: resolved.context };
         }
         const runResult = await companyRuntime.execute(
           auth,
@@ -1665,7 +1665,7 @@ export function buildApp(config: AppConfig = {}) {
         } else if (resolved.context.contextType === "company") {
           if (CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
             const result = await runNeutralMessage(auth, message, undefined, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
-            send("result", { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } });
+            send("result", { ...result, activeContext: resolved.context });
           } else {
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(
