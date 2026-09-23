@@ -111,6 +111,40 @@ describe("company management from chat", () => {
     expect(await store.listCompanyAgents(alice, company.id)).toHaveLength(2);
   });
 
+  it("creates the requested five-agent company from the exact Ukrainian chat request even when planner JSON is imperfect", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const plannerOutput = directive({
+      action: "create_company",
+      company: { name: null, industry: "Тестування", languages: "Українська", website: null },
+      agentCount: 5,
+      agents: [
+        { name: "Керівник", role: "Координатор", modelId: "auto/chat", tools: ["Web Search", "unsupported-tool"] },
+        { name: "Аналітик", role: null },
+      ],
+    });
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: plannerOutput }), async *stream() { yield "Компанію створено."; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Привіт, створи мені тестову компанію, із 5 агентів, із різними ролеми", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"companyAction":{"action":"create"');
+      expect(response.body).not.toContain("Не вдалося виконати зміну компанії");
+      const companies = (await store.listCompanies(alice)).items;
+      expect(companies).toEqual([expect.objectContaining({ name: "Тестова компанія", industry: "Тестування", languages: ["Українська"] })]);
+      const agents = await store.listCompanyAgents(alice, companies[0]!.id);
+      expect(agents).toHaveLength(5);
+      expect(new Set(agents.map((agent) => agent.role)).size).toBe(5);
+      const mainAgent = agents.find((agent) => agent.id === companies[0]!.mainAgentId);
+      expect(mainAgent).toEqual(expect.objectContaining({ name: "Керівник", role: "Координатор", modelId: undefined, tools: ["research.web_search"] }));
+    } finally { await app.close(); }
+  });
+
   it("updates company and agent fields, then deletes only the specified agent", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(alice, { name: "Studio" }, "company-1");
@@ -199,7 +233,7 @@ describe("company management from chat", () => {
 
   it("rejects unconfigured models and hides partial company directives while streaming", async () => {
     const store = new InMemoryWorkspaceStore();
-    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Studio" }, agents: [{ action: "create", fields: { name: "Lead", role: "Coordinator", modelId: "unapproved/model" } }] }), store, "conversation-7");
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Studio" }, agents: [{ action: "create", fields: { name: "Lead", role: "Coordinator", modelId: "unapproved/model" } }] }), store, "conversation-7", { requestMessage: "Create Studio with model unapproved/model" });
     expect(result.companyAction).toBeUndefined();
     expect((await store.listCompanies(alice)).items).toHaveLength(0);
     const raw = directive({ action: "delete", companyName: "Studio" });
