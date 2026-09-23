@@ -374,6 +374,42 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("asks for confirmation before deleting the selected company and deletes it only after explicit confirmation", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Тестова студія" }, "delete-confirm-company");
+    const aiEngine: AIEngine = {
+      chat: async () => { throw new Error("Deletion confirmation must not call an AI model"); }, async *stream() { throw new Error("Deletion confirmation must not call an AI model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const question = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Тепер видали її, для теста", contextType: "company", companyId: company.id } });
+      expect(question.statusCode).toBe(200);
+      expect(question.body).toContain("Ви хочете видалити вибрану компанію");
+      expect(question.body).toContain("Тестова студія");
+      expect(question.body).not.toContain('"companyAction"');
+      expect((await store.listCompanies(alice)).items).toHaveLength(1);
+
+      const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Так, видали компанію Тестова студія", contextType: "company", companyId: company.id } });
+      expect(confirmed.statusCode).toBe(200);
+      expect(confirmed.body).toContain('"companyAction":{"action":"delete"');
+      expect((await store.listCompanies(alice)).items).toHaveLength(0);
+    } finally { await app.close(); }
+  });
+
+  it("lists owned companies when a delete request has no selected company", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.createCompany(alice, { name: "Alpha" }, "list-alpha");
+    await store.createCompany(alice, { name: "Beta" }, "list-beta");
+    const message = await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію", undefined);
+    expect(message).toContain("Яку компанію ви хочете видалити?");
+    expect(message).toContain("**Alpha**");
+    expect(message).toContain("**Beta**");
+  });
+
   it("does not expose provider diagnostics when a company run fails", async () => {
     const store = new InMemoryWorkspaceStore();
     let company = await store.createCompany(alice, { name: "Failure Studio" }, "failure-company");

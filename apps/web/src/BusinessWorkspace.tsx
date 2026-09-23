@@ -814,6 +814,31 @@ const businessThinkingSteps = [
   "Preparing a response…",
 ];
 
+type ChatMutationOperation = "create" | "update" | "delete";
+
+function detectChatMutation(message: string, hasSelectedContext: boolean): ChatMutationOperation | null {
+  const target = /(?:компан|агент|бізнес|ціл|автоматизац|контент|пам(?:'|’)?ят|company|agent|business|goal|automation|content|memory|пол|field|instruction|prompt|role|tool)/iu.test(message)
+    || hasSelectedContext && /(?:її|його|їх|\bit\b|\bthis\b)/iu.test(message);
+  if (!target) return null;
+  if (/(?:видал|приб|удал|delete|remove)/iu.test(message)) return "delete";
+  if (/(?:створ|дод|созда|добав|create|add)/iu.test(message)) return "create";
+  if (/(?:заповн|змін|онов|редаг|налашт|признач|нада|измен|обнов|редакт|настро|назнач|fill|change|update|edit|configure|assign|set)/iu.test(message)) return "update";
+  return null;
+}
+
+const mutationOperationCopy: Record<ChatMutationOperation, string> = {
+  create: "Creating and saving…",
+  update: "Updating and saving…",
+  delete: "Checking and deleting…",
+};
+
+function expandDeleteConfirmationReply(message: string, history: Message[]): string {
+  if (!/^(?:так|так,|підтверджую|да|да,|подтверждаю|yes|yes,|confirm)$/iu.test(message.trim())) return message;
+  const previous = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
+  const command = /(?:Для підтвердження напишіть|Для подтверждения напишите|To confirm, write):\s*\*\*([^*]+)\*\*/iu.exec(previous)?.[1]?.trim();
+  return command || message;
+}
+
 function isWebsiteAnalysisRequest(message: string) {
   return /https?:\/\/|www\.|\b(?:website|webpage|site|scan|crawl)\b|сайт|вебсторінк|проскануй/iu.test(message);
 }
@@ -953,6 +978,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, []);
 
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
+  const [mutationOperation, setMutationOperation] = useState<ChatMutationOperation | null>(null);
   const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
@@ -1276,6 +1302,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
+    const requestMessage = expandDeleteConfirmationReply(message, messages);
     // An earlier history request must not replace the optimistic turn after it starts.
     historyLoadVersionRef.current += 1;
     const privateRequest = noMemory;
@@ -1320,11 +1347,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
+    const pendingMutation = detectChatMutation(requestMessage, Boolean(companyId || business));
+    const mutationStartedAt = Date.now();
     setActiveTurn(optimisticContent);
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
+    setSending(true); setStreamingResponse(false); setMutationOperation(pendingMutation); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     window.requestAnimationFrame(() => {
       activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -1368,7 +1397,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
     try {
       const result = await streamChat<AgentReply>({
-        message,
+        message: requestMessage,
         conversationId: selected ?? undefined,
         attachments: sentAttachments,
         contextType: companyId ? "company" : (business ? "business" : "none"),
@@ -1388,6 +1417,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           appendDelta(delta);
         },
       });
+      if (pendingMutation) {
+        const remaining = 2_000 - (Date.now() - mutationStartedAt);
+        if (remaining > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+      }
       flushDeltas();
       setReplyMeta(result);
       const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
@@ -1457,6 +1490,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if (streamControllerRef.current?.controller === controller) streamControllerRef.current = null;
       setSending(false);
       setStreamingResponse(false);
+      setMutationOperation(null);
     }
   }
   async function remember() {
@@ -1542,7 +1576,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {sending && mutationOperation && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && (
+            <article className="assistant mutation-status" aria-label="NPATI Agent is applying changes">
+              <span className="mutation-orbit" aria-hidden="true"><i /><i /><i /></span>
+              <p>{mutationOperationCopy[mutationOperation]}</p>
+            </article>
+          )}
+          {sending && !mutationOperation && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
