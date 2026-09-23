@@ -69,6 +69,36 @@ const agentFieldAliases: Record<string, string> = {
   positiony: "positionY",
 };
 
+const companyFieldAliases: Record<string, string> = {
+  companyname: "name",
+  businessid: "businessId",
+  products: "productsServices",
+  services: "productsServices",
+  productsandservices: "productsServices",
+  productservices: "productsServices",
+  brandtone: "brandTone",
+  instructions: "companyInstructions",
+  companyinstructions: "companyInstructions",
+};
+
+function compactKey(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeCompanyFields(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    if (rawValue === null || rawValue === undefined) continue;
+    const key = companyFieldAliases[compactKey(rawKey)] ?? rawKey;
+    let item = rawValue;
+    if (key === "languages" && typeof item === "string") item = item.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
+    if (key === "status" && typeof item === "string") item = item.toLocaleLowerCase();
+    result[key] = item;
+  }
+  return result;
+}
+
 function normalizeAgentFields(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const source = value as Record<string, unknown>;
@@ -82,8 +112,8 @@ function normalizeAgentFields(value: unknown): unknown {
   }
   const result: Record<string, unknown> = {};
   for (const [rawKey, rawValue] of Object.entries(expanded)) {
-    const compactKey = rawKey.toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
-    const key = agentFieldAliases[compactKey] ?? rawKey;
+    if (rawValue === null || rawValue === undefined) continue;
+    const key = agentFieldAliases[compactKey(rawKey)] ?? rawKey;
     let item = rawValue;
     if (key === "recommendedPrompts" && typeof item === "string") {
       item = item.split(/\r?\n/).map((part) => part.trim()).filter(Boolean);
@@ -91,10 +121,106 @@ function normalizeAgentFields(value: unknown): unknown {
     if (key === "tools" && typeof item === "string") {
       item = item.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
     }
-    if (key === "tools" && Array.isArray(item)) item = item.map((part) => typeof part === "string" ? normalizeTool(part) : part);
+    if (key === "tools" && Array.isArray(item)) item = item
+      .map((part) => typeof part === "string" ? normalizeTool(part) : part)
+      .filter((part): part is string => typeof part === "string" && toolIds.has(part));
     result[key] = item;
   }
   return result;
+}
+
+function operation(value: unknown, fallback: CompanyOperation): CompanyOperation {
+  if (value === undefined || value === null || value === "") return fallback;
+  const normalized = String(value ?? fallback).toLocaleLowerCase().replace(/[^a-z]/g, "");
+  if (["create", "add", "new", "createcompany", "createagent"].includes(normalized)) return "create";
+  if (["update", "edit", "change", "modify", "updatecompany", "updateagent"].includes(normalized)) return "update";
+  if (["delete", "remove", "deletecompany", "deleteagent"].includes(normalized)) return "delete";
+  throw new Error("Invalid company action");
+}
+
+function requestedAgentCount(message: string, raw: Record<string, unknown>): number | undefined {
+  const explicit = Number(raw.agentCount ?? raw.agentsCount ?? raw.numberOfAgents);
+  if (Number.isInteger(explicit) && explicit > 0 && explicit <= 25) return explicit;
+  const match = message.match(/(\d{1,2})\s+(?:[\p{L}'’-]+\s+){0,2}(?:агент|agent)/iu)
+    ?? message.match(/(?:агент|agent)[\p{L}'’ -]{0,20}(\d{1,2})/iu);
+  const count = Number(match?.[1]);
+  return Number.isInteger(count) && count > 0 && count <= 25 ? count : undefined;
+}
+
+function defaultAgentProfiles(message: string): Array<{ name: string; role: string; description: string; systemInstruction: string }> {
+  if (detectCompanyChatLanguage(message) === "uk") return [
+    { name: "Координатор", role: "Керівник команди", description: "Координує роботу агентів і контролює результат.", systemInstruction: "Координуй команду, розподіляй завдання та перевіряй результат." },
+    { name: "Дослідник", role: "Аналітик і дослідник", description: "Збирає та аналізує потрібну інформацію.", systemInstruction: "Досліджуй факти, перевіряй джерела та готуй чіткі висновки." },
+    { name: "Маркетолог", role: "Спеціаліст із маркетингу", description: "Працює з ринком, аудиторією і просуванням.", systemInstruction: "Аналізуй аудиторію та пропонуй практичні маркетингові дії." },
+    { name: "Контент-менеджер", role: "Спеціаліст із контенту", description: "Готує тексти й контентні матеріали.", systemInstruction: "Створюй точний, зрозумілий контент відповідно до цілей компанії." },
+    { name: "Операційний аналітик", role: "Спеціаліст з операцій", description: "Контролює процеси, завдання і показники.", systemInstruction: "Оптимізуй процеси, відстежуй виконання та знаходь ризики." },
+  ];
+  return [
+    { name: "Coordinator", role: "Team Lead", description: "Coordinates agents and reviews outcomes.", systemInstruction: "Coordinate the team, delegate tasks, and verify results." },
+    { name: "Researcher", role: "Research Analyst", description: "Collects and analyzes relevant information.", systemInstruction: "Research facts, verify sources, and provide clear findings." },
+    { name: "Marketer", role: "Marketing Specialist", description: "Works with markets, audiences, and promotion.", systemInstruction: "Analyze the audience and recommend practical marketing actions." },
+    { name: "Content Manager", role: "Content Specialist", description: "Creates written and content assets.", systemInstruction: "Create clear, accurate content aligned with company goals." },
+    { name: "Operations Analyst", role: "Operations Specialist", description: "Tracks processes, work, and performance.", systemInstruction: "Improve processes, track delivery, and identify risks." },
+  ];
+}
+
+function normalizeDirective(value: unknown, requestMessage: string): CompanyDirective {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid company action");
+  const raw = value as Record<string, unknown>;
+  const action = operation(raw.action, "create");
+  const nestedCompany = raw.company && typeof raw.company === "object" && !Array.isArray(raw.company) ? raw.company : undefined;
+  const companySource = raw.fields ?? nestedCompany ?? {
+    name: raw.name ?? raw.companyName,
+    industry: raw.industry,
+    description: raw.description,
+    productsServices: raw.productsServices,
+    languages: raw.languages,
+    brandTone: raw.brandTone,
+    companyInstructions: raw.companyInstructions,
+    status: raw.status,
+  };
+  const rawAgents = Array.isArray(raw.agents) ? raw.agents : [];
+  const agents: AgentDirective[] = rawAgents.slice(0, 25).map((entry, index) => {
+    const agent = entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+    const agentAction = operation(agent.action, action === "create" ? "create" : "update");
+    const flatFields = Object.fromEntries(Object.entries(agent).filter(([key]) => agentFields.has(agentFieldAliases[compactKey(key)] ?? key) || key === "instructions"));
+    const normalizedFields = normalizeAgentFields(agent.fields ?? flatFields) as Record<string, unknown>;
+    return {
+      action: agentAction,
+      agentId: typeof agent.agentId === "string" ? agent.agentId : undefined,
+      agentName: typeof agent.agentName === "string" ? agent.agentName : undefined,
+      fields: normalizedFields,
+      parentAgentId: typeof agent.parentAgentId === "string" || agent.parentAgentId === null ? agent.parentAgentId : undefined,
+      parentAgentName: typeof agent.parentAgentName === "string" || agent.parentAgentName === null ? agent.parentAgentName : undefined,
+      main: agent.main === true || index === 0 && action === "create",
+    };
+  });
+  if (action === "create") {
+    const agentGroup = raw.agents && typeof raw.agents === "object" && !Array.isArray(raw.agents) ? raw.agents as Record<string, unknown> : undefined;
+    const count = requestedAgentCount(requestMessage, { ...raw, agentCount: raw.agentCount ?? agentGroup?.count ?? agentGroup?.agentCount }) ?? agents.length;
+    const profiles = defaultAgentProfiles(requestMessage);
+    for (let index = 0; index < count; index++) {
+      const profile = profiles[index % profiles.length]!;
+      const current = agents[index];
+      if (current) {
+        current.action = "create";
+        current.fields = { ...profile, ...current.fields };
+        current.main = index === 0;
+      } else {
+        const suffix = index >= profiles.length ? ` ${Math.floor(index / profiles.length) + 1}` : "";
+        agents.push({ action: "create", fields: { ...profile, name: profile.name + suffix }, main: index === 0, ...(index > 0 ? { parentAgentName: String(agents[0]?.fields?.name ?? profiles[0]!.name) } : {}) });
+      }
+    }
+  }
+  return {
+    action,
+    companyId: typeof raw.companyId === "string" ? raw.companyId : undefined,
+    companyName: typeof raw.companyName === "string" ? raw.companyName : undefined,
+    fields: normalizeCompanyFields(companySource) as Record<string, unknown>,
+    agents,
+    mainAgentId: typeof raw.mainAgentId === "string" || raw.mainAgentId === null ? raw.mainAgentId : undefined,
+    mainAgentName: typeof raw.mainAgentName === "string" || raw.mainAgentName === null ? raw.mainAgentName : undefined,
+  };
 }
 
 function safeMarkdown(value: unknown): string {
@@ -138,11 +264,11 @@ ${agentLines}
 }
 
 function fields(value: unknown, allowed: Set<string>, kind: string): Record<string, unknown> {
+  if (kind === "company") value = normalizeCompanyFields(value);
   if (kind === "agent") value = normalizeAgentFields(value);
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${kind} fields must be an object`);
-  const input = value as Record<string, unknown>;
-  for (const key of Object.keys(input)) if (!allowed.has(key)) throw new Error(`Unsupported ${kind} field: ${key}`);
+  const input = Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => allowed.has(key)));
   for (const [key, item] of Object.entries(input)) {
     if (["languages", "recommendedPrompts", "tools"].includes(key)) {
       if (!Array.isArray(item) || item.length > 30 || item.some((part) => typeof part !== "string" || part.length > 500)) throw new Error(`Invalid ${key}`);
@@ -243,10 +369,8 @@ For update, include only fields that should change. To change only agents, use a
     try {
       if (!auth.permissions.includes("business:manage")) throw new Error("Your account cannot manage companies");
       if (matches.length !== 1) throw new Error("Use one company action per message");
-      const directive = JSON.parse(match[1]!.trim()) as CompanyDirective;
-      if (!directive || !["create", "update", "delete"].includes(directive.action)) throw new Error("Invalid company action");
+      const directive = normalizeDirective(JSON.parse(match[1]!.trim()), options.requestMessage ?? "");
       if (directive.agents && (!Array.isArray(directive.agents) || directive.agents.length > 25)) throw new Error("At most 25 agent changes are allowed per request");
-      if ((directive.agents ?? []).filter((agent) => agent?.main).length > 1) throw new Error("Choose only one main agent");
       const companyPatch = fields(directive.fields, companyFields, "company") as Partial<CompanyInput>;
       if (directive.action === "update" && !Object.keys(companyPatch).length && !directive.agents?.length && directive.mainAgentId === undefined && directive.mainAgentName === undefined) throw new Error("No company or agent changes were specified");
       if (directive.action === "delete" && (Object.keys(companyPatch).length || directive.agents?.length || directive.mainAgentId !== undefined || directive.mainAgentName !== undefined)) throw new Error("Do not combine company deletion with edits");
@@ -255,13 +379,25 @@ For update, include only fields that should change. To change only agents, use a
       for (const operation of directive.agents ?? []) {
         if (!operation || !["create", "update", "delete"].includes(operation.action)) throw new Error("Invalid agent action");
         const patch = fields(operation.fields, agentFields, "agent");
-        for (const id of [patch.modelId, patch.fallbackModelId]) if (id && !allowedModels.has(String(id))) throw new Error("Agent model must be in My Models");
+        for (const key of ["modelId", "fallbackModelId"] as const) {
+          const id = patch[key];
+          if (id && !allowedModels.has(String(id))) {
+            if ((options.requestMessage ?? "").toLocaleLowerCase().includes(String(id).toLocaleLowerCase())) throw new Error("Agent model must be in My Models");
+            delete patch[key];
+          }
+        }
         if (operation.action === "create" && (!String(patch.name ?? "").trim() || !String(patch.role ?? "").trim())) throw new Error("New agents need a name and role");
+        operation.fields = patch;
       }
       const key = createHash("sha256").update(`${auth.workspaceId}:${auth.userId}:${conversationId}:${options.requestMessage ?? match[0]}`).digest("hex");
       let company: Company;
       if (directive.action === "create") {
-        if (!String(companyPatch.name ?? "").trim()) throw new Error("New company needs a name");
+        if (!String(companyPatch.name ?? "").trim()) {
+          const language = detectCompanyChatLanguage(options.requestMessage ?? "");
+          companyPatch.name = language === "uk"
+            ? (/тест/iu.test(options.requestMessage ?? "") ? "Тестова компанія" : "Нова компанія")
+            : (/\btest/iu.test(options.requestMessage ?? "") ? "Test Company" : "New Company");
+        }
         company = await store.createCompany(auth, companyPatch as CompanyInput, `chat-company:${key}`);
         changed = true;
       } else {
