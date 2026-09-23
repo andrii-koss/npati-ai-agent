@@ -15,6 +15,8 @@ import { ActiveContextResolver } from "./active-context-resolver";
 import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
+import { WorkspaceChatActions } from "./workspace-chat-actions";
+import { chatLanguageInstruction } from "./company-chat-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -38,6 +40,8 @@ import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
+import { ContentLibraryStore } from "./content-library-store";
+import { registerContentLibraryRoutes } from "./content-library-routes";
 import { CompanyApprovalsRepository } from "./approvals-repository";
 import { registerCompanyApprovalsRoutes } from "./approvals-routes";
 import { IntegrationsRepository } from "./integrations-repository";
@@ -487,6 +491,7 @@ export function buildApp(config: AppConfig = {}) {
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
+  const contentLibrary = new ContentLibraryStore(workspaceStore);
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
@@ -606,13 +611,57 @@ export function buildApp(config: AppConfig = {}) {
       }
     }
     if (!/```company-action/i.test(actionText)) return {
-      cleanText: managementRequest ? "I couldn't complete the company change. No company or agent changes were saved. Please clarify the request or try again." : content,
+      cleanText: managementRequest ? CompanyChatActions.noActionMessage(requestMessage ?? "") : content,
       companyAction: undefined,
     };
     return CompanyChatActions.extractAndExecute(auth, actionText, workspaceStore, conversationId ?? crypto.randomUUID(), {
       allowedModelIds: addedModels.map((model) => model.id),
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       requestMessage,
+    });
+  }
+
+  async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
+    const managementRequest = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage));
+    if (!/```workspace-action/i.test(content) && !managementRequest) return { cleanText: content, workspaceAction: undefined, companyRunId: undefined };
+    const dependencies = {
+      store: workspaceStore,
+      automations: automationsRepo,
+      content: contentLibrary,
+      runCompany: (context: AuthContext, companyId: string, input: { task: string; mode?: "auto" | "single" | "pipeline" | "fusion" }, key: string) =>
+        companyRuntime.execute(context, companyId, input, key, route?.signal),
+      cancelCompanyRun: async (context: AuthContext, companyId: string, runId: string) => {
+        const result = await companyRuntime.cancel(context, companyId, runId);
+        if (companyRunQueue) await companyRunQueue.cancel({ context, companyId, runId });
+        return result;
+      },
+    };
+    let actionText = content;
+    if (!/```workspace-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
+      try {
+        const prompt = await WorkspaceChatActions.buildActionPlannerPrompt(auth, dependencies, requestMessage!, route?.selectedCompanyId, route?.selectedBusinessId);
+        const planned = await aiEngine.chat({
+          model: route?.model,
+          fallbackModel: route?.fallbackModel,
+          admission: admissionFor(auth),
+          timeoutMs: 90_000,
+          signal: route?.signal,
+          messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
+        });
+        actionText = planned.content;
+      } catch (error) {
+        app.log.warn({ err: error }, "Workspace action planning failed");
+      }
+    }
+    if (!/```workspace-action/i.test(actionText)) return {
+      cleanText: managementRequest ? WorkspaceChatActions.noActionMessage(requestMessage ?? "") : content,
+      workspaceAction: undefined,
+      companyRunId: undefined,
+    };
+    return WorkspaceChatActions.extractAndExecute(auth, actionText, dependencies, conversationId ?? crypto.randomUUID(), {
+      requestMessage,
+      selectedCompanyId: route?.selectedCompanyId,
+      selectedBusinessId: route?.selectedBusinessId,
     });
   }
 
@@ -730,7 +779,7 @@ export function buildApp(config: AppConfig = {}) {
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safePrompt);
     const result = await agent.handleBusinessMessage({
       message: safePrompt,
       context,
@@ -744,10 +793,11 @@ export function buildApp(config: AppConfig = {}) {
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
     const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
-    result.message = companyAction.cleanText;
+    const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
+    result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, companyAction: companyAction.companyAction, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
+    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
   async function runNeutralMessage(
@@ -934,7 +984,7 @@ export function buildApp(config: AppConfig = {}) {
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, managementCompany?.id, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, managementCompany?.id, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, managementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safePrompt);
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -955,7 +1005,7 @@ export function buildApp(config: AppConfig = {}) {
         if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
         const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
         content+=cleanChunk;
-        if (!CompanyChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
+        if (!CompanyChatActions.isManagementRequest(safePrompt) && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
       }
     }else {
       chatResult=await aiEngine.chat(chatRequest);
@@ -966,7 +1016,7 @@ export function buildApp(config: AppConfig = {}) {
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;
-        if (!CompanyChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
+        if (!CompanyChatActions.isManagementRequest(safePrompt) && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
       }
     }
     progress?.({ type: "final_generation_completed" });
@@ -1038,7 +1088,8 @@ export function buildApp(config: AppConfig = {}) {
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
     const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
-    content = companyAction.cleanText;
+    const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
+    content = workspaceAction.cleanText;
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
     return {
@@ -1047,6 +1098,8 @@ export function buildApp(config: AppConfig = {}) {
       businessAction: executedAction.businessAction,
       goalAction: executedAction.goalAction,
       companyAction: companyAction.companyAction,
+      workspaceAction: workspaceAction.workspaceAction,
+      companyRunId: workspaceAction.companyRunId,
       model: chatResult?.model ?? ai.model,
       telemetry: chatResult?.telemetry ? { ...chatResult.telemetry, usage: chatResult.usage } : undefined,
       conversationId: conversation?.id,
@@ -1093,6 +1146,7 @@ export function buildApp(config: AppConfig = {}) {
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: automationsRepo });
+  registerContentLibraryRoutes(app, authProvider, workspaceStore, contentLibrary);
   if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
@@ -1369,7 +1423,7 @@ export function buildApp(config: AppConfig = {}) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        if (prompt && CompanyChatActions.isManagementRequest(prompt)) {
+        if (prompt && (CompanyChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt))) {
           const result = await runNeutralMessage(auth, prompt, undefined, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } };
@@ -1606,7 +1660,7 @@ export function buildApp(config: AppConfig = {}) {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
-          if (CompanyChatActions.isManagementRequest(message)) {
+          if (CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message)) {
             const result = await runNeutralMessage(auth, message, undefined, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } });
           } else {

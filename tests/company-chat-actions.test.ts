@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { CompanyChatActions } from "../apps/agent-api/src/company-chat-actions";
+import { detectCompanyChatLanguage } from "../apps/agent-api/src/company-chat-i18n";
 import { stripInternalChatActions } from "../apps/web/src/ChatMessageContent";
 import { buildApp } from "../apps/agent-api/src/app";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -10,6 +11,40 @@ const bob: AuthContext = { userId: "bob", workspaceId: "shared", permissions: ["
 const directive = (value: object) => `Done.\n\n\`\`\`company-action\n${JSON.stringify(value)}\n\`\`\``;
 
 describe("company management from chat", () => {
+  it("detects popular chat languages", () => {
+    expect([
+      ["Create a company with agents", "en"],
+      ["Створи компанію з агентами", "uk"],
+      ["Crée une entreprise avec trois agents", "fr"],
+      ["Erstelle ein Unternehmen mit drei Agenten", "de"],
+      ["Crea una empresa con tres agentes", "es"],
+      ["Crea un'azienda con tre agenti", "it"],
+      ["Utwórz firmę z trzema agentami", "pl"],
+      ["Crie uma empresa com três agentes", "pt"],
+      ["Maak een bedrijf met drie agenten", "nl"],
+      ["Üç ajanlı bir şirket oluştur", "tr"],
+      ["Создай компанию с тремя агентами", "ru"],
+      ["创建一家拥有三个智能体的公司", "zh"],
+      ["3人のエージェントを持つ会社を作成", "ja"],
+      ["세 명의 에이전트가 있는 회사를 만들어 주세요", "ko"],
+      ["أنشئ شركة بها ثلاثة وكلاء", "ar"],
+      ["तीन एजेंटों वाली कंपनी बनाएँ", "hi"],
+    ].map(([message, expected]) => [detectCompanyChatLanguage(message!), expected])).toEqual([
+      ["en", "en"], ["uk", "uk"], ["fr", "fr"], ["de", "de"], ["es", "es"], ["it", "it"], ["pl", "pl"], ["pt", "pt"],
+      ["nl", "nl"], ["tr", "tr"], ["ru", "ru"], ["zh", "zh"], ["ja", "ja"], ["ko", "ko"], ["ar", "ar"], ["hi", "hi"],
+    ]);
+  });
+
+  it("returns a completed company card in the request language", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Atelier IA", industry: "Technologie" }, agents: [{ action: "create", fields: { name: "Responsable", role: "Coordination" }, main: true }] }), store, "conversation-fr", { requestMessage: "Crée une entreprise avec un agent" });
+    expect(result.cleanText).toContain("J’ai créé l’entreprise");
+    expect(result.cleanText).toContain("```card:Entreprise: Atelier IA");
+    expect(result.cleanText).toContain("**Secteur:** Technologie");
+    expect(result.cleanText).toContain("**Étape suivante :**");
+    expect(result.cleanText).not.toContain("Here is the current configuration");
+  });
+
   it("recognizes explicit company configuration requests in the company chat context", () => {
     expect(CompanyChatActions.isManagementRequest("Створи компанію і трьох агентів")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Додай нового агента до компанії")).toBe(true);
@@ -17,6 +52,22 @@ describe("company management from chat", () => {
     expect(CompanyChatActions.isManagementRequest("Create a company with an agent team")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Create a marketing plan for my company")).toBe(false);
     expect(CompanyChatActions.isManagementRequest("Компанію мені створи з агентами")).toBe(true);
+    for (const message of [
+      "Crée une entreprise avec trois agents",
+      "Erstelle ein Unternehmen mit drei Agenten",
+      "Crea una empresa con tres agentes",
+      "Crea un'azienda con tre agenti",
+      "Utwórz firmę z trzema agentami",
+      "Crie uma empresa com três agentes",
+      "Maak een bedrijf met drie agenten",
+      "Üç ajanlı bir şirket oluştur",
+      "Создай компанию с тремя агентами",
+      "创建一家拥有三个智能体的公司",
+      "3人のエージェントを持つ会社を作成",
+      "세 명의 에이전트가 있는 회사를 만들어 주세요",
+      "أنشئ شركة بها ثلاثة وكلاء",
+      "तीन एजेंटों वाली कंपनी बनाएँ",
+    ]) expect(CompanyChatActions.isManagementRequest(message)).toBe(true);
   });
 
   it("includes the selected company even beyond the first prompt page", async () => {
@@ -139,7 +190,7 @@ describe("company management from chat", () => {
   it("does not trust a streamed claim of creation and plans a real write", async () => {
     const store = new InMemoryWorkspaceStore();
     const claim = "I created your company and agents.";
-    const action = directive({ action: "create", fields: { name: "Verified Studio" }, agents: [{ action: "create", fields: { name: "Lead", role: "Coordinator" }, main: true }] });
+    const action = directive({ action: "create", fields: { name: "Verified Studio", industry: "IT / SaaS", description: "Тестова компанія", productsServices: "AI-сервіси", languages: ["Українська"] }, agents: [{ action: "create", fields: { name: "Lead", role: "Coordinator", description: "Керує командою" }, main: true }] });
     const aiEngine: AIEngine = {
       chat: async () => ({ content: action }), async *stream() { yield claim; },
       listModels: async () => [], getModel: async () => undefined,
@@ -153,7 +204,12 @@ describe("company management from chat", () => {
       expect(response.statusCode).toBe(200);
       expect(response.body).not.toContain("event: delta");
       expect(response.body).toContain('"companyAction":{"action":"create"');
-      expect(response.body).toContain("Created company Verified Studio with 1 agent");
+      expect(response.body).toContain("Готово, я створив компанію");
+      expect(response.body).toContain("```card:Компанія: Verified Studio");
+      expect(response.body).toContain("**Галузь:** IT / SaaS");
+      expect(response.body).toContain("**Lead** - Coordinator (головний агент)");
+      expect(response.body).toContain("**Наступний крок:** хочете, щоб я детальніше налаштував ролі");
+      expect(response.body).not.toContain("Done. I created");
       const companies = (await store.listCompanies(alice)).items;
       expect(companies).toHaveLength(1);
       expect((await store.listCompanyAgents(alice, companies[0]!.id)).map((agent) => agent.name)).toEqual(["Lead"]);
@@ -177,7 +233,7 @@ describe("company management from chat", () => {
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Створи компанію і агента", contextType: "none" } });
       expect(response.statusCode).toBe(200);
       expect(response.body).not.toContain("event: delta");
-      expect(response.body).toContain("No company or agent changes were saved");
+      expect(response.body).toContain("Компанію та агентів не було змінено");
       expect(response.body).not.toContain("companyAction");
       expect((await store.listCompanies(alice)).items).toHaveLength(0);
     } finally { await app.close(); }

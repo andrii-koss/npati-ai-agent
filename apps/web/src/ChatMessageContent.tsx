@@ -12,7 +12,7 @@ const attachmentLine = new RegExp("^\\[\\[npati-attachment:(image|audio|document
 const voiceMessageRegex = /^(?:🎤\s*)?Voice message:\s*([^\n\r]+)$/i;
 const faviconUrls = new Map<string, string>();
 const failedFavicons = new Set<string>();
-const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile", "company-action"];
+const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile", "company-action", "workspace-action"];
 
 export function stripInternalChatActions(content: string, streaming = false): string {
   let visible = "";
