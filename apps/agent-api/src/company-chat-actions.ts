@@ -317,11 +317,51 @@ export class CompanyChatActions {
   }
 
   static isManagementRequest(message: string): boolean {
-    return /(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|зроб|побуд|засну|організ)\p{L}*)(?=[\s\S]*(?:компан|агент|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
+    return /(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ)\p{L}*)(?=[\s\S]*(?:компан|агент|пол|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
       || /(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
       || /\b(?:create|add|edit|update|change|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
       || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
       || isLocalizedCompanyManagementRequest(message);
+  }
+
+  static isPotentialMutationRequest(message: string): boolean {
+    const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
+    const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
+    return mutation && companyField;
+  }
+
+  static async buildDeterministicAction(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<string | undefined> {
+    const language = detectCompanyChatLanguage(message);
+    const createCompany = /(?:створ|созда|create)\p{L}*/iu.test(message) && /(?:компан|compan)/iu.test(message);
+    const testCompany = /(?:тест|test)/iu.test(message);
+    const count = requestedAgentCount(message, {});
+    if (createCompany && testCompany && count) {
+      const fields = language === "uk"
+        ? { name: "Тестова компанія", industry: "Тестування та автоматизація", description: "Тестова компанія для перевірки роботи команди AI-агентів.", productsServices: "Тестування процесів, аналітика та автоматизація", languages: ["Українська"], brandTone: "Професійний і зрозумілий", companyInstructions: "Працювати узгоджено, перевіряти результати та чітко повідомляти про виконані дії." }
+        : language === "ru"
+          ? { name: "Тестовая компания", industry: "Тестирование и автоматизация", description: "Тестовая компания для проверки работы команды AI-агентов.", productsServices: "Тестирование процессов, аналитика и автоматизация", languages: ["Русский"], brandTone: "Профессиональный и понятный", companyInstructions: "Работать согласованно, проверять результаты и ясно сообщать о выполненных действиях." }
+          : { name: "Test Company", industry: "Testing and automation", description: "A test company for validating an AI agent team.", productsServices: "Process testing, analytics, and automation", languages: ["English"], brandTone: "Professional and clear", companyInstructions: "Coordinate work, verify results, and report completed actions clearly." };
+      return `\`\`\`company-action\n${JSON.stringify({ action: "create", fields, agentCount: count })}\n\`\`\``;
+    }
+
+    const recommendedPrompts = /recommended\s+prompts?/iu.test(message);
+    const fillPrompts = /(?:заповн|дод|онов|змін|созда|добав|обнов|измен|fill|add|update|change|set)/iu.test(message);
+    if (selectedCompanyId && recommendedPrompts && fillPrompts) {
+      const company = await store.getCompany(auth, selectedCompanyId);
+      const agents = await store.listCompanyAgents(auth, company.id);
+      if (!agents.length) return undefined;
+      const updates = agents.map((agent) => {
+        const role = agent.role || agent.name;
+        const prompts = language === "uk"
+          ? [`Склади план роботи для ролі «${role}»`, `Проаналізуй поточний стан і запропонуй наступні кроки`, `Перевір результат роботи та вкажи, що потрібно покращити`]
+          : language === "ru"
+            ? [`Составь план работы для роли «${role}»`, "Проанализируй текущее состояние и предложи следующие шаги", "Проверь результат работы и укажи, что нужно улучшить"]
+            : [`Create a work plan for the ${role} role`, "Analyze the current state and recommend next steps", "Review the result and identify what should be improved"];
+        return { action: "update", agentId: agent.id, fields: { recommendedPrompts: prompts } };
+      });
+      return `\`\`\`company-action\n${JSON.stringify({ action: "update", companyId: company.id, agents: updates })}\n\`\`\``;
+    }
+    return undefined;
   }
 
   static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = []): Promise<string> {

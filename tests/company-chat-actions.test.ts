@@ -56,6 +56,8 @@ describe("company management from chat", () => {
     expect(CompanyChatActions.isManagementRequest("в компанії, додай ще одного агента, для теста")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("можеш агенту надати роль і Tools & Capabilities?")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("створи додаткового агента в компанії")).toBe(true);
+    expect(CompanyChatActions.isPotentialMutationRequest('добре тепер це поле також заповни "Recommended Prompts" для агентів')).toBe(true);
+    expect(CompanyChatActions.isPotentialMutationRequest("напиши статтю для компанії")).toBe(false);
     for (const message of [
       "Crée une entreprise avec trois agents",
       "Erstelle ein Unternehmen mit drei Agenten",
@@ -111,19 +113,12 @@ describe("company management from chat", () => {
     expect(await store.listCompanyAgents(alice, company.id)).toHaveLength(2);
   });
 
-  it("creates the requested five-agent company from the exact Ukrainian chat request even when planner JSON is imperfect", async () => {
+  it("creates the requested five-agent test company without waiting for an AI planner", async () => {
     const store = new InMemoryWorkspaceStore();
-    const plannerOutput = directive({
-      action: "create_company",
-      company: { name: null, industry: "Тестування", languages: "Українська", website: null },
-      agentCount: 5,
-      agents: [
-        { name: "Керівник", role: "Координатор", modelId: "auto/chat", tools: ["Web Search", "unsupported-tool"] },
-        { name: "Аналітик", role: null },
-      ],
-    });
+    let chatCalls = 0;
+    let streamCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => ({ content: plannerOutput }), async *stream() { yield "Компанію створено."; },
+      chat: async () => { chatCalls += 1; throw new Error("The model planner must not handle deterministic test-company creation"); }, async *stream() { streamCalls += 1; throw new Error("The general chat model must not handle deterministic test-company creation"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
@@ -136,12 +131,14 @@ describe("company management from chat", () => {
       expect(response.body).toContain('"companyAction":{"action":"create"');
       expect(response.body).not.toContain("Не вдалося виконати зміну компанії");
       const companies = (await store.listCompanies(alice)).items;
-      expect(companies).toEqual([expect.objectContaining({ name: "Тестова компанія", industry: "Тестування", languages: ["Українська"] })]);
+      expect(companies).toEqual([expect.objectContaining({ name: "Тестова компанія", industry: "Тестування та автоматизація", languages: ["Українська"] })]);
       const agents = await store.listCompanyAgents(alice, companies[0]!.id);
       expect(agents).toHaveLength(5);
       expect(new Set(agents.map((agent) => agent.role)).size).toBe(5);
+      expect(chatCalls).toBe(0);
+      expect(streamCalls).toBe(0);
       const mainAgent = agents.find((agent) => agent.id === companies[0]!.mainAgentId);
-      expect(mainAgent).toEqual(expect.objectContaining({ name: "Керівник", role: "Координатор", modelId: undefined, tools: ["research.web_search"] }));
+      expect(mainAgent).toEqual(expect.objectContaining({ name: "Координатор", role: "Керівник команди", modelId: undefined }));
     } finally { await app.close(); }
   });
 
@@ -347,6 +344,57 @@ describe("company management from chat", () => {
       expect(response.body).toContain('"activeContext":{"contextType":"company"');
       expect(response.body).toContain(`"companyId":"${company.id}"`);
       expect((await store.getCompany(alice, company.id)).website).toBe("https://selected.example");
+    } finally { await app.close(); }
+  });
+
+  it("routes a Recommended Prompts follow-up to the selected company's agents", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Prompt Studio" }, "prompt-company");
+    const lead = await store.createCompanyAgent(alice, company.id, { name: "Lead", role: "Coordinator" }, "prompt-lead");
+    await store.setCompanyMainAgent(alice, company.id, lead.id, company.revision);
+    let chatCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { chatCalls += 1; throw new Error("The model planner must not handle this deterministic settings follow-up"); }, async *stream() { throw new Error("The general company runtime must not handle this settings follow-up"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: 'добре тепер це поле також заповни "Recommended Prompts" для агентів', contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"companyAction":{"action":"update"');
+      expect(chatCalls).toBe(0);
+      expect((await store.listCompanyAgents(alice, company.id))[0]?.recommendedPrompts).toEqual([
+        "Склади план роботи для ролі «Coordinator»",
+        "Проаналізуй поточний стан і запропонуй наступні кроки",
+        "Перевір результат роботи та вкажи, що потрібно покращити",
+      ]);
+    } finally { await app.close(); }
+  });
+
+  it("does not expose provider diagnostics when a company run fails", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let company = await store.createCompany(alice, { name: "Failure Studio" }, "failure-company");
+    const lead = await store.createCompanyAgent(alice, company.id, { name: "Lead", role: "Coordinator" }, "failure-lead");
+    company = await store.setCompanyMainAgent(alice, company.id, lead.id, company.revision);
+    const rawProviderError = 'NPATI AI A2A message failed with HTTP 500: API [502]: {"diagnostics":{"provider":"ollama-cloud","terminalReason":"HTTP 402"}}';
+    const aiEngine: AIEngine = {
+      chat: async () => { throw new Error(rawProviderError); }, async *stream() { throw new Error(rawProviderError); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat", payload: { message: "ти працюєш??", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().message).toContain("тимчасову недоступність вибраної AI-моделі");
+      expect(response.body).not.toContain("ollama-cloud");
+      expect(response.body).not.toContain("diagnostics");
+      expect(response.body).not.toContain("HTTP 402");
     } finally { await app.close(); }
   });
 });
