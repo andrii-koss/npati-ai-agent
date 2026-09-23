@@ -798,6 +798,7 @@ ${localized.next}`;
 
   async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
+    const aiRefinement = Boolean(requestMessage && CompanyChatActions.isDetailedAgentRefinementRequest(requestMessage));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
     const deleteConfirmation = requestMessage && managementRequest
       ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId)
@@ -809,7 +810,7 @@ ${localized.next}`;
       : content;
     if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
-        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels);
+        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement);
         const planned = await aiEngine.chat({
           model: route?.model,
           fallbackModel: route?.fallbackModel,
@@ -832,6 +833,7 @@ ${localized.next}`;
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       requestMessage,
       selectedCompanyId: route?.selectedCompanyId,
+      preserveResponseText: aiRefinement,
       onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Company action execution failed"),
     });
   }
