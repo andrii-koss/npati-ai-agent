@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { CompanyChatActions } from "../apps/agent-api/src/company-chat-actions";
 import { detectCompanyChatLanguage } from "../apps/agent-api/src/company-chat-i18n";
+import { compositeCreationCopy } from "../apps/agent-api/src/composite-chat-i18n";
+import { defaultLocalizedAgentProfiles } from "../apps/agent-api/src/company-agent-profile-i18n";
 import { stripInternalChatActions } from "../apps/web/src/ChatMessageContent";
 import { buildApp } from "../apps/agent-api/src/app";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -139,6 +141,93 @@ describe("company management from chat", () => {
       expect(streamCalls).toBe(0);
       const mainAgent = agents.find((agent) => agent.id === companies[0]!.mainAgentId);
       expect(mainAgent).toEqual(expect.objectContaining({ name: "Координатор", role: "Керівник команди", modelId: undefined }));
+    } finally { await app.close(); }
+  });
+
+  it("creates and links a business idea, goal, company, and five agents in one existing chat", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const conversation = await store.createNeutralConversation(alice, "Комплексне створення");
+    let chatCalls = 0;
+    let streamCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { chatCalls += 1; throw new Error("Composite creation must not depend on an external model"); },
+      async *stream() { streamCalls += 1; throw new Error("Composite creation must not depend on an external model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const message = "привіт, створи мені бізнес ідею, і ціль для теста, і потім встанови бізнес ідею в створену компанію, її також створи, із 5 агентами, для теста";
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, conversationId: conversation.id, contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain(`"conversationId":"${conversation.id}"`);
+      expect(response.body).toContain('"businessAction":{"action":"create"');
+      expect(response.body).toContain('"goalAction":{"action":"create"');
+      expect(response.body).toContain('"companyAction":{"action":"create"');
+      const businesses = await store.listUserBusinesses(alice);
+      expect(businesses).toHaveLength(1);
+      const goals = await store.listGoals(alice, businesses[0]!.id);
+      expect(goals).toHaveLength(1);
+      const companies = (await store.listCompanies(alice)).items;
+      expect(companies).toEqual([expect.objectContaining({ businessId: businesses[0]!.id, name: "Тестова компанія" })]);
+      expect(await store.listCompanyAgents(alice, companies[0]!.id)).toHaveLength(5);
+      expect(await store.listNeutralConversations(alice)).toHaveLength(1);
+      expect(chatCalls).toBe(0);
+      expect(streamCalls).toBe(0);
+    } finally { await app.close(); }
+  });
+
+  it("understands and completes the combined creation flow in all 16 supported languages", async () => {
+    const cases = [
+      ["en", "Create a test business idea and goal, then create a company with 5 agents and link the idea to it."],
+      ["uk", "Створи тестову бізнес-ідею і ціль, потім створи компанію з 5 агентами та прив’яжи до неї ідею."],
+      ["fr", "Crée une idée d’entreprise test et un objectif, puis crée une entreprise avec 5 agents et associe l’idée."],
+      ["de", "Erstelle eine Test-Geschäftsidee und ein Ziel, dann ein Unternehmen mit 5 Agenten und verknüpfe die Idee."],
+      ["es", "Crea una idea de negocio de prueba y un objetivo, luego una empresa con 5 agentes y vincula la idea."],
+      ["it", "Crea un’idea imprenditoriale di prova e un obiettivo, poi un’azienda con 5 agenti e collega l’idea."],
+      ["pl", "Utwórz testowy pomysł na biznes i cel, następnie firmę z 5 agentami i połącz z nią pomysł."],
+      ["pt", "Crie uma ideia de negócio de teste e uma meta, depois uma empresa com 5 agentes e vincule a ideia."],
+      ["nl", "Maak een test-businessidee en een doel, daarna een bedrijf met 5 agenten en koppel het idee."],
+      ["tr", "Bir test iş fikri ve hedef oluştur, ardından 5 ajan ile bir şirket oluştur ve fikri bağla."],
+      ["ru", "Создай тестовую бизнес-идею и цель, затем компанию с 5 агентами и привяжи идею."],
+      ["zh", "创建一个测试商业想法和目标，然后创建一家拥有5个智能体的公司并关联该想法。"],
+      ["ja", "テスト用のビジネスアイデアと目標を作成し、5人のエージェントを持つ会社を作成してアイデアを関連付けてください。"],
+      ["ko", "테스트 비즈니스 아이디어와 목표를 만들고 5명의 에이전트가 있는 회사를 만들어 아이디어를 연결하세요."],
+      ["ar", "أنشئ فكرة عمل تجريبية وهدفًا، ثم أنشئ شركة تضم 5 وكلاء واربط الفكرة بها."],
+      ["hi", "एक परीक्षण व्यवसाय विचार और लक्ष्य बनाएँ, फिर 5 एजेंटों वाली कंपनी बनाएँ और विचार को उससे जोड़ें।"],
+    ] as const;
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: async () => { throw new Error("The multilingual deterministic flow must not call chat"); },
+      async *stream() { throw new Error("The multilingual deterministic flow must not call stream"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      for (const [language, message] of cases) {
+        expect(detectCompanyChatLanguage(message)).toBe(language);
+        const copy = compositeCreationCopy(message);
+        const conversation = await store.createNeutralConversation(alice, `composite-${language}`);
+        const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, conversationId: conversation.id, contextType: "none" } });
+        expect(response.statusCode, language).toBe(200);
+        expect(response.body, language).toContain(copy.intro);
+        expect(response.body, language).toContain(`card:${copy.businessCard}: ${copy.businessName}`);
+        expect(response.body, language).toContain('"companyAction":{"action":"create"');
+        const business = (await store.listUserBusinesses(alice)).find((item) => item.name === copy.businessName);
+        expect(business, language).toBeDefined();
+        expect(await store.listGoals(alice, business!.id), language).toEqual([expect.objectContaining({ title: copy.goalTitle })]);
+        const company = (await store.listCompanies(alice, 100)).items.find((item) => item.name === copy.companyName && item.businessId === business!.id);
+        expect(company, language).toBeDefined();
+        const agents = await store.listCompanyAgents(alice, company!.id);
+        expect(agents, language).toHaveLength(5);
+        const expectedLead = defaultLocalizedAgentProfiles(message)[0]!;
+        expect(agents.find((agent) => agent.name === expectedLead.name), language).toMatchObject(expectedLead);
+      }
     } finally { await app.close(); }
   });
 
@@ -377,6 +466,7 @@ describe("company management from chat", () => {
   it("asks for confirmation before deleting the selected company and deletes it only after explicit confirmation", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(alice, { name: "Тестова студія" }, "delete-confirm-company");
+    const conversation = await store.createNeutralConversation(alice, "Видалення компанії");
     let researchCalls = 0;
     const aiEngine: AIEngine = {
       chat: async () => { throw new Error("Deletion confirmation must not call an AI model"); }, async *stream() { throw new Error("Deletion confirmation must not call an AI model"); },
@@ -391,18 +481,21 @@ describe("company management from chat", () => {
     } as any;
     const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace, webResearch });
     try {
-      const question = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Тепер видали її, для теста", contextType: "company", companyId: company.id } });
+      const question = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Тепер видали її, для теста", conversationId: conversation.id, contextType: "company", companyId: company.id } });
       expect(question.statusCode).toBe(200);
       expect(question.body).toContain("Ви хочете видалити вибрану компанію");
       expect(question.body).toContain("Тестова студія");
       expect(question.body).not.toContain('"companyAction"');
       expect((await store.listCompanies(alice)).items).toHaveLength(1);
+      expect(await store.listNeutralConversations(alice)).toHaveLength(1);
       expect(researchCalls).toBe(0);
 
-      const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Так, видали компанію Тестова студія", contextType: "company", companyId: company.id } });
+      const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Так, видали компанію Тестова студія", conversationId: conversation.id, contextType: "company", companyId: company.id } });
       expect(confirmed.statusCode).toBe(200);
       expect(confirmed.body).toContain('"companyAction":{"action":"delete"');
       expect((await store.listCompanies(alice)).items).toHaveLength(0);
+      expect(await store.listNeutralConversations(alice)).toHaveLength(1);
+      expect((await store.getNeutralConversation(alice, conversation.id)).messages).toHaveLength(4);
       expect(researchCalls).toBe(0);
     } finally { await app.close(); }
   });

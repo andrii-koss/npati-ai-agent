@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest } from "./company-chat-i18n";
+import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -148,20 +149,7 @@ function requestedAgentCount(message: string, raw: Record<string, unknown>): num
 }
 
 function defaultAgentProfiles(message: string): Array<{ name: string; role: string; description: string; systemInstruction: string }> {
-  if (detectCompanyChatLanguage(message) === "uk") return [
-    { name: "Координатор", role: "Керівник команди", description: "Координує роботу агентів і контролює результат.", systemInstruction: "Координуй команду, розподіляй завдання та перевіряй результат." },
-    { name: "Дослідник", role: "Аналітик і дослідник", description: "Збирає та аналізує потрібну інформацію.", systemInstruction: "Досліджуй факти, перевіряй джерела та готуй чіткі висновки." },
-    { name: "Маркетолог", role: "Спеціаліст із маркетингу", description: "Працює з ринком, аудиторією і просуванням.", systemInstruction: "Аналізуй аудиторію та пропонуй практичні маркетингові дії." },
-    { name: "Контент-менеджер", role: "Спеціаліст із контенту", description: "Готує тексти й контентні матеріали.", systemInstruction: "Створюй точний, зрозумілий контент відповідно до цілей компанії." },
-    { name: "Операційний аналітик", role: "Спеціаліст з операцій", description: "Контролює процеси, завдання і показники.", systemInstruction: "Оптимізуй процеси, відстежуй виконання та знаходь ризики." },
-  ];
-  return [
-    { name: "Coordinator", role: "Team Lead", description: "Coordinates agents and reviews outcomes.", systemInstruction: "Coordinate the team, delegate tasks, and verify results." },
-    { name: "Researcher", role: "Research Analyst", description: "Collects and analyzes relevant information.", systemInstruction: "Research facts, verify sources, and provide clear findings." },
-    { name: "Marketer", role: "Marketing Specialist", description: "Works with markets, audiences, and promotion.", systemInstruction: "Analyze the audience and recommend practical marketing actions." },
-    { name: "Content Manager", role: "Content Specialist", description: "Creates written and content assets.", systemInstruction: "Create clear, accurate content aligned with company goals." },
-    { name: "Operations Analyst", role: "Operations Specialist", description: "Tracks processes, work, and performance.", systemInstruction: "Improve processes, track delivery, and identify risks." },
-  ];
+  return defaultLocalizedAgentProfiles(message);
 }
 
 function normalizeDirective(value: unknown, requestMessage: string): CompanyDirective {

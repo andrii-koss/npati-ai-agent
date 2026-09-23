@@ -17,6 +17,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
+import { compositeCreationCopy } from "./composite-chat-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -82,6 +83,14 @@ function* boundedResponseChunks(value:string,maxCharacters=1_024){
     if(end<=offset)end=Math.min(value.length,offset+maxCharacters+1);
     yield value.slice(offset,end);offset=end;
   }
+}
+
+function isCompositeBusinessCompanyCreation(message: string): boolean {
+  const create = /(?:створ|созда|create|cr[eé]e|erstelle|crea|utwórz|stwórz|crie|maak|oluştur|创建|作成|만들|أنشئ|बना)/iu.test(message);
+  const business = /(?:б[іи]знес[\s-]*(?:іде|иде)|business\s+idea|id[eé]e\s+d['’]?entreprise|gesch[aä]ftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomysł\s+na\s+biznes|ideia\s+de\s+neg[oó]cio|businessidee|iş\s+fikri|商业想法|ビジネスアイデア|비즈니스\s*아이디어|فكرة\s+عمل|व्यवसाय\s+विचार)/iu.test(message);
+  const goal = /(?:ціл|цел|\bgoal|objectif|ziel|objetivo|obiettivo|cel\b|meta\b|doel|hedef|目标|目標|목표|هدف|लक्ष्य)/iu.test(message);
+  const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|sp[oó]łk|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
+  return create && business && goal && company;
 }
 
 function applyChatTelemetryHeaders(reply: { header(name: string, value: string): unknown }, result: { model?: string; telemetry?: AgentReply["telemetry"] }) {
@@ -598,6 +607,90 @@ export function buildApp(config: AppConfig = {}) {
     await fileRepository.purgeCompany(context, companyId);
   }
 
+  async function executeCompositeBusinessCompanyCreation(auth: AuthContext, message: string, conversationId: string, signal?: AbortSignal) {
+    if (!isCompositeBusinessCompanyCreation(message)) return undefined;
+    const language = detectCompanyChatLanguage(message);
+    const localized = compositeCreationCopy(message);
+    const businessDirective = [
+      "```business-action",
+      JSON.stringify({ action: "create", profile: {
+        name: localized.businessName, businessStage: "idea", industry: localized.industry, niche: localized.niche,
+        country: localized.country, market: localized.market, teamType: "team", presenceType: "online",
+        businessModel: localized.businessModel,
+        description: localized.description, productsServicesSummary: localized.products, audienceSummary: localized.audience,
+      } }),
+      "```",
+      "```goal-action",
+      JSON.stringify({ action: "create", businessId: "{{businessId}}", goal: {
+        title: localized.goalTitle, description: localized.goalDescription, priority: 2, status: "active",
+        targetValue: 1, currentValue: 0, targetUnit: localized.targetUnit,
+      } }),
+      "```",
+    ].join("\n");
+    const businessResult = await BusinessActionHandler.extractAndExecute(auth, businessDirective, workspaceStore, app.log, async (ctx, businessId) => { await chatFiles?.deleteBusiness(ctx, businessId); });
+    const business = businessResult.businessAction?.business;
+    const goal = businessResult.goalAction?.goal;
+    if (!business || !goal) {
+      if (business) await workspaceStore.deleteBusiness(auth, business.id).catch(() => undefined);
+      throw new Error("Composite business and goal creation did not complete");
+    }
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Cancelled", "AbortError");
+    const countMatch = message.match(/(?:\b|^)([1-9]|1\d|2[0-5])\s*(?:个|名|人の|명의)?\s*(?:агент|agents?|agentes?|agenti|agenten|ajan|智能体|エージェント|에이전트|وكلاء|एजेंट)/iu);
+    const agentCount = countMatch ? Number(countMatch[1]) : 5;
+    const companyText = `\`\`\`company-action\n${JSON.stringify({
+      action: "create",
+      fields: {
+        name: localized.companyName, businessId: business.id, industry: localized.industry, description: localized.description,
+        productsServices: localized.products,
+        languages: [localized.companyLanguage],
+        brandTone: localized.brandTone,
+        companyInstructions: localized.goalDescription,
+      },
+      agentCount,
+    })}\n\`\`\``;
+    const companyResult = await CompanyChatActions.extractAndExecute(auth, companyText, workspaceStore, conversationId, {
+      requestMessage: message,
+      beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
+      onError: (error) => app.log.warn({ err: error }, "Composite company creation failed"),
+    });
+    if (!companyResult.companyAction) {
+      await workspaceStore.deleteBusiness(auth, business.id).catch(() => undefined);
+      throw new Error("Composite company creation did not complete");
+    }
+    const businessLink = `/settings/business/${encodeURIComponent(business.id)}`;
+    const messageText = `${localized.intro}
+
+\`\`\`card:${localized.businessCard}: ${business.name}
+**${localized.businessNameLabel}:** ${business.name}
+**${localized.stageLabel}:** ${business.businessStage}
+**${localized.industryLabel}:** ${business.industry ?? localized.industry}
+**${localized.nicheLabel}:** ${business.niche ?? localized.niche}
+
+${business.description ?? localized.description}
+
+[${localized.openBusinessLabel} →](${businessLink})
+\`\`\`
+
+\`\`\`card:${localized.goalCard}: ${goal.title}
+**${localized.businessLabel}:** ${business.name}
+**${localized.statusLabel}:** ${goal.status}
+**${localized.descriptionLabel}:** ${goal.description ?? localized.goalDescription}
+
+[${localized.openGoalsLabel} →](/settings/goals)
+\`\`\`
+
+${companyResult.cleanText}
+
+${localized.next}`;
+    return {
+      message: messageText,
+      suggestedActions: [],
+      businessAction: businessResult.businessAction,
+      goalAction: businessResult.goalAction,
+      companyAction: companyResult.companyAction,
+    };
+  }
+
   async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
@@ -863,6 +956,16 @@ export function buildApp(config: AppConfig = {}) {
         if (chatFiles) for (const item of savedAttachments) await chatFiles.delete(auth, item.id).catch(() => undefined);
         throw error;
       }
+    }
+    const compositeCreation = await executeCompositeBusinessCompanyCreation(auth, safePrompt, conversation?.id ?? crypto.randomUUID(), signal);
+    if (compositeCreation) {
+      if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", compositeCreation.message);
+      return {
+        ...compositeCreation,
+        conversationId: conversation?.id,
+        noMemory: memoryPolicy.noMemoryActive,
+        contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length },
+      };
     }
     const ai = await getAIContext(auth);
     if (media.images.length > 0) {
@@ -1450,7 +1553,7 @@ export function buildApp(config: AppConfig = {}) {
         }
         const company = resolved.company!;
         if (prompt && (CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
-          const result = await runNeutralMessage(auth, prompt, undefined, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
+          const result = await runNeutralMessage(auth, prompt, request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
         }
@@ -1687,7 +1790,7 @@ export function buildApp(config: AppConfig = {}) {
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
           if (CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
-            const result = await runNeutralMessage(auth, message, undefined, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
+            const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {
           progress({ type: "final_generation_started" });
