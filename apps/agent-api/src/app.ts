@@ -18,7 +18,7 @@ import { CompanyChatActions } from "./company-chat-actions";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
-import { companyDeleteCompletedAll, isCompanyDeleteConfirmed } from "./company-delete-i18n";
+import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, isCompanyDeleteIntent } from "./company-delete-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -87,6 +87,9 @@ function* boundedResponseChunks(value:string,maxCharacters=1_024){
 }
 
 function isCompositeBusinessCompanyCreation(message: string): boolean {
+  // A phrase such as "delete everything you just created" contains a past-tense
+  // creation word. Destructive intent must always win over creation detection.
+  if (isCompanyDeleteIntent(message)) return false;
   const create = /(?:створ|созда|create|cr[eé]e|erstelle|crea|utwórz|stwórz|crie|maak|oluştur|创建|作成|만들|أنشئ|बना)/iu.test(message);
   const business = /(?:б[іи]знес[\s-]*(?:іде|иде)|business\s+idea|id[eé]e\s+d['’]?entreprise|gesch[aä]ftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomysł\s+na\s+biznes|ideia\s+de\s+neg[oó]cio|businessidee|iş\s+fikri|商业想法|ビジネスアイデア|비즈니스\s*아이디어|فكرة\s+عمل|व्यवसाय\s+विचार)/iu.test(message);
   const goal = /(?:ціл|цел|\bgoal|objectif|ziel|objetivo|obiettivo|cel\b|meta\b|doel|hedef|目标|目標|목표|هدف|लक्ष्य)/iu.test(message);
@@ -98,12 +101,16 @@ function requestsBusinessMemory(message: string): boolean {
   return /(?:пам(?:'|’)?ят|памят|мемор|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|स्मृति)/iu.test(message);
 }
 
-function requestsCompositeCompanyDeletion(message: string): boolean {
-  if (!isCompanyDeleteConfirmed(message)) return false;
+function requestsCompositeCompanyDeletionIntent(message: string): boolean {
+  if (!isCompanyDeleteIntent(message)) return false;
   const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
   const business = /(?:б[іиу]знес(?:[\s-]*(?:іде|иде))?|\bbusiness(?:\s+idea)?\b|id[eé]e\s+d['’]?entreprise|geschäftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomysł\s+na\s+biznes|ideia\s+de\s+negócio|businessidee|iş\s+fikri|商业构想|ビジネスアイデア|비즈니스\s*아이디어|فكرة\s+العمل|व्यवसाय\s+विचार)/iu.test(message);
   const linkedResource = /(?:ціл|цел|goals?|objectifs?|ziele?|objetivos?|obiettiv|metas?|doelen?|hedef|目标|目標|목표|هدف|लक्ष्य|пам(?:'|’)?ят|мемор|\bmemory\b|mémoire|gedächtnis|memoria|pamięć|memória|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|everything|all\s+of\s+it|це\s+все|усе\s+це|все\s+це)/iu.test(message);
   return company && business && linkedResource;
+}
+
+function requestsCompositeCompanyDeletion(message: string): boolean {
+  return isCompanyDeleteConfirmed(message) && requestsCompositeCompanyDeletionIntent(message);
 }
 
 function applyChatTelemetryHeaders(reply: { header(name: string, value: string): unknown }, result: { model?: string; telemetry?: AgentReply["telemetry"] }) {
@@ -722,10 +729,17 @@ ${localized.next}`;
   }
 
   async function executeCompositeCompanyDeletion(auth: AuthContext, message: string, companyId: string) {
-    if (!requestsCompositeCompanyDeletion(message)) return undefined;
+    if (!requestsCompositeCompanyDeletionIntent(message)) return undefined;
     const company = await workspaceStore.getCompany(auth, companyId);
     if (!company.businessId) return undefined;
     const business = await workspaceStore.getUserBusiness(auth, company.businessId);
+    const language = detectCompanyChatLanguage(message);
+    if (!isCompanyDeleteConfirmed(message)) {
+      return {
+        message: companyDeleteConfirmAll(language, company.name, business.name),
+        suggestedActions: [],
+      };
+    }
     const [agents, goals, memories] = await Promise.all([
       workspaceStore.listCompanyAgents(auth, company.id),
       workspaceStore.listGoals(auth, business.id),
@@ -737,7 +751,6 @@ ${localized.next}`;
     await workspaceStore.deleteBusiness(auth, business.id);
     await workspaceStore.deleteCompany(auth, company.id);
 
-    const language = detectCompanyChatLanguage(message);
     return {
       message: companyDeleteCompletedAll(language, {
         company: company.name,
@@ -987,7 +1000,7 @@ ${localized.next}`;
     const media = await prepareChatAttachments(aiEngine, message, attachments, progress);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
     const companySettingsRequest = CompanyChatActions.isManagementRequest(safePrompt)
-      || Boolean(managementCompany && CompanyChatActions.isPotentialMutationRequest(safePrompt));
+      || Boolean(managementCompany && (CompanyChatActions.isPotentialMutationRequest(safePrompt) || requestsCompositeCompanyDeletionIntent(safePrompt)));
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -1626,7 +1639,7 @@ ${localized.next}`;
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        if (prompt && (requestsCompositeCompanyDeletion(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
+        if (prompt && (requestsCompositeCompanyDeletionIntent(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
           const result = await runNeutralMessage(auth, prompt, request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
@@ -1863,7 +1876,7 @@ ${localized.next}`;
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
-          if (requestsCompositeCompanyDeletion(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
+          if (requestsCompositeCompanyDeletionIntent(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {

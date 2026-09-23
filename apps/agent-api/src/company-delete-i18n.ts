@@ -51,12 +51,39 @@ const completedAllCopies: Record<CompanyChatLanguage, string> = {
   hi: "पूरा हुआ। मैंने कंपनी **{company}**, व्यवसाय विचार **{business}**, उसके लक्ष्य ({goals}) और बिज़नेस मेमोरी ({memories}) हटा दिए।",
 };
 
+const confirmAllCopies: Record<CompanyChatLanguage, string> = {
+  en: "Do you want to delete company **{company}**, business idea **{business}**, all its goals, and Business Memory? This action cannot be undone. To confirm, write: **Yes, delete company {company}, business idea {business}, its goals and memory**.",
+  uk: "Ви хочете видалити компанію **{company}**, бізнес-ідею **{business}**, усі її цілі та Business Memory? Цю дію неможливо скасувати. Для підтвердження напишіть: **Так, видали компанію {company}, бізнес-ідею {business}, її цілі та меморі**.",
+  fr: "Voulez-vous supprimer l’entreprise **{company}**, l’idée d’entreprise **{business}**, tous ses objectifs et sa mémoire métier ? Cette action est irréversible. Pour confirmer, écrivez : **Oui, supprime l’entreprise {company}, l’idée d’entreprise {business}, ses objectifs et sa mémoire**.",
+  de: "Möchten Sie das Unternehmen **{company}**, die Geschäftsidee **{business}**, alle Ziele und den Geschäftsspeicher löschen? Diese Aktion kann nicht rückgängig gemacht werden. Schreiben Sie zur Bestätigung: **Ja, lösche das Unternehmen {company}, die Geschäftsidee {business}, ihre Ziele und das Gedächtnis**.",
+  es: "¿Quieres eliminar la empresa **{company}**, la idea de negocio **{business}**, todos sus objetivos y la memoria del negocio? Esta acción no se puede deshacer. Para confirmar, escribe: **Sí, elimina la empresa {company}, la idea de negocio {business}, sus objetivos y la memoria**.",
+  it: "Vuoi eliminare l’azienda **{company}**, l’idea imprenditoriale **{business}**, tutti i suoi obiettivi e la memoria aziendale? Questa azione non può essere annullata. Per confermare, scrivi: **Sì, elimina l’azienda {company}, l’idea imprenditoriale {business}, i suoi obiettivi e la memoria**.",
+  pl: "Czy chcesz usunąć firmę **{company}**, pomysł na biznes **{business}**, wszystkie cele i pamięć biznesową? Tej operacji nie można cofnąć. Aby potwierdzić, napisz: **Tak, usuń firmę {company}, pomysł na biznes {business}, cele i pamięć**.",
+  pt: "Deseja excluir a empresa **{company}**, a ideia de negócio **{business}**, todas as metas e a memória do negócio? Esta ação não pode ser desfeita. Para confirmar, escreva: **Sim, exclua a empresa {company}, a ideia de negócio {business}, as metas e a memória**.",
+  nl: "Wil je bedrijf **{company}**, businessidee **{business}**, alle doelen en het bedrijfsgeheugen verwijderen? Deze actie kan niet ongedaan worden gemaakt. Schrijf ter bevestiging: **Ja, verwijder bedrijf {company}, businessidee {business}, de doelen en het geheugen**.",
+  tr: "**{company}** şirketini, **{business}** iş fikrini, tüm hedeflerini ve işletme hafızasını silmek istiyor musunuz? Bu işlem geri alınamaz. Onaylamak için şunu yazın: **Evet, {company} şirketini, {business} iş fikrini, hedeflerini ve hafızayı sil**.",
+  ru: "Вы хотите удалить компанию **{company}**, бизнес-идею **{business}**, все её цели и память бизнеса? Это действие нельзя отменить. Для подтверждения напишите: **Да, удали компанию {company}, бизнес-идею {business}, её цели и память**.",
+  zh: "您要删除公司 **{company}**、业务构想 **{business}**、全部目标和业务记忆吗？此操作无法撤销。请写：**是的，删除公司 {company}、业务构想 {business}、目标和记忆**。",
+  ja: "会社 **{company}**、ビジネスアイデア **{business}**、すべての目標とビジネスメモリを削除しますか？この操作は元に戻せません。確認するには、**はい、会社 {company}、ビジネスアイデア {business}、目標、メモリを削除** と入力してください。",
+  ko: "회사 **{company}**, 비즈니스 아이디어 **{business}**, 모든 목표와 비즈니스 메모리를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다. 확인하려면 **예, 회사 {company}, 비즈니스 아이디어 {business}, 목표와 메모리 삭제**라고 입력하세요.",
+  ar: "هل تريد حذف الشركة **{company}** وفكرة العمل **{business}** وجميع أهدافها وذاكرة النشاط التجاري؟ لا يمكن التراجع عن هذا الإجراء. للتأكيد، اكتب: **نعم، احذف الشركة {company} وفكرة العمل {business} والأهداف والذاكرة**.",
+  hi: "क्या आप कंपनी **{company}**, व्यवसाय विचार **{business}**, उसके सभी लक्ष्य और बिज़नेस मेमोरी हटाना चाहते हैं? यह कार्रवाई वापस नहीं की जा सकती। पुष्टि के लिए लिखें: **हाँ, कंपनी {company}, व्यवसाय विचार {business}, लक्ष्य और मेमोरी हटा दें**।",
+};
+
+export function companyDeleteConfirmAll(language: CompanyChatLanguage, company: string, business: string): string {
+  return confirmAllCopies[language].replaceAll("{company}", company).replaceAll("{business}", business);
+}
+
 export function companyDeleteCompletedAll(language: CompanyChatLanguage, values: { company: string; business: string; goals: number; memories: number }): string {
   return completedAllCopies[language]
     .replaceAll("{company}", values.company)
     .replaceAll("{business}", values.business)
     .replaceAll("{goals}", String(values.goals))
     .replaceAll("{memories}", String(values.memories));
+}
+
+export function isCompanyDeleteIntent(message: string): boolean {
+  return /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu.test(message);
 }
 
 export function isCompanyDeleteConfirmed(message: string): boolean {
