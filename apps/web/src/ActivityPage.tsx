@@ -70,6 +70,10 @@ interface CompanyItem {
 
 type RunStatusFilter = "all" | "completed" | "running" | "failed";
 
+function visibleRunTask(task: string): string {
+  return task.replace(/^\[NPATI_CONTENT:(?:article|seo_blueprint|social_post|brief|strategy|other):[A-Za-z0-9_-]+\]\s*/, "");
+}
+
 export function ActivityPage() {
   const [companies, setCompanies] = useState<CompanyItem[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
@@ -624,7 +628,7 @@ export function ActivityPage() {
                           <span className={`status-pill ${r.status}`}>{r.status}</span>
                           <small className="run-timestamp">{timeFormatted}</small>
                         </div>
-                        <strong className="activity-run-task">{r.task}</strong>
+                        <strong className="activity-run-task">{visibleRunTask(r.task)}</strong>
                         <div className="activity-run-footer">
                           <span className="activity-run-mode-tag">
                             {r.executionMode || r.requestedMode || "auto"}
@@ -671,7 +675,7 @@ export function ActivityPage() {
                       </div>
                     </div>
                     <div className="trace-header-main">
-                      <h2>{activeRunDetails.run.task}</h2>
+                      <h2>{visibleRunTask(activeRunDetails.run.task)}</h2>
                     <div className="trace-meta-row">
                       <div className="trace-meta-item">
                         <span>Run ID:</span>

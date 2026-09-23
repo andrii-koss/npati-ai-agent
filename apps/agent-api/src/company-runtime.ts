@@ -7,6 +7,7 @@ import {SecurityPolicyEngine,SecurityPolicyViolation,type CompanyGuardrailPolicy
 import {AutoExecReviewer} from "./auto-exec-reviewer";
 import { CostTelemetry } from "./cost-telemetry";
 import type { AuditRepository } from "./audit-repository";
+import { chatLanguageInstruction } from "./company-chat-i18n";
 
 const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
@@ -381,7 +382,7 @@ export class CompanyDelegationRuntime {
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task)) },
           { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
         ],
       });
@@ -392,7 +393,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user.") },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task)) },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });

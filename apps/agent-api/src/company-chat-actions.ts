@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
+import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest } from "./company-chat-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -25,6 +26,46 @@ type CompanyDirective = {
 const companyFields = new Set(["name", "businessId", "website", "industry", "description", "productsServices", "languages", "brandTone", "companyInstructions", "status"]);
 const agentFields = new Set(["name", "role", "description", "systemInstruction", "promptGuidelines", "recommendedPrompts", "modelId", "fallbackModelId", "tools", "isActive", "sortOrder", "positionX", "positionY"]);
 const toolIds = new Set(["storage.agent_knowledge_retrieval", "storage.company_memory", "research.web_search", "browser.web_fetch", "web.crawl", "mcp", "files", "system.text-to-speech", "exec", "Knowledge", "Company Memory", "Web Search", "Web Fetch", "Crawler", "MCP", "Files", "Text-to-Speech", "Code Mode / Exec"]);
+
+function safeMarkdown(value: unknown): string {
+  return String(value ?? "").replace(/```/g, "'''").trim();
+}
+
+function companyResultMessage(action: CompanyOperation, company: Company, agents: CompanyAgent[], requestMessage = ""): string {
+  const labels = companyChatCopy(requestMessage);
+  const companyName = safeMarkdown(company.name);
+  if (action === "delete") return insertCompanyName(labels.deleted, companyName);
+
+  const mainAgent = agents.find((agent) => agent.id === company.mainAgentId);
+  const value = (item: unknown) => safeMarkdown(item) || labels.notSpecified;
+  const status = company.status === "active" ? labels.active : labels.inactive;
+  const agentLines = agents.length
+    ? agents.map((agent, index) => `${index + 1}. **${safeMarkdown(agent.name)}** - ${safeMarkdown(agent.role)}${agent.id === mainAgent?.id ? ` (${labels.mainAgent})` : ""}${agent.description ? `\n   ${safeMarkdown(agent.description)}` : ""}`).join("\n")
+    : labels.noAgents;
+  const companyUrl = `/settings/company?company=${encodeURIComponent(company.id)}`;
+  const intro = action === "create"
+    ? insertCompanyName(labels.created, companyName)
+    : insertCompanyName(labels.updated, companyName);
+  return `${intro}\n\n${labels.configured}\n\n\`\`\`card:${labels.company}: ${companyName}
+**${labels.name}:** ${value(company.name)}
+**${labels.status}:** ${status}
+**${labels.industry}:** ${value(company.industry)}
+**${labels.website}:** ${value(company.website)}
+**${labels.languages}:** ${company.languages.length ? company.languages.map(safeMarkdown).join(", ") : labels.notSpecified}
+**${labels.brandTone}:** ${value(company.brandTone)}
+
+### ${labels.description}
+${value(company.description)}
+
+### ${labels.products}
+${value(company.productsServices)}
+
+### ${labels.agents} (${agents.length})
+${agentLines}
+
+[${labels.openSettings}](${companyUrl})
+\`\`\`\n\n${labels.nextStep}`;
+}
 
 function fields(value: unknown, allowed: Set<string>, kind: string): Record<string, unknown> {
   if (value === undefined) return {};
@@ -71,15 +112,21 @@ function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | n
 }
 
 export class CompanyChatActions {
+  static noActionMessage(message: string): string {
+    return companyChatCopy(message).noAction;
+  }
+
   static isManagementRequest(message: string): boolean {
     return /(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|змін\p{L}*|онов\p{L}*|видал\p{L}*|приб\p{L}*|налашт\p{L}*|признач\p{L}*|зроб\p{L}*|побуд\p{L}*|засну\p{L}*|організ\p{L}*)\s+(?:(?:нов\p{L}*|мо\p{L}*|цю|цього|головн\p{L}*|ще|мені|таку|такого)\s+){0,3}(?:компан\p{L}*|агент\p{L}*|оркестратор\p{L}*|схем\p{L}*\s+агент\p{L}*|сітку\s+агент\p{L}*|структур\p{L}*\s+агент\p{L}*)/iu.test(message)
       || /\b(?:create|add|edit|update|change|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
-      || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message);
+      || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
+      || isLocalizedCompanyManagementRequest(message);
   }
 
   static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = []): Promise<string> {
     const context = await this.buildSystemPrompt(auth, store, message, selectedCompanyId, addedModels);
-    return `${context}\n\nThe user's latest message is an explicit company settings request. Return ONLY one complete fenced company-action JSON block if the requested change can be made. Do not describe a completed action in prose. Use a single concrete action value (create, update, or delete), and omit fields that do not apply. For a new company, fields.name is required. For each new agent, fields.name and fields.role are required. Do not use example placeholder values or invent existing IDs. If the target or required details are ambiguous, return exactly NO_ACTION.`;
+    const language = detectCompanyChatLanguage(message);
+    return `${context}\n\nThe user's latest message is an explicit company settings request. Its detected language is ${language}. Return ONLY one complete fenced company-action JSON block if the requested change can be made. Write all human-readable company and agent field values in the user's language. Do not describe a completed action in prose. Use a single concrete action value (create, update, or delete), and omit fields that do not apply. For a new company, fields.name is required. Build a useful, complete profile from the user's request: normally include industry, description, productsServices, languages, brandTone, and companyInstructions. Give every new agent a name, role, useful description, and systemInstruction so the created team is ready to use. Do not invent a website, businessId, modelId, fallbackModelId, or existing record ID. Do not use example placeholder values. If an existing target or a destructive request is ambiguous, return exactly NO_ACTION.`;
   }
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message = "", selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = []): Promise<string> {
@@ -113,7 +160,7 @@ For update, include only fields that should change. To change only agents, use a
     const matches = [...text.matchAll(/```company-action\s*([\s\S]*?)```/gi)];
     const match = matches[0];
     if (!match) return /```company-action/i.test(text)
-      ? { cleanText: "I couldn't complete the company change because the action was incomplete. Please try again." }
+      ? { cleanText: companyChatCopy(options.requestMessage).incomplete }
       : { cleanText: text };
     let changed = false;
     try {
@@ -147,7 +194,7 @@ For update, include only fields that should change. To change only agents, use a
           await options.beforeDeleteCompany?.(company.id);
           changed = true;
           await store.deleteCompany(auth, company.id);
-          return { cleanText: `Deleted company ${company.name}.`, companyAction: { action: "delete", companyId: company.id, companyName: company.name, agentCount: 0 } };
+          return { cleanText: companyResultMessage("delete", company, [], options.requestMessage), companyAction: { action: "delete", companyId: company.id, companyName: company.name, agentCount: 0 } };
         }
         if (Object.keys(companyPatch).length) {
           company = await store.updateCompany(auth, company.id, companyPatch, company.revision);
@@ -158,7 +205,14 @@ For update, include only fields that should change. To change only agents, use a
       let agents = await store.listCompanyAgents(auth, company.id);
       let requestedMain: CompanyAgent | undefined;
       const parentChanges: Array<{ childId: string; parentId?: string | null; parentName?: string | null }> = [];
-      const operations = directive.agents?.length ? directive.agents : directive.action === "create" ? [{ action: "create" as const, fields: { name: "Main Agent", role: "Coordinator", description: `Coordinates agents for ${company.name}`, isActive: true }, main: true }] : [];
+      const labels = companyChatCopy(options.requestMessage);
+      const defaultAgentName = labels.mainAgent.charAt(0).toLocaleUpperCase() + labels.mainAgent.slice(1);
+      const operations = directive.agents?.length ? directive.agents : directive.action === "create" ? [{ action: "create" as const, fields: {
+        name: defaultAgentName,
+        role: defaultAgentName,
+        description: `${labels.agents}: ${company.name}`,
+        isActive: true,
+      }, main: true }] : [];
       for (const [index, operation] of operations.entries()) {
         const patch = fields(operation.fields, agentFields, "agent") as Partial<CompanyAgentInput>;
         if (operation.action === "create") {
@@ -196,15 +250,10 @@ For update, include only fields that should change. To change only agents, use a
         company = await store.setCompanyMainAgent(auth, company.id, requestedMain?.id ?? null, latest.revision);
         changed = true;
       } else company = latest;
-      const summary = directive.action === "create"
-        ? `Created company ${company.name} with ${agents.length} agent${agents.length === 1 ? "" : "s"}.`
-        : `Updated company ${company.name}. It now has ${agents.length} agent${agents.length === 1 ? "" : "s"}.`;
-      const companyUrl = `/settings/company?company=${encodeURIComponent(company.id)}`;
-      const link = summary.includes(companyUrl) ? "" : `\n\n[Open company settings](${companyUrl})`;
-      return { cleanText: summary + link, companyAction: { action: directive.action, companyId: company.id, companyName: company.name, agentCount: agents.length } };
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "Invalid company action";
-      return { cleanText: `I couldn't complete the company change: ${reason}.${changed ? " Some changes may have been saved; review Settings > Company before retrying." : " No changes were saved."}` };
+      return { cleanText: companyResultMessage(directive.action, company, agents, options.requestMessage), companyAction: { action: directive.action, companyId: company.id, companyName: company.name, agentCount: agents.length } };
+    } catch {
+      const labels = companyChatCopy(options.requestMessage);
+      return { cleanText: `${labels.failed}. ${changed ? labels.partial : labels.unchanged}` };
     }
   }
 }

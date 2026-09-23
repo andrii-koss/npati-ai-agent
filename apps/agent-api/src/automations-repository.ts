@@ -194,7 +194,7 @@ export class CompanyAutomationsRepository {
            prompt = COALESCE($7, prompt),
            cron_expression = COALESCE($8, cron_expression),
            timezone = COALESCE($9, timezone),
-           agent_id = CASE WHEN $10::text IS NOT NULL THEN $10 ELSE agent_id END,
+           agent_id = CASE WHEN $13::boolean THEN $10 ELSE agent_id END,
            status = COALESCE($11, status),
            next_run_at = COALESCE($12, next_run_at),
            updated_at = now()
@@ -213,6 +213,7 @@ export class CompanyAutomationsRepository {
           input.agentId !== undefined ? input.agentId : null,
           input.status ?? null,
           input.nextRunAt ?? null,
+          input.agentId !== undefined,
         ]
       );
       return result.rows[0] || current;

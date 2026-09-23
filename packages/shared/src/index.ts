@@ -35,6 +35,7 @@ export interface AgentReply {
   message: string;
   suggestedActions: string[];
   companyAction?: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number };
+  workspaceAction?: { action: "activity.run" | "activity.cancel" | "automation.create" | "automation.update" | "automation.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete"; resourceId: string; companyId?: string; businessId?: string };
   conversationId?: string;
   noMemory?: boolean;
   model?: string;

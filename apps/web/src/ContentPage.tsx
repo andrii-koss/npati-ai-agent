@@ -10,6 +10,7 @@ export interface ContentItem {
   type: "article" | "seo_structure" | "social_post" | "brief";
   content: string;
   sourceRunId?: string;
+  companyId?: string;
   companyName?: string;
   createdAt: string;
 }
@@ -33,6 +34,27 @@ function getEditsMap(): Record<string, Partial<ContentItem>> {
   } catch {
     return {};
   }
+}
+
+function parseChatContentTask(task: string): { title?: string; type?: ContentItem["type"]; task: string } {
+  const match = task.match(/^\[NPATI_CONTENT:(article|seo_blueprint|social_post|brief|strategy|other):([A-Za-z0-9_-]+)\]\s*/);
+  if (!match) return { task };
+  let title: string | undefined;
+  try {
+    const base64 = match[2]!.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(base64);
+    title = new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+  } catch {
+    title = undefined;
+  }
+  const mappedType: ContentItem["type"] = match[1] === "seo_blueprint"
+    ? "seo_structure"
+    : match[1] === "social_post"
+      ? "social_post"
+      : match[1] === "brief" || match[1] === "strategy"
+        ? "brief"
+        : "article";
+  return { title, type: mappedType, task: task.slice(match[0].length) };
 }
 
 export function ContentPage() {
@@ -65,6 +87,10 @@ export function ContentPage() {
         const contentRows: ContentItem[] = [];
         const deletedIds = new Set(getDeletedIds());
         const editsMap = getEditsMap();
+        const overridesResponse = await fetch("/api/content/overrides", { headers });
+        const overrides = overridesResponse.ok
+          ? ((await overridesResponse.json()) as { overrides?: Record<string, { title?: string; type?: ContentItem["type"]; content?: string; deleted?: boolean }> }).overrides ?? {}
+          : {};
 
         for (const company of companies.slice(0, 5)) {
           const runRes = await fetch(`/api/companies/${company.id}/runs?limit=20`, { headers });
@@ -74,10 +100,11 @@ export function ContentPage() {
             };
             for (const r of runData.runs ?? []) {
               if (r.result && r.status === "completed") {
-                if (deletedIds.has(r.id)) continue;
+                if (deletedIds.has(r.id) || overrides[r.id]?.deleted) continue;
 
-                let type: ContentItem["type"] = "article";
-                const lowerTask = r.task.toLowerCase();
+                const chatContent = parseChatContentTask(r.task);
+                let type: ContentItem["type"] = chatContent.type ?? "article";
+                const lowerTask = chatContent.task.toLowerCase();
                 if (lowerTask.includes("seo") || lowerTask.includes("keyword") || lowerTask.includes("structure")) {
                   type = "seo_structure";
                 } else if (lowerTask.includes("social") || lowerTask.includes("post") || lowerTask.includes("tweet") || lowerTask.includes("linkedin")) {
@@ -86,13 +113,14 @@ export function ContentPage() {
                   type = "brief";
                 }
 
-                const edited = editsMap[r.id];
+                const edited = { ...editsMap[r.id], ...overrides[r.id] };
                 contentRows.push({
                   id: r.id,
-                  title: edited?.title || (r.task.length > 70 ? `${r.task.slice(0, 70)}…` : r.task),
+                  title: edited?.title || chatContent.title || (chatContent.task.length > 70 ? `${chatContent.task.slice(0, 70)}…` : chatContent.task),
                   type: (edited?.type as ContentItem["type"]) || type,
                   content: edited?.content !== undefined ? edited.content : r.result,
                   sourceRunId: r.id,
+                  companyId: company.id,
                   companyName: company.name,
                   createdAt: r.createdAt,
                 });
@@ -189,7 +217,7 @@ export function ContentPage() {
     URL.revokeObjectURL(url);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!selectedItem) return;
     const trimmedTitle = editTitle.trim() || selectedItem.title;
     const updated: ContentItem = {
@@ -199,19 +227,25 @@ export function ContentPage() {
       content: editContent,
     };
 
-    setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? updated : i)));
-    setSelectedItem(updated);
-    setIsEditing(false);
+    try {
+      const response = await fetch(`/api/companies/${selectedItem.companyId}/content/${selectedItem.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...(getStoredAuthToken() ? { authorization: `Bearer ${getStoredAuthToken()}` } : {}) },
+        body: JSON.stringify({ title: trimmedTitle, type: editType, content: editContent }),
+      });
+      if (!response.ok) throw new Error("Could not save content changes");
+      setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? updated : i)));
+      setSelectedItem(updated);
+      setIsEditing(false);
 
-    const edits = getEditsMap();
-    edits[selectedItem.id] = {
-      title: trimmedTitle,
-      type: editType,
-      content: editContent,
-    };
-    localStorage.setItem(STORAGE_EDITS_KEY, JSON.stringify(edits));
+      const edits = getEditsMap();
+      edits[selectedItem.id] = { title: trimmedTitle, type: editType, content: editContent };
+      localStorage.setItem(STORAGE_EDITS_KEY, JSON.stringify(edits));
 
-    setToast("Changes saved successfully!");
+      setToast("Changes saved successfully!");
+    } catch {
+      setToast("Could not save changes");
+    }
     setTimeout(() => setToast(null), 2500);
   };
 
@@ -229,6 +263,18 @@ export function ContentPage() {
       isDanger: true,
     });
     if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/companies/${targetItem?.companyId}/content/${targetId}`, {
+        method: "DELETE",
+        headers: getStoredAuthToken() ? { authorization: `Bearer ${getStoredAuthToken()}` } : {},
+      });
+      if (!response.ok) throw new Error("Could not delete content");
+    } catch {
+      setToast("Could not delete document");
+      setTimeout(() => setToast(null), 2500);
       return;
     }
 
