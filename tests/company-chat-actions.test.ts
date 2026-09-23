@@ -597,6 +597,67 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("does not recreate resources when an unconfirmed delete-all request mentions what was just created", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(alice, { name: "Щойно створена бізнес-ідея" });
+    await store.createGoal(alice, business.id, { title: "Щойно створена ціль" });
+    await store.createMemory(alice, business.id, { type: "business_fact", title: "Щойно створена пам’ять", content: "Тест" });
+    const company = await store.createCompany(alice, { name: "Щойно створена компанія", businessId: business.id }, "delete-all-regression-company");
+    const conversation = await store.createNeutralConversation(alice, "Видалення без повторного створення");
+    let chatCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { chatCalls += 1; throw new Error("Delete confirmation must not call an AI model"); },
+      async *stream() { chatCalls += 1; throw new Error("Delete confirmation must not call an AI model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const question = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: {
+          message: "Я хочу щоб ти видалив усе що ти тільки що створив, компанію, ціль, бізнес ідею усе, потрібно видалити",
+          conversationId: conversation.id,
+          contextType: "company",
+          companyId: company.id,
+        },
+      });
+      expect(question.statusCode).toBe(200);
+      expect(question.body).toContain("Ви хочете видалити компанію");
+      expect(question.body).toContain("Щойно створена компанія");
+      expect(question.body).toContain("Щойно створена бізнес-ідея");
+      expect(question.body).not.toContain('"companyAction":{"action":"create"');
+      expect(question.body).not.toContain('"businessAction":{"action":"create"');
+      expect((await store.listCompanies(alice)).items).toHaveLength(1);
+      expect(await store.listUserBusinesses(alice)).toHaveLength(1);
+      expect(await store.listUserGoals(alice)).toHaveLength(1);
+      expect(await store.listUserMemories(alice)).toHaveLength(1);
+      expect(chatCalls).toBe(0);
+
+      const confirmed = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: {
+          message: "Так, видали компанію Щойно створена компанія, бізнес-ідею Щойно створена бізнес-ідея, її цілі та меморі",
+          conversationId: conversation.id,
+          contextType: "company",
+          companyId: company.id,
+        },
+      });
+      expect(confirmed.statusCode).toBe(200);
+      expect(confirmed.body).toContain('"companyAction":{"action":"delete"');
+      expect(confirmed.body).toContain('"businessAction":{"action":"delete"');
+      expect((await store.listCompanies(alice)).items).toHaveLength(0);
+      expect(await store.listUserBusinesses(alice)).toHaveLength(0);
+      expect(await store.listUserGoals(alice)).toHaveLength(0);
+      expect(await store.listUserMemories(alice)).toHaveLength(0);
+      expect(chatCalls).toBe(0);
+    } finally { await app.close(); }
+  });
+
   it.each([
     ["en", "Yes, delete the company, business idea, goal, and memory"],
     ["uk", "Так, видали компанію, бізнес-ідею, ціль і меморі"],
