@@ -553,6 +553,93 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("deletes the selected company and its linked business, goals, and memory in one confirmed request", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(alice, { name: "Тестова бізнес-ідея" });
+    await store.createGoal(alice, business.id, { title: "Тестова ціль" });
+    await store.createMemory(alice, business.id, { type: "business_fact", title: "Тестова пам’ять", content: "Тестовий контекст" });
+    const company = await store.createCompany(alice, { name: "Тестова компанія", businessId: business.id }, "compound-delete-company");
+    await store.createCompanyAgent(alice, company.id, { name: "Координатор", role: "Керівник" }, "compound-delete-agent");
+    const conversation = await store.createNeutralConversation(alice, "Комплексне видалення");
+    let chatCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { chatCalls += 1; throw new Error("Compound deletion must not call an AI model"); },
+      async *stream() { chatCalls += 1; throw new Error("Compound deletion must not call an AI model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: {
+          message: "так, видали компанію, і все що ти створив мені, ціль, меморі, і бузнес ідею також видали",
+          conversationId: conversation.id,
+          contextType: "company",
+          companyId: company.id,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"companyAction":{"action":"delete"');
+      expect(response.body).toContain('"businessAction":{"action":"delete"');
+      expect(response.body).toContain('"goalAction":{"action":"delete"');
+      expect(response.body).toContain('"workspaceAction":{"action":"memory.delete"');
+      expect(response.body).toContain("Тестова компанія");
+      expect(response.body).toContain("Тестова бізнес-ідея");
+      expect((await store.listCompanies(alice)).items).toHaveLength(0);
+      expect(await store.listUserBusinesses(alice)).toHaveLength(0);
+      expect(await store.listUserGoals(alice)).toHaveLength(0);
+      expect(await store.listUserMemories(alice)).toHaveLength(0);
+      expect(chatCalls).toBe(0);
+    } finally { await app.close(); }
+  });
+
+  it.each([
+    ["en", "Yes, delete the company, business idea, goal, and memory"],
+    ["uk", "Так, видали компанію, бізнес-ідею, ціль і меморі"],
+    ["fr", "Oui, supprime l’entreprise, l’idée d’entreprise, l’objectif et la mémoire"],
+    ["de", "Ja, lösche das Unternehmen, die Geschäftsidee, das Ziel und das Gedächtnis"],
+    ["es", "Sí, elimina la empresa, la idea de negocio, el objetivo y la memoria"],
+    ["it", "Sì, elimina l’azienda, l’idea imprenditoriale, l’obiettivo e la memoria"],
+    ["pl", "Tak, usuń firmę, pomysł na biznes, cel i pamięć"],
+    ["pt", "Sim, exclua a empresa, a ideia de negócio, a meta e a memória"],
+    ["nl", "Ja, verwijder het bedrijf, het businessidee, het doel en het geheugen"],
+    ["tr", "Evet, şirketi, iş fikrini, hedefi ve hafızayı sil"],
+    ["ru", "Да, удали компанию, бизнес-идею, цель и память"],
+    ["zh", "是的，删除公司、商业构想、目标和记忆"],
+    ["ja", "はい、会社、ビジネスアイデア、目標、メモリを削除"],
+    ["ko", "예, 회사, 비즈니스 아이디어, 목표, 메모리를 삭제"],
+    ["ar", "نعم، احذف الشركة وفكرة العمل والهدف والذاكرة"],
+    ["hi", "हाँ, कंपनी, व्यवसाय विचार, लक्ष्य और मेमोरी हटा दें"],
+  ])("deletes all linked composite resources in %s", async (language, message) => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(alice, { name: `Business ${language}` });
+    await store.createGoal(alice, business.id, { title: `Goal ${language}` });
+    await store.createMemory(alice, business.id, { type: "business_fact", title: `Memory ${language}`, content: "Context" });
+    const company = await store.createCompany(alice, { name: `Company ${language}`, businessId: business.id }, `compound-company-${language}`);
+    const aiEngine: AIEngine = {
+      chat: async () => { throw new Error("Multilingual compound deletion must not call an AI model"); },
+      async *stream() { throw new Error("Multilingual compound deletion must not call an AI model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      expect(detectCompanyChatLanguage(message)).toBe(language);
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "company", companyId: company.id } });
+      expect(response.statusCode, language).toBe(200);
+      expect(response.body, language).toContain('"companyAction":{"action":"delete"');
+      expect(response.body, language).toContain('"businessAction":{"action":"delete"');
+      expect(await store.listUserBusinesses(alice), language).toHaveLength(0);
+      expect((await store.listCompanies(alice)).items, language).toHaveLength(0);
+    } finally { await app.close(); }
+  });
+
   it.each([
     ["en", "Delete everything you just created", "Do you want", "Yes, delete company Acme"],
     ["uk", "Тепер видали це все, що тільки що створив", "Ви хочете", "Так, видали компанію Acme"],
