@@ -16,7 +16,7 @@ import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
-import { chatLanguageInstruction } from "./company-chat-i18n";
+import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -341,6 +341,15 @@ function publicChatError(error: unknown, route?: string) {
   return "NPATI Agent could not complete this message. Please try again.";
 }
 
+function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string) {
+  if (result?.trim()) return result;
+  if (!errorMessage?.trim()) return "Company run completed.";
+  const language = detectCompanyChatLanguage(requestMessage);
+  if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перемкніть AI mode або підключіть іншу модель в AI Marketplace і спробуйте ще раз.";
+  if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Переключите AI mode или подключите другую модель в AI Marketplace и попробуйте снова.";
+  return "The company task could not be completed because the selected AI model is temporarily unavailable. Switch AI mode or connect another model in AI Marketplace, then try again.";
+}
+
 function attachResearchSources(content: string, research?: { sources: Array<{ url: string; title?: string }> }) {
   if (!research?.sources.length) return content;
   const unique = [...new Map(research.sources.map((item) => [item.url, item])).values()];
@@ -590,10 +599,12 @@ export function buildApp(config: AppConfig = {}) {
   }
 
   async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
-    const managementRequest = Boolean(requestMessage && CompanyChatActions.isManagementRequest(requestMessage));
+    const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
     const addedModels = (await aiPreferences.get(auth)).addedModels;
-    let actionText = content;
+    let actionText = requestMessage && managementRequest
+      ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId) ?? content
+      : content;
     if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
         const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels);
@@ -1001,28 +1012,32 @@ export function buildApp(config: AppConfig = {}) {
       ],
       signal,
     };
+    const companySettingsRequest = CompanyChatActions.isManagementRequest(safePrompt)
+      || Boolean(managementCompany && CompanyChatActions.isPotentialMutationRequest(safePrompt));
     let content="";
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
-    if(onDelta){
-      for await(const chunk of aiEngine.stream(chatRequest)){
-        if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
-        const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
-        content+=cleanChunk;
-        if (!CompanyChatActions.isManagementRequest(safePrompt) && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
+    if (!companySettingsRequest) {
+      if(onDelta){
+        for await(const chunk of aiEngine.stream(chatRequest)){
+          if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
+          const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
+          content+=cleanChunk;
+          if (!WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
+        }
+      }else {
+        chatResult=await aiEngine.chat(chatRequest);
+        content=chatResult.content.replace(/[\u2014\u2013]/g, " - ");
       }
-    }else {
-      chatResult=await aiEngine.chat(chatRequest);
-      content=chatResult.content.replace(/[\u2014\u2013]/g, " - ");
     }
     if (research?.sources.length) {
       const appended = attachResearchSources(content, research);
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;
-        if (!CompanyChatActions.isManagementRequest(safePrompt) && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
+        if (!companySettingsRequest && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
       }
     }
-    progress?.({ type: "final_generation_completed" });
+    if (!companySettingsRequest) progress?.({ type: "final_generation_completed" });
 
     // Automatic Spreadsheet File Editing & Attachment Generation
     if (chatFiles && conversation) {
@@ -1093,6 +1108,7 @@ export function buildApp(config: AppConfig = {}) {
     const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
     const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
     content = workspaceAction.cleanText;
+    if (companySettingsRequest) progress?.({ type: "final_generation_completed" });
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
     return {
@@ -1426,7 +1442,7 @@ export function buildApp(config: AppConfig = {}) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        if (prompt && (CompanyChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
+        if (prompt && (CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
           const result = await runNeutralMessage(auth, prompt, undefined, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
@@ -1450,7 +1466,7 @@ export function buildApp(config: AppConfig = {}) {
         );
 
         return {
-          message: runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.",
+          message: publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, prompt || ""),
           suggestedActions: [],
           activeContext: resolved.context,
           companyRunId: runResult.run.id,
@@ -1663,7 +1679,7 @@ export function buildApp(config: AppConfig = {}) {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
-          if (CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
+          if (CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
             const result = await runNeutralMessage(auth, message, undefined, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {
@@ -1687,7 +1703,7 @@ export function buildApp(config: AppConfig = {}) {
               runResult.run.status,
               memoryPolicy.noMemoryActive,
             );
-            const responseMessage=runResult.run.result ?? runResult.run.errorMessage ?? "Company run completed.";
+            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message);
             for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
             send("result", {
               message: responseMessage,
