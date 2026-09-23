@@ -159,3 +159,28 @@ const copies: Record<CompanyChatLanguage, CompositeCreationCopy> = {
 export function compositeCreationCopy(message = ""): CompositeCreationCopy {
   return copies[detectCompanyChatLanguage(message)];
 }
+
+export type CompositeMemoryCopy = { title: string; content: string; intro: string };
+
+const memoryCopies: Record<CompanyChatLanguage, CompositeMemoryCopy> = {
+  en: { title: "Test business context", content: "This business, its validation goal, and its five-agent company were created together for system testing.", intro: "I also saved the verified setup in Business Memory." },
+  uk: { title: "Контекст тестового бізнесу", content: "Цей бізнес, його тестову ціль і компанію з п’ятьма агентами створено разом для перевірки системи.", intro: "Також зберіг перевірений контекст у пам’яті бізнесу." },
+  fr: { title: "Contexte de l’entreprise test", content: "Cette entreprise, son objectif de validation et sa société de cinq agents ont été créés ensemble pour tester le système.", intro: "J’ai également enregistré ce contexte vérifié dans la mémoire métier." },
+  de: { title: "Kontext des Testunternehmens", content: "Dieses Geschäft, sein Prüfziel und das Unternehmen mit fünf Agenten wurden gemeinsam für den Systemtest erstellt.", intro: "Ich habe den bestätigten Kontext auch im Geschäftsgedächtnis gespeichert." },
+  es: { title: "Contexto del negocio de prueba", content: "Este negocio, su objetivo de validación y la empresa con cinco agentes se crearon juntos para probar el sistema.", intro: "También guardé el contexto verificado en la memoria del negocio." },
+  it: { title: "Contesto dell’attività di prova", content: "Questa attività, il suo obiettivo di verifica e l’azienda con cinque agenti sono stati creati insieme per testare il sistema.", intro: "Ho anche salvato il contesto verificato nella memoria aziendale." },
+  pl: { title: "Kontekst testowego biznesu", content: "Ten biznes, jego cel weryfikacyjny i firma z pięcioma agentami zostały utworzone razem do testowania systemu.", intro: "Zapisałem również zweryfikowany kontekst w pamięci firmy." },
+  pt: { title: "Contexto do negócio de teste", content: "Este negócio, sua meta de validação e a empresa com cinco agentes foram criados juntos para testar o sistema.", intro: "Também salvei o contexto verificado na memória do negócio." },
+  nl: { title: "Context van het testbedrijf", content: "Dit bedrijf, het validatiedoel en het bedrijf met vijf agenten zijn samen gemaakt om het systeem te testen.", intro: "Ik heb de geverifieerde context ook in het bedrijfsgeheugen opgeslagen." },
+  tr: { title: "Test işletmesi bağlamı", content: "Bu işletme, doğrulama hedefi ve beş ajanlı şirket sistem testi için birlikte oluşturuldu.", intro: "Doğrulanmış bağlamı işletme hafızasına da kaydettim." },
+  ru: { title: "Контекст тестового бизнеса", content: "Этот бизнес, его тестовая цель и компания с пятью агентами созданы вместе для проверки системы.", intro: "Также сохранил проверенный контекст в памяти бизнеса." },
+  zh: { title: "测试业务背景", content: "该业务、验证目标和由五个智能体组成的公司是为系统测试而一并创建的。", intro: "我还将已验证的背景保存到了业务记忆中。" },
+  ja: { title: "テスト事業のコンテキスト", content: "この事業、検証目標、5人のエージェントを持つ会社は、システムテストのためにまとめて作成されました。", intro: "確認済みのコンテキストをビジネスメモリにも保存しました。" },
+  ko: { title: "테스트 비즈니스 컨텍스트", content: "이 비즈니스, 검증 목표 및 5명의 에이전트로 구성된 회사는 시스템 테스트를 위해 함께 생성되었습니다.", intro: "검증된 컨텍스트를 비즈니스 메모리에도 저장했습니다." },
+  ar: { title: "سياق العمل التجريبي", content: "تم إنشاء هذا العمل وهدف التحقق والشركة المكونة من خمسة وكلاء معًا لاختبار النظام.", intro: "حفظت أيضًا السياق المتحقق منه في ذاكرة النشاط التجاري." },
+  hi: { title: "परीक्षण व्यवसाय संदर्भ", content: "यह व्यवसाय, इसका सत्यापन लक्ष्य और पाँच एजेंटों वाली कंपनी सिस्टम परीक्षण के लिए एक साथ बनाए गए थे।", intro: "मैंने सत्यापित संदर्भ को व्यवसाय मेमोरी में भी सहेजा है।" },
+};
+
+export function compositeMemoryCopy(message = ""): CompositeMemoryCopy {
+  return memoryCopies[detectCompanyChatLanguage(message)];
+}

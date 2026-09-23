@@ -91,7 +91,7 @@ const actionSignals = [
 
 const resourceSignals = [
   /\b(?:activit(?:y|ies)|run trace|execution trace|automation|scheduled task|cron job|content hub|article|seo blueprint|social draft|business memory|memory item|memory|brand voice|audience profile)\b/iu,
-  /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|пам.?ят|тон.*бренд|аудитор)/iu,
+  /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|пам.?ят|мемор|тон.*бренд|аудитор)/iu,
   /(?:activité|trace d.exécution|automatisation|tâche planifiée|contenu|article|mémoire|voix de marque|audience)/iu,
   /(?:aktivität|ausführungsspur|automatisierung|geplante aufgabe|inhalt|artikel|gedächtnis|markenstimme|zielgruppe)/iu,
   /(?:actividad|traza de ejecución|automatización|tarea programada|contenido|artículo|memoria|voz de marca|audiencia)/iu,
