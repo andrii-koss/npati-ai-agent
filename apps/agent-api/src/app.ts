@@ -601,6 +601,10 @@ export function buildApp(config: AppConfig = {}) {
   async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
+    const deleteConfirmation = requestMessage && managementRequest
+      ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId)
+      : undefined;
+    if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined };
     const addedModels = (await aiPreferences.get(auth)).addedModels;
     let actionText = requestMessage && managementRequest
       ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId) ?? content
@@ -1106,7 +1110,9 @@ export function buildApp(config: AppConfig = {}) {
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
     const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
-    const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
+    const workspaceAction = companySettingsRequest
+      ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
+      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: managementCompany?.id });
     content = workspaceAction.cleanText;
     if (companySettingsRequest) progress?.({ type: "final_generation_completed" });
 

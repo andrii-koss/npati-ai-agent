@@ -5347,6 +5347,46 @@ article.user .chat-message-attachment.document {
   display: inline-block;
 }
 
+.message-stream article.mutation-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  min-width: 220px;
+  color: #4d5565;
+}
+
+.mutation-status p {
+  margin: 0;
+}
+
+.mutation-orbit {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border: 1px solid rgba(211, 51, 54, .2);
+  border-radius: 50%;
+  animation: mutation-orbit-rotate 1.15s linear infinite;
+}
+
+.mutation-orbit i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--npati-red);
+  box-shadow: 0 0 0 4px rgba(211, 51, 54, .1);
+}
+
+.mutation-orbit i:nth-child(1) { top: -3px; left: 9px; }
+.mutation-orbit i:nth-child(2) { right: -2px; bottom: 3px; transform: scale(.75); }
+.mutation-orbit i:nth-child(3) { left: -2px; bottom: 3px; transform: scale(.5); }
+
+@keyframes mutation-orbit-rotate {
+  to { transform: rotate(360deg); }
+}
+
 .message-stream article.research-status {
   width: auto;
   max-width: 88%;
