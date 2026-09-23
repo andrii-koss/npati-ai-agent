@@ -17,7 +17,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
-import { compositeCreationCopy } from "./composite-chat-i18n";
+import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -91,6 +91,10 @@ function isCompositeBusinessCompanyCreation(message: string): boolean {
   const goal = /(?:ціл|цел|\bgoal|objectif|ziel|objetivo|obiettivo|cel\b|meta\b|doel|hedef|目标|目標|목표|هدف|लक्ष्य)/iu.test(message);
   const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|sp[oó]łk|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
   return create && business && goal && company;
+}
+
+function requestsBusinessMemory(message: string): boolean {
+  return /(?:пам(?:'|’)?ят|памят|мемор|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|स्मृति)/iu.test(message);
 }
 
 function applyChatTelemetryHeaders(reply: { header(name: string, value: string): unknown }, result: { model?: string; telemetry?: AgentReply["telemetry"] }) {
@@ -657,6 +661,22 @@ export function buildApp(config: AppConfig = {}) {
       await workspaceStore.deleteBusiness(auth, business.id).catch(() => undefined);
       throw new Error("Composite company creation did not complete");
     }
+    const memoryRequested = requestsBusinessMemory(message);
+    const memoryCopy = memoryRequested ? compositeMemoryCopy(message) : undefined;
+    const memoryResult = memoryCopy
+      ? await executeWorkspaceChatAction(auth, `\`\`\`workspace-action\n${JSON.stringify({
+          action: "memory.create",
+          businessId: business.id,
+          intro: memoryCopy.intro,
+          memory: { type: "business_fact", title: memoryCopy.title, content: memoryCopy.content, confidence: 1 },
+        })}\n\`\`\``, conversationId, message, { selectedCompanyId: companyResult.companyAction.companyId, selectedBusinessId: business.id, signal })
+      : undefined;
+    if (memoryRequested && !memoryResult?.workspaceAction) {
+      await beforeDeleteCompany(auth, companyResult.companyAction.companyId).catch(() => undefined);
+      await workspaceStore.deleteCompany(auth, companyResult.companyAction.companyId).catch(() => undefined);
+      await workspaceStore.deleteBusiness(auth, business.id).catch(() => undefined);
+      throw new Error("Composite memory creation did not complete");
+    }
     const businessLink = `/settings/business/${encodeURIComponent(business.id)}`;
     const messageText = `${localized.intro}
 
@@ -679,7 +699,7 @@ ${business.description ?? localized.description}
 [${localized.openGoalsLabel} →](/settings/goals)
 \`\`\`
 
-${companyResult.cleanText}
+${companyResult.cleanText}${memoryResult ? `\n\n${memoryResult.cleanText}` : ""}
 
 ${localized.next}`;
     return {
@@ -688,6 +708,7 @@ ${localized.next}`;
       businessAction: businessResult.businessAction,
       goalAction: businessResult.goalAction,
       companyAction: companyResult.companyAction,
+      workspaceAction: memoryResult?.workspaceAction,
     };
   }
 

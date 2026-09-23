@@ -144,7 +144,7 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
-  it("creates and links a business idea, goal, company, and five agents in one existing chat", async () => {
+  it("creates and links a business idea, goal, company, agents, and memory in one existing chat", async () => {
     const store = new InMemoryWorkspaceStore();
     const conversation = await store.createNeutralConversation(alice, "Комплексне створення");
     let chatCalls = 0;
@@ -159,17 +159,21 @@ describe("company management from chat", () => {
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
     const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
     try {
-      const message = "привіт, створи мені бізнес ідею, і ціль для теста, і потім встанови бізнес ідею в створену компанію, її також створи, із 5 агентами, для теста";
+      const message = "створи ще раз, для тесту, ще одну компанію, ціль, бізнес ідею, і меморі, для теста";
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, conversationId: conversation.id, contextType: "none" } });
       expect(response.statusCode).toBe(200);
       expect(response.body).toContain(`"conversationId":"${conversation.id}"`);
       expect(response.body).toContain('"businessAction":{"action":"create"');
       expect(response.body).toContain('"goalAction":{"action":"create"');
       expect(response.body).toContain('"companyAction":{"action":"create"');
+      expect(response.body).toContain('"workspaceAction":{"action":"memory.create"');
       const businesses = await store.listUserBusinesses(alice);
       expect(businesses).toHaveLength(1);
       const goals = await store.listGoals(alice, businesses[0]!.id);
       expect(goals).toHaveLength(1);
+      expect(await store.listMemory(alice, businesses[0]!.id)).toEqual([
+        expect.objectContaining({ type: "business_fact", title: "Контекст тестового бізнесу", confidence: 1 }),
+      ]);
       const companies = (await store.listCompanies(alice)).items;
       expect(companies).toEqual([expect.objectContaining({ businessId: businesses[0]!.id, name: "Тестова компанія" })]);
       expect(await store.listCompanyAgents(alice, companies[0]!.id)).toHaveLength(5);

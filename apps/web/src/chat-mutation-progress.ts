@@ -29,7 +29,7 @@ const targets: Array<ChatMutationProgressTarget & { pattern: RegExp }> = [
   },
   {
     url: "https://ai.npati.com/settings/memory", domain: "ai.npati.com", title: "Business Memory",
-    pattern: /(?:пам(?:'|’)?ят|памят|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|स्मृति)/iu,
+    pattern: /(?:пам(?:'|’)?ят|памят|мемор|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|स्मृति)/iu,
   },
 ];
 

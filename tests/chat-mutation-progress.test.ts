@@ -23,6 +23,33 @@ describe("chat mutation progress", () => {
     expect(paths(message)).toEqual(["/settings/automations", "/settings/content", "/settings/memory", "/settings/company"]);
   });
 
+  it("recognizes the Ukrainian transliteration меморі as Business Memory", () => {
+    const message = "створи ще одну компанію, ціль, бізнес ідею, і меморі, для теста";
+    expect(detectChatMutationOperation(message, "none")).toBe("create");
+    expect(paths(message)).toEqual(["/settings/company", "/settings/goals", "/settings/business", "/settings/memory"]);
+  });
+
+  it.each([
+    ["English", "Create memory"],
+    ["Ukrainian", "Створи меморі"],
+    ["French", "Créer une mémoire"],
+    ["German", "Gedächtnis erstellen"],
+    ["Spanish", "Crear memoria"],
+    ["Italian", "Creare memoria"],
+    ["Polish", "Utwórz pamięć"],
+    ["Portuguese", "Criar memória"],
+    ["Dutch", "Geheugen maken"],
+    ["Turkish", "Hafıza oluştur"],
+    ["Russian", "Создай память"],
+    ["Chinese", "创建记忆"],
+    ["Japanese", "メモリを作成"],
+    ["Korean", "메모리 생성"],
+    ["Arabic", "إنشاء الذاكرة"],
+    ["Hindi", "मेमोरी बनाएँ"],
+  ])("recognizes Business Memory in %s", (_language, message) => {
+    expect(paths(message)).toEqual(["/settings/memory"]);
+  });
+
   it("retains every completed action while the next settings page is active", () => {
     const timestamp = new Date().toISOString();
     const events: ChatProgressEvent[] = [
