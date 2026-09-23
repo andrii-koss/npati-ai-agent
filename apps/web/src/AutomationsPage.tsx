@@ -1,6 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 
@@ -65,8 +65,10 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function AutomationsPage() {
   const { overview } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedCompanyId = searchParams.get("company") ?? "";
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(requestedCompanyId);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [automations, setAutomations] = useState<CompanyAutomation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,8 +100,13 @@ export function AutomationsPage() {
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
         setCompanies(res.companies);
-        if (res.companies.length > 0 && !selectedCompanyId) {
-          setSelectedCompanyId(res.companies[0]!.id);
+        const requested = searchParams.get("company");
+        const selected = requested && res.companies.some((company) => company.id === requested)
+          ? requested
+          : res.companies[0]?.id ?? "";
+        setSelectedCompanyId(selected);
+        if (selected && selected !== requested) {
+          setSearchParams({ company: selected }, { replace: true });
         }
       })
       .catch((e) => setNotice(e.message))
@@ -316,7 +323,10 @@ export function AutomationsPage() {
               <select
                 aria-label="Select company"
                 value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setSearchParams({ company: e.target.value }, { replace: true });
+                }}
                 className="page-size-select"
               >
                 {companies.map((c) => (

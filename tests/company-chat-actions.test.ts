@@ -52,6 +52,10 @@ describe("company management from chat", () => {
     expect(CompanyChatActions.isManagementRequest("Create a company with an agent team")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Create a marketing plan for my company")).toBe(false);
     expect(CompanyChatActions.isManagementRequest("Компанію мені створи з агентами")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("в компанії, додай текст агенту в полях Instructions, System Instruction, Prompt Guidelines, Recommended Prompts і Tools & Capabilities")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("в компанії, додай ще одного агента, для теста")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("можеш агенту надати роль і Tools & Capabilities?")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("створи додаткового агента в компанії")).toBe(true);
     for (const message of [
       "Crée une entreprise avec trois agents",
       "Erstelle ein Unternehmen mit drei Agenten",
@@ -118,6 +122,57 @@ describe("company management from chat", () => {
     expect((await store.getCompanyAgent(alice, company.id, agent.id)).isActive).toBe(false);
     await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "delete", agentId: agent.id }] }), store, "conversation-3");
     expect(await store.listCompanyAgents(alice, company.id)).toHaveLength(0);
+  });
+
+  it("maps Company UI field labels and updates the selected main agent without repeating IDs", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let company = await store.createCompany(alice, { name: "Selected Studio" }, "company-ui-fields");
+    const agent = await store.createCompanyAgent(alice, company.id, { name: "Lead", role: "Coordinator" }, "agent-ui-fields");
+    company = await store.setCompanyMainAgent(alice, company.id, agent.id, company.revision);
+    const errors: unknown[] = [];
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({
+      action: "update",
+      agents: [{
+        action: "update",
+        fields: {
+          instructions: {
+            "System Instruction": "Керуй тестовою командою.",
+            "Prompt Guidelines": "Відповідай стисло.",
+            "Recommended Prompts": "Перевір статус\nПідготуй звіт",
+          },
+          "Tools & Capabilities": ["Knowledge", "Company Memory", "Web Search", "Code Mode / Exec - Critical - Approval required"],
+          role: "Керівник тестування",
+        },
+      }],
+    }), store, "conversation-ui-fields", {
+      selectedCompanyId: company.id,
+      requestMessage: "в компанії, додай текст агенту в полях Instructions і Tools & Capabilities",
+      onError: (error) => errors.push(error),
+    });
+    expect(errors).toEqual([]);
+    expect(result.companyAction?.action).toBe("update");
+    const updated = await store.getCompanyAgent(alice, company.id, agent.id);
+    expect(updated).toMatchObject({
+      role: "Керівник тестування",
+      systemInstruction: "Керуй тестовою командою.",
+      promptGuidelines: "Відповідай стисло.",
+      recommendedPrompts: ["Перевір статус", "Підготуй звіт"],
+      tools: ["storage.agent_knowledge_retrieval", "storage.company_memory", "research.web_search", "exec"],
+    });
+  });
+
+  it("adds an agent to the selected company when the planner omits the repeated company ID", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Selected Studio" }, "company-add-agent");
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({
+      action: "update",
+      agents: [{ action: "create", fields: { name: "Тестовий аналітик", role: "Аналітик", description: "Перевіряє роботу команди" } }],
+    }), store, "conversation-add-agent", {
+      selectedCompanyId: company.id,
+      requestMessage: "в компанії, додай ще одного агента, для теста",
+    });
+    expect(result.companyAction?.action).toBe("update");
+    expect((await store.listCompanyAgents(alice, company.id)).map((item) => item.name)).toEqual(["Тестовий аналітик"]);
   });
 
   it("cannot edit or delete another user's company or link another user's business", async () => {

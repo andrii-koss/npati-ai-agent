@@ -90,7 +90,7 @@ const actionSignals = [
 ];
 
 const resourceSignals = [
-  /\b(?:activit(?:y|ies)|run trace|execution trace|automation|scheduled task|cron job|content hub|article|seo blueprint|social draft|business memory|memory item|brand voice|audience profile)\b/iu,
+  /\b(?:activit(?:y|ies)|run trace|execution trace|automation|scheduled task|cron job|content hub|article|seo blueprint|social draft|business memory|memory item|memory|brand voice|audience profile)\b/iu,
   /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|пам.?ят|тон.*бренд|аудитор)/iu,
   /(?:activité|trace d.exécution|automatisation|tâche planifiée|contenu|article|mémoire|voix de marque|audience)/iu,
   /(?:aktivität|ausführungsspur|automatisierung|geplante aufgabe|inhalt|artikel|gedächtnis|markenstimme|zielgruppe)/iu,
@@ -106,6 +106,43 @@ const resourceSignals = [
   /(?:활동|실행 추적|자동화|예약 작업|콘텐츠|기사|메모리|브랜드 보이스|대상 고객)/u,
   /(?:نشاط|تتبع التنفيذ|أتمتة|مهمة مجدولة|محتوى|مقال|ذاكرة|صوت العلامة|الجمهور)/u,
   /(?:गतिविधि|निष्पादन ट्रेस|ऑटोमेशन|निर्धारित कार्य|सामग्री|लेख|मेमोरी|ब्रांड वॉइस|दर्शक)/u,
+];
+
+const mutationSignals = [
+  /\b(?:edit|update|change|delete|remove|pause|resume|cancel)\b/iu,
+  /(?:редаг|змін|онов|видал|приб|призуп|віднов|скас)/iu,
+  /(?:modifi|mettre à jour|supprim|retir|suspend|repren|annul)/iu,
+  /(?:bearbeit|aktualisier|änder|lösch|entfern|pausier|fortsetz|abbrech)/iu,
+  /(?:edit|actualiz|cambi|elimin|borr|paus|reanud|cancel)/iu,
+  /(?:modific|aggiorn|cambi|elimin|rimuov|sospend|riprend|annull)/iu,
+  /(?:edytuj|zaktualizuj|zmień|usuń|wstrzymaj|wznów|anuluj)/iu,
+  /(?:edit|atualiz|alter|exclu|remov|paus|retom|cancel)/iu,
+  /(?:bewerk|werk.*bij|wijzig|verwijder|pauzeer|hervat|annuleer)/iu,
+  /(?:düzenle|güncelle|değiştir|sil|kaldır|duraklat|sürdür|iptal)/iu,
+  /(?:редакт|измен|обнов|удал|приостанов|возобнов|отмен)/iu,
+  /(?:编辑|更新|修改|删除|移除|暂停|恢复|取消)/u,
+  /(?:編集|更新|変更|削除|一時停止|再開|キャンセル)/u,
+  /(?:편집|업데이트|변경|삭제|제거|일시 중지|재개|취소)/u,
+  /(?:حرر|حدث|غيّر|احذف|أزل|أوقف|استأنف|ألغ)/u,
+  /(?:संपादित|अपडेट|बदलें|हटाएं|रोकें|फिर शुरू|रद्द)/u,
+];
+const referenceSignals = [
+  /\b(?:it|this|that|one|last|previous)\b/iu,
+  /(?:її|його|це|цю|цей|останн|попередн)/iu,
+  /\b(?:le|la|les|ceci|cela|dernier|précédent)\b/iu,
+  /\b(?:es|dies|diese|letzte|vorherige)\b/iu,
+  /\b(?:lo|la|esto|esta|últim|anterior)\b/iu,
+  /\b(?:lo|la|quest|ultim|precedent)\b/iu,
+  /\b(?:to|ten|ta|ostatni|poprzedni)\b/iu,
+  /\b(?:isso|isto|este|esta|últim|anterior)\b/iu,
+  /\b(?:het|dit|deze|laatste|vorige)\b/iu,
+  /\b(?:onu|bunu|şunu|son|önceki)\b/iu,
+  /(?:её|его|это|эту|этот|последн|предыдущ)/iu,
+  /(?:它|这个|这条|最后|上一个)/u,
+  /(?:それ|これ|この|最後|前の)/u,
+  /(?:그것|이것|이 항목|마지막|이전)/u,
+  /(?:إياه|إياها|هذا|هذه|الأخير|السابق)/u,
+  /(?:इसे|यह|इसको|अंतिम|पिछल)/u,
 ];
 
 function clean(value: unknown, max = 12_000): string {
@@ -160,6 +197,10 @@ function finish(directive: WorkspaceDirective, card: string): string {
   return `${intro(directive)}\n\n${card}${followUp(directive) ? `\n\n${followUp(directive)}` : ""}`;
 }
 
+function automationSettingsUrl(companyId: string): string {
+  return `/settings/automations?company=${encodeURIComponent(companyId)}`;
+}
+
 function idempotency(auth: AuthContext, conversationId: string, requestMessage: string, action: string): string {
   return createHash("sha256").update(`${auth.workspaceId}:${auth.userId}:${conversationId}:${requestMessage}:${action}`).digest("hex");
 }
@@ -183,6 +224,10 @@ export class WorkspaceChatActions {
     return actionSignals.some((pattern) => pattern.test(message)) && resourceSignals.some((pattern) => pattern.test(message));
   }
 
+  static isPotentialMutationRequest(message: string): boolean {
+    return mutationSignals.some((pattern) => pattern.test(message)) && referenceSignals.some((pattern) => pattern.test(message));
+  }
+
   static noActionMessage(message: string): string {
     const language = detectCompanyChatLanguage(message);
     const messages: Partial<Record<typeof language, string>> = {
@@ -201,7 +246,7 @@ export class WorkspaceChatActions {
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: { automations: CompanyAutomationsRepository; content: ContentLibraryStore }): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resourceSignals.some((pattern) => pattern.test(message))) return "";
+    if (!resourceSignals.some((pattern) => pattern.test(message)) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
     const ownedCompanies = await companies(store, auth);
     const ownedBusinesses = await store.listUserBusinesses(auth);
     const companyContext = await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => ({
@@ -267,7 +312,7 @@ Use activity.run when the user asks the company agents to perform work and wants
     return `${await this.buildSystemPrompt(auth, deps.store, message, selectedCompanyId, selectedBusinessId, deps)}\n\nThe latest user message is an explicit request for one of the supported workspace actions. Return ONLY one complete workspace-action block. Do not state that it succeeded. Use NO_ACTION if required data is missing or the target is ambiguous.`;
   }
 
-  static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string } = {}): Promise<WorkspaceChatActionResult> {
+  static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string; onError?: (error: unknown) => void } = {}): Promise<WorkspaceChatActionResult> {
     const matches = fenced(text);
     if (!matches[0]) return /```workspace-action/i.test(text) ? { cleanText: this.noActionMessage(options.requestMessage ?? "") } : { cleanText: text };
     try {
@@ -323,7 +368,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           const current = matches[0]!;
           if (directive.action === "automation.delete") {
             if (!await deps.automations.delete(auth, company.id, current.id)) throw new Error("Automation not found");
-            const card = `\`\`\`card:${clean(current.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n\n[${labels.openAutomations}](/settings/automations)\n\`\`\``;
+            const card = `\`\`\`card:${clean(current.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
             return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
           }
           if (!item) throw new Error("Automation changes are required");
@@ -343,7 +388,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           };
           if (!Object.keys(update).length || (item.name !== undefined && !update.name) || (item.prompt !== undefined && !update.prompt)) throw new Error("Invalid automation changes");
           const updated = await deps.automations.update(auth, company.id, current.id, update);
-          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${updated.status}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${updated.nextRunAt}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](/settings/automations)\n\`\`\``;
+          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${updated.status}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${updated.nextRunAt}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
           return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
         }
         if (!item || !clean(item.name, 300) || !clean(item.prompt) || !item.cronExpression || !isValidCronExpression(item.cronExpression)) throw new Error("Invalid automation");
@@ -361,7 +406,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           cronExpression, timezone: clean(item.timezone, 100) || "Europe/Kyiv", agentId: item.agentId ?? undefined,
           nextRunAt: computeNextCronDate(cronExpression).toISOString(),
         });
-        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](/settings/automations)\n\`\`\``;
+        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
       }
 
@@ -423,7 +468,8 @@ Use activity.run when the user asks the company agents to perform work and wants
       await deps.content.update(auth, run.id, company.id, { title: clean(item.title, 300), type: contentType(item.type!), content: clean(run.result, 200_000) });
       const card = `\`\`\`card:${clean(item.title, 300)}\n${clean(run.result)}\n\n[${labels.openContent}](/settings/content)\n\`\`\``;
       return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id }, companyRunId: run.id };
-    } catch {
+    } catch (error) {
+      options.onError?.(error);
       return { cleanText: this.noActionMessage(options.requestMessage ?? "") };
     }
   }

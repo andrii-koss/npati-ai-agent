@@ -31,6 +31,7 @@ describe("workspace resources from chat", () => {
   it("recognizes explicit requests across supported scripts", () => {
     for (const message of [
       "Create an automation for my company",
+      "Створи тестову автоматизацію на сторінці Automations & Scheduled Tasks",
       "Створи автоматизацію для моєї компанії",
       "Crée une automatisation pour mon entreprise",
       "Erstelle eine Automatisierung für mein Unternehmen",
@@ -202,6 +203,41 @@ describe("workspace resources from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("turns an AI success claim into a persisted automation for the selected company", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const firstCompany = await store.createCompany(alice, { name: "First Company" }, "automation-first-company");
+    const selectedCompany = await store.createCompany(alice, { name: "Selected Company" }, "automation-selected-company");
+    const output = directive({
+      action: "automation.create",
+      intro: "Готово, тестову автоматизацію створено.",
+      followUp: "Бажаєте змінити час запуску?",
+      automation: { name: "Тестова автоматизація", prompt: "Підготуй тестовий звіт", cronExpression: "0 9 * * *", timezone: "Europe/Kyiv" },
+    });
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: output }), async *stream() { yield "Готово, я створив автоматизацію."; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: { message: "Створи тестову автоматизацію на сторінці Automations & Scheduled Tasks", contextType: "company", companyId: selectedCompany.id },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"workspaceAction":{"action":"automation.create"');
+      expect(response.body).toContain(`/settings/automations?company=${selectedCompany.id}`);
+      expect(response.body).not.toContain('"delta":"Готово, я створив автоматизацію."');
+      const selectedList = await app.inject({ method: "GET", url: `/companies/${selectedCompany.id}/automations` });
+      const firstList = await app.inject({ method: "GET", url: `/companies/${firstCompany.id}/automations` });
+      expect(selectedList.json().automations).toEqual([expect.objectContaining({ name: "Тестова автоматизація", prompt: "Підготуй тестовий звіт" })]);
+      expect(firstList.json().automations).toEqual([]);
+    } finally { await app.close(); }
+  });
+
   it("persists Content Hub edits and deletion through the server API", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(alice, { name: "Content API Studio" }, "content-api-company");
@@ -225,6 +261,32 @@ describe("workspace resources from chat", () => {
       expect(remove.statusCode).toBe(204);
       const after = await app.inject({ method: "GET", url: "/content/overrides" });
       expect(after.json().overrides[created.run.id].deleted).toBe(true);
+    } finally { await app.close(); }
+  });
+
+  it("creates and deletes Business Memory through the real business chat route", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(alice, { name: "Memory Business", businessStage: "operating" });
+    let output = directive({ action: "memory.create", businessId: business.id, intro: "Пам’ять створено.", memory: { type: "audience", title: "Основна аудиторія", content: "Малі інтернет-магазини України", confidence: 1 } });
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: output }), async *stream() { yield output; }, listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const create = await app.inject({ method: "POST", url: "/chat", payload: { message: "Створи memory про мою аудиторію", contextType: "business", businessId: business.id } });
+      expect(create.statusCode).toBe(200);
+      expect(create.json().workspaceAction.action).toBe("memory.create");
+      const saved = await store.listMemory(alice, business.id);
+      expect(saved).toEqual([expect.objectContaining({ title: "Основна аудиторія", content: "Малі інтернет-магазини України" })]);
+
+      output = directive({ action: "memory.delete", businessId: business.id, memoryId: saved[0]!.id, intro: "Пам’ять видалено." });
+      const remove = await app.inject({ method: "POST", url: "/chat", payload: { message: "Видали її", conversationId: create.json().conversationId, contextType: "business", businessId: business.id } });
+      expect(remove.statusCode).toBe(200);
+      expect(remove.json().workspaceAction.action).toBe("memory.delete");
+      expect(await store.listMemory(alice, business.id)).toHaveLength(0);
     } finally { await app.close(); }
   });
 });
