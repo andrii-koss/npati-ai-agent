@@ -35,6 +35,38 @@ describe("company management from chat", () => {
       ["en", "en"], ["uk", "uk"], ["fr", "fr"], ["de", "de"], ["es", "es"], ["it", "it"], ["pl", "pl"], ["pt", "pt"],
       ["nl", "nl"], ["tr", "tr"], ["ru", "ru"], ["zh", "zh"], ["ja", "ja"], ["ko", "ko"], ["ar", "ar"], ["hi", "hi"],
     ]);
+    expect(detectCompanyChatLanguage("так")).toBe("uk");
+  });
+
+  it("understands a short Ukrainian yes as acceptance of the previous agent-setup question", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Тестова компанія" }, "contextual-follow-up-company");
+    for (let index = 0; index < 5; index++) {
+      await store.createCompanyAgent(alice, company.id, { name: `Агент ${index + 1}`, role: index === 0 ? "Координатор" : "Спеціаліст" }, `contextual-agent-${index}`);
+    }
+    const conversation = await store.createNeutralConversation(alice, "Контекстне підтвердження");
+    await store.appendNeutralMessage(alice, conversation.id, "assistant", `Готово.\n\n\`\`\`card:Компанія: Тестова компанія\n[Відкрити налаштування компанії →](/settings/company?company=${company.id})\n\`\`\`\n\n**Наступний крок:** хочете, щоб я детальніше налаштував ролі, інструкції та моделі для цих агентів?`);
+    let modelCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { modelCalls += 1; throw new Error("Contextual company follow-up must not call an AI model"); },
+      async *stream() { modelCalls += 1; throw new Error("Contextual company follow-up must not call an AI model"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "так", conversationId: conversation.id, contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"companyAction":{"action":"update"');
+      expect(response.body).toContain("Готово, я оновив компанію");
+      expect(response.body).not.toContain("Не удалось выполнить задачу компании");
+      const agents = await store.listCompanyAgents(alice, company.id);
+      expect(agents).toHaveLength(5);
+      expect(agents.every((agent) => Boolean(agent.systemInstruction) && Boolean(agent.promptGuidelines) && agent.recommendedPrompts.length >= 2)).toBe(true);
+      expect(modelCalls).toBe(0);
+    } finally { await app.close(); }
   });
 
   it("returns a completed company card in the request language", async () => {

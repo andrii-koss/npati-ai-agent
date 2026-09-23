@@ -359,6 +359,31 @@ export class CompanyChatActions {
       return `\`\`\`company-action\n${JSON.stringify({ action: "create", fields, agentCount: count })}\n\`\`\``;
     }
 
+    const refineAllAgents = /(?:детальн|detailed|détail|detaill|detall|dettagli|szczegół|detalh|gedetailleerd|ayrıntılı|подробно|详细|詳しく|상세|بالتفصيل|विस्तृत)/iu.test(message)
+      && /(?:рол|roles?|rôles?|rollen?|ruoli|role|funções?|roller|角色|役割|역할|أدوار|भूमिक)/iu.test(message)
+      && /(?:інструкц|инструкц|instructions?|anweisungen?|instrucciones?|istruzioni?|instrukcj|instruções?|instructies?|talimat|指令|指示|지침|تعليمات|निर्देश)/iu.test(message);
+    if (selectedCompanyId && refineAllAgents) {
+      const company = await store.getCompany(auth, selectedCompanyId);
+      const agents = await store.listCompanyAgents(auth, company.id);
+      if (!agents.length) return undefined;
+      const profiles = defaultAgentProfiles(message);
+      const updates = agents.map((agent, index) => {
+        const profile = profiles[index % profiles.length]!;
+        return {
+          action: "update",
+          agentId: agent.id,
+          fields: {
+            role: agent.role || profile.role,
+            description: agent.description || profile.description,
+            systemInstruction: profile.systemInstruction,
+            promptGuidelines: profile.systemInstruction,
+            recommendedPrompts: [profile.systemInstruction, profile.description],
+          },
+        };
+      });
+      return `\`\`\`company-action\n${JSON.stringify({ action: "update", companyId: company.id, agents: updates })}\n\`\`\``;
+    }
+
     const recommendedPrompts = /recommended\s+prompts?/iu.test(message);
     const fillPrompts = /(?:заповн|дод|онов|змін|созда|добав|обнов|измен|fill|add|update|change|set)/iu.test(message);
     if (selectedCompanyId && recommendedPrompts && fillPrompts) {

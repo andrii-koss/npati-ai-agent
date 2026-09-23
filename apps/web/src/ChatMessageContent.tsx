@@ -739,6 +739,17 @@ function EditableContentCard({
     }
   };
 
+  const handleCardLinkClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>("a.chat-card-link");
+    if (!anchor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+    if (href.startsWith("/")) window.location.assign(href);
+    else window.open(href, "_blank", "noopener,noreferrer");
+  };
+
   const handleCopy = async () => {
     const textToCopy = (bodyRef.current?.innerText ?? initialContent).replace(/[\u2014\u2013]/g, " - ");
     try {
@@ -863,6 +874,7 @@ function EditableContentCard({
           suppressContentEditableWarning={true}
           spellCheck={true}
           onInput={handleInput}
+          onClick={handleCardLinkClick}
           dangerouslySetInnerHTML={{ __html: initialHtml }}
         />
       </div>
@@ -936,6 +948,7 @@ function EditableContentCard({
               suppressContentEditableWarning={true}
               spellCheck={true}
               onInput={handleInput}
+              onClick={handleCardLinkClick}
               dangerouslySetInnerHTML={{ __html: bodyRef.current ? bodyRef.current.innerHTML : initialHtml }}
             />
           </div>
