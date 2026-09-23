@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
+import { companyDeleteCopy, isCompanyDeleteConfirmed } from "./company-delete-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -38,6 +39,9 @@ const toolAliases = new Map([
   ["text to speech", "system.text-to-speech"],
   ["code mode exec", "exec"],
 ]);
+
+const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|sil|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
+const selectedDeleteReferenceSignal = /(?:її|його|їх|це\s+все|все\s+це|усе\s+це|щойно\s+створен\p{L}*|ее|его|их|это\s+вс[её]|вс[её](?:\s+это|\s*,?\s*что)|только\s+что\s+создан\p{L}*|\bit\b|\bthis\s+one\b|\beverything\b|\ball\s+(?:of\s+it|this)\b|what\s+(?:you|was)\s+just\s+created|tout\s+(?:cela|ça|ce\s+que)|alles|todo\s+(?:esto|lo\s+que)|tutto\s+(?:questo|ciò)|wszystko|tudo\s+(?:isso|o\s+que)|dit\s+allemaal|hepsini|tümünü|her\s+şeyi|全部|这一切|すべて|全て|모두|전부|모든\s+것|كل\s+(?:شيء|هذا|ما)|सब\s+(?:कुछ|चीज़ें)|यह\s+सब)/iu;
 
 function normalizedLabel(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[\s_\-/]+/g, " ").replace(/[^\p{L}\p{N} .]+/gu, "").trim();
@@ -315,33 +319,30 @@ export class CompanyChatActions {
   static isPotentialMutationRequest(message: string): boolean {
     const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
-    const deleteReference = /(?:видал|удал|delete|remove)/iu.test(message) && /(?:її|його|їх|ее|его|их|\bit\b|\bthis\s+one\b)/iu.test(message);
+    const deleteReference = deleteMutationSignal.test(message) && selectedDeleteReferenceSignal.test(message);
     return mutation && companyField || deleteReference;
   }
 
   static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<string | undefined> {
-    const deleteRequest = /(?:видал|удал|delete|remove)/iu.test(message)
-      && /(?:компан|compan|її|його|їх|ее|его|их|\bit\b|\bthis\s+one\b)/iu.test(message);
-    const confirmed = /(?:так[\s\S]{0,30}видал|підтвердж\p{L}*[\s\S]{0,30}видал|да[\s\S]{0,30}удал|подтвержд\p{L}*[\s\S]{0,30}удал|\byes\b[\s\S]{0,30}(?:delete|remove)|\bconfirm\p{L}*[\s\S]{0,30}(?:delete|remove))/iu.test(message);
+    const deleteRequest = deleteMutationSignal.test(message)
+      && (/(?:компан|compan)/iu.test(message) || selectedDeleteReferenceSignal.test(message));
+    const confirmed = isCompanyDeleteConfirmed(message);
     if (!deleteRequest || confirmed) return undefined;
     const language = detectCompanyChatLanguage(message);
+    const labels = companyDeleteCopy(language);
     if (selectedCompanyId) {
       const company = await store.getCompany(auth, selectedCompanyId);
-      if (language === "uk") return `Ви хочете видалити вибрану компанію **${safeMarkdown(company.name)}**? Цю дію неможливо скасувати. Для підтвердження напишіть: **Так, видали компанію ${safeMarkdown(company.name)}**.`;
-      if (language === "ru") return `Вы хотите удалить выбранную компанию **${safeMarkdown(company.name)}**? Это действие нельзя отменить. Для подтверждения напишите: **Да, удали компанию ${safeMarkdown(company.name)}**.`;
-      return `Do you want to delete the selected company **${safeMarkdown(company.name)}**? This action cannot be undone. To confirm, write: **Yes, delete company ${safeMarkdown(company.name)}**.`;
+      return companyDeleteCopy(language, safeMarkdown(company.name)).selected;
     }
     const companies = (await store.listCompanies(auth, 100)).items;
-    if (!companies.length) return language === "uk" ? "У вас немає компаній для видалення." : language === "ru" ? "У вас нет компаний для удаления." : "You do not have any companies to delete.";
+    if (!companies.length) return labels.none;
     const names = companies.map((company, index) => `${index + 1}. **${safeMarkdown(company.name)}**`).join("\n");
-    if (language === "uk") return `Яку компанію ви хочете видалити?\n\n${names}\n\nНапишіть: **Видали компанію <назва>**. Після цього я попрошу підтвердження.`;
-    if (language === "ru") return `Какую компанию вы хотите удалить?\n\n${names}\n\nНапишите: **Удали компанию <название>**. После этого я попрошу подтверждение.`;
-    return `Which company do you want to delete?\n\n${names}\n\nWrite: **Delete company <name>**. I will then ask for confirmation.`;
+    return `${labels.choose}\n\n${names}\n\n${labels.command}`;
   }
 
   static async buildDeterministicAction(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<string | undefined> {
     const language = detectCompanyChatLanguage(message);
-    const confirmedDelete = /(?:так[\s\S]{0,30}видал|підтвердж\p{L}*[\s\S]{0,30}видал|да[\s\S]{0,30}удал|подтвержд\p{L}*[\s\S]{0,30}удал|\byes\b[\s\S]{0,30}(?:delete|remove)|\bconfirm\p{L}*[\s\S]{0,30}(?:delete|remove))/iu.test(message);
+    const confirmedDelete = isCompanyDeleteConfirmed(message);
     if (selectedCompanyId && confirmedDelete) {
       const company = await store.getCompany(auth, selectedCompanyId);
       return `\`\`\`company-action\n${JSON.stringify({ action: "delete", companyId: company.id })}\n\`\`\``;

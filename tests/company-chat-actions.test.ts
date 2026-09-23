@@ -504,6 +504,90 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("uses the selected company for a delete-everything reference", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Щойно створена компанія" }, "delete-everything-company");
+    const conversation = await store.createNeutralConversation(alice, "Комплексне видалення");
+    let chatCalls = 0;
+    const aiEngine: AIEngine = {
+      chat: async () => { chatCalls += 1; throw new Error("Selected-company deletion must be deterministic"); },
+      async *stream() { chatCalls += 1; throw new Error("Selected-company deletion must be deterministic"); },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const question = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: {
+          message: "тепер видали це все, що тільки що створив",
+          conversationId: conversation.id,
+          contextType: "company",
+          companyId: company.id,
+        },
+      });
+      expect(question.statusCode).toBe(200);
+      expect(question.body).toContain("Ви хочете видалити вибрану компанію");
+      expect(question.body).toContain("Щойно створена компанія");
+      expect(question.body).not.toContain("Уточніть компанію");
+      expect((await store.listCompanies(alice)).items).toHaveLength(1);
+      expect(chatCalls).toBe(0);
+
+      const confirmed = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        payload: {
+          message: "Так, видали компанію Щойно створена компанія",
+          conversationId: conversation.id,
+          contextType: "company",
+          companyId: company.id,
+        },
+      });
+      expect(confirmed.statusCode).toBe(200);
+      expect(confirmed.body).toContain('"companyAction":{"action":"delete"');
+      expect((await store.listCompanies(alice)).items).toHaveLength(0);
+      expect(chatCalls).toBe(0);
+    } finally { await app.close(); }
+  });
+
+  it.each([
+    ["en", "Delete everything you just created", "Do you want", "Yes, delete company Acme"],
+    ["uk", "Тепер видали це все, що тільки що створив", "Ви хочете", "Так, видали компанію Acme"],
+    ["fr", "Supprime tout ce que tu viens de créer", "Voulez-vous", "Oui, supprime l’entreprise Acme"],
+    ["de", "Lösche alles, was du gerade erstellt hast", "Möchten Sie", "Ja, lösche das Unternehmen Acme"],
+    ["es", "Elimina todo lo que acabas de crear", "¿Quieres", "Sí, elimina la empresa Acme"],
+    ["it", "Elimina tutto ciò che hai appena creato per questa azienda", "Vuoi", "Sì, elimina l’azienda Acme"],
+    ["pl", "Usuń wszystko, co właśnie utworzyłeś", "Czy chcesz", "Tak, usuń firmę Acme"],
+    ["pt", "Exclua tudo o que acabou de criar", "Deseja", "Sim, exclua a empresa Acme"],
+    ["nl", "Verwijder alles wat je zojuist hebt gemaakt", "Wil je", "Ja, verwijder bedrijf Acme"],
+    ["tr", "Az önce oluşturduğun her şeyi sil", "Seçili", "Evet, Acme şirketini sil"],
+    ["ru", "Удали всё, что только что создал", "Вы хотите", "Да, удали компанию Acme"],
+    ["zh", "删除刚刚创建的全部内容", "您要删除", "是的，删除公司 Acme"],
+    ["ja", "今作成したものをすべて削除して", "選択した会社", "はい、会社 Acme を削除"],
+    ["ko", "방금 만든 모든 것을 삭제해", "선택한 회사", "예, 회사 Acme 삭제"],
+    ["ar", "احذف كل ما أنشأته للتو", "هل تريد", "نعم، احذف الشركة Acme"],
+    ["hi", "अभी बनाई गई सब चीज़ें हटा दें", "क्या आप", "हाँ, कंपनी Acme हटाएँ"],
+  ])("confirms and deletes an implicitly selected company in %s", async (language, request, questionStart, confirmation) => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Acme" }, `delete-all-${language}`);
+    expect(detectCompanyChatLanguage(request)).toBe(language);
+    expect(CompanyChatActions.isPotentialMutationRequest(request)).toBe(true);
+    const question = await CompanyChatActions.deleteConfirmationMessage(alice, store, request, company.id);
+    expect(question).toContain(questionStart);
+    expect(question).toContain("**Acme**");
+    const action = await CompanyChatActions.buildDeterministicAction(alice, store, confirmation, company.id);
+    expect(action).toContain('"action":"delete"');
+    const result = await CompanyChatActions.extractAndExecute(alice, action!, store, `delete-all-${language}`, {
+      requestMessage: confirmation,
+      selectedCompanyId: company.id,
+    });
+    expect(result.companyAction?.action).toBe("delete");
+    expect((await store.listCompanies(alice)).items).toHaveLength(0);
+  });
+
   it("lists owned companies when a delete request has no selected company", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.createCompany(alice, { name: "Alpha" }, "list-alpha");

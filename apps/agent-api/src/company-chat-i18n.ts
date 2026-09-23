@@ -65,6 +65,8 @@ export function detectCompanyChatLanguage(message = ""): CompanyChatLanguage {
   if (/\p{Script=Han}/u.test(message)) return "zh";
   if (/\p{Script=Arabic}/u.test(message)) return "ar";
   if (/\p{Script=Devanagari}/u.test(message)) return "hi";
+  if (/\b(?:lösche|entferne|gerade\s+erstellt)\b/iu.test(message)) return "de";
+  if (/\b(?:verwijder|zojuist\s+(?:hebt\s+)?gemaakt)\b/iu.test(message)) return "nl";
   if (/[іїєґ]/iu.test(message) || /\b(?:створи|створити|додай|видали|зміни|компанію|компанії|агента|агентів|мені|будь ласка|потрібно|хочу)\b/iu.test(message)) return "uk";
   if (/\p{Script=Cyrillic}/u.test(message)) return "ru";
   if (/[ąćęłńśźż]/iu.test(message)) return "pl";
