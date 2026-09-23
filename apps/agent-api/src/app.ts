@@ -618,11 +618,13 @@ export function buildApp(config: AppConfig = {}) {
       allowedModelIds: addedModels.map((model) => model.id),
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       requestMessage,
+      selectedCompanyId: route?.selectedCompanyId,
+      onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Company action execution failed"),
     });
   }
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
-    const managementRequest = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage));
+    const managementRequest = Boolean(requestMessage && (WorkspaceChatActions.isManagementRequest(requestMessage) || ((route?.selectedCompanyId || route?.selectedBusinessId) && WorkspaceChatActions.isPotentialMutationRequest(requestMessage))));
     if (!/```workspace-action/i.test(content) && !managementRequest) return { cleanText: content, workspaceAction: undefined, companyRunId: undefined };
     const dependencies = {
       store: workspaceStore,
@@ -662,6 +664,7 @@ export function buildApp(config: AppConfig = {}) {
       requestMessage,
       selectedCompanyId: route?.selectedCompanyId,
       selectedBusinessId: route?.selectedBusinessId,
+      onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId, selectedBusinessId: route?.selectedBusinessId }, "Workspace action execution failed"),
     });
   }
 
@@ -1423,7 +1426,7 @@ export function buildApp(config: AppConfig = {}) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        if (prompt && (CompanyChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt))) {
+        if (prompt && (CompanyChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
           const result = await runNeutralMessage(auth, prompt, undefined, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } };
@@ -1660,7 +1663,7 @@ export function buildApp(config: AppConfig = {}) {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
-          if (CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message)) {
+          if (CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
             const result = await runNeutralMessage(auth, message, undefined, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: { contextType: "none", workspaceId: auth.workspaceId, userId: auth.userId, businessId: null, companyId: null, agentId: null } });
           } else {

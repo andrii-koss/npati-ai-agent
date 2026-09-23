@@ -25,7 +25,77 @@ type CompanyDirective = {
 
 const companyFields = new Set(["name", "businessId", "website", "industry", "description", "productsServices", "languages", "brandTone", "companyInstructions", "status"]);
 const agentFields = new Set(["name", "role", "description", "systemInstruction", "promptGuidelines", "recommendedPrompts", "modelId", "fallbackModelId", "tools", "isActive", "sortOrder", "positionX", "positionY"]);
-const toolIds = new Set(["storage.agent_knowledge_retrieval", "storage.company_memory", "research.web_search", "browser.web_fetch", "web.crawl", "mcp", "files", "system.text-to-speech", "exec", "Knowledge", "Company Memory", "Web Search", "Web Fetch", "Crawler", "MCP", "Files", "Text-to-Speech", "Code Mode / Exec"]);
+const toolIds = new Set(["storage.agent_knowledge_retrieval", "storage.company_memory", "research.web_search", "browser.web_fetch", "web.crawl", "mcp", "files", "system.text-to-speech", "exec"]);
+const toolAliases = new Map([
+  ["knowledge", "storage.agent_knowledge_retrieval"],
+  ["company memory", "storage.company_memory"],
+  ["web search", "research.web_search"],
+  ["web fetch", "browser.web_fetch"],
+  ["crawler", "web.crawl"],
+  ["mcp", "mcp"],
+  ["files", "files"],
+  ["text to speech", "system.text-to-speech"],
+  ["code mode exec", "exec"],
+]);
+
+function normalizedLabel(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/[\s_\-/]+/g, " ").replace(/[^\p{L}\p{N} .]+/gu, "").trim();
+}
+
+function normalizeTool(value: string): string {
+  if (toolIds.has(value)) return value;
+  const label = normalizedLabel(value)
+    .replace(/\b(?:low|medium|high|critical)\b/giu, "")
+    .replace(/\bapproval required\b/giu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return toolAliases.get(label) ?? value;
+}
+
+const agentFieldAliases: Record<string, string> = {
+  systeminstruction: "systemInstruction",
+  systemprompt: "systemInstruction",
+  promptguidelines: "promptGuidelines",
+  recommendedprompts: "recommendedPrompts",
+  toolsandcapabilities: "tools",
+  toolscapabilities: "tools",
+  capabilities: "tools",
+  toolids: "tools",
+  modelid: "modelId",
+  fallbackmodelid: "fallbackModelId",
+  isactive: "isActive",
+  sortorder: "sortOrder",
+  positionx: "positionX",
+  positiony: "positionY",
+};
+
+function normalizeAgentFields(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  const expanded: Record<string, unknown> = { ...source };
+  if (source.instructions && typeof source.instructions === "object" && !Array.isArray(source.instructions)) {
+    Object.assign(expanded, source.instructions);
+    delete expanded.instructions;
+  } else if (typeof source.instructions === "string" && source.systemInstruction === undefined) {
+    expanded.systemInstruction = source.instructions;
+    delete expanded.instructions;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(expanded)) {
+    const compactKey = rawKey.toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+    const key = agentFieldAliases[compactKey] ?? rawKey;
+    let item = rawValue;
+    if (key === "recommendedPrompts" && typeof item === "string") {
+      item = item.split(/\r?\n/).map((part) => part.trim()).filter(Boolean);
+    }
+    if (key === "tools" && typeof item === "string") {
+      item = item.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
+    }
+    if (key === "tools" && Array.isArray(item)) item = item.map((part) => typeof part === "string" ? normalizeTool(part) : part);
+    result[key] = item;
+  }
+  return result;
+}
 
 function safeMarkdown(value: unknown): string {
   return String(value ?? "").replace(/```/g, "'''").trim();
@@ -68,6 +138,7 @@ ${agentLines}
 }
 
 function fields(value: unknown, allowed: Set<string>, kind: string): Record<string, unknown> {
+  if (kind === "agent") value = normalizeAgentFields(value);
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${kind} fields must be an object`);
   const input = value as Record<string, unknown>;
@@ -89,8 +160,9 @@ function fields(value: unknown, allowed: Set<string>, kind: string): Record<stri
   return input;
 }
 
-async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive: CompanyDirective): Promise<Company> {
+async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive: CompanyDirective, selectedCompanyId?: string): Promise<Company> {
   if (directive.companyId) return store.getCompany(auth, directive.companyId);
+  if (!directive.companyName?.trim() && selectedCompanyId) return store.getCompany(auth, selectedCompanyId);
   const name = directive.companyName?.trim().toLocaleLowerCase();
   if (!name) throw new Error("Specify the company name or ID");
   let cursor: string | undefined;
@@ -105,7 +177,9 @@ async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive:
   return matches[0]!;
 }
 
-function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | null): CompanyAgent {
+function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | null, fallbackId?: string): CompanyAgent {
+  if (!id && !name && fallbackId) id = fallbackId;
+  if (!id && !name && agents.length === 1) return agents[0]!;
   const matches = id ? agents.filter((agent) => agent.id === id) : agents.filter((agent) => agent.name.toLocaleLowerCase() === name?.trim().toLocaleLowerCase());
   if (matches.length !== 1) throw new Error(matches.length ? "More than one agent has this name; use its ID" : "Agent not found in this company");
   return matches[0]!;
@@ -117,7 +191,8 @@ export class CompanyChatActions {
   }
 
   static isManagementRequest(message: string): boolean {
-    return /(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|змін\p{L}*|онов\p{L}*|видал\p{L}*|приб\p{L}*|налашт\p{L}*|признач\p{L}*|зроб\p{L}*|побуд\p{L}*|засну\p{L}*|організ\p{L}*)\s+(?:(?:нов\p{L}*|мо\p{L}*|цю|цього|головн\p{L}*|ще|мені|таку|такого)\s+){0,3}(?:компан\p{L}*|агент\p{L}*|оркестратор\p{L}*|схем\p{L}*\s+агент\p{L}*|сітку\s+агент\p{L}*|структур\p{L}*\s+агент\p{L}*)/iu.test(message)
+    return /(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|зроб|побуд|засну|організ)\p{L}*)(?=[\s\S]*(?:компан|агент|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
+      || /(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
       || /\b(?:create|add|edit|update|change|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
       || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
       || isLocalizedCompanyManagementRequest(message);
@@ -148,7 +223,7 @@ Valid creation example (replace the names and other values with the user's reque
 \`\`\`company-action
 {"action":"create","fields":{"name":"Example Studio","industry":"Design"},"agents":[{"action":"create","fields":{"name":"Coordinator","role":"Lead"},"main":true},{"action":"create","fields":{"name":"Researcher","role":"Research"},"parentAgentName":"Coordinator"}]}
 \`\`\`
-For an existing company use action "update" or "delete" and its owned companyId, or its exact companyName. For an existing agent use agentId or its exact agentName. Each agent entry uses its own action "create", "update", or "delete". Allowed company fields: name, businessId, website, industry, description, productsServices, languages, brandTone, companyInstructions, status. Allowed agent fields: name, role, description, systemInstruction, promptGuidelines, recommendedPrompts, modelId, fallbackModelId, tools, isActive, sortOrder, positionX, positionY. Omit all unspecified fields, especially modelId and fallbackModelId.
+For an existing company use action "update" or "delete" and its owned companyId, or its exact companyName. When a company is selected in chat, always use that selected companyId for references such as "the company" or "in the company". For an existing agent use agentId or its exact agentName. When the user refers to "the agent" without a name, use the selected company's mainAgentId. Each agent entry uses its own action "create", "update", or "delete". Allowed company fields: name, businessId, website, industry, description, productsServices, languages, brandTone, companyInstructions, status. Allowed agent fields: name, role, description, systemInstruction, promptGuidelines, recommendedPrompts, modelId, fallbackModelId, tools, isActive, sortOrder, positionX, positionY. UI labels map as follows: Instructions/System Instruction -> systemInstruction, Prompt Guidelines -> promptGuidelines, Recommended Prompts -> recommendedPrompts (array), Tools & Capabilities -> tools (array). Omit all unspecified fields, especially modelId and fallbackModelId.
 For update, include only fields that should change. To change only agents, use action update with no company fields. For a new company, include its agents in the same directive, set main:true on exactly one coordinator, and link subagents with parentAgentName (or parentAgentId). To delete an agent use an agent action delete; to delete the whole company use company action delete. For a linked business, fields.businessId must be an owned business ID. Only use model IDs that the user has already added in My Models; omit modelId for NPATI Auto. Agent tools must be supported capability IDs. Do not put a card around a deletion. End with a link to /settings/company when useful.`;
   }
 
@@ -156,6 +231,8 @@ For update, include only fields that should change. To change only agents, use a
     allowedModelIds?: string[];
     beforeDeleteCompany?: (companyId: string) => Promise<void>;
     requestMessage?: string;
+    selectedCompanyId?: string;
+    onError?: (error: unknown) => void;
   } = {}): Promise<{ cleanText: string; companyAction?: { action: CompanyOperation; companyId: string; companyName: string; agentCount: number } }> {
     const matches = [...text.matchAll(/```company-action\s*([\s\S]*?)```/gi)];
     const match = matches[0];
@@ -188,7 +265,7 @@ For update, include only fields that should change. To change only agents, use a
         company = await store.createCompany(auth, companyPatch as CompanyInput, `chat-company:${key}`);
         changed = true;
       } else {
-        company = await ownedCompany(store, auth, directive);
+        company = await ownedCompany(store, auth, directive, options.selectedCompanyId);
         if (directive.action === "delete") {
           if (directive.agents?.length) throw new Error("Do not combine company deletion with agent changes");
           await options.beforeDeleteCompany?.(company.id);
@@ -222,7 +299,8 @@ For update, include only fields that should change. To change only agents, use a
           if (operation.main) requestedMain = agent;
           if (operation.parentAgentId !== undefined || operation.parentAgentName !== undefined) parentChanges.push({ childId: agent.id, parentId: operation.parentAgentId, parentName: operation.parentAgentName });
         } else {
-          const current = findAgent(agents, operation.agentId, operation.agentName);
+          const implicitAgentId = operation.action === "update" ? company.mainAgentId : undefined;
+          const current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
           if (operation.action === "delete") {
             await store.deleteCompanyAgent(auth, company.id, current.id, current.revision);
             agents = agents.filter((agent) => agent.id !== current.id);
@@ -251,7 +329,8 @@ For update, include only fields that should change. To change only agents, use a
         changed = true;
       } else company = latest;
       return { cleanText: companyResultMessage(directive.action, company, agents, options.requestMessage), companyAction: { action: directive.action, companyId: company.id, companyName: company.name, agentCount: agents.length } };
-    } catch {
+    } catch (error) {
+      options.onError?.(error);
       const labels = companyChatCopy(options.requestMessage);
       return { cleanText: `${labels.failed}. ${changed ? labels.partial : labels.unchanged}` };
     }
