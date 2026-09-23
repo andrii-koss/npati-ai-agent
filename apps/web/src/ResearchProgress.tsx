@@ -109,19 +109,25 @@ function pageLabel(page: PageState) {
   }
 }
 
-function progressModel(events: ChatProgressEvent[]) {
+export function progressModel(events: ChatProgressEvent[]) {
   let query = "";
   let searchComplete = false;
   let generationActive = false;
   let generationFailed = false;
-  let action: PageState | undefined;
+  const actions = new Map<string, PageState>();
   const pages = new Map<string, PageState>();
 
   for (const event of events) {
     if (event.type === "search_started") query = event.query ?? query;
     if (event.type === "search_results_received") searchComplete = true;
-    if (event.type === "action_started" && event.url && event.domain) action = { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" };
-    if (event.type === "action_completed" && event.url && event.domain) action = { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "completed" };
+    if (event.type === "action_started" && event.url && event.domain) {
+      for (const [key, action] of actions) if (action.status === "active") actions.set(key, { ...action, status: "completed" });
+      actions.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" });
+    }
+    if (event.type === "action_completed" && event.url && event.domain) {
+      const previous = actions.get(event.url);
+      actions.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title ?? previous?.title, status: "completed" });
+    }
     if (event.type === "page_fetch_started" && event.url && event.domain) {
       for (const [key, page] of pages) if (page.status === "active") pages.delete(key);
       pages.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" });
@@ -154,7 +160,7 @@ function progressModel(events: ChatProgressEvent[]) {
     }
   }
 
-  return { query, searchComplete, generationActive, generationFailed, action, pages: [...pages.values()] };
+  return { query, searchComplete, generationActive, generationFailed, actions: [...actions.values()], pages: [...pages.values()] };
 }
 
 export function ResearchProgressPanel({
@@ -206,14 +212,14 @@ export function ResearchProgressPanel({
       <span className="research-active-text">Searching web: {model.query}</span>
     </div>}
 
-    {model.action && <div className={"research-page-row " + model.action.status}>
-      <span className="research-progress-state">{model.action.status === "completed" ? "✓" : "●"}</span>
-      <DomainIcon domain={model.action.domain} />
-      <a className={model.action.status === "active" ? "research-active-text" : undefined} href={model.action.url}>
-        <strong>{model.action.domain}</strong>
-        <small>{pageLabel(model.action)}</small>
+    <div className="research-page-list">{model.actions.map((action) => <div className={"research-page-row " + action.status} key={action.key}>
+      <span className="research-progress-state">{action.status === "completed" ? "✓" : "●"}</span>
+      <DomainIcon domain={action.domain} />
+      <a className={action.status === "active" ? "research-active-text" : undefined} href={action.url}>
+        <strong>{action.domain}</strong>
+        <small>{pageLabel(action)}</small>
       </a>
-    </div>}
+    </div>)}</div>
 
     <div className="research-page-list">{model.pages.map((page) => <div className={"research-page-row " + page.status} key={page.key}>
       <span className="research-progress-state">{page.status === "completed" ? "✓" : page.status === "failed" ? "!" : "●"}</span>
