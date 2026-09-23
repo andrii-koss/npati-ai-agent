@@ -10,6 +10,7 @@ import { SPEECH_VOICES } from "./speech-voices";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { confirmModal, alertModal } from "./ConfirmDialog";
+import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 
 type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -814,29 +815,6 @@ const businessThinkingSteps = [
   "Preparing a response…",
 ];
 
-type ChatMutationOperation = "create" | "update" | "delete";
-
-function detectChatMutation(message: string, hasSelectedContext: boolean): ChatMutationOperation | null {
-  const target = /(?:компан|агент|бізнес|ціл|автоматизац|контент|пам(?:'|’)?ят|company|agent|business|goal|automation|content|memory|пол|field|instruction|prompt|role|tool)/iu.test(message)
-    || hasSelectedContext && /(?:її|його|їх|\bit\b|\bthis\b)/iu.test(message);
-  if (!target) return null;
-  if (/(?:видал|приб|удал|delete|remove)/iu.test(message)) return "delete";
-  if (/(?:створ|дод|созда|добав|create|add)/iu.test(message)) return "create";
-  if (/(?:заповн|змін|онов|редаг|налашт|признач|нада|измен|обнов|редакт|настро|назнач|fill|change|update|edit|configure|assign|set)/iu.test(message)) return "update";
-  return null;
-}
-
-function mutationProgressTarget(message: string, companySelected: boolean) {
-  if (companySelected || /(?:компан|агент|company|agent)/iu.test(message)) {
-    return { url: "https://ai.npati.com/settings/company", domain: "ai.npati.com", title: "Company settings" };
-  }
-  if (/(?:автоматизац|automation)/iu.test(message)) return { url: "https://ai.npati.com/settings/automations", domain: "ai.npati.com", title: "Automations" };
-  if (/(?:контент|content)/iu.test(message)) return { url: "https://ai.npati.com/settings/content", domain: "ai.npati.com", title: "Content Hub" };
-  if (/(?:пам(?:'|’)?ят|memory)/iu.test(message)) return { url: "https://ai.npati.com/settings/memory", domain: "ai.npati.com", title: "Business Memory" };
-  if (/(?:бізнес|ціл|business|goal)/iu.test(message)) return { url: "https://ai.npati.com/settings/business", domain: "ai.npati.com", title: "Business settings" };
-  return { url: "https://ai.npati.com/settings", domain: "ai.npati.com", title: "Settings" };
-}
-
 function expandDeleteConfirmationReply(message: string, history: Message[]): string {
   if (!/^(?:так|так,|підтверджую|да|да,|подтверждаю|yes|yes,|confirm)$/iu.test(message.trim())) return message;
   const previous = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
@@ -1351,14 +1329,17 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
-    const pendingMutation = detectChatMutation(requestMessage, Boolean(companyId || business));
-    const mutationTarget = pendingMutation ? mutationProgressTarget(requestMessage, Boolean(companyId)) : null;
+    const mutationContext = companyId ? "company" : business ? "business" : "none";
+    const pendingMutation = detectChatMutationOperation(requestMessage, mutationContext);
+    const mutationTargets = pendingMutation
+      ? mutationProgressTargets(requestMessage, mutationContext)
+      : [];
     const mutationStartedAt = Date.now();
     setActiveTurn(optimisticContent);
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    if (mutationTarget) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
+    for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
     setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     window.requestAnimationFrame(() => {
       activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1427,7 +1408,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         const remaining = 2_000 - (Date.now() - mutationStartedAt);
         if (remaining > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
       }
-      if (mutationTarget) enqueueProgress({ type: "action_completed", ...mutationTarget, timestamp: new Date().toISOString() });
+      const finalMutationTarget = mutationTargets.at(-1);
+      if (finalMutationTarget) enqueueProgress({ type: "action_completed", ...finalMutationTarget, timestamp: new Date().toISOString() });
       flushDeltas();
       setReplyMeta(result);
       const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
