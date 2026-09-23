@@ -355,13 +355,21 @@ export function ConversationalChat(props: ChatProps) {
 function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...props }: ChatProps & { userId?: string }) {
   const { overview } = useWorkspace();
   const key = "npati_chat_context:" + (userId ?? "anonymous");
-  const [selection, setSelection] = useState(() => {
-    if (neutralChat) return "none";
-    if (businessRoute) return "business";
+  const readStoredSelection = () => {
     try {
-      const stored = sessionStorage.getItem(key);
-      if (stored && stored.startsWith("company:")) return stored;
-    } catch {}
+      return sessionStorage.getItem(key) ?? localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const persistSelection = (value: string) => {
+    try { sessionStorage.setItem(key, value); } catch {}
+    try { localStorage.setItem(key, value); } catch {}
+  };
+  const [selection, setSelection] = useState(() => {
+    if (businessRoute) return "business";
+    const stored = readStoredSelection();
+    if (stored && stored.startsWith("company:")) return stored;
     return "none";
   });
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
@@ -370,45 +378,56 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 
   useEffect(() => {
     let active = true;
+    const loadCompanies = async (preferredCompanyId?: string) => {
+      const value = await request<{ companies: Array<{ id: string; name: string }> }>("/companies?limit=100");
+      if (!active) return;
+      setCompanies(value.companies);
+      if (businessRoute || businessSetup) return;
+      setSelection((current) => {
+        const preferred = preferredCompanyId ? `company:${preferredCompanyId}` : "";
+        if (preferred && value.companies.some((company) => `company:${company.id}` === preferred)) {
+          persistSelection(preferred);
+          return preferred;
+        }
+        if (current.startsWith("company:") && value.companies.some((company) => `company:${company.id}` === current)) {
+          persistSelection(current);
+          return current;
+        }
+        const stored = readStoredSelection();
+        if (stored?.startsWith("company:") && value.companies.some((company) => `company:${company.id}` === stored)) {
+          persistSelection(stored);
+          return stored;
+        }
+        const fallback = value.companies[0] ? `company:${value.companies[0].id}` : "none";
+        persistSelection(fallback);
+        return fallback;
+      });
+    };
+    const handleCompanyChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; companyId?: string }>).detail;
+      void loadCompanies(detail?.action === "create" ? detail.companyId : undefined).catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : "Could not refresh companies");
+      });
+    };
+    window.addEventListener("npati:company-changed", handleCompanyChanged);
     if (userId) {
-      void request<{ companies: Array<{ id: string; name: string }> }>("/companies?limit=100")
-        .then((v) => {
-          if (!active) return;
-          setCompanies(v.companies);
-          if (!businessRoute && !businessSetup && !neutralChat) {
-            setSelection((curr) => {
-              if (curr.startsWith("company:") && v.companies.some((c) => "company:" + c.id === curr)) {
-                return curr;
-              }
-              try {
-                const stored = sessionStorage.getItem(key);
-                if (stored?.startsWith("company:") && v.companies.some((c) => "company:" + c.id === stored)) {
-                  return stored;
-                }
-              } catch {}
-              const firstCompany = v.companies[0];
-              if (firstCompany) {
-                const firstId = "company:" + firstCompany.id;
-                try { sessionStorage.setItem(key, firstId); } catch {}
-                return firstId;
-              }
-              return "none";
-            });
-          }
-        })
+      void loadCompanies()
         .catch((e) => {
           if (active) setError(e.message);
         });
     }
-    return () => { active = false; };
-  }, [userId, key, businessRoute, businessSetup, neutralChat]);
+    return () => {
+      active = false;
+      window.removeEventListener("npati:company-changed", handleCompanyChanged);
+    };
+  }, [userId, key, businessRoute, businessSetup]);
 
   async function choose(value: string) {
     setSwitching(true);
     setError("");
     try {
       setSelection(value);
-      try { sessionStorage.setItem(key, value); } catch {}
+      persistSelection(value);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not switch context");
     } finally {
@@ -453,15 +472,12 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
         onChange={(e) => void choose(e.target.value)}
         className="composer-context-select"
       >
-        {companies.length === 0 ? (
-          <option value="none">No company</option>
-        ) : (
-          companies.map((c) => (
+        <option value="none">No company</option>
+        {companies.map((c) => (
             <option key={c.id} value={"company:" + c.id} title={c.name}>
               {c.name}
             </option>
-          ))
-        )}
+          ))}
       </select>
     </div>
   );
@@ -493,7 +509,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
         />
       )}
       <BusinessChatPage
-        key={`${key}:${props.initialConversationId ?? "root"}:${selectValue}`}
+        key={`${key}:${props.initialConversationId ?? "root"}`}
         {...props}
         neutralChat={selectValue === "none"}
         companyId={selectValue.startsWith("company:") ? selectValue.slice(8) : undefined}

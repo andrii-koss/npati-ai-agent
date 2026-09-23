@@ -310,6 +310,8 @@ describe("company management from chat", () => {
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Update company website", contextType: "company", companyId: company.id } });
       expect(response.statusCode).toBe(200);
       expect(response.body).toContain('"companyAction":{"action":"update"');
+      expect(response.body).toContain('"activeContext":{"contextType":"company"');
+      expect(response.body).toContain(`"companyId":"${company.id}"`);
       expect((await store.getCompany(alice, company.id)).website).toBe("https://selected.example");
     } finally { await app.close(); }
   });
