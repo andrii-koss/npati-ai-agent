@@ -147,7 +147,7 @@ export const ChatContextSwitcherContext = createContext<ReactNode>(null);
 
 export function BusinessSwitcher() {
   const { overview, loading, switchBusiness } = useWorkspace();
-  if (loading) return <span className="business-switcher muted">Loading workspace…</span>;
+  if (loading) return null;
   if (!overview?.businesses.length) return <Link className="business-switcher setup" to="/business">Set up business</Link>;
   return (
     <label className="business-switcher">
