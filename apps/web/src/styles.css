@@ -355,16 +355,27 @@ a {
 }
 
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  width: 230px;
   z-index: 50;
   height: 100vh;
+  height: 100dvh;
   padding: 0 18px 25px;
   display: flex;
   flex-direction: column;
   color: var(--npati-black);
   background: white;
   border-right: 1px solid #e5e5e5;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar-brand {
@@ -754,6 +765,7 @@ a {
 }
 
 .workspace-content {
+  grid-column: 2;
   padding: 64px clamp(28px, 6vw, 90px);
   min-width: 0;
 }
@@ -6751,6 +6763,21 @@ body:has(.editable-card-modal-backdrop),
 html:has(.npati-dialog-backdrop),
 body:has(.npati-dialog-backdrop) {
   overflow: hidden !important;
+}
+
+html:has(.company-drawer-backdrop) .sidebar,
+body:has(.company-drawer-backdrop) .sidebar,
+html:has(.drawer-backdrop) .sidebar,
+body:has(.drawer-backdrop) .sidebar,
+html:has(.auth-modal-backdrop) .sidebar,
+body:has(.auth-modal-backdrop) .sidebar,
+html:has(.editable-card-modal-backdrop) .sidebar,
+body:has(.editable-card-modal-backdrop) .sidebar,
+html:has(.npati-dialog-backdrop) .sidebar,
+body:has(.npati-dialog-backdrop) .sidebar {
+  top: 0 !important;
+  left: 0 !important;
+  transform: none !important;
 }
 
 .company-drawer-backdrop {
