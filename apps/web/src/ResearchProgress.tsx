@@ -129,7 +129,14 @@ export function progressModel(events: ChatProgressEvent[]) {
       actions.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title ?? previous?.title, status: "completed" });
     }
     if (event.type === "page_fetch_started" && event.url && event.domain) {
-      for (const [key, page] of pages) if (page.status === "active") pages.delete(key);
+      for (const [key, page] of pages) {
+        if (page.status !== "active") continue;
+        if (event.domain === "file" && page.domain === "file") {
+          pages.set(key, { ...page, status: "completed" });
+        } else {
+          pages.delete(key);
+        }
+      }
       pages.set(event.url, { key: event.url, url: event.url, domain: event.domain, title: event.title, status: "active" });
     }
     if ((event.type === "page_fetch_completed" || event.type === "page_fetch_failed") && event.url && event.domain) {
@@ -145,11 +152,25 @@ export function progressModel(events: ChatProgressEvent[]) {
         status: event.type === "page_fetch_completed" ? "completed" : "failed",
       });
     }
-    if (event.type === "research_completed" || event.type === "final_generation_started") {
+    if (event.type === "research_completed") {
       for (const [key, page] of pages) {
-        if (page.status === "active") {
+        if (page.status === "active") pages.set(key, { ...page, status: "completed" });
+      }
+    }
+    if (event.type === "final_generation_started") {
+      for (const [key, page] of pages) {
+        // Uploaded files remain visibly active while the model analyzes their
+        // extracted or visual content and writes the answer.
+        if (page.domain === "file" && page.status !== "failed") {
+          pages.set(key, { ...page, status: "active" });
+        } else if (page.status === "active") {
           pages.set(key, { ...page, status: "completed" });
         }
+      }
+    }
+    if (event.type === "final_generation_completed") {
+      for (const [key, page] of pages) {
+        if (page.domain === "file" && page.status === "active") pages.set(key, { ...page, status: "completed" });
       }
     }
     if (event.type === "final_generation_started") generationActive = true;
@@ -157,6 +178,9 @@ export function progressModel(events: ChatProgressEvent[]) {
     if (event.type === "final_generation_failed") {
       generationActive = false;
       generationFailed = true;
+      for (const [key, page] of pages) {
+        if (page.domain === "file" && page.status === "active") pages.set(key, { ...page, status: "failed" });
+      }
     }
   }
 

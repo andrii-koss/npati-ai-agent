@@ -65,6 +65,20 @@ describe("chat mutation progress", () => {
     ]);
   });
 
+  it("keeps uploaded image filenames active until final generation completes", () => {
+    const timestamp = new Date().toISOString();
+    const activeEvents: ChatProgressEvent[] = [
+      { type: "page_fetch_started", timestamp, url: "file://invoice-2026.png", domain: "file", title: "invoice-2026.png" },
+      { type: "final_generation_started", timestamp },
+    ];
+    expect(progressModel(activeEvents).pages).toEqual([
+      expect.objectContaining({ domain: "file", title: "invoice-2026.png", status: "active" }),
+    ]);
+    expect(progressModel([...activeEvents, { type: "final_generation_completed", timestamp }]).pages).toEqual([
+      expect.objectContaining({ domain: "file", title: "invoice-2026.png", status: "completed" }),
+    ]);
+  });
+
   it("detects creation requests in all 16 supported languages", () => {
     const messages = [
       "Create a business idea, goal, and company",
