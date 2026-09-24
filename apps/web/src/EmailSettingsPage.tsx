@@ -368,7 +368,7 @@ export function EmailSettingsPage() {
   }, [accounts, searchQuery, agents]);
 
   return (
-    <main className="automations-container">
+    <main className="goals-container automations-container">
       {/* Hero Header matching /settings/automations and /settings/activity */}
       <header className="inspector-header automations-header">
         <div className="automations-header-top">
@@ -405,7 +405,7 @@ export function EmailSettingsPage() {
               </select>
             )}
             <Link
-              to="/inbox"
+              to="/settings/email/inbox"
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -923,7 +923,7 @@ export function EmailSettingsPage() {
       {/* ADD / EDIT ACCOUNT DRAWER */}
       {drawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDrawerOpen(false)}>
-          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(680px, 95vw)" }}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
                 <span>Email Accounts</span>
@@ -1139,7 +1139,7 @@ export function EmailSettingsPage() {
       {/* DNS AUDIT DRAWER */}
       {dnsDrawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDnsDrawerOpen(false)}>
-          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(640px, 95vw)" }}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
                 <span>DNS Verification</span>
