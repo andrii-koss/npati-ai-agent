@@ -113,7 +113,7 @@ export function EmailSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Editor Drawer
+  // Email Account Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [emailAddress, setEmailAddress] = useState("");
@@ -148,10 +148,43 @@ export function EmailSettingsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
 
-  // Rules & Templates & Contacts & Analytics
+  // Rules Drawer & State
   const [rules, setRules] = useState<EmailRule[]>([]);
+  const [ruleDrawerOpen, setRuleDrawerOpen] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [ruleName, setRuleName] = useState("");
+  const [ruleSubjectKeywords, setRuleSubjectKeywords] = useState("");
+  const [ruleSenders, setRuleSenders] = useState("");
+  const [ruleIsVip, setRuleIsVip] = useState(false);
+  const [rulePriority, setRulePriority] = useState("");
+  const [ruleMode, setRuleMode] = useState("");
+  const [ruleAgentId, setRuleAgentId] = useState("");
+  const [savingRule, setSavingRule] = useState(false);
+
+  // Templates Drawer & State
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [templateTitle, setTemplateTitle] = useState("");
+  const [templateCategory, setTemplateCategory] = useState("general");
+  const [templateSubject, setTemplateSubject] = useState("");
+  const [templateBody, setTemplateBody] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
+  // Contacts Drawer & State
   const [contacts, setContacts] = useState<ContactItem[]>([]);
+  const [contactDrawerOpen, setContactDrawerOpen] = useState(false);
+  const [editingContactEmail, setEditingContactEmail] = useState<string | null>(null);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactCompanyName, setContactCompanyName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactIsVip, setContactIsVip] = useState(false);
+  const [contactIsBlacklisted, setContactIsBlacklisted] = useState(false);
+  const [contactNotes, setContactNotes] = useState("");
+  const [savingContact, setSavingContact] = useState(false);
+
+  // Analytics
   const [analytics, setAnalytics] = useState<EmailAnalytics | null>(null);
 
   // Load companies
@@ -243,12 +276,12 @@ export function EmailSettingsPage() {
     setImapPort(account.imapConfig.port || 993);
     setImapSecure(account.imapConfig.secure ?? true);
     setImapUser(account.imapConfig.username || "");
-    setImapPass(account.imapConfig.password || "");
+    setImapPass("");
     setSmtpHost(account.smtpConfig.host || "");
     setSmtpPort(account.smtpConfig.port || 465);
     setSmtpSecure(account.smtpConfig.secure ?? true);
     setSmtpUser(account.smtpConfig.username || "");
-    setSmtpPass(account.smtpConfig.password || "");
+    setSmtpPass("");
     setGreeting(account.signatureConfig.greeting || "Hello,");
     setSignature(account.signatureConfig.signature || "Best regards,\nCustomer Support");
     setFooter(account.signatureConfig.footer || "");
@@ -271,8 +304,20 @@ export function EmailSettingsPage() {
         testMode,
         confidenceThreshold,
         languageMode,
-        imapConfig: { host: imapHost, port: imapPort, secure: imapSecure, username: imapUser, password: imapPass },
-        smtpConfig: { host: smtpHost, port: smtpPort, secure: smtpSecure, username: smtpUser, password: smtpPass },
+        imapConfig: {
+          host: imapHost,
+          port: imapPort,
+          secure: imapSecure,
+          username: imapUser,
+          ...(imapPass ? { password: imapPass } : {}),
+        },
+        smtpConfig: {
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpSecure,
+          username: smtpUser,
+          ...(smtpPass ? { password: smtpPass } : {}),
+        },
         signatureConfig: { greeting, signature, footer },
       };
 
@@ -328,7 +373,6 @@ export function EmailSettingsPage() {
           ? "IMAP & SMTP connections verified successfully!"
           : res.result.error || "Connection failed. Check host credentials.",
       });
-      // Refresh accounts status
       const updated = await api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`);
       setAccounts(updated.accounts);
     } catch (err: any) {
@@ -353,6 +397,221 @@ export function EmailSettingsPage() {
       setNotice(err.message);
     } finally {
       setDnsChecking(false);
+    }
+  }
+
+  // --- Rule Drawer Handlers ---
+  function openCreateRuleDrawer() {
+    setEditingRuleId(null);
+    setRuleName("");
+    setRuleSubjectKeywords("");
+    setRuleSenders("");
+    setRuleIsVip(false);
+    setRulePriority("high");
+    setRuleMode("");
+    setRuleAgentId(agents[0]?.id || "");
+    setRuleDrawerOpen(true);
+  }
+
+  function openEditRuleDrawer(rule: EmailRule) {
+    setEditingRuleId(rule.id);
+    setRuleName(rule.name);
+    setRuleSubjectKeywords((rule.conditions?.subjectKeywords || []).join(", "));
+    setRuleSenders((rule.conditions?.senders || []).join(", "));
+    setRuleIsVip(rule.conditions?.isVip || false);
+    setRulePriority(rule.actions?.setPriority || "");
+    setRuleMode(rule.actions?.setMode || "");
+    setRuleAgentId(rule.actions?.setAgentId || "");
+    setRuleDrawerOpen(true);
+  }
+
+  async function handleSaveRule(e: FormEvent) {
+    e.preventDefault();
+    if (!ruleName.trim()) {
+      setNotice("Rule name is required.");
+      return;
+    }
+    setSavingRule(true);
+    try {
+      const conditions: any = {};
+      const kw = ruleSubjectKeywords.split(",").map((s) => s.trim()).filter(Boolean);
+      if (kw.length > 0) conditions.subjectKeywords = kw;
+      const senders = ruleSenders.split(",").map((s) => s.trim()).filter(Boolean);
+      if (senders.length > 0) conditions.senders = senders;
+      if (ruleIsVip) conditions.isVip = true;
+
+      const actions: any = {};
+      if (rulePriority) actions.setPriority = rulePriority;
+      if (ruleMode) actions.setMode = ruleMode;
+      if (ruleAgentId) actions.setAgentId = ruleAgentId;
+
+      if (editingRuleId) {
+        const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules/${editingRuleId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: ruleName.trim(),
+            conditions,
+            actions,
+          }),
+        });
+        setRules((prev) => prev.map((r) => (r.id === editingRuleId ? res.rule : r)));
+      } else {
+        const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: ruleName.trim(),
+            conditions,
+            actions,
+          }),
+        });
+        setRules((prev) => [...prev, res.rule]);
+      }
+      setRuleDrawerOpen(false);
+    } catch (err: any) {
+      setNotice(err.message);
+    } finally {
+      setSavingRule(false);
+    }
+  }
+
+  async function handleDeleteRule(id: string) {
+    const ok = await confirmModal({
+      title: "Delete Routing Rule",
+      message: "Are you sure you want to delete this email rule?",
+      isDanger: true,
+    });
+    if (!ok) return;
+    try {
+      await api(`/companies/${selectedCompanyId}/email-inbox/rules/${id}`, { method: "DELETE" });
+      setRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (err: any) {
+      setNotice(err.message);
+    }
+  }
+
+  // --- Template Drawer Handlers ---
+  function openCreateTemplateDrawer() {
+    setEditingTemplateId(null);
+    setTemplateTitle("");
+    setTemplateCategory("general");
+    setTemplateSubject("");
+    setTemplateBody("Hello {{customer_name}},\n\nThank you for reaching out to {{company_name}}.\n\nBest regards,\n{{agent_name}}");
+    setTemplateDrawerOpen(true);
+  }
+
+  function openEditTemplateDrawer(t: EmailTemplate) {
+    setEditingTemplateId(t.id);
+    setTemplateTitle(t.title);
+    setTemplateCategory(t.category);
+    setTemplateSubject(t.subjectTemplate || "");
+    setTemplateBody(t.bodyTemplate);
+    setTemplateDrawerOpen(true);
+  }
+
+  async function handleSaveTemplate(e: FormEvent) {
+    e.preventDefault();
+    if (!templateTitle.trim() || !templateBody.trim()) {
+      setNotice("Title and body template are required.");
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      if (editingTemplateId) {
+        const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates/${editingTemplateId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            title: templateTitle.trim(),
+            category: templateCategory,
+            subjectTemplate: templateSubject.trim() || null,
+            bodyTemplate: templateBody,
+          }),
+        });
+        setTemplates((prev) => prev.map((t) => (t.id === editingTemplateId ? res.template : t)));
+      } else {
+        const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: templateTitle.trim(),
+            category: templateCategory,
+            subjectTemplate: templateSubject.trim() || undefined,
+            bodyTemplate: templateBody,
+          }),
+        });
+        setTemplates((prev) => [...prev, res.template]);
+      }
+      setTemplateDrawerOpen(false);
+    } catch (err: any) {
+      setNotice(err.message);
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  async function handleDeleteTemplate(id: string) {
+    const ok = await confirmModal({
+      title: "Delete Response Template",
+      message: "Are you sure you want to delete this email template?",
+      isDanger: true,
+    });
+    if (!ok) return;
+    try {
+      await api(`/companies/${selectedCompanyId}/email-inbox/templates/${id}`, { method: "DELETE" });
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+    } catch (err: any) {
+      setNotice(err.message);
+    }
+  }
+
+  // --- Contact Drawer Handlers ---
+  function openCreateContactDrawer(isVip = true) {
+    setEditingContactEmail(null);
+    setContactEmail("");
+    setContactName("");
+    setContactCompanyName("");
+    setContactPhone("");
+    setContactIsVip(isVip);
+    setContactIsBlacklisted(false);
+    setContactNotes("");
+    setContactDrawerOpen(true);
+  }
+
+  function openEditContactDrawer(c: ContactItem) {
+    setEditingContactEmail(c.email);
+    setContactEmail(c.email);
+    setContactName(c.name || "");
+    setContactCompanyName(c.companyName || "");
+    setContactPhone(c.phone || "");
+    setContactIsVip(c.isVip);
+    setContactIsBlacklisted(c.isBlacklisted);
+    setContactNotes(c.notes || "");
+    setContactDrawerOpen(true);
+  }
+
+  async function handleSaveContact(e: FormEvent) {
+    e.preventDefault();
+    if (!contactEmail.includes("@")) {
+      setNotice("A valid email address is required.");
+      return;
+    }
+    setSavingContact(true);
+    try {
+      const res = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(contactEmail.trim().toLowerCase())}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: contactName.trim() || undefined,
+          companyName: contactCompanyName.trim() || undefined,
+          phone: contactPhone.trim() || undefined,
+          isVip: contactIsVip,
+          isBlacklisted: contactIsBlacklisted,
+          notes: contactNotes.trim() || undefined,
+        }),
+      });
+      setContacts((prev) => [...prev.filter((c) => c.email !== res.contact.email), res.contact]);
+      setContactDrawerOpen(false);
+    } catch (err: any) {
+      setNotice(err.message);
+    } finally {
+      setSavingContact(false);
     }
   }
 
@@ -680,15 +939,7 @@ export function EmailSettingsPage() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              onClick={async () => {
-                const name = prompt("Rule name (e.g. Invoices to Billing Agent):");
-                if (!name) return;
-                const r = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules`, {
-                  method: "POST",
-                  body: JSON.stringify({ name, conditions: { subjectKeywords: ["invoice", "payment", "billing"] }, actions: { setPriority: "high" } }),
-                });
-                setRules((prev) => [...prev, r.rule]);
-              }}
+              onClick={openCreateRuleDrawer}
             >
               + Add Rule
             </button>
@@ -696,10 +947,10 @@ export function EmailSettingsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ width: "240px" }}>Rule Name</th>
+                <th style={{ width: "220px" }}>Rule Name</th>
                 <th>Conditions</th>
                 <th>Actions</th>
-                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "100px", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -710,39 +961,86 @@ export function EmailSettingsPage() {
                   </td>
                 </tr>
               ) : (
-                rules.map((rule) => (
-                  <tr key={rule.id}>
-                    <td>
-                      <div className="automation-title-cell">
-                        <strong>{rule.name}</strong>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="automation-cron-pill">
-                        {JSON.stringify(rule.conditions)}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="automation-agent-badge">
-                        {JSON.stringify(rule.actions)}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="automation-actions-cell">
-                        <button
-                          type="button"
-                          className="automation-action-btn danger"
-                          onClick={async () => {
-                            await api(`/companies/${selectedCompanyId}/email-inbox/rules/${rule.id}`, { method: "DELETE" });
-                            setRules((prev) => prev.filter((r) => r.id !== rule.id));
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                rules.map((rule) => {
+                  const kw = rule.conditions?.subjectKeywords ?? [];
+                  const senders = rule.conditions?.senders ?? [];
+                  const isVip = rule.conditions?.isVip;
+
+                  return (
+                    <tr key={rule.id}>
+                      <td>
+                        <div className="automation-title-cell">
+                          <strong>{rule.name}</strong>
+                          <span className="automation-status-btn active" style={{ cursor: "default", fontSize: 10, padding: "2px 8px" }}>
+                            <span className="automation-status-dot" />
+                            Active
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          {kw.length > 0 && (
+                            <span className="automation-cron-pill">
+                              Keywords: {kw.join(", ")}
+                            </span>
+                          )}
+                          {senders.length > 0 && (
+                            <span className="automation-cron-pill">
+                              Senders: {senders.join(", ")}
+                            </span>
+                          )}
+                          {isVip && (
+                            <span className="automation-cron-pill" style={{ color: "#b45309", background: "#fef3c7" }}>
+                              ★ VIP Only
+                            </span>
+                          )}
+                          {!kw.length && !senders.length && !isVip && (
+                            <span style={{ color: "#64748b", fontSize: 12 }}>All inbound messages</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          {rule.actions?.setPriority && (
+                            <span className="automation-agent-badge" style={{ textTransform: "capitalize" }}>
+                              Priority: {rule.actions.setPriority}
+                            </span>
+                          )}
+                          {rule.actions?.setMode && (
+                            <span className="automation-agent-badge" style={{ textTransform: "capitalize" }}>
+                              Mode: {rule.actions.setMode}
+                            </span>
+                          )}
+                          {rule.actions?.setAgentId && (
+                            <span className="automation-agent-badge">
+                              🤖 {agents.find((a) => a.id === rule.actions.setAgentId)?.name || "Agent"}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="automation-actions-cell">
+                          <button
+                            type="button"
+                            className="automation-action-btn"
+                            onClick={() => openEditRuleDrawer(rule)}
+                            title="Edit rule"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="automation-action-btn danger"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            title="Delete rule"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -760,17 +1058,7 @@ export function EmailSettingsPage() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              onClick={async () => {
-                const title = prompt("Template title (e.g. Greeting & Acknowledgment):");
-                if (!title) return;
-                const body = prompt("Template body text:");
-                if (!body) return;
-                const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates`, {
-                  method: "POST",
-                  body: JSON.stringify({ title, bodyTemplate: body }),
-                });
-                setTemplates((prev) => [...prev, res.template]);
-              }}
+              onClick={openCreateTemplateDrawer}
             >
               + Add Template
             </button>
@@ -781,7 +1069,7 @@ export function EmailSettingsPage() {
                 <th style={{ width: "240px" }}>Title</th>
                 <th style={{ width: "160px" }}>Category</th>
                 <th>Body Preview</th>
-                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "140px", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -797,13 +1085,16 @@ export function EmailSettingsPage() {
                     <td>
                       <div className="automation-title-cell">
                         <strong>{t.title}</strong>
+                        {t.subjectTemplate && (
+                          <small style={{ color: "#64748b", fontSize: 11 }}>Re: {t.subjectTemplate}</small>
+                        )}
                       </div>
                     </td>
                     <td>
-                      <span className="automation-cron-pill">{t.category}</span>
+                      <span className="automation-cron-pill" style={{ textTransform: "capitalize" }}>{t.category}</span>
                     </td>
                     <td>
-                      <div className="automation-prompt-preview" style={{ maxWidth: "500px" }}>
+                      <div className="automation-prompt-preview" style={{ maxWidth: "480px" }}>
                         {t.bodyTemplate}
                       </div>
                     </td>
@@ -811,11 +1102,17 @@ export function EmailSettingsPage() {
                       <div className="automation-actions-cell">
                         <button
                           type="button"
+                          className="automation-action-btn"
+                          onClick={() => openEditTemplateDrawer(t)}
+                          title="Edit template"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
                           className="automation-action-btn danger"
-                          onClick={async () => {
-                            await api(`/companies/${selectedCompanyId}/email-inbox/templates/${t.id}`, { method: "DELETE" });
-                            setTemplates((prev) => prev.filter((item) => item.id !== t.id));
-                          }}
+                          onClick={() => handleDeleteTemplate(t.id)}
+                          title="Delete template"
                         >
                           Delete
                         </button>
@@ -840,18 +1137,9 @@ export function EmailSettingsPage() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              onClick={async () => {
-                const email = prompt("Contact email (e.g. partner@corp.com):");
-                if (!email) return;
-                const name = prompt("Contact name:") || undefined;
-                const res = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts`, {
-                  method: "POST",
-                  body: JSON.stringify({ email, name, isVip: true }),
-                });
-                setContacts((prev) => [...prev.filter((c) => c.email !== email), res.contact]);
-              }}
+              onClick={() => openCreateContactDrawer(true)}
             >
-              + Add VIP Contact
+              + Add Contact
             </button>
           </div>
           <table className="automations-table">
@@ -861,7 +1149,7 @@ export function EmailSettingsPage() {
                 <th style={{ minWidth: "140px" }}>VIP Status</th>
                 <th style={{ minWidth: "140px" }}>Blacklisted</th>
                 <th>Notes</th>
-                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "160px", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -878,12 +1166,15 @@ export function EmailSettingsPage() {
                       <div className="automation-title-cell">
                         <strong>{contact.name || contact.email}</strong>
                         <p>{contact.email}</p>
+                        {contact.companyName && (
+                          <small style={{ color: "#64748b", fontSize: 11 }}>{contact.companyName}</small>
+                        )}
                       </div>
                     </td>
                     <td>
                       <span className={`automation-status-btn ${contact.isVip ? "active" : "paused"}`} style={{ cursor: "default" }}>
                         <span className="automation-status-dot" />
-                        {contact.isVip ? "VIP Sender" : "Standard"}
+                        {contact.isVip ? "★ VIP Sender" : "Standard"}
                       </span>
                     </td>
                     <td>
@@ -897,6 +1188,14 @@ export function EmailSettingsPage() {
                     </td>
                     <td>
                       <div className="automation-actions-cell">
+                        <button
+                          type="button"
+                          className="automation-action-btn"
+                          onClick={() => openEditContactDrawer(contact)}
+                          title="Edit contact"
+                        >
+                          Edit
+                        </button>
                         <button
                           type="button"
                           className="automation-action-btn"
@@ -931,7 +1230,7 @@ export function EmailSettingsPage() {
               </div>
               <button
                 type="button"
-                className="automations-drawer-close"
+                className="company-drawer-close"
                 aria-label="Close"
                 onClick={() => setDrawerOpen(false)}
               >
@@ -1136,6 +1435,341 @@ export function EmailSettingsPage() {
         </div>
       )}
 
+      {/* ADD / EDIT ROUTING RULE DRAWER */}
+      {ruleDrawerOpen && (
+        <div className="company-drawer-backdrop" onMouseDown={() => setRuleDrawerOpen(false)}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
+            <header>
+              <div>
+                <span>Email Routing</span>
+                <h2>{editingRuleId ? "Edit Routing Rule" : "Add Routing Rule"}</h2>
+              </div>
+              <button
+                type="button"
+                className="company-drawer-close"
+                aria-label="Close"
+                onClick={() => setRuleDrawerOpen(false)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </header>
+
+            <form onSubmit={handleSaveRule}>
+              <section>
+                <h3>Rule Parameters</h3>
+                <label>
+                  <span>Rule Name</span>
+                  <input
+                    required
+                    placeholder="e.g. Invoices to Billing Agent"
+                    value={ruleName}
+                    onChange={(e) => setRuleName(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <section>
+                <h3>Trigger Conditions</h3>
+                <label>
+                  <span>Subject Keywords (comma-separated)</span>
+                  <input
+                    placeholder="invoice, payment, bill, receipt"
+                    value={ruleSubjectKeywords}
+                    onChange={(e) => setRuleSubjectKeywords(e.target.value)}
+                  />
+                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>Triggers when subject contains any of these words.</small>
+                </label>
+                <label>
+                  <span>Sender Email or Domain Patterns (comma-separated)</span>
+                  <input
+                    placeholder="billing@, *@partner.com"
+                    value={ruleSenders}
+                    onChange={(e) => setRuleSenders(e.target.value)}
+                  />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={ruleIsVip}
+                    onChange={(e) => setRuleIsVip(e.target.checked)}
+                  />
+                  <span>Apply only to VIP senders</span>
+                </label>
+              </section>
+
+              <section>
+                <h3>Automated Actions</h3>
+                <label>
+                  <span>Set Priority</span>
+                  <select value={rulePriority} onChange={(e) => setRulePriority(e.target.value)}>
+                    <option value="">Don't change priority</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="high">High</option>
+                    <option value="normal">Normal</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Set AI Operational Mode</span>
+                  <select value={ruleMode} onChange={(e) => setRuleMode(e.target.value)}>
+                    <option value="">Don't change mode</option>
+                    <option value="autopilot">Autopilot Mode (Auto-reply)</option>
+                    <option value="approval">Approval Mode (Draft for human)</option>
+                    <option value="manual">Manual Mode</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Assign to Agent</span>
+                  <select value={ruleAgentId} onChange={(e) => setRuleAgentId(e.target.value)}>
+                    <option value="">Don't reassign agent</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.role})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </section>
+
+              <footer style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setRuleDrawerOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button-primary automations-action-primary"
+                  disabled={savingRule}
+                >
+                  {savingRule ? "Saving..." : editingRuleId ? "Save Rule" : "Create Rule"}
+                </button>
+              </footer>
+            </form>
+          </aside>
+        </div>
+      )}
+
+      {/* ADD / EDIT RESPONSE TEMPLATE DRAWER */}
+      {templateDrawerOpen && (
+        <div className="company-drawer-backdrop" onMouseDown={() => setTemplateDrawerOpen(false)}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
+            <header>
+              <div>
+                <span>Response Templates</span>
+                <h2>{editingTemplateId ? "Edit Response Template" : "Add Response Template"}</h2>
+              </div>
+              <button
+                type="button"
+                className="company-drawer-close"
+                aria-label="Close"
+                onClick={() => setTemplateDrawerOpen(false)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </header>
+
+            <form onSubmit={handleSaveTemplate}>
+              <section>
+                <h3>Template Details</h3>
+                <label>
+                  <span>Template Title</span>
+                  <input
+                    required
+                    placeholder="e.g. Greeting & Ticket Acknowledgment"
+                    value={templateTitle}
+                    onChange={(e) => setTemplateTitle(e.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Category</span>
+                  <select value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)}>
+                    <option value="general">General</option>
+                    <option value="support">Customer Support</option>
+                    <option value="billing">Billing & Invoices</option>
+                    <option value="sales">Sales & Partnerships</option>
+                    <option value="information">Information & Onboarding</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Subject Line Template (Optional)</span>
+                  <input
+                    placeholder="e.g. Re: {{customer_name}} - Ticket Confirmation"
+                    value={templateSubject}
+                    onChange={(e) => setTemplateSubject(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <section>
+                <h3>Body Content & Placeholders</h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: "#64748b", alignSelf: "center", marginRight: 4 }}>Insert variable:</span>
+                  {["{{customer_name}}", "{{company_name}}", "{{agent_name}}", "{{date}}"].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className="automation-cron-pill"
+                      style={{ cursor: "pointer", background: "#f1f5f9" }}
+                      onClick={() => setTemplateBody((prev) => prev + " " + v)}
+                    >
+                      + {v}
+                    </button>
+                  ))}
+                </div>
+                <label>
+                  <span>Body Template Text</span>
+                  <textarea
+                    required
+                    rows={6}
+                    placeholder="Hello {{customer_name}},&#10;&#10;Thank you for contacting {{company_name}}..."
+                    value={templateBody}
+                    onChange={(e) => setTemplateBody(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <footer style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setTemplateDrawerOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button-primary automations-action-primary"
+                  disabled={savingTemplate}
+                >
+                  {savingTemplate ? "Saving..." : editingTemplateId ? "Save Template" : "Create Template"}
+                </button>
+              </footer>
+            </form>
+          </aside>
+        </div>
+      )}
+
+      {/* ADD / EDIT CONTACT DRAWER */}
+      {contactDrawerOpen && (
+        <div className="company-drawer-backdrop" onMouseDown={() => setContactDrawerOpen(false)}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
+            <header>
+              <div>
+                <span>Client Contacts</span>
+                <h2>{editingContactEmail ? "Edit Client Contact" : "Add Client Contact"}</h2>
+              </div>
+              <button
+                type="button"
+                className="company-drawer-close"
+                aria-label="Close"
+                onClick={() => setContactDrawerOpen(false)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </header>
+
+            <form onSubmit={handleSaveContact}>
+              <section>
+                <h3>Contact Information</h3>
+                <label>
+                  <span>Email Address</span>
+                  <input
+                    type="email"
+                    required
+                    disabled={!!editingContactEmail}
+                    placeholder="client@company.com"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Full Name</span>
+                  <input
+                    placeholder="John Doe"
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Company Name</span>
+                  <input
+                    placeholder="Acme Corp"
+                    value={contactCompanyName}
+                    onChange={(e) => setContactCompanyName(e.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Phone Number</span>
+                  <input
+                    placeholder="+1 555 019 2834"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <section>
+                <h3>Status & Priority Flags</h3>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={contactIsVip}
+                    onChange={(e) => setContactIsVip(e.target.checked)}
+                  />
+                  <span>★ Mark as VIP Client (prioritizes emails automatically)</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={contactIsBlacklisted}
+                    onChange={(e) => setContactIsBlacklisted(e.target.checked)}
+                  />
+                  <span>🚫 Blacklist Sender (route incoming messages to spam)</span>
+                </label>
+                <label style={{ marginTop: 10 }}>
+                  <span>Notes & Internal Comments</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Key account details, preference notes..."
+                    value={contactNotes}
+                    onChange={(e) => setContactNotes(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <footer style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setContactDrawerOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button-primary automations-action-primary"
+                  disabled={savingContact}
+                >
+                  {savingContact ? "Saving..." : editingContactEmail ? "Save Contact" : "Add Contact"}
+                </button>
+              </footer>
+            </form>
+          </aside>
+        </div>
+      )}
+
       {/* DNS AUDIT DRAWER */}
       {dnsDrawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDnsDrawerOpen(false)}>
@@ -1147,7 +1781,7 @@ export function EmailSettingsPage() {
               </div>
               <button
                 type="button"
-                className="automations-drawer-close"
+                className="company-drawer-close"
                 aria-label="Close"
                 onClick={() => setDnsDrawerOpen(false)}
               >

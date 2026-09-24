@@ -223,6 +223,11 @@ export class EmailInboxRepository {
     const updated: CompanyEmailAccount = {
       ...existing,
       ...patch,
+      imapConfig: { ...existing.imapConfig, ...(patch.imapConfig || {}) },
+      smtpConfig: { ...existing.smtpConfig, ...(patch.smtpConfig || {}) },
+      rateLimits: { ...existing.rateLimits, ...(patch.rateLimits || {}) },
+      signatureConfig: { ...existing.signatureConfig, ...(patch.signatureConfig || {}) },
+      followupConfig: { ...existing.followupConfig, ...(patch.followupConfig || {}) },
       updatedAt: now,
     };
 
@@ -647,6 +652,35 @@ export class EmailInboxRepository {
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
+  async findMessageByExternalId(
+    ctx: AuthContext,
+    companyId: string,
+    externalMessageId: string
+  ): Promise<CompanyEmailMessage | null> {
+    const normalizedMessageId = externalMessageId.trim();
+    if (!normalizedMessageId) return null;
+
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailMessage>(
+        `SELECT ${messageCols} FROM company_email_messages
+         WHERE workspace_id = $1 AND company_id = $2 AND message_id = $3
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [ctx.workspaceId, companyId, normalizedMessageId]
+      );
+      return result.rows[0] ?? null;
+    }
+
+    return (
+      Array.from(this.memoryMessages.values()).find(
+        (message) =>
+          message.workspaceId === ctx.workspaceId &&
+          message.companyId === companyId &&
+          message.messageId === normalizedMessageId
+      ) ?? null
+    );
+  }
+
   async createMessage(
     ctx: AuthContext,
     companyId: string,
@@ -797,6 +831,30 @@ export class EmailInboxRepository {
   // =========================================================================
   // 5. Contacts & Customer Cards (Items 10 & 20)
   // =========================================================================
+
+  async listContacts(ctx: AuthContext, companyId: string): Promise<CompanyEmailContact[]> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailContact>(
+        `SELECT id, workspace_id AS "workspaceId", company_id AS "companyId", email,
+                name, company_name AS "companyName", phone, is_vip AS "isVip",
+                is_blacklisted AS "isBlacklisted", notes, last_activity_at AS "lastActivityAt",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM company_email_contacts
+         WHERE workspace_id = $1 AND company_id = $2
+         ORDER BY is_vip DESC, last_activity_at DESC NULLS LAST, email ASC`,
+        [ctx.workspaceId, companyId]
+      );
+      return result.rows;
+    }
+
+    return Array.from(this.memoryContacts.values())
+      .filter((contact) => contact.workspaceId === ctx.workspaceId && contact.companyId === companyId)
+      .sort((a, b) => {
+        if (a.isVip !== b.isVip) return a.isVip ? -1 : 1;
+        const activityDelta = new Date(b.lastActivityAt || 0).getTime() - new Date(a.lastActivityAt || 0).getTime();
+        return activityDelta || a.email.localeCompare(b.email);
+      });
+  }
 
   async getContact(ctx: AuthContext, companyId: string, email: string): Promise<CompanyEmailContact | null> {
     const cleanEmail = email.trim().toLowerCase();
@@ -969,6 +1027,50 @@ export class EmailInboxRepository {
     this.memoryTemplates.delete(templateId);
   }
 
+  async updateTemplate(
+    ctx: AuthContext,
+    companyId: string,
+    templateId: string,
+    patch: { title?: string; category?: string; subjectTemplate?: string | null; bodyTemplate?: string }
+  ): Promise<CompanyEmailTemplate> {
+    const templates = await this.listTemplates(ctx, companyId);
+    const existing = templates.find((t) => t.id === templateId);
+    if (!existing) throw new Error("Template not found.");
+
+    const updated: CompanyEmailTemplate = {
+      ...existing,
+      title: patch.title !== undefined ? patch.title.trim() : existing.title,
+      category: (patch.category as any) ?? existing.category,
+      subjectTemplate: patch.subjectTemplate !== undefined ? patch.subjectTemplate : existing.subjectTemplate,
+      bodyTemplate: patch.bodyTemplate !== undefined ? patch.bodyTemplate : existing.bodyTemplate,
+    };
+
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailTemplate>(
+        `UPDATE company_email_templates SET
+          title = $1, category = $2, subject_template = $3, body_template = $4
+         WHERE workspace_id = $5 AND company_id = $6 AND id = $7
+         RETURNING id, workspace_id AS "workspaceId", company_id AS "companyId",
+                   email_account_id AS "emailAccountId", title, category,
+                   subject_template AS "subjectTemplate", body_template AS "bodyTemplate",
+                   created_at AS "createdAt"`,
+        [
+          updated.title,
+          updated.category,
+          updated.subjectTemplate,
+          updated.bodyTemplate,
+          ctx.workspaceId,
+          companyId,
+          templateId,
+        ]
+      );
+      return result.rows[0]!;
+    }
+
+    this.memoryTemplates.set(templateId, updated);
+    return updated;
+  }
+
   // =========================================================================
   // 7. Email Rules (Item 25)
   // =========================================================================
@@ -1051,6 +1153,54 @@ export class EmailInboxRepository {
       return;
     }
     this.memoryRules.delete(ruleId);
+  }
+
+  async updateRule(
+    ctx: AuthContext,
+    companyId: string,
+    ruleId: string,
+    patch: { name?: string; conditions?: any; actions?: any; isActive?: boolean; priorityOrder?: number }
+  ): Promise<CompanyEmailRule> {
+    const rules = await this.listRules(ctx, companyId);
+    const existing = rules.find((r) => r.id === ruleId);
+    if (!existing) throw new Error("Rule not found.");
+
+    const now = new Date().toISOString();
+    const updated: CompanyEmailRule = {
+      ...existing,
+      name: patch.name !== undefined ? patch.name.trim() : existing.name,
+      conditions: patch.conditions !== undefined ? patch.conditions : existing.conditions,
+      actions: patch.actions !== undefined ? patch.actions : existing.actions,
+      isActive: patch.isActive !== undefined ? patch.isActive : existing.isActive,
+      priorityOrder: patch.priorityOrder !== undefined ? patch.priorityOrder : existing.priorityOrder,
+      updatedAt: now,
+    };
+
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailRule>(
+        `UPDATE company_email_rules SET
+          name = $1, conditions = $2, actions = $3, is_active = $4, priority_order = $5, updated_at = $6
+         WHERE workspace_id = $7 AND company_id = $8 AND id = $9
+         RETURNING id, workspace_id AS "workspaceId", company_id AS "companyId",
+                   email_account_id AS "emailAccountId", name, priority_order AS "priorityOrder",
+                   is_active AS "isActive", conditions, actions, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        [
+          updated.name,
+          JSON.stringify(updated.conditions),
+          JSON.stringify(updated.actions),
+          updated.isActive,
+          updated.priorityOrder,
+          now,
+          ctx.workspaceId,
+          companyId,
+          ruleId,
+        ]
+      );
+      return result.rows[0]!;
+    }
+
+    this.memoryRules.set(ruleId, updated);
+    return updated;
   }
 
   // =========================================================================

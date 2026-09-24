@@ -13,6 +13,17 @@ import type {
   EmailPriority,
 } from "./email-inbox-types";
 
+function matchesEmailPattern(email: string, rawPattern: string): boolean {
+  const value = email.trim().toLowerCase();
+  const pattern = rawPattern.trim().toLowerCase();
+  if (!pattern) return false;
+  if (pattern.startsWith("@")) return value.endsWith(pattern);
+  if (!pattern.includes("*")) return value === pattern;
+
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`, "i").test(value);
+}
+
 export interface InboundEmailPayload {
   from: string;
   to?: string;
@@ -21,13 +32,15 @@ export interface InboundEmailPayload {
   bodyHtml?: string;
   attachments?: EmailAttachment[];
   threadKey?: string;
+  messageId?: string;
+  inReplyTo?: string;
 }
 
 export interface InboundProcessingResult {
   thread: CompanyEmailThread;
   inboundMessage: CompanyEmailMessage;
   aiMessage?: CompanyEmailMessage | null;
-  actionTaken: "manual_recorded" | "draft_created" | "autopilot_sent" | "test_mode_simulated" | "blacklisted_ignored" | "collision_hold" | "rate_limited_draft";
+  actionTaken: "manual_recorded" | "draft_created" | "autopilot_sent" | "test_mode_simulated" | "blacklisted_ignored" | "collision_hold" | "rate_limited_draft" | "duplicate_ignored";
   confidenceScore: number;
   priority: EmailPriority;
   detectedLanguage: string;
@@ -100,6 +113,28 @@ export class EmailAIProcessor {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    // IMAP retries and reconnects can deliver the same provider message more
+    // than once. Treat a provider Message-ID as an idempotency key before any
+    // contact, thread, AI, or outbound side effects are executed.
+    const externalMessageId = payload.messageId?.trim();
+    if (externalMessageId) {
+      const existingMessage = await this.repo.findMessageByExternalId(ctx, companyId, externalMessageId);
+      if (existingMessage) {
+        const existingThread = await this.repo.getThread(ctx, companyId, existingMessage.threadId);
+        if (existingThread) {
+          return {
+            thread: existingThread,
+            inboundMessage: existingMessage,
+            aiMessage: null,
+            actionTaken: "duplicate_ignored",
+            confidenceScore: existingThread.aiConfidenceScore ?? 0,
+            priority: existingThread.priority,
+            detectedLanguage: existingThread.detectedLanguage || effectiveAccount.fallbackLanguage,
+          };
+        }
+      }
+    }
 
     // 4. Contact & VIP / Blacklist Check (Items 10 & 20)
     let contact = await this.repo.getContact(ctx, companyId, parsed.from);
@@ -184,6 +219,8 @@ export class EmailAIProcessor {
       subject: parsed.subject,
       bodyText: parsed.bodyText,
       bodyHtml: payload.bodyHtml,
+      messageId: externalMessageId,
+      inReplyTo: payload.inReplyTo,
       attachments: payload.attachments || [],
       deliveryStatus: "delivered",
     });
@@ -209,23 +246,33 @@ export class EmailAIProcessor {
 
     for (const rule of rules) {
       if (!rule.isActive) continue;
+      if (rule.emailAccountId && rule.emailAccountId !== effectiveAccount.id) continue;
       const cond = rule.conditions;
       let matched = true;
 
       if (cond.senders && cond.senders.length > 0) {
-        if (!cond.senders.some((s) => s.toLowerCase() === parsed.from.toLowerCase())) matched = false;
+        if (!cond.senders.some((senderPattern) => matchesEmailPattern(parsed.from, senderPattern))) matched = false;
       }
       if (cond.domains && cond.domains.length > 0) {
         const senderDomain = parsed.from.split("@")[1]?.toLowerCase();
-        if (!cond.domains.some((d) => d.toLowerCase() === senderDomain)) matched = false;
+        if (!senderDomain || !cond.domains.some((domain) => matchesEmailPattern(senderDomain, domain))) matched = false;
       }
       if (cond.subjectKeywords && cond.subjectKeywords.length > 0) {
-        if (!cond.subjectKeywords.some((k) => textForAnalysis.includes(k.toLowerCase()))) matched = false;
+        const normalizedSubject = parsed.subject.toLowerCase();
+        if (!cond.subjectKeywords.some((keyword) => normalizedSubject.includes(keyword.toLowerCase()))) matched = false;
       }
+      if (cond.bodyKeywords && cond.bodyKeywords.length > 0) {
+        const normalizedBody = parsed.bodyText.toLowerCase();
+        if (!cond.bodyKeywords.some((keyword) => normalizedBody.includes(keyword.toLowerCase()))) matched = false;
+      }
+      if (cond.priority && cond.priority !== priority) matched = false;
+      if (cond.hasAttachments !== undefined && cond.hasAttachments !== ((parsed.attachments?.length || 0) > 0)) matched = false;
+      if (cond.language && cond.language.toLowerCase() !== detectedLanguage.toLowerCase()) matched = false;
       if (cond.isVip !== undefined && cond.isVip !== isVip) matched = false;
 
       if (matched) {
         if (rule.actions.setMode) effectiveMode = rule.actions.setMode;
+        if (rule.actions.requireApproval) effectiveMode = "approval";
         if (rule.actions.setPriority) priority = rule.actions.setPriority;
         if (rule.actions.setAgentId) overrideAgentId = rule.actions.setAgentId;
         if (rule.actions.autoReplyTemplateId) autoReplyTemplateId = rule.actions.autoReplyTemplateId;
@@ -238,6 +285,8 @@ export class EmailAIProcessor {
     if (collision.locked) {
       thread = await this.repo.updateThread(ctx, companyId, thread.id, {
         status: "waiting_human",
+        priority,
+        assignedAgentId: overrideAgentId,
       });
       return {
         thread,
@@ -255,6 +304,7 @@ export class EmailAIProcessor {
       thread = await this.repo.updateThread(ctx, companyId, thread.id, {
         status: "waiting_human",
         priority,
+        assignedAgentId: overrideAgentId,
       });
       return {
         thread,
@@ -312,6 +362,8 @@ export class EmailAIProcessor {
 
         thread = await this.repo.updateThread(ctx, companyId, thread.id, {
           status: "waiting_approval",
+          priority,
+          assignedAgentId: overrideAgentId,
           aiConfidenceScore: confidenceScore,
           aiClassificationSummary: `Rate limit triggered: ${rateLimit.reason}. Converted to draft.`,
         });
@@ -350,6 +402,8 @@ export class EmailAIProcessor {
 
         thread = await this.repo.updateThread(ctx, companyId, thread.id, {
           status: "draft_ready",
+          priority,
+          assignedAgentId: overrideAgentId,
           aiConfidenceScore: confidenceScore,
           aiClassificationSummary: "Test Mode: Autopilot simulated answer without external sending.",
         });
@@ -373,6 +427,8 @@ export class EmailAIProcessor {
 
         thread = await this.repo.updateThread(ctx, companyId, thread.id, {
           status: "answered",
+          priority,
+          assignedAgentId: overrideAgentId,
           aiConfidenceScore: confidenceScore,
           aiClassificationSummary: "AI Autopilot answered and dispatched reply.",
         });
@@ -396,6 +452,8 @@ export class EmailAIProcessor {
 
       thread = await this.repo.updateThread(ctx, companyId, thread.id, {
         status: meetsConfidence ? "draft_ready" : "waiting_approval",
+        priority,
+        assignedAgentId: overrideAgentId,
         aiConfidenceScore: confidenceScore,
         aiClassificationSummary: meetsConfidence
           ? "AI response draft prepared and ready for human review."

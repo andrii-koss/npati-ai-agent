@@ -560,7 +560,7 @@ async function prepareChatAttachments(
 }
 
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
   const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
   const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
   app.addHook("onClose", async () => { await activeSessionRegistry.close(); });
