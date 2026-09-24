@@ -503,7 +503,8 @@ describe("Agent API", () => {
     let secondUserPrompt = "";
     const aiEngine: AIEngine = {
       chat: async (request) => request.messages.some((item) => chatContentText(item.content).includes("Convert the user's spreadsheet edit request"))
-        ? { content: `\`\`\`spreadsheet-edit\n${JSON.stringify({ action: "add_column", newColumn: { header: "Статус", values: ["Готово", "В роботі"] } })}\n\`\`\`` }
+        // Some providers ignore the requested fence and return raw JSON.
+        ? { content: JSON.stringify({ action: "add_column", newColumn: { header: "npati адмін", values: ["Контроль і підтримка", "Запланувати"] } }) }
         : { content: "Conversation context." },
       async *stream(request) {
         streamCall += 1;
@@ -513,12 +514,12 @@ describe("Agent API", () => {
         }
         secondSystemPrompt = chatContentText(request.messages.find((item) => item.role === "system")?.content);
         secondUserPrompt = chatContentText(request.messages.at(-1)?.content);
-        // Reproduce the production failure: the model creates a detached
-        // Markdown table instead of emitting a spreadsheet-edit directive.
-        yield "| Feature | Owner | Статус |\n";
-        yield "| --- | --- | --- |\n";
-        yield "| OCR | Anna | Готово |\n";
-        yield "| PDF capture | Mark | В роботі |";
+        // Reproduce the production failure from the real conversation: prose
+        // followed by a detached TSV preview instead of an edit directive.
+        yield "Додам новий стовпець до вихідного листа.\n";
+        yield "Feature\tOwner\tnpati адмін\n";
+        yield "OCR\tAnna\tКонтроль і підтримка\n";
+        yield "PDF capture\tMark\tЗапланувати";
       },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
@@ -553,7 +554,7 @@ describe("Agent API", () => {
       payload: {
         contextType: "none",
         conversationId,
-        message: "Додай новий стовпець «Статус», заповни його та поверни змінений файл.",
+        message: "Додай новий стовпець «npati адмін», заповни його та поверни змінений файл.",
       },
     });
 
@@ -572,9 +573,9 @@ describe("Agent API", () => {
     const edited = new ExcelJS.Workbook();
     await edited.xlsx.load(download.rawPayload as any);
     const editedSheet = edited.getWorksheet("Roadmap")!;
-    expect(editedSheet.getRow(1).values).toEqual([undefined, "Feature", "Owner", "Статус"]);
-    expect(editedSheet.getRow(2).values).toEqual([undefined, "OCR", "Anna", "Готово"]);
-    expect(editedSheet.getRow(3).values).toEqual([undefined, "PDF capture", "Mark", "В роботі"]);
+    expect(editedSheet.getRow(1).values).toEqual([undefined, "Feature", "Owner", "npati адмін"]);
+    expect(editedSheet.getRow(2).values).toEqual([undefined, "OCR", "Anna", "Контроль і підтримка"]);
+    expect(editedSheet.getRow(3).values).toEqual([undefined, "PDF capture", "Mark", "Запланувати"]);
   });
 
   it("starts and exposes aggregate health", async () => {
