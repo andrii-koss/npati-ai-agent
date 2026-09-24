@@ -427,6 +427,49 @@ export function isSpreadsheetEditRequest(message: string): boolean {
   return edit && spreadsheet;
 }
 
+function explicitlyRequestsWebResearch(message: string): boolean {
+  return Boolean(extractTargetUrlOrDomain(message))
+    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|інтернет|веб|сайт|пошук|пошукай|проскануй\s+(?:сайт|веб)|интернет|сайт|поиск|найди\s+в\s+интернете|recherche\s+(?:web|internet)|im\s+internet|sitio\s+web|cerca\s+online|pesquise\s+na\s+internet|zoek\s+online|internette\s+ara|网络|网站|互联网|ウェブ|サイト|인터넷|웹사이트|الإنترنت|موقع|इंटरनेट|वेबसाइट)/iu.test(message);
+}
+
+const spreadsheetEditedCopies: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
+  en: "Done. I updated the uploaded spreadsheet and attached the edited file.",
+  uk: "Готово. Я оновив завантажену таблицю та прикріпив відредагований файл.",
+  fr: "Terminé. J’ai mis à jour la feuille de calcul importée et joint le fichier modifié.",
+  de: "Erledigt. Ich habe die hochgeladene Tabelle aktualisiert und die bearbeitete Datei angehängt.",
+  es: "Listo. Actualicé la hoja de cálculo cargada y adjunté el archivo editado.",
+  it: "Fatto. Ho aggiornato il foglio di calcolo caricato e allegato il file modificato.",
+  pl: "Gotowe. Zaktualizowałem przesłany arkusz i załączyłem edytowany plik.",
+  pt: "Pronto. Atualizei a planilha enviada e anexei o arquivo editado.",
+  nl: "Klaar. Ik heb het geüploade werkblad bijgewerkt en het bewerkte bestand bijgevoegd.",
+  tr: "Tamamlandı. Yüklenen tabloyu güncelledim ve düzenlenmiş dosyayı ekledim.",
+  ru: "Готово. Я обновил загруженную таблицу и прикрепил отредактированный файл.",
+  zh: "完成。我已更新上传的电子表格并附上编辑后的文件。",
+  ja: "完了しました。アップロードされたスプレッドシートを更新し、編集済みファイルを添付しました。",
+  ko: "완료했습니다. 업로드한 스프레드시트를 수정하고 편집된 파일을 첨부했습니다.",
+  ar: "تم. حدّثت جدول البيانات المرفوع وأرفقت الملف المعدّل.",
+  hi: "पूरा हुआ। मैंने अपलोड की गई स्प्रेडशीट अपडेट करके संपादित फ़ाइल संलग्न कर दी है।",
+};
+
+function spreadsheetEditedMessage(message: string): string {
+  return spreadsheetEditedCopies[detectCompanyChatLanguage(message)];
+}
+
+function addColumnDirectiveFromMarkdown(content: string, request: string) {
+  const quotedHeader = /[«“"']([^»”"']{1,80})[»”"']/u.exec(request)?.[1]?.trim();
+  const namedHeader = /(?:column|стовп(?:ець|ця)|колонк[ауи]|colonne|spalte|columna|colonna|kolumn[ęa]|coluna|kolom|sütun|列|열|عمود|कॉलम)\s+([\p{L}\p{N}_ -]{1,40})/iu.exec(request)?.[1]?.trim();
+  const header = quotedHeader || namedHeader;
+  if (!header) return undefined;
+  const rows = content.split(/\r?\n/).filter((line) => /^\s*\|.*\|\s*$/.test(line));
+  if (rows.length < 3) return undefined;
+  const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+  const headers = cells(rows[0]!);
+  const column = headers.findIndex((value) => value.toLocaleLowerCase() === header.toLocaleLowerCase());
+  if (column < 0 || !/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/u.test(rows[1]!)) return undefined;
+  const values = rows.slice(2).map((row) => cells(row)[column] ?? "");
+  return { action: "add_column" as const, newColumn: { header, values } };
+}
+
 async function prepareChatAttachments(
   aiEngine: AIEngine,
   message: string,
@@ -959,9 +1002,8 @@ ${localized.next}`;
     }
     let research;
     let researchJob;
-    const imageResearchRequested = !media.images.length
-      || Boolean(extractTargetUrlOrDomain(message))
-      || /https?:|web|internet|website|site|search|online|веб|інтернет|сайт|пошук|скануй|перевір|подиви|scan|browse/iu.test(message);
+    const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
+    const imageResearchRequested = !hasAttachedEvidence || explicitlyRequestsWebResearch(message);
     if (imageResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };
       try {
@@ -1154,11 +1196,8 @@ ${localized.next}`;
     }
     let research: ResearchOutcome | undefined;
     let researchJob;
-    const webResearchRequested = !companySettingsRequest && (
-      !media.images.length
-      || Boolean(extractTargetUrlOrDomain(message))
-      || /https?:|web|internet|website|site|search|online|веб|інтернет|сайт|пошук|скануй/iu.test(message)
-    );
+    const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
+    const webResearchRequested = !companySettingsRequest && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message));
     if (webResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
       try {
@@ -1331,39 +1370,53 @@ ${localized.next}`;
 
     // Automatic Spreadsheet File Editing & Attachment Generation
     if (chatFiles && conversation) {
-      const extractedDirective = SpreadsheetModifier.extractDirective(content);
-      if (extractedDirective) {
-        try {
-          let targetAttachment: { name: string; mimeType: string; data: Buffer; kind?: string } | undefined = media.decoded.find(
-            (d) => d.kind === "document" && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(d.name)
-          ) ?? previousSpreadsheet;
+      try {
+        let targetAttachment: { name: string; mimeType: string; data: Buffer; kind?: string } | undefined = media.decoded.find(
+          (d) => d.kind === "document" && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(d.name)
+        ) ?? previousSpreadsheet;
 
-          if (!targetAttachment) {
-            const matchAtt = existing.messages
-              .slice(-10)
-              .reverse()
-              .map((m) => m.content.match(/\[\[npati-attachment:document:([0-9a-f-]{36}):([^\]]+)\]\]/i))
-              .find(Boolean);
-            if (matchAtt) {
-              const fileId = matchAtt[1]!;
-              const fileName = decodeURIComponent(matchAtt[2]!);
-              if (/\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(fileName)) {
-                const opened = await chatFiles.open(auth, fileId);
-                if (opened) {
-                  const chunks: Buffer[] = [];
-                  for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
-                  targetAttachment = {
-                    name: fileName,
-                    mimeType: opened.file.mimeType,
-                    data: Buffer.concat(chunks),
-                    kind: "document",
-                  };
-                }
+        if (!targetAttachment) {
+          const matchAtt = existing.messages
+            .slice(-10)
+            .reverse()
+            .map((m) => m.content.match(/\[\[npati-attachment:document:([0-9a-f-]{36}):([^\]]+)\]\]/i))
+            .find(Boolean);
+          if (matchAtt) {
+            const fileId = matchAtt[1]!;
+            const fileName = decodeURIComponent(matchAtt[2]!);
+            if (/\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(fileName)) {
+              const opened = await chatFiles.open(auth, fileId);
+              if (opened) {
+                const chunks: Buffer[] = [];
+                for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
+                targetAttachment = { name: fileName, mimeType: opened.file.mimeType, data: Buffer.concat(chunks), kind: "document" };
               }
             }
           }
+        }
 
-          if (targetAttachment) {
+        let extractedDirective = SpreadsheetModifier.extractDirective(content);
+        const markdownDirective = spreadsheetEditRequested ? addColumnDirectiveFromMarkdown(content, safeUserRequest) : undefined;
+        if (!extractedDirective && markdownDirective) {
+          extractedDirective = { directive: markdownDirective, cleanText: spreadsheetEditedMessage(safeUserRequest) };
+        }
+        if (!extractedDirective && spreadsheetEditRequested && targetAttachment) {
+          const planned = await aiEngine.chat({
+            model: ai.model,
+            fallbackModel: ai.fallbackModel,
+            admission: admissionFor(auth),
+            timeoutMs: 90_000,
+            signal,
+            messages: [
+              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON block. Return no prose and no Markdown table. Allowed actions: add_column, update_cells, insert_after, append_rows, delete_rows. Preserve the existing workbook and express only the requested changes. For add_column, provide newColumn.header and one value per existing data row when the user asks to fill it." },
+              { role: "user", content: safePrompt },
+            ],
+          });
+          const plannedDirective = SpreadsheetModifier.extractDirective(planned.content);
+          if (plannedDirective) extractedDirective = { directive: plannedDirective.directive, cleanText: spreadsheetEditedMessage(safeUserRequest) };
+        }
+
+        if (extractedDirective && targetAttachment) {
             const modified = await SpreadsheetModifier.applyEdits(
               targetAttachment.data,
               targetAttachment.name,
@@ -1387,10 +1440,9 @@ ${localized.next}`;
               content = extractedDirective.cleanText + fileCard;
               if (onDelta) onDelta(spreadsheetEditRequested ? content : fileCard);
             }
-          }
-        } catch (editError) {
-          app.log.warn({ err: editError }, "Failed to apply automatic spreadsheet edit");
         }
+      } catch (editError) {
+        app.log.warn({ err: editError }, "Failed to apply automatic spreadsheet edit");
       }
     }
 

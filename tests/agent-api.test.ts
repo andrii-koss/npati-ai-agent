@@ -447,6 +447,7 @@ describe("Agent API", () => {
 
   it("treats attached spreadsheet text as analysis evidence instead of a company deletion command", async () => {
     let receivedUserPrompt = "";
+    let researchCalls = 0;
     const aiEngine: AIEngine = {
       chat: async () => ({ content: "Короткий звіт готовий." }),
       async *stream(request) {
@@ -458,9 +459,13 @@ describe("Agent API", () => {
       getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
     };
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const webResearch = {
+      shouldResearch: () => true,
+      run: async () => { researchCalls += 1; return undefined; },
+    } as unknown as WebResearchService;
     const dataDirectory = await mkdtemp(path.join(tmpdir(), "npati-document-intent-"));
     tempDirectories.push(dataDirectory);
-    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace, dataDirectory });
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace, webResearch, dataDirectory });
     apps.push(app);
 
     const response = await app.inject({
@@ -483,6 +488,7 @@ describe("Agent API", () => {
     expect(response.body).not.toContain("У вас немає компаній для видалення.");
     expect(receivedUserPrompt).toContain("Проаналізуй цей документ");
     expect(receivedUserPrompt).toContain("delete,company");
+    expect(researchCalls).toBe(0);
   });
 
   it("edits the spreadsheet attached in an earlier message and returns the modified workbook", async () => {
@@ -496,7 +502,9 @@ describe("Agent API", () => {
     let secondSystemPrompt = "";
     let secondUserPrompt = "";
     const aiEngine: AIEngine = {
-      chat: async () => ({ content: "Conversation context." }),
+      chat: async (request) => request.messages.some((item) => chatContentText(item.content).includes("Convert the user's spreadsheet edit request"))
+        ? { content: `\`\`\`spreadsheet-edit\n${JSON.stringify({ action: "add_column", newColumn: { header: "Статус", values: ["Готово", "В роботі"] } })}\n\`\`\`` }
+        : { content: "Conversation context." },
       async *stream(request) {
         streamCall += 1;
         if (streamCall === 1) {
@@ -505,9 +513,12 @@ describe("Agent API", () => {
         }
         secondSystemPrompt = chatContentText(request.messages.find((item) => item.role === "system")?.content);
         secondUserPrompt = chatContentText(request.messages.at(-1)?.content);
-        yield "Готово, я додав стовпець до завантаженого файла.\n\n```spreadsheet-edit\n";
-        yield JSON.stringify({ action: "add_column", newColumn: { header: "Статус", values: ["Готово", "В роботі"] } });
-        yield "\n```";
+        // Reproduce the production failure: the model creates a detached
+        // Markdown table instead of emitting a spreadsheet-edit directive.
+        yield "| Feature | Owner | Статус |\n";
+        yield "| --- | --- | --- |\n";
+        yield "| OCR | Anna | Готово |\n";
+        yield "| PDF capture | Mark | В роботі |";
       },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
