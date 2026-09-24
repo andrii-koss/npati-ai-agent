@@ -133,13 +133,35 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
+const MEMORY_CACHE_PREFIX = "npati_memory_cache_v1_";
+
+function getCachedMemory(businessId?: string): MemoryItem[] {
+  if (!businessId) return [];
+  try {
+    const raw = sessionStorage.getItem(MEMORY_CACHE_PREFIX + businessId) || localStorage.getItem(MEMORY_CACHE_PREFIX + businessId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* storage may be restricted */ }
+  return [];
+}
+
+function updateCachedMemory(businessId: string, items: MemoryItem[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
+    localStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
+  } catch { /* storage may be restricted */ }
+}
+
 export function MemoryPage() {
   const { overview, loading: workspaceLoading, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
   const businessId = business?.id;
 
-  const [items, setItems] = useState<MemoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<MemoryItem[]>(() => getCachedMemory(businessId));
+  const [loading, setLoading] = useState(() => getCachedMemory(businessId).length === 0);
   const [search, setSearch] = useState("");
   const [selectedTab, setSelectedTab] = useState<string>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -162,10 +184,11 @@ export function MemoryPage() {
       setLoading(workspaceLoading);
       return;
     }
-    setLoading(true);
+    if (items.length === 0) setLoading(true);
     try {
       const data = await api<MemoryItem[]>(`/businesses/${businessId}/memory`);
       setItems(data);
+      updateCachedMemory(businessId, data);
     } catch {
       setItems([]);
     } finally {
@@ -463,7 +486,7 @@ export function MemoryPage() {
       </div>
 
       {/* Empty States */}
-      {items.length === 0 && (
+      {!loading && items.length === 0 && (
         <div className="automations-empty-card memory-empty-card">
           <div className="automations-empty-icon">🧠</div>
           <h3>No Durable Memory Items Yet</h3>

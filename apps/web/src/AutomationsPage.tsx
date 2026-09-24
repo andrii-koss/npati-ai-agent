@@ -443,7 +443,7 @@ export function AutomationsPage() {
         </div>
       </div>
 
-      {automations.length === 0 ? (
+      {loading ? null : automations.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⏱️</div>
           <h3>No Automations Configured</h3>
