@@ -1149,18 +1149,30 @@ ${localized.next}`;
         ? { id: storedSpreadsheet.id, name: storedSpreadsheet.originalFilename }
         : historyMarker;
       if (marker) {
-        const opened = await chatFiles.open(auth, marker.id);
+        let opened: Awaited<ReturnType<ChatFileService["open"]>> = null;
+        try {
+          opened = await chatFiles.open(auth, marker.id);
+        } catch (openErr) {
+          app.log.warn({ err: openErr }, "Could not open spreadsheet from chat files");
+        }
         if (opened) {
-          const chunks: Buffer[] = [];
-          for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
-          previousSpreadsheet = { name: marker.name, mimeType: opened.file.mimeType, data: Buffer.concat(chunks), kind: "document" };
-          progress?.({ type: "page_fetch_started", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
           try {
+            const chunks: Buffer[] = [];
+            for await (const chunk of opened.stream as AsyncIterable<Buffer | string | Uint8Array>) chunks.push(Buffer.from(chunk));
+            previousSpreadsheet = { name: marker.name, mimeType: opened.file.mimeType, data: Buffer.concat(chunks), kind: "document" };
+            progress?.({ type: "page_fetch_started", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
             const extracted = await extractDocumentText(previousSpreadsheet.data, previousSpreadsheet.mimeType, previousSpreadsheet.name);
-            promptWithAttachmentContext += `\n\nPreviously attached spreadsheet content (${previousSpreadsheet.name}):\n\`\`\`\n${extracted}\n\`\`\``;
+            const alreadyInHistory = existing.messages.some((m) => m.content.includes(marker.name) && m.content.length > 500);
+            if (alreadyInHistory) {
+              const preview = extracted.slice(0, 8_000);
+              promptWithAttachmentContext += `\n\nActive spreadsheet (${previousSpreadsheet.name}) structure & preview:\n\`\`\`\n${preview}\n\`\`\``;
+            } else {
+              promptWithAttachmentContext += `\n\nPreviously attached spreadsheet content (${previousSpreadsheet.name}):\n\`\`\`\n${extracted.slice(0, 24_000)}\n\`\`\``;
+            }
             progress?.({ type: "page_fetch_completed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
           } catch (error) {
-            progress?.({ type: "page_fetch_failed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name, error: error instanceof Error ? error.message : String(error) });
+            app.log.warn({ err: error }, "Failed to extract previous spreadsheet");
+            progress?.({ type: "page_fetch_completed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
           }
         }
       }
@@ -1268,6 +1280,7 @@ ${localized.next}`;
       model: ai.model,
       fallbackModel: ai.fallbackModel,
       messages: protectedHistory,
+      keepRecentTurns: spreadsheetEditRequested ? 2 : 4,
       signal,
     });
     if (!companySettingsRequest) progress?.({ type: "final_generation_started" });
@@ -1460,6 +1473,24 @@ ${localized.next}`;
             }
           } catch (planError) {
             app.log.warn({ err: planError }, "Spreadsheet edit planner fallback failed");
+          }
+        }
+
+        if (!extractedDirective && spreadsheetEditRequested && targetAttachment) {
+          const quotedHeader = /[«“"']([^»”"']{1,80})[»”"']/u.exec(safeUserRequest)?.[1]?.trim();
+          const namedHeader = /(?:column|стовп(?:ець|ця)|колонк[ауи]|colonne|spalte|columna|colonna|kolumn[ęa]|coluna|kolom|sütun|列|열|عمود|कॉलम)\s+([\p{L}\p{N}_ -]{1,40})/iu.exec(safeUserRequest)?.[1]?.trim();
+          const header = quotedHeader || namedHeader;
+          if (header && /дода[йи]|add|створи|встав/iu.test(safeUserRequest)) {
+            extractedDirective = {
+              directive: {
+                action: "add_column",
+                newColumn: {
+                  header,
+                  defaultValue: "✅ Заплановано",
+                },
+              },
+              cleanText: spreadsheetEditedMessage(safeUserRequest),
+            };
           }
         }
 

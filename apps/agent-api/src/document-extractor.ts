@@ -122,15 +122,16 @@ export async function extractDocumentText(data: Buffer, declaredMime: string, fi
       return sheetTexts.length > 0 ? sheetTexts.join("\n\n") : `[Spreadsheet: ${filename} has no data rows]`;
     } catch (excelErr) {
       try {
-        const ExcelJS = (await import("exceljs")).default;
-        const wb = new ExcelJS.Workbook();
+        const excelModule = await import("exceljs");
+        const ExcelJSClass = (excelModule as any).default?.Workbook ? (excelModule as any).default : excelModule;
+        const wb = new ExcelJSClass.Workbook();
         await wb.xlsx.load(target as any);
         const sheetTexts: string[] = [];
         for (const sheet of wb.worksheets) {
           const rows: string[] = [];
-          sheet.eachRow((row) => {
-            const cells = (row.values as any[]).slice(1).map((c) => (c == null ? "" : String(c).replace(/[\r\n\t]+/g, " ").trim()));
-            if (cells.some((c) => c.length > 0)) rows.push(cells.join(" | "));
+          sheet.eachRow((row: any) => {
+            const cells = (row.values as any[]).slice(1).map((c: any) => (c == null ? "" : String(c).replace(/[\r\n\t]+/g, " ").trim()));
+            if (cells.some((c: string) => c.length > 0)) rows.push(cells.join(" | "));
           });
           if (rows.length > 0) sheetTexts.push(`[Table / Sheet: ${sheet.name}] (${rows.length} rows):\n` + rows.slice(0, 300).join("\n"));
         }
@@ -138,7 +139,7 @@ export async function extractDocumentText(data: Buffer, declaredMime: string, fi
       } catch {}
       const fallback = data.toString("utf8").replace(/\0/g, "").trim();
       if (fallback.length > 50) return fallback.slice(0, 10000);
-      throw excelErr;
+      return `[Spreadsheet: ${filename} (${data.length} bytes)]`;
     }
   }
 

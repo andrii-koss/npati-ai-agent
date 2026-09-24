@@ -16,6 +16,7 @@ export interface SpreadsheetEditOperation {
   newColumn?: {
     header: string;
     values?: (string | number | boolean | null)[];
+    defaultValue?: string | number | boolean | null;
   };
   sourceColumn?: string | number;
   valueMap?: Array<{
@@ -200,10 +201,11 @@ export class SpreadsheetModifier {
       const headerRow = sheet.getRow(1);
       const newColIndex = Math.max(sheet.actualColumnCount, sheet.columnCount, headerRow.actualCellCount) + 1;
       headerRow.getCell(newColIndex).value = op.newColumn.header;
-      if (op.newColumn.values) {
-        op.newColumn.values.forEach((val, idx) => {
-          sheet.getRow(idx + 2).getCell(newColIndex).value = val;
-        });
+      const defVal = (op.newColumn as any).defaultValue ?? op.defaultValue ?? "";
+      const maxRows = Math.max(sheet.rowCount, (op.newColumn.values?.length ?? 0) + 1);
+      for (let r = 2; r <= maxRows; r++) {
+        const val = op.newColumn.values ? op.newColumn.values[r - 2] : undefined;
+        sheet.getRow(r).getCell(newColIndex).value = val !== undefined ? val : defVal;
       }
       return `Додано нову колонку «${op.newColumn.header}» до аркуша «${sheet.name}»`;
     }
@@ -387,8 +389,10 @@ export class SpreadsheetModifier {
       if (action === "add_column" && op.newColumn) {
         if (rows.length > 0) rows[0]!.push(op.newColumn.header);
         const colVals = op.newColumn.values ?? [];
+        const defVal = (op.newColumn as any).defaultValue ?? op.defaultValue ?? "";
         for (let r = 1; r < rows.length; r++) {
-          rows[r]!.push(String(colVals[r - 1] ?? ""));
+          const val = colVals[r - 1];
+          rows[r]!.push(String(val !== undefined ? val : defVal));
         }
         summaries.push(`Додано колонку «${op.newColumn.header}»`);
         continue;
