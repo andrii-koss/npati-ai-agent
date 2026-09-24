@@ -1052,8 +1052,12 @@ ${localized.next}`;
     }
     const media = await prepareChatAttachments(aiEngine, effectiveMessage, attachments, progress);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
-    const companySettingsRequest = CompanyChatActions.isManagementRequest(safePrompt)
-      || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safePrompt) || requestsCompositeCompanyDeletionIntent(safePrompt)));
+    // Attachment text is evidence for analysis. It must not decide whether the
+    // user requested a workspace mutation. A spreadsheet can legitimately
+    // contain phrases such as "delete company" without being an instruction.
+    const safeUserRequest = SecurityPolicyEngine.protectText(effectiveMessage).sanitized;
+    const companySettingsRequest = CompanyChatActions.isManagementRequest(safeUserRequest)
+      || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)));
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -1086,7 +1090,7 @@ ${localized.next}`;
       }
     }
     const compositeDeletion = effectiveManagementCompany
-      ? await executeCompositeCompanyDeletion(auth, safePrompt, effectiveManagementCompany.id)
+      ? await executeCompositeCompanyDeletion(auth, safeUserRequest, effectiveManagementCompany.id)
       : undefined;
     if (compositeDeletion) {
       if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", compositeDeletion.message);
@@ -1097,7 +1101,7 @@ ${localized.next}`;
         contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length },
       };
     }
-    const compositeCreation = await executeCompositeBusinessCompanyCreation(auth, safePrompt, conversation?.id ?? crypto.randomUUID(), signal);
+    const compositeCreation = await executeCompositeBusinessCompanyCreation(auth, safeUserRequest, conversation?.id ?? crypto.randomUUID(), signal);
     if (compositeCreation) {
       if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", compositeCreation.message);
       return {
@@ -1249,7 +1253,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safePrompt);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safeUserRequest);
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1271,7 +1275,7 @@ ${localized.next}`;
           if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
           const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
           content+=cleanChunk;
-          if (!WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta(cleanChunk);
+          if (!WorkspaceChatActions.isManagementRequest(safeUserRequest)) onDelta(cleanChunk);
         }
       }else {
         chatResult=await aiEngine.chat(chatRequest);
@@ -1283,7 +1287,7 @@ ${localized.next}`;
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;
-        if (!companySettingsRequest && !WorkspaceChatActions.isManagementRequest(safePrompt)) onDelta?.(extra);
+        if (!companySettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest)) onDelta?.(extra);
       }
     }
     if (!companySettingsRequest) progress?.({ type: "final_generation_completed" });
@@ -1354,10 +1358,10 @@ ${localized.next}`;
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     const workspaceAction = companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
-      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     content = workspaceAction.cleanText;
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
