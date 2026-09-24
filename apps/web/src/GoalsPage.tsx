@@ -69,12 +69,35 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
+const GOALS_CACHE_PREFIX = "npati_goals_cache_v1_";
+
+function getCachedGoals(businessId?: string): Goal[] {
+  if (!businessId) return [];
+  try {
+    const raw = sessionStorage.getItem(GOALS_CACHE_PREFIX + businessId) || localStorage.getItem(GOALS_CACHE_PREFIX + businessId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* storage may be restricted */ }
+  return [];
+}
+
+function updateCachedGoals(businessId: string, items: Goal[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
+    localStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
+  } catch { /* storage may be restricted */ }
+}
+
 export function GoalsPage() {
   const { overview } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
+  const businessId = business?.id;
 
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [goals, setGoals] = useState<Goal[]>(() => getCachedGoals(businessId));
+  const [loading, setLoading] = useState(() => getCachedGoals(businessId).length === 0);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Search & Filter State
@@ -88,17 +111,16 @@ export function GoalsPage() {
   const [form, setForm] = useState<GoalFormData>(initialForm);
   const [saving, setSaving] = useState(false);
 
-  const businessId = business?.id;
-
   const loadGoals = async () => {
     if (!businessId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (goals.length === 0) setLoading(true);
     try {
       const data = await api<Goal[]>(`/businesses/${businessId}/goals`);
       setGoals(data);
+      updateCachedGoals(businessId, data);
     } catch (err: any) {
       setNotice(`Failed to load goals: ${err.message}`);
     } finally {
@@ -459,7 +481,7 @@ export function GoalsPage() {
       </div>
 
       {/* Main Content Area */}
-      {goals.length === 0 ? (
+      {loading ? null : goals.length === 0 ? (
         <div className="automations-empty-card goals-empty-card">
           <div className="automations-empty-icon">🎯</div>
           <h3>No Goals Configured Yet</h3>

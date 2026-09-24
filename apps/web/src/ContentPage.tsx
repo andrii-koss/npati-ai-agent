@@ -441,7 +441,7 @@ export function ContentPage() {
         </div>
       </div>
 
-      {items.length === 0 && (
+      {!loading && items.length === 0 && (
         <div className="automations-empty-card content-empty-card">
           <div className="automations-empty-icon">📝</div>
           <h3>Your AI Content Library is Ready</h3>
