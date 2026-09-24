@@ -50,6 +50,9 @@ import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
 import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
+import { EmailInboxRepository } from "./email-inbox-repository";
+import { registerEmailInboxRoutes } from "./email-routes";
+import { EmailAgentTools } from "./email-agent-tools";
 import { ApiKeysRepository } from "./api-keys-repository";
 import { registerApiKeyRoutes } from "./api-keys-routes";
 import { ScopedMemoryEngine } from "./scoped-memory";
@@ -614,7 +617,9 @@ export function buildApp(config: AppConfig = {}) {
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox());
+  const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
+  const emailAgentTools = new EmailAgentTools(emailInboxRepo);
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -1543,6 +1548,7 @@ ${localized.next}`;
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
+  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerMemoryDocumentRoutes(app,authProvider,memoryDocuments);
@@ -1551,7 +1557,7 @@ ${localized.next}`;
   registerBrowserAutomationRoutes(app, authProvider);
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { storageReconciler?.stop(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await objectStorage?.initialize();

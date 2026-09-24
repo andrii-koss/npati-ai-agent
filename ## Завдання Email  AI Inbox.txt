@@ -1,0 +1,722 @@
+## Завдання: Email / AI Inbox
+
+Потрібно розширити існуючу функцію:
+
+**6. IMAP Email Trigger (#136)**
+Новий лист може автоматично запускати агента: класифікувати звернення, створити завдання або підготувати відповідь.
+
+На її основі потрібно реалізувати повноцінний модуль **Email / AI Inbox** для роботи користувача, команди та AI агентів з корпоративною електронною поштою.
+
+### ВАЖЛИВО ПЕРЕД ПОЧАТКОМ РЕАЛІЗАЦІЇ
+
+Перед написанням нового коду обов’язково провести аудит існуючого проєкту.
+
+Перевірити:
+
+* існуючі компоненти UI;
+* сторінки Settings;
+* Company та Agents;
+* Tasks;
+* існуючу реалізацію IMAP Email Trigger #136;
+* email services;
+* SMTP / IMAP інтеграції;
+* DNS verification;
+* notifications;
+* contacts / customers;
+* workflows / triggers;
+* agent tools;
+* attachments;
+* analytics;
+* audit logs;
+* permissions;
+* rate limits;
+* background jobs / queues;
+* існуючі database models та migrations.
+
+Не створювати дублікати функцій, компонентів, моделей, API endpoint, services або utilities, якщо аналогічна функціональність вже існує.
+
+Якщо потрібна функція вже реалізована, потрібно **розширити або повторно використати існуючу реалізацію**.
+
+Перед реалізацією визначити, які частини вже є в системі, які можна перевикористати, а які потрібно додати.
+
+Уся реалізація повинна відповідати **існуючій архітектурі, структурі коду, UI/UX, компонентам, кольорам, typography, spacing, формам, таблицям, modal windows, notifications та загальному стилю проєкту**.
+
+Не створювати новий дизайн стиль, якщо відповідний патерн вже використовується в проєкті.
+
+---
+
+## 1. Новий розділ Email
+
+У Settings додати окремий розділ:
+
+**Settings → Email**
+
+Користувач компанії повинен мати можливість додати декілька незалежних email адрес.
+
+Наприклад:
+
+* [support@company.com](mailto:support@company.com)
+* [info@company.com](mailto:info@company.com)
+* [sales@company.com](mailto:sales@company.com)
+* [billing@company.com](mailto:billing@company.com)
+* [registration@company.com](mailto:registration@company.com)
+
+Кожна адреса може використовуватися для окремих бізнес задач.
+
+---
+
+## 2. Підключення Email
+
+Для кожної email адреси потрібно підтримати підключення через доступні в системі способи.
+
+Наприклад:
+
+* IMAP
+* SMTP
+* OAuth, якщо підтримується провайдером
+
+Показувати статус підключення:
+
+* Connected
+* Pending
+* Authentication Error
+* IMAP Error
+* SMTP Error
+* DNS Problem
+* Disabled
+
+Додати можливість виконати **Test Connection**.
+
+---
+
+## 3. DNS перевірка
+
+Для домену email перевіряти:
+
+* MX
+* SPF
+* DKIM
+* DMARC
+
+Користувач повинен бачити:
+
+* який запис знайдений;
+* який запис відсутній;
+* чи правильно він налаштований;
+* рекомендацію, якщо потрібно щось виправити.
+
+DNS verification повинна використовувати існуючі UI компоненти та status indicators проєкту.
+
+---
+
+## 4. Призначення AI агента
+
+До кожної email адреси можна призначити окремого агента компанії з існуючого розділу Company / Agents.
+
+Наприклад:
+
+**[support@company.com](mailto:support@company.com) → Support Agent**
+
+**[sales@company.com](mailto:sales@company.com) → Sales Agent**
+
+**[billing@company.com](mailto:billing@company.com) → Billing Agent**
+
+**[registration@company.com](mailto:registration@company.com) → Automation Agent**
+
+Не створювати окрему систему агентів. Використовувати існуючу модель Agent.
+
+---
+
+## 5. Режими роботи AI
+
+Для кожної email адреси повинно бути три режими.
+
+### Manual
+
+AI може:
+
+* прочитати лист;
+* класифікувати;
+* визначити priority;
+* підготувати інформацію.
+
+Але не створює і не надсилає відповідь автоматично.
+
+### Approval
+
+AI створює draft відповіді.
+
+Користувач може:
+
+* переглянути;
+* відредагувати;
+* підтвердити;
+* відправити.
+
+### Autopilot
+
+AI може самостійно:
+
+* прочитати лист;
+* проаналізувати;
+* відповісти;
+* створити Task;
+* запустити інший доступний workflow.
+
+---
+
+## 6. Inbox
+
+Реалізувати повноцінний Inbox у стилі проєкту.
+
+Показувати:
+
+* Inbox;
+* Sent;
+* Drafts;
+* Archived;
+* Spam, якщо підтримується;
+* email threads;
+* sender;
+* recipient;
+* subject;
+* preview;
+* date/time;
+* attachments;
+* assigned agent;
+* assigned user;
+* status;
+* priority.
+
+При відкритті листа показувати весь thread.
+
+---
+
+## 7. Статуси листів
+
+Використовувати status system проєкту або розширити її.
+
+Приклад:
+
+* New
+* AI Processing
+* Draft Ready
+* Waiting for Approval
+* Waiting for Customer
+* Waiting for Human
+* Answered
+* Closed
+* Failed
+
+---
+
+## 8. Робота користувача з листами
+
+Користувач повинен мати можливість:
+
+* читати лист;
+* відповідати;
+* Reply All;
+* Forward;
+* редагувати AI draft;
+* відправляти;
+* архівувати;
+* видаляти;
+* переглядати attachments;
+* відкривати links;
+* натискати verification links;
+* переглядати повну історію thread.
+
+---
+
+## 9. AI Priority
+
+AI автоматично визначає пріоритет листа.
+
+Наприклад:
+
+* Low
+* Normal
+* High
+* Urgent
+
+При визначенні priority враховувати:
+
+* зміст;
+* намір користувача;
+* ключові слова;
+* VIP status;
+* urgency;
+* попередню історію клієнта.
+
+Дозволити користувачу змінити priority вручну.
+
+---
+
+## 10. Customer Card
+
+Поруч з листом показувати Customer Card, якщо відправника вдалося ідентифікувати.
+
+Показувати доступну інформацію з уже існуючих систем:
+
+* ім’я;
+* email;
+* company;
+* phone;
+* попередні email;
+* попередні звернення;
+* Tasks;
+* замовлення, якщо такі дані існують;
+* notes;
+* останню активність.
+
+Не дублювати CRM або Contact functionality, якщо вона вже реалізована.
+
+---
+
+## 11. Collision Protection
+
+Захистити систему від одночасної відповіді AI та людини.
+
+Якщо користувач:
+
+* відкрив composer;
+* почав писати;
+* редагує draft;
+* взяв thread в роботу;
+
+AI не повинен автоматично відправляти відповідь у цей момент.
+
+Потрібен механізм lock / ownership / active editing відповідно до архітектури проєкту.
+
+---
+
+## 12. AI Confidence Score
+
+Для AI відповідей визначати Confidence Score.
+
+Наприклад:
+
+* High
+* Medium
+* Low
+
+або внутрішнє числове значення.
+
+Якщо confidence нижче встановленого threshold:
+
+* AI не відправляє відповідь;
+* створюється draft;
+* thread переходить у Waiting for Human / Approval.
+
+Threshold бажано зробити configurable.
+
+---
+
+## 13. Templates та Signatures
+
+Для email адрес або агентів дозволити налаштовувати:
+
+* response templates;
+* signatures;
+* greeting;
+* footer.
+
+Наприклад окремо для:
+
+* Support
+* Sales
+* Billing
+* Information
+
+Перед реалізацією перевірити, чи templates вже існують у проєкті.
+
+---
+
+## 14. Auto Language Detection
+
+AI автоматично визначає мову вхідного листа.
+
+За замовчуванням відповідати тією самою мовою.
+
+При цьому дозволити в налаштуваннях email встановити:
+
+* Auto;
+* конкретну мову;
+* fallback language.
+
+---
+
+## 15. Follow-up Automation
+
+Дозволити налаштувати follow-up.
+
+Наприклад:
+
+якщо клієнт не відповів протягом:
+
+* 2 днів;
+* 3 днів;
+* іншого заданого періоду;
+
+AI може:
+
+* створити follow-up draft;
+* автоматично відправити follow-up;
+* створити Task;
+* повідомити відповідального користувача.
+
+Follow-up повинен автоматично скасовуватися, якщо клієнт уже відповів.
+
+---
+
+## 16. Bounce / Delivery Tracking
+
+Для відправлених email показувати delivery status, якщо це технічно підтримується використовуваним способом відправлення.
+
+Наприклад:
+
+* Sending
+* Sent
+* Delivered
+* Bounced
+* Rejected
+* Failed
+
+Зберігати причину помилки, якщо вона доступна.
+
+---
+
+## 17. Attachments AI Analysis
+
+AI агент повинен мати можливість аналізувати attachments відповідно до вже існуючих можливостей системи.
+
+Наприклад:
+
+* PDF;
+* images;
+* screenshots;
+* invoices;
+* text documents;
+* інші підтримувані формати.
+
+Не створювати новий document processing pipeline, якщо аналогічна система вже існує для агентів.
+
+---
+
+## 18. Email як інструмент агента
+
+Email адреса повинна бути доступна агенту не тільки для Support.
+
+Агент може використовувати корпоративний email для виконання задач.
+
+Наприклад:
+
+* реєстрація на сторонньому сервісі;
+* отримання verification email;
+* отримання verification code;
+* відкриття confirmation link;
+* passwordless login;
+* отримання повідомлень від стороннього сервісу;
+* продовження Task після отримання очікуваного листа.
+
+Email events повинні мати можливість продовжувати існуючий Agent Task / Workflow.
+
+---
+
+## 19. Security для links та verification
+
+Оскільки агент може працювати з links з email, реалізувати це безпечно.
+
+Перед автоматичним відкриттям посилання враховувати:
+
+* sender;
+* domain;
+* redirect domain;
+* suspicious URL;
+* blacklist;
+* дозволи агента.
+
+Для потенційно небезпечних дій вимагати human approval відповідно до існуючої permission system проєкту.
+
+---
+
+## 20. Blacklist / VIP List
+
+Для кожної пошти або компанії підтримати:
+
+### VIP
+
+Листи від VIP можуть:
+
+* отримувати High / Urgent priority;
+* передаватися конкретному користувачу;
+* вимагати human approval.
+
+### Blacklist
+
+Заблоковані адреси або домени можуть:
+
+* автоматично ігноруватися;
+* переходити в spam;
+* не запускати AI агента.
+
+---
+
+## 21. Rate Limits
+
+Встановити обмеження для автоматичних email.
+
+Наприклад:
+
+* emails per hour;
+* emails per day;
+* кількість відповідей одному recipient;
+* максимальна кількість follow-ups.
+
+Rate limits мають працювати на рівні:
+
+* company;
+* email account;
+* agent, якщо необхідно.
+
+Не дублювати rate limiting system, якщо вона вже є.
+
+---
+
+## 22. Test Mode
+
+Для кожної email адреси додати Test Mode.
+
+У цьому режимі можна перевірити:
+
+* отримання email;
+* класифікацію;
+* priority;
+* AI analysis;
+* generated response;
+* selected agent;
+* workflow;
+* confidence.
+
+Але AI не повинен реально надсилати email зовнішньому отримувачу.
+
+Чітко показувати в UI, що email account знаходиться в Test Mode.
+
+---
+
+## 23. Analytics
+
+Додати Email Analytics, використовуючи існуючу analytics architecture.
+
+Показувати:
+
+* received emails;
+* sent emails;
+* AI answered;
+* Human answered;
+* Drafted by AI;
+* Approved by Human;
+* Escalated to Human;
+* Failed;
+* Bounced;
+* average response time;
+* average first response time;
+* кількість виправлених AI відповідей;
+* automation rate;
+* confidence distribution;
+* email volume по днях;
+* email volume по agents;
+* email volume по email accounts.
+
+Не створювати окрему analytics систему, якщо в проєкті вже є загальний Analytics module.
+
+---
+
+## 24. Audit History
+
+Для кожного thread зберігати історію важливих дій.
+
+Наприклад:
+
+* email received;
+* agent started;
+* priority changed;
+* AI generated draft;
+* user edited draft;
+* approved;
+* sent;
+* agent sent automatically;
+* agent escalated;
+* link opened;
+* Task created;
+* archived;
+* deleted.
+
+Показувати:
+
+* хто виконав дію;
+* AI Agent або User;
+* date/time.
+
+Використовувати існуючий Audit Log, якщо він вже реалізований.
+
+---
+
+## 25. Email Rules
+
+Для кожної email адреси дозволити задавати правила.
+
+Приклад:
+
+`support@company.com`
+AI може відповідати автоматично.
+
+`billing@company.com`
+AI створює draft, але відправлення тільки після approval.
+
+`legal@company.com`
+AI тільки аналізує та готує draft.
+
+`registration@company.com`
+AI може автоматично обробляти verification email.
+
+Також правила можуть базуватися на:
+
+* sender;
+* sender domain;
+* subject;
+* detected intent;
+* priority;
+* language;
+* VIP;
+* attachment type.
+
+Якщо в проєкті вже є Workflow / Trigger system, використовувати її замість створення окремого rule engine.
+
+---
+
+## 26. Human Takeover
+
+Користувач повинен мати можливість натиснути:
+
+**Take Over**
+
+Після цього AI тимчасово не відповідає автоматично в цьому thread.
+
+Також повинна бути можливість:
+
+**Return to AI**
+
+після чого автоматизація продовжується відповідно до налаштувань email.
+
+---
+
+## 27. Архітектура
+
+Email не повинен бути ізольованим модулем.
+
+Він повинен інтегруватися з уже існуючими:
+
+* Company;
+* Users;
+* Agents;
+* Tasks;
+* Contacts / Customers;
+* Workflows;
+* Tools;
+* Notifications;
+* Files / Attachments;
+* Analytics;
+* Audit Logs;
+* Permissions.
+
+Основний принцип:
+
+**Email є ще одним каналом взаємодії між компанією, користувачем, клієнтом та AI агентом.**
+
+Не потрібно створювати паралельні системи там, де вже існує відповідна логіка.
+
+---
+
+## 28. UI / UX
+
+Нові сторінки та компоненти повинні на 100% відповідати існуючому стилю проєкту.
+
+Перед створенням UI знайти аналогічні:
+
+* Settings pages;
+* tables;
+* cards;
+* status badges;
+* dropdowns;
+* tabs;
+* forms;
+* side panels;
+* modals;
+* confirmation dialogs;
+* empty states;
+* loaders;
+* errors;
+* pagination;
+* search;
+* filters.
+
+Максимально використовувати існуючі reusable components.
+
+Не додавати нові сторонні UI libraries без необхідності.
+
+---
+
+## 29. Permissions
+
+Перевірити існуючу permission / role system.
+
+За можливості підтримати окремі права:
+
+* view email;
+* manage email accounts;
+* read messages;
+* send messages;
+* delete messages;
+* approve AI drafts;
+* configure Autopilot;
+* configure agents;
+* view analytics.
+
+Admin компанії повинен мати повний контроль відповідно до існуючої role system.
+
+---
+
+## 30. Фінальна перевірка
+
+Після реалізації перевірити повний сценарій:
+
+**Add Email → DNS Check → IMAP/SMTP Connection → Assign Agent → Receive Email → AI Analysis → Priority → Customer Context → Generate Response → Confidence Check → Human Approval або Autopilot → Send → Delivery Status → Thread History → Analytics.**
+
+Також перевірити сценарій:
+
+**Agent Task → використання корпоративного email → реєстрація на зовнішньому сервісі → отримання verification email → verification code/link → продовження Task.**
+
+Перевірити:
+
+* duplicate processing;
+* duplicate sending;
+* race conditions;
+* Collision Protection;
+* retries;
+* failed IMAP/SMTP connection;
+* bounced email;
+* attachments;
+* permissions;
+* rate limits;
+* Test Mode;
+* Human Takeover.
+
+### Головна вимога
+
+Перед створенням будь-якої нової сутності або функції спочатку знайти, чи немає аналогічної реалізації в проєкті.
+
+**Reuse → Extend → Create new only when necessary.**
+
+Не ламати існуючу функціональність та не змінювати загальний стиль і архітектурні принципи проєкту.
