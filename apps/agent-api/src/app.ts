@@ -437,6 +437,14 @@ async function prepareChatAttachments(
   const documents = decoded.filter((item) => item.kind === "document" || item.kind === "file");
   const transcripts: Array<{ name: string; text: string }> = [];
   const cleanMessage = message.trim();
+  for (const image of decoded.filter((item) => item.kind === "image")) {
+    progress?.({
+      type: "page_fetch_started",
+      url: `file://${encodeURIComponent(image.name)}`,
+      domain: "file",
+      title: image.name,
+    });
+  }
   for (const item of audio) {
     if (item.name.startsWith("speech-") && cleanMessage) {
       transcripts.push({ name: item.name, text: cleanMessage });

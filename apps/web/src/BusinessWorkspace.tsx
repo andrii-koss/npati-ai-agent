@@ -1258,8 +1258,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       pendingSearchResultsRef.current = null;
     }
     if (event.type === "page_fetch_started") {
-      if (pageStartPendingRef.current) return;
-      pageStartPendingRef.current = true;
+      // Web research emits transient duplicate starts while navigating. File
+      // attachments are distinct user inputs and every filename must remain
+      // visible in the shared progress panel.
+      if (pageStartPendingRef.current && event.domain !== "file") return;
+      if (event.domain !== "file") pageStartPendingRef.current = true;
     }
     if (event.type === "page_fetch_completed" || event.type === "page_fetch_failed" || event.type === "research_completed") {
       pageStartPendingRef.current = false;

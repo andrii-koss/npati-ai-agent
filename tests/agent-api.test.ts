@@ -398,6 +398,8 @@ describe("Agent API", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"type":"page_fetch_started"');
+    expect(response.body).toContain('"title":"chair.png"');
     expect(lastChat?.model).toBe("openai/gpt-5.6-luna");
     expect(lastChat?.fallbackModel).toBeUndefined();
     expect(transcriptionMimeType).toBe("audio/mp4");
