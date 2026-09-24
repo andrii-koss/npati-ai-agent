@@ -46,7 +46,7 @@ function resolveNpatiAvatarUrl(value?: string | null): string | null {
 }
 
 
-const navigation = ["Inbox", "Settings"];
+const navigation = ["Settings"];
 type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
 const legacyChatStorageResetMarker = "npati_legacy_chat_storage_removed_2026_09_06_v1";
 function clearLegacyLocalChatsOnce() {
