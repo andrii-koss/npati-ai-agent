@@ -444,6 +444,46 @@ describe("Agent API", () => {
     expect((await app.inject({ method: "GET", url: "/attachments/" + documentId })).statusCode).toBe(404);
   });
 
+  it("treats attached spreadsheet text as analysis evidence instead of a company deletion command", async () => {
+    let receivedUserPrompt = "";
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: "Короткий звіт готовий." }),
+      async *stream(request) {
+        receivedUserPrompt = chatContentText(request.messages.at(-1)?.content);
+        yield "Короткий звіт за документом готовий.";
+      },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const dataDirectory = await mkdtemp(path.join(tmpdir(), "npati-document-intent-"));
+    tempDirectories.push(dataDirectory);
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace, dataDirectory });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: {
+        contextType: "none",
+        message: "Проаналізуй цей документ і зроби короткий звіт.",
+        attachments: [{
+          kind: "document",
+          name: "company-roadmap.csv",
+          mimeType: "text/csv",
+          dataBase64: Buffer.from("action,resource\ndelete,company\nremove,agent").toString("base64"),
+        }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("Короткий звіт за документом готовий.");
+    expect(response.body).not.toContain("У вас немає компаній для видалення.");
+    expect(receivedUserPrompt).toContain("Проаналізуй цей документ");
+    expect(receivedUserPrompt).toContain("delete,company");
+  });
+
   it("starts and exposes aggregate health", async () => {
     const app = buildApp();
     apps.push(app);
