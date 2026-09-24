@@ -43,6 +43,30 @@ export interface SpreadsheetEditDirective {
   defaultValue?: SpreadsheetEditOperation["defaultValue"];
 }
 
+export function normalizeSpreadsheetAction(rawAction?: string): SpreadsheetEditOperation["action"] | undefined {
+  if (!rawAction) return undefined;
+  const a = String(rawAction).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (a === "add_column" || a === "add_col" || a === "new_column" || a === "column") return "add_column";
+  if (a === "map_column" || a === "map_col" || a === "map_values" || a === "map") return "map_column";
+  if (a === "update_cells" || a === "update_cell" || a === "update" || a === "edit_cells" || a === "edit_cell" || a === "edit" || a === "modify_cells" || a === "modify" || a === "set_cells" || a === "set_cell") return "update_cells";
+  if (a === "insert_after" || a === "insert" || a === "insert_row" || a === "insert_rows") return "insert_after";
+  if (a === "append_rows" || a === "append_row" || a === "append" || a === "add_row" || a === "add_rows") return "append_rows";
+  if (a === "delete_rows" || a === "delete_row" || a === "delete" || a === "remove_rows" || a === "remove_row" || a === "remove") return "delete_rows";
+  if (a === "replace_sheet" || a === "replace_rows" || a === "replace") return "replace_sheet";
+  return undefined;
+}
+
+export function columnLetterToIndex(col: string | number): number | undefined {
+  if (typeof col === "number") return col;
+  const clean = String(col).trim().toUpperCase();
+  if (!/^[A-Z]{1,3}$/.test(clean)) return undefined;
+  let index = 0;
+  for (let i = 0; i < clean.length; i++) {
+    index = index * 26 + (clean.charCodeAt(i) - 64);
+  }
+  return index;
+}
+
 function escapeCsvCell(val: unknown): string {
   const str = String(val ?? "").trim();
   if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
@@ -169,12 +193,12 @@ export class SpreadsheetModifier {
   }
 
   private static applyWorksheetOperation(sheet: ExcelJS.Worksheet, op: SpreadsheetEditOperation): string {
-    const action = op.action ?? "insert_after";
+    const action = normalizeSpreadsheetAction(op.action) ?? "insert_after";
 
     // 1. Column addition
     if (action === "add_column" && op.newColumn) {
       const headerRow = sheet.getRow(1);
-      const newColIndex = sheet.columnCount + 1;
+      const newColIndex = Math.max(sheet.actualColumnCount, sheet.columnCount, headerRow.actualCellCount) + 1;
       headerRow.getCell(newColIndex).value = op.newColumn.header;
       if (op.newColumn.values) {
         op.newColumn.values.forEach((val, idx) => {
@@ -192,7 +216,7 @@ export class SpreadsheetModifier {
         ? op.sourceColumn
         : headers.get(String(op.sourceColumn).trim().toLowerCase());
       if (!sourceIndex) throw new Error(`Spreadsheet source column not found: ${String(op.sourceColumn)}`);
-      const newColIndex = sheet.columnCount + 1;
+      const newColIndex = Math.max(sheet.actualColumnCount, sheet.columnCount, headerRow.actualCellCount) + 1;
       headerRow.getCell(newColIndex).value = op.newColumn.header;
       let updated = 0;
       for (let rowIndex = 2; rowIndex <= sheet.rowCount; rowIndex++) {
@@ -210,7 +234,7 @@ export class SpreadsheetModifier {
       const headerRow = sheet.getRow(1);
       const headers = new Map<string, number>();
       headerRow.eachCell((cell, colNumber) => {
-        headers.set(String(cell.value ?? "").trim().toLowerCase(), colNumber);
+        headers.set(String(cell.text || cell.value || "").trim().toLowerCase(), colNumber);
       });
 
       for (const update of op.cellUpdates) {
@@ -220,7 +244,8 @@ export class SpreadsheetModifier {
           sheet.eachRow((row, rowNumber) => {
             if (rowNumber === 1) return;
             row.eachCell((cell) => {
-              if (String(cell.value ?? "").trim().toLowerCase() === searchStr) {
+              const cellText = String(cell.text || cell.value || "").trim().toLowerCase();
+              if (cellText === searchStr) {
                 targetRowIndex = rowNumber;
               }
             });
@@ -231,7 +256,11 @@ export class SpreadsheetModifier {
         let colIndex = typeof update.column === "number" ? update.column : headers.get(String(update.column).trim().toLowerCase());
         if (!colIndex && typeof update.column === "string") {
           const colNum = parseInt(update.column, 10);
-          if (!isNaN(colNum)) colIndex = colNum;
+          if (!isNaN(colNum)) {
+            colIndex = colNum;
+          } else {
+            colIndex = columnLetterToIndex(update.column);
+          }
         }
         if (!colIndex) continue;
 
@@ -255,17 +284,17 @@ export class SpreadsheetModifier {
               let targetCol = typeof op.searchColumn === "number" ? op.searchColumn : -1;
               if (targetCol === -1) {
                 sheet.getRow(1).eachCell((cell, cNum) => {
-                  if (String(cell.value ?? "").trim().toLowerCase() === colKey) targetCol = cNum;
+                  if (String(cell.text || cell.value || "").trim().toLowerCase() === colKey) targetCol = cNum;
                 });
               }
               if (targetCol !== -1) {
-                const val = String(row.getCell(targetCol).value ?? "").trim().toLowerCase();
+                const val = String(row.getCell(targetCol).text || row.getCell(targetCol).value || "").trim().toLowerCase();
                 if (val === searchStr || val.includes(searchStr)) insertIndex = rowNumber;
               }
             } else {
               row.eachCell((cell) => {
                 if (insertIndex !== -1) return;
-                const val = String(cell.value ?? "").trim().toLowerCase();
+                const val = String(cell.text || cell.value || "").trim().toLowerCase();
                 if (val === searchStr) insertIndex = rowNumber;
               });
             }
@@ -287,12 +316,59 @@ export class SpreadsheetModifier {
         // Insert after insertIndex
         let currentPos = insertIndex + 1;
         for (const rowData of op.rows) {
-          // ExcelJS insertRow takes 1-based index and array of values
           sheet.insertRow(currentPos, rowData);
           currentPos++;
         }
         return `Вставлено ${op.rows.length} нових рядків після рядка ${insertIndex} у аркуш «${sheet.name}»`;
       }
+    }
+
+    // 4. Row deletion
+    if (action === "delete_rows" && (op.deleteSearch != null || op.search != null)) {
+      const searchStr = String(op.deleteSearch ?? op.search).trim().toLowerCase();
+      let deleted = 0;
+      for (let rowNumber = sheet.rowCount; rowNumber >= 2; rowNumber--) {
+        const row = sheet.getRow(rowNumber);
+        let match = false;
+        if (op.searchColumn != null) {
+          const colKey = String(op.searchColumn).trim().toLowerCase();
+          let targetCol = typeof op.searchColumn === "number" ? op.searchColumn : -1;
+          if (targetCol === -1) {
+            sheet.getRow(1).eachCell((cell, cNum) => {
+              if (String(cell.text || cell.value || "").trim().toLowerCase() === colKey) targetCol = cNum;
+            });
+          }
+          if (targetCol !== -1) {
+            const val = String(row.getCell(targetCol).text || row.getCell(targetCol).value || "").trim().toLowerCase();
+            if (val === searchStr || val.includes(searchStr)) match = true;
+          }
+        } else {
+          row.eachCell((cell) => {
+            if (match) return;
+            const val = String(cell.text || cell.value || "").trim().toLowerCase();
+            if (val === searchStr || val.includes(searchStr)) match = true;
+          });
+        }
+        if (match) {
+          sheet.spliceRows(rowNumber, 1);
+          deleted++;
+        }
+      }
+      return `Видалено ${deleted} рядків з аркуша «${sheet.name}»`;
+    }
+
+    // 5. Replace sheet rows
+    if (action === "replace_sheet" && op.rows?.length) {
+      const headerRowValues = (sheet.getRow(1).values as any[]).slice(1);
+      const isHeaderIncluded = op.rows[0] && op.rows[0].some((c, i) => String(c).trim().toLowerCase() === String(headerRowValues[i] ?? "").trim().toLowerCase());
+      const rowsToAdd = isHeaderIncluded ? op.rows.slice(1) : op.rows;
+      while (sheet.rowCount > 1) {
+        sheet.spliceRows(2, sheet.rowCount - 1);
+      }
+      for (const rowData of rowsToAdd) {
+        sheet.addRow(rowData);
+      }
+      return `Оновлено дані аркуша «${sheet.name}» (${rowsToAdd.length} рядків)`;
     }
 
     return "";
@@ -306,7 +382,7 @@ export class SpreadsheetModifier {
     const summaries: string[] = [];
 
     for (const op of operations) {
-      const action = op.action ?? "insert_after";
+      const action = normalizeSpreadsheetAction(op.action) ?? "insert_after";
 
       if (action === "add_column" && op.newColumn) {
         if (rows.length > 0) rows[0]!.push(op.newColumn.header);
@@ -347,6 +423,10 @@ export class SpreadsheetModifier {
           if (rowIdx < 0 || rowIdx >= rows.length) continue;
 
           let colIdx = typeof u.column === "number" ? u.column - 1 : headerMap.get(String(u.column).toLowerCase());
+          if (colIdx == null || colIdx < 0) {
+            const letterIdx = columnLetterToIndex(u.column);
+            if (letterIdx != null) colIdx = letterIdx - 1;
+          }
           if (colIdx == null || colIdx < 0) continue;
 
           rows[rowIdx]![colIdx] = String(u.value ?? "");
@@ -377,6 +457,32 @@ export class SpreadsheetModifier {
           rows.splice(insertPos, 0, ...stringRows);
           summaries.push(`Вставлено ${stringRows.length} рядків після позиції ${insertPos}`);
         }
+        continue;
+      }
+
+      if (action === "delete_rows" && (op.deleteSearch != null || op.search != null)) {
+        const searchStr = String(op.deleteSearch ?? op.search).toLowerCase();
+        let deleted = 0;
+        for (let i = rows.length - 1; i >= 1; i--) {
+          const row = rows[i]!;
+          if (row.some(c => c.toLowerCase() === searchStr || c.toLowerCase().includes(searchStr))) {
+            rows.splice(i, 1);
+            deleted++;
+          }
+        }
+        summaries.push(`Видалено ${deleted} рядків`);
+        continue;
+      }
+
+      if (action === "replace_sheet" && op.rows?.length) {
+        const stringRows = op.rows.map(r => r.map(c => String(c ?? "")));
+        if (rows.length > 0) {
+          rows = [rows[0]!, ...stringRows];
+        } else {
+          rows = stringRows;
+        }
+        summaries.push(`Оновлено дані таблиці (${stringRows.length} рядків)`);
+        continue;
       }
     }
 
@@ -403,9 +509,17 @@ export class SpreadsheetModifier {
     for (const candidate of candidates) {
       try {
         const parsed = JSON.parse(candidate.raw.trim()) as SpreadsheetEditDirective;
+        if (parsed.action) {
+          const norm = normalizeSpreadsheetAction(parsed.action);
+          if (norm) parsed.action = norm;
+        }
         const operations = parsed.operations?.length ? parsed.operations : [parsed];
         const valid = operations.every((operation) => {
           if (!operation) return false;
+          if (operation.action) {
+            const norm = normalizeSpreadsheetAction(operation.action);
+            if (norm) operation.action = norm;
+          }
           const inferredAction = operation.action
             ?? (operation.newColumn ? "add_column" : operation.cellUpdates?.length ? "update_cells" : operation.rows?.length ? "append_rows" : "");
           return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "map_column", "delete_rows", "replace_sheet"].includes(inferredAction);
