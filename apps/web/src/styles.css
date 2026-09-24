@@ -2237,6 +2237,7 @@ a {
   justify-content: flex-end;
   background: rgb(17 17 17 / 48%);
   backdrop-filter: blur(3px);
+  overflow: hidden;
 }
 
 .provider-drawer {
@@ -2245,9 +2246,29 @@ a {
   height: 100%;
   padding: 28px;
   overflow-y: auto;
+  overflow-x: hidden;
   background: white;
   box-shadow: -20px 0 50px rgb(0 0 0 / 15%);
   animation: drawer-in 180ms ease-out;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.provider-drawer::-webkit-scrollbar {
+  width: 6px;
+}
+
+.provider-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.provider-drawer::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.provider-drawer::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 @keyframes drawer-in {
@@ -6719,6 +6740,19 @@ article.user .chat-message-attachment.document {
   max-width: 530px;
 }
 
+html:has(.company-drawer-backdrop),
+body:has(.company-drawer-backdrop),
+html:has(.drawer-backdrop),
+body:has(.drawer-backdrop),
+html:has(.auth-modal-backdrop),
+body:has(.auth-modal-backdrop),
+html:has(.editable-card-modal-backdrop),
+body:has(.editable-card-modal-backdrop),
+html:has(.npati-dialog-backdrop),
+body:has(.npati-dialog-backdrop) {
+  overflow: hidden !important;
+}
+
 .company-drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -6726,14 +6760,35 @@ article.user .chat-message-attachment.document {
   background: rgba(18, 18, 18, .32);
   display: flex;
   justify-content: flex-end;
+  overflow: hidden;
 }
 
 .company-drawer {
   width: min(620px, 100vw);
   height: 100%;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #fff;
   box-shadow: -18px 0 45px rgba(0, 0, 0, .15);
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.company-drawer::-webkit-scrollbar {
+  width: 6px;
+}
+
+.company-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.company-drawer::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.company-drawer::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .company-drawer>header {
@@ -11067,6 +11122,25 @@ article.user .chat-message-attachment.document {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.memory-drawer>form::-webkit-scrollbar {
+  width: 6px;
+}
+
+.memory-drawer>form::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.memory-drawer>form::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.memory-drawer>form::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .memory-drawer form>footer {
