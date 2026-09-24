@@ -948,7 +948,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multimodal-inference-and-moderation.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 60,
@@ -2197,7 +2197,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/automation-reminders-heartbeat-hooks.test.ts",
       "tests/production-p13-automations.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 139,
@@ -2245,7 +2245,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/omniroute-adapter.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 142,
@@ -2306,7 +2306,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/modality-bridge-image-editing-browser.test.ts",
       "tests/production-p12-multimodal.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 146,
@@ -2441,7 +2441,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/browser-dom-screenshot-and-pdf.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 155,
@@ -2457,7 +2457,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/tools-exec-process-search.test.ts",
       "tests/production-p11-browser-automation.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "PARTIALLY_IMPLEMENTED"
   },
   {
     "id": 156,

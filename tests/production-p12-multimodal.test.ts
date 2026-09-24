@@ -24,6 +24,21 @@ import { DocumentIoManager } from "../apps/agent-api/src/document-io-manager";
 import { registerMultimodalRoutes, SUPPORTED_PROVIDERS } from "../apps/agent-api/src/multimodal-routes";
 import { LocalDevAuthProvider } from "../apps/agent-api/src/auth";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
+import type { AIEngine, ChatRequest } from "@npati/omniroute-adapter";
+
+function visionTestEngine(onChat?: (request: ChatRequest) => string): AIEngine {
+  return {
+    chat: async (request) => ({ content: onChat?.(request) ?? "Invoice INV-2026-9901\nTotal: 4,500.00 EUR" }),
+    async *stream() { yield ""; },
+    listModels: async () => [],
+    getModel: async () => undefined,
+    executeTool: async () => undefined,
+    searchMemory: async () => [],
+    saveMemory: async () => undefined,
+    getCapabilities: async () => ["chat", "vision"],
+    healthCheck: async () => ({ status: "ok" }),
+  };
+}
 
 describe("Production P1.2 Multimodal Tools & Media Gateway Suite", () => {
   // =========================================================================
@@ -91,7 +106,15 @@ describe("Production P1.2 Multimodal Tools & Media Gateway Suite", () => {
       const app = Fastify();
       const auth = new LocalDevAuthProvider();
       const store = new InMemoryWorkspaceStore();
-      registerMultimodalRoutes(app, { auth, store });
+      let request: ChatRequest | undefined;
+      registerMultimodalRoutes(app, {
+        auth,
+        store,
+        aiEngine: visionTestEngine((value) => {
+          request = value;
+          return "The image contains a revenue chart and a table of monthly totals.";
+        }),
+      });
 
       const res = await app.inject({
         method: "POST",
@@ -104,9 +127,10 @@ describe("Production P1.2 Multimodal Tools & Media Gateway Suite", () => {
 
       expect(res.statusCode).toBe(200);
       const data = res.json();
-      expect(data.detectedObjects.length).toBeGreaterThan(0);
-      expect(data.confidence).toBeGreaterThan(0.9);
-      expect(data.answers).toContain("Visual confirmation verified");
+      expect(data.detectedObjects).toEqual([]);
+      expect(data.confidence).toBeUndefined();
+      expect(data.answers).toContain("revenue chart");
+      expect(JSON.stringify(request?.messages.at(-1)?.content)).toContain("demo-dashboard.png");
     });
   });
 
@@ -356,7 +380,7 @@ describe("Production P1.2 Multimodal Tools & Media Gateway Suite", () => {
       app = Fastify();
       const auth = new LocalDevAuthProvider();
       const store = new InMemoryWorkspaceStore();
-      registerMultimodalRoutes(app, { auth, store });
+      registerMultimodalRoutes(app, { auth, store, aiEngine: visionTestEngine() });
     });
 
     it("GET /media/providers lists all supported media providers", async () => {
@@ -375,6 +399,18 @@ describe("Production P1.2 Multimodal Tools & Media Gateway Suite", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe("UNSUPPORTED_PROVIDER");
+    });
+
+    it("POST /media/ocr sends validated image bytes to the connected vision model", async () => {
+      const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC";
+      const res = await app.inject({
+        method: "POST",
+        url: "/media/ocr",
+        payload: { content: png, mimeType: "image/png", language: "en-US" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().fullText).toContain("INV-2026-9901");
+      expect(res.json().detectedLanguage).toBe("en-US");
     });
 
     it("POST /media/images/generate successfully creates image with valid provider", async () => {

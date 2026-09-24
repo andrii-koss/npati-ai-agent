@@ -1418,7 +1418,7 @@ ${localized.next}`;
   registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
   registerReliabilityAndOperationsRoutes(app, authProvider, workspaceStore);
   registerBrowserAutomationRoutes(app, authProvider);
-  registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage });
+  registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
   app.addHook("onClose", async () => { storageReconciler?.stop(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {

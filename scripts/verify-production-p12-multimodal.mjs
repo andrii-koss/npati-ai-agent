@@ -247,16 +247,31 @@ async function run() {
   console.log("\n[15/15] Inspecting Live Capability Matrix (/capabilities/inspect)...");
   const inspectRes = await api("/capabilities/inspect");
   assert(inspectRes.ok, "Capability inspection succeeded");
-  const p12CapabilityIds = [58, 59, 141, 142, 143, 145, 147, 148, 235, 246, 247, 248, 249, 254];
+  const expectedStatuses = new Map([
+    [58, "PARTIALLY_IMPLEMENTED"],
+    [59, "VERIFIED_EXISTING"],
+    [141, "VERIFIED_EXISTING"],
+    [142, "PARTIALLY_IMPLEMENTED"],
+    [143, "PARTIALLY_IMPLEMENTED"],
+    [145, "PARTIALLY_IMPLEMENTED"],
+    [147, "NOT_IMPLEMENTED"],
+    [148, "NOT_IMPLEMENTED"],
+    [235, "PARTIALLY_IMPLEMENTED"],
+    [246, "PARTIALLY_IMPLEMENTED"],
+    [247, "NOT_IMPLEMENTED"],
+    [248, "NOT_IMPLEMENTED"],
+    [249, "NOT_IMPLEMENTED"],
+    [254, "PARTIALLY_IMPLEMENTED"],
+  ]);
   const liveItems = inspectRes.data.items || [];
-  for (const cid of p12CapabilityIds) {
+  for (const [cid, expectedStatus] of expectedStatuses) {
     const item = liveItems.find((i) => i.id === cid);
     assert(Boolean(item), `Capability #${cid} found in live inspect`);
-    assert(item.status === "VERIFIED_EXISTING", `Capability #${cid} status is VERIFIED_EXISTING (got ${item?.status})`);
+    assert(item.status === expectedStatus, `Capability #${cid} status is ${expectedStatus} (got ${item?.status})`);
   }
 
   console.log("\n==========================================================");
-  console.log("  ALL 14 CAPABILITIES IN P1.2 SUCCESSFULLY VERIFIED!     ");
+  console.log("  ALL 14 P1.2 CAPABILITY STATUSES MATCH LIVE READINESS!   ");
   console.log("==========================================================");
 }
 

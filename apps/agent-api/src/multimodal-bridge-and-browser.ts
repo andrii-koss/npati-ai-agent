@@ -104,7 +104,7 @@ export interface ImageUnderstandingResult {
   detectedObjects: VisualDetectedObject[];
   sceneDescription: string;
   answers: string;
-  confidence: number;
+  confidence?: number;
   processedAt: string;
 }
 
@@ -115,44 +115,27 @@ export class ImageUnderstandingEngine {
   static async analyzeImage(options: {
     imageInput: string;
     query?: string;
+    analyze: (input: { imageInput: string; query: string }) => Promise<string>;
   }): Promise<ImageUnderstandingResult> {
-    const { imageInput, query = "Describe this image in detail." } = options;
+    const { imageInput, query = "Describe this image in detail.", analyze } = options;
     const isUrl = imageInput.startsWith("http://") || imageInput.startsWith("https://");
-
-    const queryLower = query.toLowerCase();
-    const detectedObjects: VisualDetectedObject[] = [
-      { label: "interface", confidence: 0.98, boundingBox: { x: 10, y: 10, w: 980, h: 540 } },
-      { label: "text_block", confidence: 0.95, boundingBox: { x: 50, y: 80, w: 400, h: 120 } },
-      { label: "chart_component", confidence: 0.92, boundingBox: { x: 500, y: 80, w: 450, h: 300 } },
-    ];
-
-    if (queryLower.includes("table") || queryLower.includes("data") || queryLower.includes("invoice")) {
-      detectedObjects.push({
-        label: "data_table",
-        confidence: 0.94,
-        boundingBox: { x: 50, y: 220, w: 850, h: 280 },
+    const answer = (await analyze({ imageInput, query })).trim();
+    if (!answer) {
+      throw Object.assign(new Error("The connected vision model returned an empty analysis."), {
+        status: 502,
+        code: "EMPTY_VISION_RESPONSE",
       });
     }
-
-    if (queryLower.includes("button") || queryLower.includes("action")) {
-      detectedObjects.push({
-        label: "action_button",
-        confidence: 0.96,
-        boundingBox: { x: 800, y: 30, w: 120, h: 40 },
-      });
-    }
-
-    const sceneDescription = "A modern software analytics dashboard displaying charts and data tables.";
-    const answers = `Based on the visual analysis for '${query}': Visual confirmation verified with high confidence.`;
 
     return {
       imageId: `img_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
       source: isUrl ? "url" : "base64",
       query,
-      detectedObjects,
-      sceneDescription,
-      answers,
-      confidence: 0.96,
+      // A chat vision model does not provide trustworthy pixel bounding boxes.
+      // Keep this empty instead of returning invented detections.
+      detectedObjects: [],
+      sceneDescription: answer,
+      answers: answer,
       processedAt: new Date().toISOString(),
     };
   }

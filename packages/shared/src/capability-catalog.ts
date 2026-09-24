@@ -1339,7 +1339,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "system",
     "name": "Image generation",
-    "description": "Якщо вже є image generation у твоєму агенті - route через OmniRoute.",
+    "description": "Image generation has provider discovery, validation, moderation, and HTTP routes. Provider-backed binary generation and chat artifact delivery are still incomplete.",
     "useWhen": [
       "User asks to execute or inspect Image generation"
     ],
@@ -1366,7 +1366,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "system",
     "name": "OCR",
-    "description": "Добре доповнить твоє завантаження фото/файлів.",
+    "description": "Extracts visible text from an uploaded image through the connected vision model, preserves reading order, and returns structured OCR text metadata. Chat image uploads use the same native vision path.",
     "useWhen": [
       "User asks to execute or inspect OCR"
     ],
@@ -3201,7 +3201,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "system",
     "name": "One-shot reminders",
-    "description": "Це ключ до переходу від чату до автономного business agent.",
+    "description": "Reminder scheduling, due checks, cancellation, and authenticated company routes exist. Durable storage, worker dispatch, notification delivery, and direct chat invocation are still incomplete.",
     "useWhen": [
       "User asks to execute or inspect One-shot reminders"
     ],
@@ -3276,7 +3276,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "communications",
     "name": "Image understanding",
-    "description": "Базовий голос/файли вже є; не відволікатися від orchestration та automation.",
+    "description": "Chat image uploads and the authenticated image-understanding route pass the real image to the connected vision model, with upload validation and visual prompt-injection protection.",
     "useWhen": [
       "User asks to execute or inspect Image understanding"
     ],
@@ -3301,7 +3301,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "files",
     "name": "Document input/output",
-    "description": "Базовий голос/файли вже є; не відволікатися від orchestration та automation.",
+    "description": "Chat can extract and analyze supported document uploads, edit real spreadsheets, and export Markdown/CSV. Full provider-independent PDF and DOCX generation/editing is still incomplete.",
     "useWhen": [
       "User asks to execute or inspect Document input/output"
     ],
@@ -3376,7 +3376,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "communications",
     "name": "Image generation/editing",
-    "description": "Базовий голос/файли вже є; не відволікатися від orchestration та automation.",
+    "description": "Generation/editing routes validate operations, dimensions, and moderation. Real provider-backed generated/edited image bytes and Content Hub delivery are still incomplete.",
     "useWhen": [
       "User asks to execute or inspect Image generation/editing"
     ],
@@ -3603,7 +3603,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "browser",
     "name": "Browser screenshots",
-    "description": "Робити після tool permissions/approvals.",
+    "description": "Authenticated browser-tab screenshot routes and request validation exist. The current capture engine returns a synthetic descriptor rather than pixels from a live browser, so production capture remains incomplete.",
     "useWhen": [
       "User asks to execute or inspect Browser screenshots"
     ],
@@ -3628,7 +3628,7 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "browser",
     "name": "Browser PDF capture",
-    "description": "Робити після tool permissions/approvals.",
+    "description": "Authenticated browser-tab PDF routes and print option validation exist. The current capture engine returns a synthetic PDF descriptor rather than a live browser print result, so production capture remains incomplete.",
     "useWhen": [
       "User asks to execute or inspect Browser PDF capture"
     ],
