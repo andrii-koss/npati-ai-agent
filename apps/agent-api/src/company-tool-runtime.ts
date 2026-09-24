@@ -6,6 +6,7 @@ import path from "node:path";
 import { McpScopeGuard } from "./mcp-scopes";
 import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
 import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
+import type { EmailAgentTools } from "./email-agent-tools";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -51,6 +52,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly attachmentReader?: { authorize(context: AuthContext, fileId: string): Promise<{ originalFilename: string; mimeType: string; sizeBytes: number } | null> },
     private readonly memoryRepository?: CompanyMemoryToolRepository,
     private readonly execSandbox?: IsolatedExecSandbox,
+    private readonly emailAgentTools?: EmailAgentTools,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -123,6 +125,35 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
       }, signal);
       return { ...result, codeMode: true, validationWarnings: validation.lintWarnings };
+    }
+    if (tool === "email.send" || tool === "communications.email_send") {
+      if (!this.emailAgentTools) throw new Error("Email Agent Tools runtime is not configured");
+      return this.emailAgentTools.sendEmail(context, company, {
+        to: text(input.to, "Recipient email", 200),
+        subject: text(input.subject, "Email subject", 500),
+        body: text(input.body ?? input.content ?? input.message, "Email body", 50_000),
+        fromEmail: typeof input.fromEmail === "string" ? input.fromEmail : undefined,
+        cc: Array.isArray(input.cc) ? input.cc.map(String) : undefined,
+      });
+    }
+    if (tool === "email.read" || tool === "communications.email_read") {
+      if (!this.emailAgentTools) throw new Error("Email Agent Tools runtime is not configured");
+      return this.emailAgentTools.readEmail(context, company, {
+        query: typeof input.query === "string" ? input.query : undefined,
+        sender: typeof input.sender === "string" ? input.sender : undefined,
+        limit: typeof input.limit === "number" ? input.limit : 10,
+      });
+    }
+    if (tool === "email.extract_code" || tool === "communications.email_extract_code") {
+      if (!this.emailAgentTools) throw new Error("Email Agent Tools runtime is not configured");
+      return this.emailAgentTools.extractVerification(text(input.text ?? input.body ?? input.content, "Email text", 100_000));
+    }
+    if (tool === "email.verify_link" || tool === "communications.email_verify_link") {
+      if (!this.emailAgentTools) throw new Error("Email Agent Tools runtime is not configured");
+      return this.emailAgentTools.inspectLinkSecurity(
+        text(input.url, "URL to inspect", 2_000),
+        typeof input.sender === "string" ? input.sender : undefined
+      );
     }
     throw new Error(`Tool "${tool}" has no runtime adapter`);
   }

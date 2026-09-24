@@ -46,7 +46,7 @@ function resolveNpatiAvatarUrl(value?: string | null): string | null {
 }
 
 
-const navigation = ["Settings"];
+const navigation = ["Inbox", "Settings"];
 type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
 const legacyChatStorageResetMarker = "npati_legacy_chat_storage_removed_2026_09_06_v1";
 function clearLegacyLocalChatsOnce() {
@@ -130,6 +130,7 @@ function ChatUserMenu() {
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
+            <Link to="/inbox" onClick={closeMenu}>Email Inbox <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/ai" onClick={closeMenu}>AI Provider <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/company" onClick={closeMenu}>Company <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
@@ -1047,6 +1048,7 @@ function Workspace({ children }: { children: ReactNode }) {
   const isConnections = location.pathname === "/connections" || location.pathname.startsWith("/connections");
   const isMemory = location.pathname === "/memory" || location.pathname.startsWith("/memory");
   const isSkills = location.pathname === "/skills" || location.pathname.startsWith("/skills");
+  const isInbox = location.pathname === "/inbox" || location.pathname.startsWith("/inbox");
   return (
     <div className={`workspace ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       <header className="workspace-mobile-header">
@@ -1074,9 +1076,9 @@ function Workspace({ children }: { children: ReactNode }) {
         />
       )}
       <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills ? "settings-workspace-content" : ""}`}>
+      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills || isInbox ? "settings-workspace-content" : ""}`}>
         {isChat && <ChatUserMenu />}
-        {!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && <div className="workspace-topbar"><BusinessSwitcher /></div>}
+        {!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && !isInbox && <div className="workspace-topbar"><BusinessSwitcher /></div>}
         {children}
       </section>
     </div>
@@ -1201,6 +1203,8 @@ import { ActivityPage } from "./ActivityPage";
 import { CapabilityInspectorPage } from "./CapabilityInspectorPage";
 import { ConnectionsPage } from "./ConnectionsPage";
 import { ContentPage } from "./ContentPage";
+import { EmailSettingsPage } from "./EmailSettingsPage";
+import { EmailInboxPage } from "./EmailInboxPage";
 
 function SettingsPage() {
   const { t } = useTranslation();
@@ -1211,6 +1215,7 @@ function SettingsPage() {
     { to: "/settings/capabilities", icon: "CP", title: t("settings.cards.capabilities.title"), description: t("settings.cards.capabilities.desc") },
     { to: "/settings/activity", icon: "AC", title: t("settings.cards.activity.title"), description: t("settings.cards.activity.desc") },
     { to: "/settings/automations", icon: "AU", title: t("settings.cards.automations.title"), description: t("settings.cards.automations.desc") },
+    { to: "/settings/email", icon: "EM", title: "Email / AI Inbox", description: "Corporate email addresses, IMAP/SMTP, and AI inbox automation." },
     { to: "/settings/goals", icon: "G", title: t("settings.cards.goals.title"), description: t("settings.cards.goals.desc") },
     { to: "/settings/content", icon: "C", title: t("settings.cards.content.title"), description: t("settings.cards.content.desc") },
     { to: "/settings/connections", icon: "CS", title: t("settings.cards.connections.title"), description: t("settings.cards.connections.desc") },
@@ -1273,6 +1278,9 @@ export function App() {
             <Route path="/settings/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
             <Route path="/automations" element={<Workspace><AutomationsPage /></Workspace>} />
             <Route path="/settings/automations" element={<Workspace><AutomationsPage /></Workspace>} />
+            <Route path="/inbox" element={<Workspace><EmailInboxPage /></Workspace>} />
+            <Route path="/email" element={<Navigate to="/inbox" replace />} />
+            <Route path="/settings/email" element={<Workspace><EmailSettingsPage /></Workspace>} />
             <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
             <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
             <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
