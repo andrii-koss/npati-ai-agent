@@ -1205,23 +1205,151 @@ import { ConnectionsPage } from "./ConnectionsPage";
 import { ContentPage } from "./ContentPage";
 import { EmailSettingsPage } from "./EmailSettingsPage";
 import { EmailInboxPage } from "./EmailInboxPage";
-import { IconsTestPage } from "./IconsTestPage";
 
 function SettingsPage() {
   const { t } = useTranslation();
-  const cards = [
-    { to: "/settings/ai", icon: "AI", title: t("settings.cards.aiProviders.title"), description: t("settings.cards.aiProviders.desc") },
-    { to: "/settings/business", icon: "B", title: t("settings.cards.business.title"), description: t("settings.cards.business.desc") },
-    { to: "/settings/company", icon: "CO", title: t("settings.cards.company.title"), description: t("settings.cards.company.desc") },
-    { to: "/settings/capabilities", icon: "CP", title: t("settings.cards.capabilities.title"), description: t("settings.cards.capabilities.desc") },
-    { to: "/settings/activity", icon: "AC", title: t("settings.cards.activity.title"), description: t("settings.cards.activity.desc") },
-    { to: "/settings/automations", icon: "AU", title: t("settings.cards.automations.title"), description: t("settings.cards.automations.desc") },
-    { to: "/settings/email", icon: "EM", title: "Email / AI Inbox", description: "Corporate email addresses, IMAP/SMTP, and AI inbox automation." },
-    { to: "/settings/goals", icon: "G", title: t("settings.cards.goals.title"), description: t("settings.cards.goals.desc") },
-    { to: "/settings/content", icon: "C", title: t("settings.cards.content.title"), description: t("settings.cards.content.desc") },
-    { to: "/settings/connections", icon: "CS", title: t("settings.cards.connections.title"), description: t("settings.cards.connections.desc") },
-    { to: "/settings/memory", icon: "M", title: t("settings.cards.memory.title"), description: t("settings.cards.memory.desc") },
-    { to: "/settings/skills", icon: "S", title: t("settings.cards.skills.title"), description: t("settings.cards.skills.desc") },
+  const cards: Array<{
+    to: string;
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+  }> = [
+    {
+      to: "/settings/ai",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3Z" />
+          <path d="M19 4v4" />
+          <path d="M21 6h-4" />
+        </svg>
+      ),
+      title: t("settings.cards.aiProviders.title"),
+      description: t("settings.cards.aiProviders.desc"),
+    },
+    {
+      to: "/settings/business",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+          <rect width="20" height="14" x="2" y="6" rx="2" />
+          <path d="M2 13h20" />
+        </svg>
+      ),
+      title: t("settings.cards.business.title"),
+      description: t("settings.cards.business.desc"),
+    },
+    {
+      to: "/settings/company",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="5" rx="1.5" />
+          <rect x="3" y="15" width="6" height="5" rx="1.5" />
+          <rect x="15" y="15" width="6" height="5" rx="1.5" />
+          <path d="M12 8v4M6 12h12v3M6 12v3" />
+        </svg>
+      ),
+      title: t("settings.cards.company.title"),
+      description: t("settings.cards.company.desc"),
+    },
+    {
+      to: "/settings/capabilities",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      ),
+      title: t("settings.cards.capabilities.title"),
+      description: t("settings.cards.capabilities.desc"),
+    },
+    {
+      to: "/settings/activity",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        </svg>
+      ),
+      title: t("settings.cards.activity.title"),
+      description: t("settings.cards.activity.desc"),
+    },
+    {
+      to: "/settings/automations",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      ),
+      title: t("settings.cards.automations.title"),
+      description: t("settings.cards.automations.desc"),
+    },
+    {
+      to: "/settings/email",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2" />
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+        </svg>
+      ),
+      title: "Email / AI Inbox",
+      description: "Corporate email addresses, IMAP/SMTP, and AI inbox automation.",
+    },
+    {
+      to: "/settings/goals",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+      ),
+      title: t("settings.cards.goals.title"),
+      description: t("settings.cards.goals.desc"),
+    },
+    {
+      to: "/settings/content",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" x2="8" y1="13" y2="13" />
+          <line x1="16" x2="8" y1="17" y2="17" />
+          <line x1="10" x2="8" y1="9" y2="9" />
+        </svg>
+      ),
+      title: t("settings.cards.content.title"),
+      description: t("settings.cards.content.desc"),
+    },
+    {
+      to: "/settings/connections",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8z" />
+        </svg>
+      ),
+      title: t("settings.cards.connections.title"),
+      description: t("settings.cards.connections.desc"),
+    },
+    {
+      to: "/settings/memory",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04" />
+          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04" />
+        </svg>
+      ),
+      title: t("settings.cards.memory.title"),
+      description: t("settings.cards.memory.desc"),
+    },
+    {
+      to: "/settings/skills",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      ),
+      title: t("settings.cards.skills.title"),
+      description: t("settings.cards.skills.desc"),
+    },
   ];
 
   return (
@@ -1231,42 +1359,11 @@ function SettingsPage() {
         <h1>{t("settings.title")}</h1>
         <p>{t("settings.description")}</p>
       </div>
-      {/* Test Page Banner for Icons Selection */}
-      <div style={{
-        background: "#ffffff",
-        border: "1px solid #e5e5e5",
-        borderRadius: 14,
-        padding: "14px 20px",
-        marginBottom: 24,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        flexWrap: "wrap",
-        gap: 12,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.03)"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 24 }}>🧪</span>
-          <div>
-            <strong style={{ fontSize: 14, color: "#111", display: "block" }}>Тестова сторінка: вибір білих іконок на чорному фоні</strong>
-            <p style={{ margin: "2px 0 0 0", fontSize: 12.5, color: "#666" }}>
-              Оберіть стиль іконок для розділів замість 2 літер. Після вибору тестову сторінку буде видалено.
-            </p>
-          </div>
-        </div>
-        <Link
-          to="/settings/icons-test"
-          className="button-primary automations-action-primary"
-          style={{ padding: "8px 18px", textDecoration: "none", fontSize: 13, fontWeight: 650, borderRadius: 10 }}
-        >
-          Відкрити тестову сторінку &rarr;
-        </Link>
-      </div>
 
       <div className="settings-card-grid">
         {cards.map((card) => (
           <Link className="settings-ai-card" to={card.to} key={card.to}>
-            <span className="provider-avatar">{card.icon}</span>
+            <span className="provider-avatar" aria-hidden="true">{card.icon}</span>
             <span>
               <strong>{card.title}</strong>
               <small>{card.description}</small>
@@ -1324,8 +1421,6 @@ export function App() {
             <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/settings/icons-test" element={<Workspace><IconsTestPage /></Workspace>} />
-            <Route path="/test-icons" element={<Workspace><IconsTestPage /></Workspace>} />
             <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
             <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
             <Route path="*" element={<Navigate to="/" replace />} />
