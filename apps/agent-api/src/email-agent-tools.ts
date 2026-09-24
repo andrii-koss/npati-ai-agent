@@ -42,7 +42,7 @@ export class EmailAgentTools {
     }
 
     // Rate limit check
-    const rateLimit = this.repo.checkRateLimit(company.id, account, input.to);
+    const rateLimit = await this.repo.reserveSendQuota(company.id, account, input.to);
     if (!rateLimit.allowed) {
       throw new Error(`Rate limit exceeded: ${rateLimit.reason}`);
     }
@@ -62,8 +62,6 @@ export class EmailAgentTools {
       });
     }
 
-    this.repo.recordSentEmail(company.id, account.id, input.to);
-
     const message = await this.repo.createMessage(context, company.id, {
       threadId: thread.id,
       emailAccountId: account.id,
@@ -75,8 +73,15 @@ export class EmailAgentTools {
       bodyText: input.body,
       isDraft: false,
       isAiGenerated: true,
-      deliveryStatus: account.testMode ? "delivered" : "sent",
+      deliveryStatus: account.testMode ? "delivered" : "sending",
     });
+
+    if (!account.testMode) {
+      await this.repo.enqueueJob(context, company.id, {
+        jobType: "send", emailAccountId: account.id, threadId: thread.id,
+        messageId: message.id, idempotencyKey: `send:${message.id}`,
+      });
+    }
 
     return {
       success: true,
@@ -85,7 +90,7 @@ export class EmailAgentTools {
       to: input.to,
       subject: input.subject,
       testMode: account.testMode,
-      status: account.testMode ? "simulated_send" : "sent",
+      status: account.testMode ? "simulated_send" : "queued",
     };
   }
 

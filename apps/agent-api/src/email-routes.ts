@@ -1,22 +1,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
+import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AuthProvider } from "./auth";
 import type { AuditRepository } from "./audit-repository";
 import { EmailInboxRepository } from "./email-inbox-repository";
-import { EmailAIProcessor } from "./email-ai-processor";
+import { EmailAIProcessor, type EmailAutomationHooks } from "./email-ai-processor";
 import { EmailDnsVerifier } from "./email-dns-verifier";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailAgentTools } from "./email-agent-tools";
 import type {
   CompanyEmailAccount,
+  EmailAttachment,
   EmailFolder,
   EmailPriority,
   EmailThreadStatus,
 } from "./email-inbox-types";
 
 function presentEmailAccount(account: CompanyEmailAccount): CompanyEmailAccount {
-  const { password: _imapPassword, ...imapConfig } = account.imapConfig;
-  const { password: _smtpPassword, ...smtpConfig } = account.smtpConfig;
+  const { password: _imapPassword, accessToken: _imapAccess, refreshToken: _imapRefresh, clientSecret: _imapSecret, ...imapConfig } = account.imapConfig;
+  const { password: _smtpPassword, accessToken: _smtpAccess, refreshToken: _smtpRefresh, clientSecret: _smtpSecret, ...smtpConfig } = account.smtpConfig;
   return { ...account, imapConfig, smtpConfig };
 }
 
@@ -26,10 +28,17 @@ function err(reply: FastifyReply, error: unknown) {
   return reply.code(status).send({ error: { message } });
 }
 
-async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace:read" | "business:manage") {
+type EmailPermission =
+  | "workspace:read" | "business:manage" | "email:view" | "email:manage_accounts"
+  | "email:read_messages" | "email:send_messages" | "email:delete_messages"
+  | "email:approve_drafts" | "email:configure_autopilot" | "email:configure_agents"
+  | "email:view_analytics";
+
+async function ctx(auth: AuthProvider, r: FastifyRequest, permission: EmailPermission) {
   const scope = await auth.authenticate(r);
-  const hasAccess =
-    permission === "workspace:read"
+  const emailReadPermission = ["email:view", "email:read_messages", "email:view_analytics"].includes(permission);
+  const hasAccess = scope.permissions.includes(permission) ||
+    (permission === "workspace:read" || emailReadPermission
       ? scope.permissions.includes("workspace:read") ||
         scope.permissions.includes("workspace:write") ||
         scope.permissions.includes("business:manage") ||
@@ -38,7 +47,7 @@ async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace
       : scope.permissions.includes("business:manage") ||
         scope.permissions.includes("workspace:write") ||
         scope.permissions.includes("admin:all") ||
-        scope.permissions.includes("*");
+        scope.permissions.includes("*"));
 
   if (!hasAccess) {
     throw Object.assign(new Error(`Missing required permission: ${permission}`), { status: 403 });
@@ -53,10 +62,12 @@ export function registerEmailInboxRoutes(
     store: WorkspaceStore;
     repo: EmailInboxRepository;
     auditRepo?: AuditRepository;
+    aiEngine?: AIEngine;
+    automationHooks?: EmailAutomationHooks;
   }
 ) {
-  const { auth, store, repo, auditRepo } = options;
-  const aiProcessor = new EmailAIProcessor(repo, auditRepo);
+  const { auth, store, repo, auditRepo, aiEngine, automationHooks } = options;
+  const aiProcessor = new EmailAIProcessor(repo, auditRepo, aiEngine, automationHooks);
   const agentTools = new EmailAgentTools(repo);
 
   // =========================================================================
@@ -65,7 +76,7 @@ export function registerEmailInboxRoutes(
 
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-accounts", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:view");
       await store.getCompany(c, r.params.companyId);
       const accounts = await repo.listAccounts(c, r.params.companyId);
       return reply.code(200).send({ accounts: accounts.map(presentEmailAccount) });
@@ -93,7 +104,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-accounts", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:manage_accounts");
       await store.getCompany(c, r.params.companyId);
 
       if (!r.body?.emailAddress || !r.body.emailAddress.includes("@")) {
@@ -122,7 +133,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-accounts/:accountId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "workspace:read");
+        const c = await ctx(auth, r, "email:view");
         await store.getCompany(c, r.params.companyId);
         const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
         if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
@@ -138,7 +149,7 @@ export function registerEmailInboxRoutes(
     Body: Record<string, any>;
   }>("/companies/:companyId/email-accounts/:accountId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:manage_accounts");
       await store.getCompany(c, r.params.companyId);
       const account = await repo.updateAccount(c, r.params.companyId, r.params.accountId, r.body || {});
       return reply.code(200).send({ account: presentEmailAccount(account) });
@@ -151,7 +162,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-accounts/:accountId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "business:manage");
+        const c = await ctx(auth, r, "email:manage_accounts");
         await store.getCompany(c, r.params.companyId);
         await repo.deleteAccount(c, r.params.companyId, r.params.accountId);
         return reply.code(200).send({ deleted: true });
@@ -167,7 +178,7 @@ export function registerEmailInboxRoutes(
     Body: { imapConfig?: any; smtpConfig?: any };
   }>("/companies/:companyId/email-accounts/:accountId/test-connection", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:manage_accounts");
       await store.getCompany(c, r.params.companyId);
       const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
       if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
@@ -197,7 +208,7 @@ export function registerEmailInboxRoutes(
     Body: { domain?: string; selector?: string };
   }>("/companies/:companyId/email-accounts/:accountId/dns-check", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:view");
       await store.getCompany(c, r.params.companyId);
       const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
       if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
@@ -229,7 +240,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/threads", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
 
       const threads = await repo.listThreads(c, r.params.companyId, {
@@ -252,7 +263,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/threads/:threadId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "workspace:read");
+        const c = await ctx(auth, r, "email:read_messages");
         await store.getCompany(c, r.params.companyId);
 
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
@@ -280,7 +291,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/threads/:threadId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
       const thread = await repo.updateThread(c, r.params.companyId, r.params.threadId, r.body || {});
       return reply.code(200).send({ thread });
@@ -293,10 +304,27 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/threads/:threadId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "business:manage");
+        const c = await ctx(auth, r, "email:delete_messages");
         await store.getCompany(c, r.params.companyId);
         await repo.deleteThread(c, r.params.companyId, r.params.threadId);
         return reply.code(200).send({ deleted: true });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
+
+  // Send message / reply or save draft
+  app.get<{ Params: { companyId: string; threadId: string } }>(
+    "/companies/:companyId/email-inbox/threads/:threadId/audit",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "email:read_messages");
+        await store.getCompany(c, r.params.companyId);
+        const logs = auditRepo
+          ? await auditRepo.listResourceLogs(c, r.params.companyId, "company_email_thread", r.params.threadId)
+          : [];
+        return reply.code(200).send({ logs });
       } catch (e) {
         return err(reply, e);
       }
@@ -315,10 +343,11 @@ export function registerEmailInboxRoutes(
       bccAddresses?: string[];
       isDraft?: boolean;
       approvedDraftMessageId?: string;
+      attachments?: EmailAttachment[];
     };
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, r.body?.approvedDraftMessageId ? "email:approve_drafts" : "email:send_messages");
       await store.getCompany(c, r.params.companyId);
 
       const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
@@ -335,11 +364,10 @@ export function registerEmailInboxRoutes(
 
       // Rate limit check if sending live
       if (!isDraft && account) {
-        const rateLimit = repo.checkRateLimit(r.params.companyId, account, toAddresses[0] || thread.customerEmail);
+        const rateLimit = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0] || thread.customerEmail);
         if (!rateLimit.allowed) {
           throw new Error(`Rate limit exceeded: ${rateLimit.reason}`);
         }
-        repo.recordSentEmail(r.params.companyId, account.id, toAddresses[0] || thread.customerEmail);
       }
 
       // If approving an existing draft message
@@ -348,11 +376,18 @@ export function registerEmailInboxRoutes(
           isDraft: false,
           aiDraftApprovedBy: c.userId,
           sentByUserId: c.userId,
-          deliveryStatus: account?.testMode ? "delivered" : "sent",
+          deliveryStatus: account?.testMode ? "delivered" : "sending",
         });
 
+        if (account && !account.testMode) {
+          await repo.enqueueJob(c, r.params.companyId, {
+            jobType: "send", emailAccountId: account.id, threadId: thread.id,
+            messageId: updatedDraft.id, idempotencyKey: `send:${updatedDraft.id}`,
+          });
+        }
+
         await repo.updateThread(c, r.params.companyId, thread.id, {
-          status: "answered",
+          status: account?.testMode ? "answered" : "ai_processing",
         });
 
         if (auditRepo) {
@@ -367,7 +402,7 @@ export function registerEmailInboxRoutes(
             .catch(() => undefined);
         }
 
-        return reply.code(200).send({ message: updatedDraft, status: "sent" });
+        return reply.code(account?.testMode ? 200 : 202).send({ message: updatedDraft, status: account?.testMode ? "sent" : "queued" });
       }
 
       const msg = await repo.createMessage(c, r.params.companyId, {
@@ -381,18 +416,25 @@ export function registerEmailInboxRoutes(
         subject: r.body.subject || `Re: ${thread.subject}`,
         bodyText: r.body.bodyText,
         bodyHtml: r.body.bodyHtml,
+        attachments: r.body.attachments,
         isDraft,
         sentByUserId: c.userId,
-        deliveryStatus: isDraft ? "sending" : account?.testMode ? "delivered" : "sent",
+        deliveryStatus: isDraft ? "sending" : account?.testMode ? "delivered" : "sending",
       });
 
       if (!isDraft) {
+        if (account && !account.testMode) {
+          await repo.enqueueJob(c, r.params.companyId, {
+            jobType: "send", emailAccountId: account.id, threadId: thread.id,
+            messageId: msg.id, idempotencyKey: `send:${msg.id}`,
+          });
+        }
         await repo.updateThread(c, r.params.companyId, thread.id, {
-          status: "answered",
+          status: account?.testMode ? "answered" : "ai_processing",
         });
       }
 
-      return reply.code(201).send({ message: msg });
+      return reply.code(!isDraft && account && !account.testMode ? 202 : 201).send({ message: msg });
     } catch (e) {
       return err(reply, e);
     }
@@ -404,10 +446,42 @@ export function registerEmailInboxRoutes(
     Body: { bodyText?: string; bodyHtml?: string; isDraft?: boolean };
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages/:messageId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:send_messages");
       await store.getCompany(c, r.params.companyId);
       const msg = await repo.updateMessage(c, r.params.companyId, r.params.messageId, r.body || {});
       return reply.code(200).send({ message: msg });
+    } catch (e) {
+      return err(reply, e);
+    }
+  });
+
+  // Collision Protection Lock (Item 11)
+  app.post<{
+    Params: { companyId: string; threadId: string; messageId: string };
+    Body: { status: "delivered" | "bounced" | "rejected" | "failed"; error?: string };
+  }>("/companies/:companyId/email-inbox/threads/:threadId/messages/:messageId/delivery-event", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:manage_accounts");
+      await store.getCompany(c, r.params.companyId);
+      const allowed = new Set(["delivered", "bounced", "rejected", "failed"]);
+      if (!allowed.has(r.body?.status)) throw new Error("Unsupported delivery status");
+      const message = await repo.updateMessage(c, r.params.companyId, r.params.messageId, {
+        deliveryStatus: r.body.status,
+        deliveryError: r.body.error || null,
+      });
+      if (r.body.status !== "delivered") {
+        await repo.updateThread(c, r.params.companyId, r.params.threadId, { status: "failed" });
+      }
+      if (auditRepo) {
+        await auditRepo.log(c, r.params.companyId, {
+          action: `email.delivery_${r.body.status}`,
+          category: "automation",
+          resourceType: "company_email_message",
+          resourceId: message.id,
+          details: { threadId: r.params.threadId, error: r.body.error },
+        }).catch(() => undefined);
+      }
+      return reply.code(200).send({ message });
     } catch (e) {
       return err(reply, e);
     }
@@ -419,7 +493,7 @@ export function registerEmailInboxRoutes(
     Body: { action: "acquire" | "release" };
   }>("/companies/:companyId/email-inbox/threads/:threadId/lock", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
 
       if (r.body?.action === "acquire") {
@@ -440,7 +514,7 @@ export function registerEmailInboxRoutes(
     Body: { takeover: boolean };
   }>("/companies/:companyId/email-inbox/threads/:threadId/takeover", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
       const thread = await repo.setHumanTakeover(c, r.params.companyId, r.params.threadId, r.body?.takeover ?? true);
 
@@ -481,7 +555,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/inbound", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:manage_accounts");
       await store.getCompany(c, r.params.companyId);
 
       const result = await aiProcessor.processInbound(c, r.params.companyId, r.body);
@@ -502,7 +576,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/simulate", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
 
       const accounts = await repo.listAccounts(c, r.params.companyId);
@@ -531,7 +605,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/contacts",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "workspace:read");
+        const c = await ctx(auth, r, "email:view");
         await store.getCompany(c, r.params.companyId);
         const contacts = await repo.listContacts(c, r.params.companyId);
         return reply.code(200).send({ contacts });
@@ -545,7 +619,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/contacts/:email",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "workspace:read");
+        const c = await ctx(auth, r, "email:view");
         await store.getCompany(c, r.params.companyId);
         const contact = await repo.getContact(c, r.params.companyId, r.params.email);
         return reply.code(200).send({ contact });
@@ -567,7 +641,7 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/contacts/:email", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:manage_accounts");
       await store.getCompany(c, r.params.companyId);
       const contact = await repo.upsertContact(c, r.params.companyId, {
         email: r.params.email,
@@ -585,7 +659,7 @@ export function registerEmailInboxRoutes(
 
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/templates", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:view");
       await store.getCompany(c, r.params.companyId);
       const templates = await repo.listTemplates(c, r.params.companyId);
       return reply.code(200).send({ templates });
@@ -599,7 +673,7 @@ export function registerEmailInboxRoutes(
     Body: { title: string; category?: string; subjectTemplate?: string; bodyTemplate: string; emailAccountId?: string };
   }>("/companies/:companyId/email-inbox/templates", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
       const template = await repo.createTemplate(c, r.params.companyId, r.body);
       return reply.code(201).send({ template });
@@ -613,7 +687,7 @@ export function registerEmailInboxRoutes(
     Body: { title?: string; category?: string; subjectTemplate?: string | null; bodyTemplate?: string };
   }>("/companies/:companyId/email-inbox/templates/:templateId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
       const template = await repo.updateTemplate(c, r.params.companyId, r.params.templateId, r.body || {});
       return reply.code(200).send({ template });
@@ -626,7 +700,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/templates/:templateId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "business:manage");
+        const c = await ctx(auth, r, "email:configure_autopilot");
         await store.getCompany(c, r.params.companyId);
         await repo.deleteTemplate(c, r.params.companyId, r.params.templateId);
         return reply.code(200).send({ deleted: true });
@@ -642,7 +716,7 @@ export function registerEmailInboxRoutes(
 
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/rules", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:view");
       await store.getCompany(c, r.params.companyId);
       const rules = await repo.listRules(c, r.params.companyId);
       return reply.code(200).send({ rules });
@@ -656,7 +730,7 @@ export function registerEmailInboxRoutes(
     Body: { name: string; emailAccountId?: string; conditions?: any; actions?: any; priorityOrder?: number };
   }>("/companies/:companyId/email-inbox/rules", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
       const rule = await repo.createRule(c, r.params.companyId, r.body);
       return reply.code(201).send({ rule });
@@ -670,7 +744,7 @@ export function registerEmailInboxRoutes(
     Body: { name?: string; conditions?: any; actions?: any; isActive?: boolean; priorityOrder?: number };
   }>("/companies/:companyId/email-inbox/rules/:ruleId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "business:manage");
+      const c = await ctx(auth, r, "email:configure_autopilot");
       await store.getCompany(c, r.params.companyId);
       const rule = await repo.updateRule(c, r.params.companyId, r.params.ruleId, r.body || {});
       return reply.code(200).send({ rule });
@@ -683,7 +757,7 @@ export function registerEmailInboxRoutes(
     "/companies/:companyId/email-inbox/rules/:ruleId",
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "business:manage");
+        const c = await ctx(auth, r, "email:configure_autopilot");
         await store.getCompany(c, r.params.companyId);
         await repo.deleteRule(c, r.params.companyId, r.params.ruleId);
         return reply.code(200).send({ deleted: true });
@@ -699,7 +773,7 @@ export function registerEmailInboxRoutes(
 
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/analytics", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:view_analytics");
       await store.getCompany(c, r.params.companyId);
       const analytics = await repo.getAnalytics(c, r.params.companyId);
       return reply.code(200).send({ analytics });
@@ -717,7 +791,7 @@ export function registerEmailInboxRoutes(
     Body: { url: string; senderEmail?: string };
   }>("/companies/:companyId/email-inbox/inspect-link", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
       const result = agentTools.inspectLinkSecurity(r.body.url, r.body.senderEmail);
       return reply.code(200).send({ check: result });
@@ -731,7 +805,7 @@ export function registerEmailInboxRoutes(
     Body: { text: string };
   }>("/companies/:companyId/email-inbox/extract-code", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "workspace:read");
+      const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
       const result = agentTools.extractVerification(r.body.text || "");
       return reply.code(200).send(result);

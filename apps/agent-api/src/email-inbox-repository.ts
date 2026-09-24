@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import type { AuthContext } from "@npati/workspace";
+import { defaultVault, type AuthContext, type CryptoVault } from "@npati/workspace";
 import type {
   CompanyEmailAccount,
   CompanyEmailContact,
+  CompanyEmailJob,
   CompanyEmailMessage,
   CompanyEmailRule,
   CompanyEmailTemplate,
@@ -51,6 +52,7 @@ const messageCols = `
 
 export class EmailInboxRepository {
   private pool?: Pool;
+  private readonly vault: CryptoVault;
 
   // In-memory fallback maps
   private memoryAccounts = new Map<string, CompanyEmailAccount>();
@@ -59,9 +61,12 @@ export class EmailInboxRepository {
   private memoryContacts = new Map<string, CompanyEmailContact>();
   private memoryTemplates = new Map<string, CompanyEmailTemplate>();
   private memoryRules = new Map<string, CompanyEmailRule>();
+  private memoryJobs = new Map<string, CompanyEmailJob>();
   private sentTimestamps = new Map<string, number[]>(); // key: `${companyId}:${accountId}:${recipient}` -> array of epoch ms
+  private inboundLocks = new Map<string, Promise<void>>();
 
-  constructor(databaseUrl?: string, pool?: Pool) {
+  constructor(databaseUrl?: string, pool?: Pool, vault: CryptoVault = defaultVault) {
+    this.vault = vault;
     if (pool) {
       this.pool = pool;
     } else if (databaseUrl && databaseUrl.trim().length > 0) {
@@ -69,9 +74,104 @@ export class EmailInboxRepository {
     }
   }
 
+  private encryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
+    const encrypt = (value?: string) => {
+      if (!value || value.startsWith("v1$")) return value;
+      return this.vault.encrypt(value);
+    };
+    return {
+      ...account,
+      imapConfig: { ...account.imapConfig, password: encrypt(account.imapConfig.password),
+        accessToken: encrypt(account.imapConfig.accessToken), refreshToken: encrypt(account.imapConfig.refreshToken),
+        clientSecret: encrypt(account.imapConfig.clientSecret) },
+      smtpConfig: { ...account.smtpConfig, password: encrypt(account.smtpConfig.password),
+        accessToken: encrypt(account.smtpConfig.accessToken), refreshToken: encrypt(account.smtpConfig.refreshToken),
+        clientSecret: encrypt(account.smtpConfig.clientSecret) },
+    };
+  }
+
+  private decryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
+    const decrypt = (value?: string) => {
+      if (!value || !value.startsWith("v1$")) return value;
+      return this.vault.decrypt(value);
+    };
+    return {
+      ...account,
+      imapConfig: { ...account.imapConfig, password: decrypt(account.imapConfig.password),
+        accessToken: decrypt(account.imapConfig.accessToken), refreshToken: decrypt(account.imapConfig.refreshToken),
+        clientSecret: decrypt(account.imapConfig.clientSecret) },
+      smtpConfig: { ...account.smtpConfig, password: decrypt(account.smtpConfig.password),
+        accessToken: decrypt(account.smtpConfig.accessToken), refreshToken: decrypt(account.smtpConfig.refreshToken),
+        clientSecret: decrypt(account.smtpConfig.clientSecret) },
+    };
+  }
+
   async close(): Promise<void> {
     if (this.pool) {
       await this.pool.end().catch(() => undefined);
+    }
+  }
+
+  async encryptLegacyAccountCredentials(): Promise<number> {
+    if (!this.pool) {
+      let changed = 0;
+      for (const [id, account] of this.memoryAccounts) {
+        const protectedAccount = this.encryptAccountSecrets(account);
+        if (JSON.stringify(protectedAccount) !== JSON.stringify(account)) {
+          this.memoryAccounts.set(id, protectedAccount);
+          changed++;
+        }
+      }
+      return changed;
+    }
+    const result = await this.pool.query<CompanyEmailAccount>(
+      `SELECT ${accountCols} FROM company_email_accounts WHERE deleted_at IS NULL`
+    );
+    let changed = 0;
+    for (const account of result.rows) {
+      const protectedAccount = this.encryptAccountSecrets(account);
+      if (JSON.stringify(protectedAccount.imapConfig) === JSON.stringify(account.imapConfig)
+        && JSON.stringify(protectedAccount.smtpConfig) === JSON.stringify(account.smtpConfig)) continue;
+      await this.pool.query(
+        "UPDATE company_email_accounts SET imap_config=$1, smtp_config=$2, updated_at=now() WHERE id=$3",
+        [JSON.stringify(protectedAccount.imapConfig), JSON.stringify(protectedAccount.smtpConfig), account.id]
+      );
+      changed++;
+    }
+    return changed;
+  }
+
+  async withInboundMessageLock<T>(
+    workspaceId: string,
+    companyId: string,
+    externalMessageId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const lockKey = `${workspaceId}:${companyId}:${externalMessageId.trim()}`;
+    if (this.pool) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+        return await operation();
+      } finally {
+        await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]).catch(() => undefined);
+        client.release();
+      }
+    }
+
+    const previous = this.inboundLocks.get(lockKey) || Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => gate);
+    this.inboundLocks.set(lockKey, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.inboundLocks.get(lockKey) === tail) this.inboundLocks.delete(lockKey);
     }
   }
 
@@ -87,12 +187,12 @@ export class EmailInboxRepository {
          ORDER BY created_at ASC`,
         [ctx.workspaceId, companyId]
       );
-      return result.rows;
+      return result.rows.map((account) => this.decryptAccountSecrets(account));
     }
 
-    return Array.from(this.memoryAccounts.values()).filter(
-      (a) => a.workspaceId === ctx.workspaceId && a.companyId === companyId
-    );
+    return Array.from(this.memoryAccounts.values())
+      .filter((a) => a.workspaceId === ctx.workspaceId && a.companyId === companyId)
+      .map((account) => this.decryptAccountSecrets(account));
   }
 
   async getAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<CompanyEmailAccount | null> {
@@ -102,11 +202,13 @@ export class EmailInboxRepository {
          WHERE workspace_id = $1 AND company_id = $2 AND id = $3 AND deleted_at IS NULL`,
         [ctx.workspaceId, companyId, accountId]
       );
-      return result.rows[0] ?? null;
+      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
     }
 
     const item = this.memoryAccounts.get(accountId);
-    return item && item.workspaceId === ctx.workspaceId && item.companyId === companyId ? item : null;
+    return item && item.workspaceId === ctx.workspaceId && item.companyId === companyId
+      ? this.decryptAccountSecrets(item)
+      : null;
   }
 
   async findAccountByEmail(companyId: string, emailAddress: string): Promise<CompanyEmailAccount | null> {
@@ -118,15 +220,29 @@ export class EmailInboxRepository {
          LIMIT 1`,
         [companyId, normalized]
       );
-      return result.rows[0] ?? null;
+      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
     }
 
     for (const a of this.memoryAccounts.values()) {
       if (a.companyId === companyId && a.emailAddress.toLowerCase() === normalized) {
-        return a;
+        return this.decryptAccountSecrets(a);
       }
     }
     return null;
+  }
+
+  async listAccountsForWorker(): Promise<CompanyEmailAccount[]> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailAccount>(
+        `SELECT ${accountCols} FROM company_email_accounts
+         WHERE deleted_at IS NULL AND status <> 'disabled'
+         ORDER BY created_at ASC`
+      );
+      return result.rows.map((account) => this.decryptAccountSecrets(account));
+    }
+    return Array.from(this.memoryAccounts.values())
+      .filter((account) => account.status !== "disabled")
+      .map((account) => this.decryptAccountSecrets(account));
   }
 
   async createAccount(
@@ -169,6 +285,7 @@ export class EmailInboxRepository {
       updatedAt: now,
     };
 
+    const storedAccount = this.encryptAccountSecrets(account);
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailAccount>(
         `INSERT INTO company_email_accounts (
@@ -194,8 +311,8 @@ export class EmailInboxRepository {
           account.confidenceThreshold,
           account.languageMode,
           account.fallbackLanguage,
-          JSON.stringify(account.imapConfig),
-          JSON.stringify(account.smtpConfig),
+          JSON.stringify(storedAccount.imapConfig),
+          JSON.stringify(storedAccount.smtpConfig),
           JSON.stringify(account.rateLimits),
           JSON.stringify(account.signatureConfig),
           JSON.stringify(account.followupConfig),
@@ -203,10 +320,10 @@ export class EmailInboxRepository {
           account.updatedAt,
         ]
       );
-      return result.rows[0]!;
+      return this.decryptAccountSecrets(result.rows[0]!);
     }
 
-    this.memoryAccounts.set(id, account);
+    this.memoryAccounts.set(id, storedAccount);
     return account;
   }
 
@@ -231,6 +348,7 @@ export class EmailInboxRepository {
       updatedAt: now,
     };
 
+    const storedAccount = this.encryptAccountSecrets(updated);
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailAccount>(
         `UPDATE company_email_accounts SET
@@ -250,8 +368,8 @@ export class EmailInboxRepository {
           updated.confidenceThreshold,
           updated.languageMode,
           updated.fallbackLanguage,
-          JSON.stringify(updated.imapConfig),
-          JSON.stringify(updated.smtpConfig),
+          JSON.stringify(storedAccount.imapConfig),
+          JSON.stringify(storedAccount.smtpConfig),
           JSON.stringify(updated.rateLimits),
           JSON.stringify(updated.signatureConfig),
           JSON.stringify(updated.followupConfig),
@@ -261,10 +379,10 @@ export class EmailInboxRepository {
           accountId,
         ]
       );
-      return result.rows[0]!;
+      return this.decryptAccountSecrets(result.rows[0]!);
     }
 
-    this.memoryAccounts.set(accountId, updated);
+    this.memoryAccounts.set(accountId, storedAccount);
     return updated;
   }
 
@@ -650,6 +768,19 @@ export class EmailInboxRepository {
     return Array.from(this.memoryMessages.values())
       .filter((m) => m.workspaceId === ctx.workspaceId && m.companyId === companyId && m.threadId === threadId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  async getMessage(ctx: AuthContext, companyId: string, messageId: string): Promise<CompanyEmailMessage | null> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailMessage>(
+        `SELECT ${messageCols} FROM company_email_messages
+         WHERE workspace_id=$1 AND company_id=$2 AND id=$3`,
+        [ctx.workspaceId, companyId, messageId]
+      );
+      return result.rows[0] ?? null;
+    }
+    const message = this.memoryMessages.get(messageId);
+    return message && message.workspaceId === ctx.workspaceId && message.companyId === companyId ? message : null;
   }
 
   async findMessageByExternalId(
@@ -1207,11 +1338,40 @@ export class EmailInboxRepository {
   // 8. Rate Limits (Item 21)
   // =========================================================================
 
-  checkRateLimit(
+  async checkRateLimit(
     companyId: string,
     account: CompanyEmailAccount,
     recipientEmail: string
-  ): { allowed: boolean; reason?: string } {
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const normalizedRecipient = recipientEmail.trim().toLowerCase();
+    if (this.pool) {
+      const result = await this.pool.query<{ hour_count: string; day_count: string; recipient_count: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS day_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count
+         FROM company_email_send_events
+         WHERE workspace_id = $1 AND company_id = $2 AND email_account_id = $3`,
+        [account.workspaceId, companyId, account.id, normalizedRecipient]
+      );
+      const sentLastHour = Number(result.rows[0]?.hour_count || 0);
+      const sentLastDay = Number(result.rows[0]?.day_count || 0);
+      const sentToRecipient = Number(result.rows[0]?.recipient_count || 0);
+      if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
+        return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
+      }
+      if (sentLastDay >= (account.rateLimits.maxPerDay || 500)) {
+        return { allowed: false, reason: `Daily limit reached (${sentLastDay}/${account.rateLimits.maxPerDay} emails).` };
+      }
+      if (sentToRecipient >= (account.rateLimits.maxPerRecipientDaily || 5)) {
+        return {
+          allowed: false,
+          reason: `Daily limit for recipient ${recipientEmail} reached (${sentToRecipient}/${account.rateLimits.maxPerRecipientDaily}).`,
+        };
+      }
+      return { allowed: true };
+    }
+
     const now = Date.now();
     const oneHourAgo = now - 3600_000;
     const oneDayAgo = now - 86400_000;
@@ -1244,7 +1404,20 @@ export class EmailInboxRepository {
     return { allowed: true };
   }
 
-  recordSentEmail(companyId: string, accountId: string, recipientEmail: string): void {
+  async recordSentEmail(companyId: string, accountId: string, recipientEmail: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(
+        `INSERT INTO company_email_send_events (
+           id, workspace_id, company_id, email_account_id, recipient_email, sent_at
+         )
+         SELECT $1, workspace_id, company_id, id, $3, now()
+         FROM company_email_accounts
+         WHERE id = $2 AND company_id = $4 AND deleted_at IS NULL`,
+        [randomUUID(), accountId, recipientEmail.trim().toLowerCase(), companyId]
+      );
+      return;
+    }
+
     const now = Date.now();
     const accountKey = `${companyId}:${accountId}`;
     const recipientKey = `${companyId}:${accountId}:${recipientEmail.trim().toLowerCase()}`;
@@ -1258,37 +1431,228 @@ export class EmailInboxRepository {
     this.sentTimestamps.set(recipientKey, rec);
   }
 
+  async reserveSendQuota(
+    companyId: string,
+    account: CompanyEmailAccount,
+    recipientEmail: string
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    if (!this.pool) {
+      const result = await this.checkRateLimit(companyId, account, recipientEmail);
+      if (result.allowed) await this.recordSentEmail(companyId, account.id, recipientEmail);
+      return result;
+    }
+
+    const client = await this.pool.connect();
+    const recipient = recipientEmail.trim().toLowerCase();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `email-rate:${account.workspaceId}:${companyId}:${account.id}`,
+      ]);
+      const counts = await client.query<{ hour_count: string; day_count: string; recipient_count: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS day_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count
+         FROM company_email_send_events
+         WHERE workspace_id = $1 AND company_id = $2 AND email_account_id = $3`,
+        [account.workspaceId, companyId, account.id, recipient]
+      );
+      const hourCount = Number(counts.rows[0]?.hour_count || 0);
+      const dayCount = Number(counts.rows[0]?.day_count || 0);
+      const recipientCount = Number(counts.rows[0]?.recipient_count || 0);
+      let deniedReason: string | undefined;
+      if (hourCount >= (account.rateLimits.maxPerHour || 50)) {
+        deniedReason = `Hourly limit reached (${hourCount}/${account.rateLimits.maxPerHour} emails).`;
+      } else if (dayCount >= (account.rateLimits.maxPerDay || 500)) {
+        deniedReason = `Daily limit reached (${dayCount}/${account.rateLimits.maxPerDay} emails).`;
+      } else if (recipientCount >= (account.rateLimits.maxPerRecipientDaily || 5)) {
+        deniedReason = `Daily limit for recipient ${recipientEmail} reached (${recipientCount}/${account.rateLimits.maxPerRecipientDaily}).`;
+      }
+      if (deniedReason) {
+        await client.query("COMMIT");
+        return { allowed: false, reason: deniedReason };
+      }
+
+      await client.query(
+        `INSERT INTO company_email_send_events
+          (id, workspace_id, company_id, email_account_id, recipient_email, sent_at)
+         VALUES ($1, $2, $3, $4, $5, now())`,
+        [randomUUID(), account.workspaceId, companyId, account.id, recipient]
+      );
+      await client.query("COMMIT");
+      return { allowed: true };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async enqueueJob(
+    ctx: AuthContext,
+    companyId: string,
+    input: {
+      jobType: CompanyEmailJob["jobType"];
+      emailAccountId?: string | null;
+      threadId?: string | null;
+      messageId?: string | null;
+      payload?: Record<string, unknown>;
+      runAfter?: string;
+      maxAttempts?: number;
+      idempotencyKey?: string | null;
+    }
+  ): Promise<CompanyEmailJob> {
+    const now = new Date().toISOString();
+    const job: CompanyEmailJob = {
+      id: randomUUID(), workspaceId: ctx.workspaceId, companyId,
+      emailAccountId: input.emailAccountId || null, threadId: input.threadId || null,
+      messageId: input.messageId || null, jobType: input.jobType, status: "queued",
+      payload: input.payload || {}, attemptCount: 0, maxAttempts: input.maxAttempts ?? 5,
+      runAfter: input.runAfter || now, lockedAt: null, lockedBy: null, lastError: null,
+      idempotencyKey: input.idempotencyKey || null, createdAt: now, updatedAt: now,
+    };
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailJob>(
+        `INSERT INTO company_email_jobs (
+           id, workspace_id, company_id, email_account_id, thread_id, message_id,
+           job_type, status, payload, attempt_count, max_attempts, run_after,
+           idempotency_key, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8,0,$9,$10,$11,$12,$12)
+         ON CONFLICT (workspace_id, company_id, idempotency_key) DO UPDATE
+           SET updated_at = company_email_jobs.updated_at
+         RETURNING id, workspace_id AS "workspaceId", company_id AS "companyId",
+           email_account_id AS "emailAccountId", thread_id AS "threadId", message_id AS "messageId",
+           job_type AS "jobType", status, payload, attempt_count AS "attemptCount",
+           max_attempts AS "maxAttempts", run_after AS "runAfter", locked_at AS "lockedAt",
+           locked_by AS "lockedBy", last_error AS "lastError", idempotency_key AS "idempotencyKey",
+           created_at AS "createdAt", updated_at AS "updatedAt"`,
+        [job.id, job.workspaceId, job.companyId, job.emailAccountId, job.threadId, job.messageId,
+          job.jobType, JSON.stringify(job.payload), job.maxAttempts, job.runAfter,
+          job.idempotencyKey, now]
+      );
+      return result.rows[0]!;
+    }
+    if (job.idempotencyKey) {
+      const existing = Array.from(this.memoryJobs.values()).find((item) =>
+        item.workspaceId === ctx.workspaceId && item.companyId === companyId && item.idempotencyKey === job.idempotencyKey);
+      if (existing) return existing;
+    }
+    this.memoryJobs.set(job.id, job);
+    return job;
+  }
+
+  async claimJobs(workerId: string, limit = 10): Promise<CompanyEmailJob[]> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailJob>(
+        `WITH candidates AS (
+           SELECT id FROM company_email_jobs
+           WHERE ((status = 'queued' AND run_after <= now())
+              OR (status = 'processing' AND locked_at < now() - interval '5 minutes'))
+           ORDER BY run_after ASC, created_at ASC
+           FOR UPDATE SKIP LOCKED LIMIT $2
+         )
+         UPDATE company_email_jobs j SET status='processing', locked_at=now(), locked_by=$1,
+           attempt_count=j.attempt_count+1, updated_at=now()
+         FROM candidates c WHERE j.id=c.id
+         RETURNING j.id, j.workspace_id AS "workspaceId", j.company_id AS "companyId",
+           j.email_account_id AS "emailAccountId", j.thread_id AS "threadId", j.message_id AS "messageId",
+           j.job_type AS "jobType", j.status, j.payload, j.attempt_count AS "attemptCount",
+           j.max_attempts AS "maxAttempts", j.run_after AS "runAfter", j.locked_at AS "lockedAt",
+           j.locked_by AS "lockedBy", j.last_error AS "lastError", j.idempotency_key AS "idempotencyKey",
+           j.created_at AS "createdAt", j.updated_at AS "updatedAt"`,
+        [workerId, Math.max(1, Math.min(limit, 100))]
+      );
+      return result.rows;
+    }
+    const now = Date.now();
+    const jobs = Array.from(this.memoryJobs.values())
+      .filter((job) => job.status === "queued" && new Date(job.runAfter).getTime() <= now)
+      .sort((a, b) => new Date(a.runAfter).getTime() - new Date(b.runAfter).getTime())
+      .slice(0, limit);
+    return jobs.map((job) => {
+      const claimed = { ...job, status: "processing" as const, lockedAt: new Date().toISOString(), lockedBy: workerId,
+        attemptCount: job.attemptCount + 1, updatedAt: new Date().toISOString() };
+      this.memoryJobs.set(job.id, claimed);
+      return claimed;
+    });
+  }
+
+  async completeJob(jobId: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query("UPDATE company_email_jobs SET status='completed', locked_at=NULL, locked_by=NULL, updated_at=now() WHERE id=$1", [jobId]);
+      return;
+    }
+    const job = this.memoryJobs.get(jobId);
+    if (job) this.memoryJobs.set(jobId, { ...job, status: "completed", lockedAt: null, lockedBy: null, updatedAt: new Date().toISOString() });
+  }
+
+  async failJob(job: CompanyEmailJob, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const terminal = job.attemptCount >= job.maxAttempts;
+    const delaySeconds = Math.min(300, 2 ** Math.max(0, job.attemptCount - 1));
+    if (this.pool) {
+      await this.pool.query(
+        `UPDATE company_email_jobs SET status=$2, last_error=$3, locked_at=NULL, locked_by=NULL,
+           run_after=CASE WHEN $2='queued' THEN now() + ($4 * interval '1 second') ELSE run_after END,
+           updated_at=now() WHERE id=$1`,
+        [job.id, terminal ? "failed" : "queued", message.slice(0, 2000), delaySeconds]
+      );
+      return;
+    }
+    this.memoryJobs.set(job.id, { ...job, status: terminal ? "failed" : "queued",
+      lastError: message.slice(0, 2000), lockedAt: null, lockedBy: null,
+      runAfter: new Date(Date.now() + delaySeconds * 1000).toISOString(), updatedAt: new Date().toISOString() });
+  }
+
+  async cancelPendingFollowups(threadId: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(
+        "UPDATE company_email_jobs SET status='cancelled', updated_at=now() WHERE thread_id=$1 AND job_type='followup' AND status IN ('queued','processing')",
+        [threadId]
+      );
+      return;
+    }
+    for (const [id, job] of this.memoryJobs) {
+      if (job.threadId === threadId && job.jobType === "followup" && (job.status === "queued" || job.status === "processing")) {
+        this.memoryJobs.set(id, { ...job, status: "cancelled", updatedAt: new Date().toISOString() });
+      }
+    }
+  }
+
   // =========================================================================
   // 9. Analytics (Item 23)
   // =========================================================================
 
   async getAnalytics(ctx: AuthContext, companyId: string): Promise<EmailAnalytics> {
-    const threads = await this.listThreads(ctx, companyId, { limit: 100 });
+    const threads = await this.listThreads(ctx, companyId, { limit: 1000 });
     const accounts = await this.listAccounts(ctx, companyId);
+    const messages: CompanyEmailMessage[] = this.pool
+      ? (await this.pool.query<CompanyEmailMessage>(
+          `SELECT ${messageCols} FROM company_email_messages
+           WHERE workspace_id = $1 AND company_id = $2 ORDER BY created_at ASC`,
+          [ctx.workspaceId, companyId]
+        )).rows
+      : Array.from(this.memoryMessages.values())
+          .filter((message) => message.workspaceId === ctx.workspaceId && message.companyId === companyId)
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-    let receivedEmails = 0;
-    let sentEmails = 0;
-    let aiAnswered = 0;
-    let humanAnswered = 0;
-    let draftedByAi = 0;
-    let escalatedToHuman = 0;
-    let failedEmails = 0;
+    const receivedEmails = messages.filter((message) => message.direction === "inbound").length;
+    const completedOutbound = messages.filter((message) => message.direction === "outbound" && !message.isDraft);
+    const sentEmails = completedOutbound.length;
+    const aiAnswered = completedOutbound.filter((message) => message.isAiGenerated).length;
+    const humanAnswered = completedOutbound.filter((message) => !message.isAiGenerated).length;
+    const draftedByAi = messages.filter((message) => message.direction === "outbound" && message.isAiGenerated && message.isDraft).length;
+    const approvedByHuman = completedOutbound.filter((message) => Boolean(message.aiDraftApprovedBy)).length;
+    const failedEmails = messages.filter((message) => message.deliveryStatus === "failed" || message.deliveryStatus === "rejected").length;
+    const bouncedEmails = messages.filter((message) => message.deliveryStatus === "bounced").length;
+    const escalatedToHuman = threads.filter((thread) => thread.status === "waiting_human" || thread.isHumanTakeover).length;
     let highConf = 0;
     let medConf = 0;
     let lowConf = 0;
 
     for (const t of threads) {
-      if (t.status === "answered") {
-        if (t.assignedAgentId && !t.isHumanTakeover) aiAnswered++;
-        else humanAnswered++;
-      } else if (t.status === "waiting_human" || t.isHumanTakeover) {
-        escalatedToHuman++;
-      } else if (t.status === "draft_ready" || t.status === "waiting_approval") {
-        draftedByAi++;
-      } else if (t.status === "failed") {
-        failedEmails++;
-      }
-
       if (t.aiConfidenceScore !== null && t.aiConfidenceScore !== undefined) {
         if (t.aiConfidenceScore >= 0.85) highConf++;
         else if (t.aiConfidenceScore >= 0.6) medConf++;
@@ -1296,25 +1660,32 @@ export class EmailInboxRepository {
       }
     }
 
-    const messages = this.pool
-      ? (
-          await this.pool.query<{ direction: string; delivery_status: string; is_ai_generated: boolean }>(
-            `SELECT direction, delivery_status, is_ai_generated FROM company_email_messages
-             WHERE workspace_id = $1 AND company_id = $2`,
-            [ctx.workspaceId, companyId]
-          )
-        ).rows
-      : Array.from(this.memoryMessages.values()).filter(
-          (m) => m.workspaceId === ctx.workspaceId && m.companyId === companyId
-        );
-
-    for (const m of messages) {
-      if (m.direction === "inbound") receivedEmails++;
-      else sentEmails++;
+    const responseTimes: number[] = [];
+    for (const thread of threads) {
+      const threadMessages = messages.filter((message) => message.threadId === thread.id);
+      const firstInbound = threadMessages.find((message) => message.direction === "inbound");
+      const firstResponse = firstInbound && threadMessages.find((message) =>
+        message.direction === "outbound" && !message.isDraft && new Date(message.createdAt) >= new Date(firstInbound.createdAt));
+      if (firstInbound && firstResponse) {
+        responseTimes.push((new Date(firstResponse.createdAt).getTime() - new Date(firstInbound.createdAt).getTime()) / 60_000);
+      }
     }
-
-    const totalHandled = aiAnswered + humanAnswered;
-    const automationRate = totalHandled > 0 ? Math.round((aiAnswered / totalHandled) * 100) : 0;
+    const averageResponse = responseTimes.length
+      ? Math.round((responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length) * 10) / 10
+      : 0;
+    const automationRate = sentEmails > 0 ? Math.round((aiAnswered / sentEmails) * 100) : 0;
+    const dayMap = new Map<string, { received: number; sent: number }>();
+    const accountMap = new Map<string, number>();
+    const agentMap = new Map<string, number>();
+    for (const message of messages) {
+      const day = new Date(message.createdAt).toISOString().slice(0, 10);
+      const entry = dayMap.get(day) || { received: 0, sent: 0 };
+      if (message.direction === "inbound") entry.received++;
+      else if (!message.isDraft) entry.sent++;
+      dayMap.set(day, entry);
+      if (message.emailAccountId) accountMap.set(message.emailAccountId, (accountMap.get(message.emailAccountId) || 0) + 1);
+      if (message.sentByAgentId) agentMap.set(message.sentByAgentId, (agentMap.get(message.sentByAgentId) || 0) + 1);
+    }
 
     return {
       receivedEmails,
@@ -1322,33 +1693,30 @@ export class EmailInboxRepository {
       aiAnswered,
       humanAnswered,
       draftedByAi,
-      approvedByHuman: Math.floor(aiAnswered * 0.4),
+      approvedByHuman,
       escalatedToHuman,
       failedEmails,
-      bouncedEmails: 0,
-      averageResponseTimeMinutes: 4.2,
-      averageFirstResponseTimeMinutes: 1.5,
-      editedAiResponsesCount: Math.floor(draftedByAi * 0.2),
+      bouncedEmails,
+      averageResponseTimeMinutes: averageResponse,
+      averageFirstResponseTimeMinutes: averageResponse,
+      editedAiResponsesCount: 0,
       automationRate,
       confidenceDistribution: {
         high: highConf,
         medium: medConf,
         low: lowConf,
       },
-      volumeByDay: [
-        { date: new Date(Date.now() - 86400000 * 2).toISOString().slice(0, 10), received: Math.max(1, receivedEmails - 2), sent: Math.max(1, sentEmails - 1) },
-        { date: new Date(Date.now() - 86400000).toISOString().slice(0, 10), received: receivedEmails, sent: sentEmails },
-        { date: new Date().toISOString().slice(0, 10), received: receivedEmails, sent: sentEmails },
-      ],
-      volumeByAgent: accounts.filter((a) => a.agentId).map((a) => ({
-        agentId: a.agentId!,
-        agentName: a.displayName || a.emailAddress,
-        count: Math.floor(receivedEmails * 0.5),
+      volumeByDay: Array.from(dayMap.entries()).sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, volume]) => ({ date, ...volume })),
+      volumeByAgent: Array.from(agentMap.entries()).map(([agentId, count]) => ({
+        agentId,
+        agentName: accounts.find((account) => account.agentId === agentId)?.displayName || agentId,
+        count,
       })),
       volumeByAccount: accounts.map((a) => ({
         accountId: a.id,
         email: a.emailAddress,
-        count: Math.floor(receivedEmails / Math.max(1, accounts.length)),
+        count: accountMap.get(a.id) || 0,
       })),
     };
   }

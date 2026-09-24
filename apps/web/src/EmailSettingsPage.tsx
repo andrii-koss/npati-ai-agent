@@ -26,9 +26,10 @@ interface EmailAccount {
   confidenceThreshold: number;
   languageMode: string;
   fallbackLanguage: string;
-  imapConfig: { host?: string; port?: number; secure?: boolean; username?: string; password?: string; lastError?: string | null };
-  smtpConfig: { host?: string; port?: number; secure?: boolean; username?: string; password?: string; fromName?: string; replyTo?: string; lastError?: string | null };
+  imapConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; lastError?: string | null };
+  smtpConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; fromName?: string; replyTo?: string; lastError?: string | null };
   rateLimits: { maxPerHour: number; maxPerDay: number; maxPerRecipientDaily: number; maxFollowups: number };
+  followupConfig: { enabled: boolean; delayDays: number; maxFollowups: number; action: "draft" | "auto_send" | "create_task" };
   signatureConfig: { greeting?: string; signature?: string; footer?: string };
   createdAt: string;
   updatedAt: string;
@@ -56,8 +57,8 @@ interface EmailRule {
   name: string;
   priorityOrder: number;
   isActive: boolean;
-  conditions: { senders?: string[]; subjectKeywords?: string[]; isVip?: boolean };
-  actions: { setMode?: string; setPriority?: string; setAgentId?: string };
+  conditions: { senders?: string[]; domains?: string[]; subjectKeywords?: string[]; bodyKeywords?: string[]; isVip?: boolean };
+  actions: { setMode?: string; setPriority?: string; setAgentId?: string; requireApproval?: boolean; createTask?: boolean };
 }
 
 interface EmailTemplate {
@@ -123,6 +124,12 @@ export function EmailSettingsPage() {
   const [testMode, setTestMode] = useState(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.8);
   const [languageMode, setLanguageMode] = useState("auto");
+  const [mailAuthType, setMailAuthType] = useState<"password" | "oauth2">("password");
+  const [oauthAccessToken, setOauthAccessToken] = useState("");
+  const [oauthRefreshToken, setOauthRefreshToken] = useState("");
+  const [oauthTokenUrl, setOauthTokenUrl] = useState("");
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState(993);
   const [imapSecure, setImapSecure] = useState(true);
@@ -133,6 +140,13 @@ export function EmailSettingsPage() {
   const [smtpSecure, setSmtpSecure] = useState(true);
   const [smtpUser, setSmtpUser] = useState("");
   const [smtpPass, setSmtpPass] = useState("");
+  const [maxPerHour, setMaxPerHour] = useState(50);
+  const [maxPerDay, setMaxPerDay] = useState(500);
+  const [maxPerRecipientDaily, setMaxPerRecipientDaily] = useState(5);
+  const [followupEnabled, setFollowupEnabled] = useState(false);
+  const [followupDelayDays, setFollowupDelayDays] = useState(2);
+  const [followupMax, setFollowupMax] = useState(2);
+  const [followupAction, setFollowupAction] = useState<"draft" | "auto_send" | "create_task">("draft");
   const [greeting, setGreeting] = useState("Hello,");
   const [signature, setSignature] = useState("Best regards,\nCustomer Support");
   const [footer, setFooter] = useState("");
@@ -154,11 +168,15 @@ export function EmailSettingsPage() {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleSubjectKeywords, setRuleSubjectKeywords] = useState("");
+  const [ruleBodyKeywords, setRuleBodyKeywords] = useState("");
   const [ruleSenders, setRuleSenders] = useState("");
+  const [ruleDomains, setRuleDomains] = useState("");
   const [ruleIsVip, setRuleIsVip] = useState(false);
   const [rulePriority, setRulePriority] = useState("");
   const [ruleMode, setRuleMode] = useState("");
   const [ruleAgentId, setRuleAgentId] = useState("");
+  const [ruleRequireApproval, setRuleRequireApproval] = useState(false);
+  const [ruleCreateTask, setRuleCreateTask] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
 
   // Templates Drawer & State
@@ -247,6 +265,9 @@ export function EmailSettingsPage() {
     setTestMode(false);
     setConfidenceThreshold(0.8);
     setLanguageMode("auto");
+    setMailAuthType("password");
+    setOauthAccessToken("");
+    setOauthRefreshToken(""); setOauthTokenUrl(""); setOauthClientId(""); setOauthClientSecret("");
     setImapHost("imap.company.com");
     setImapPort(993);
     setImapSecure(true);
@@ -257,6 +278,13 @@ export function EmailSettingsPage() {
     setSmtpSecure(true);
     setSmtpUser("");
     setSmtpPass("");
+    setMaxPerHour(50);
+    setMaxPerDay(500);
+    setMaxPerRecipientDaily(5);
+    setFollowupEnabled(false);
+    setFollowupDelayDays(2);
+    setFollowupMax(2);
+    setFollowupAction("draft");
     setGreeting("Hello,");
     setSignature("Best regards,\nCustomer Support");
     setFooter("");
@@ -272,6 +300,12 @@ export function EmailSettingsPage() {
     setTestMode(account.testMode);
     setConfidenceThreshold(account.confidenceThreshold);
     setLanguageMode(account.languageMode || "auto");
+    setMailAuthType(account.imapConfig.authType || account.smtpConfig.authType || "password");
+    setOauthAccessToken("");
+    setOauthRefreshToken("");
+    setOauthTokenUrl(account.imapConfig.tokenUrl || account.smtpConfig.tokenUrl || "");
+    setOauthClientId(account.imapConfig.clientId || account.smtpConfig.clientId || "");
+    setOauthClientSecret("");
     setImapHost(account.imapConfig.host || "");
     setImapPort(account.imapConfig.port || 993);
     setImapSecure(account.imapConfig.secure ?? true);
@@ -282,6 +316,13 @@ export function EmailSettingsPage() {
     setSmtpSecure(account.smtpConfig.secure ?? true);
     setSmtpUser(account.smtpConfig.username || "");
     setSmtpPass("");
+    setMaxPerHour(account.rateLimits.maxPerHour);
+    setMaxPerDay(account.rateLimits.maxPerDay);
+    setMaxPerRecipientDaily(account.rateLimits.maxPerRecipientDaily);
+    setFollowupEnabled(account.followupConfig?.enabled || false);
+    setFollowupDelayDays(account.followupConfig?.delayDays || 2);
+    setFollowupMax(account.followupConfig?.maxFollowups || 2);
+    setFollowupAction(account.followupConfig?.action || "draft");
     setGreeting(account.signatureConfig.greeting || "Hello,");
     setSignature(account.signatureConfig.signature || "Best regards,\nCustomer Support");
     setFooter(account.signatureConfig.footer || "");
@@ -305,19 +346,33 @@ export function EmailSettingsPage() {
         confidenceThreshold,
         languageMode,
         imapConfig: {
+          authType: mailAuthType,
           host: imapHost,
           port: imapPort,
           secure: imapSecure,
           username: imapUser,
           ...(imapPass ? { password: imapPass } : {}),
+          ...(oauthAccessToken ? { accessToken: oauthAccessToken } : {}),
+          ...(oauthRefreshToken ? { refreshToken: oauthRefreshToken } : {}),
+          ...(oauthTokenUrl ? { tokenUrl: oauthTokenUrl } : {}),
+          ...(oauthClientId ? { clientId: oauthClientId } : {}),
+          ...(oauthClientSecret ? { clientSecret: oauthClientSecret } : {}),
         },
         smtpConfig: {
+          authType: mailAuthType,
           host: smtpHost,
           port: smtpPort,
           secure: smtpSecure,
           username: smtpUser,
           ...(smtpPass ? { password: smtpPass } : {}),
+          ...(oauthAccessToken ? { accessToken: oauthAccessToken } : {}),
+          ...(oauthRefreshToken ? { refreshToken: oauthRefreshToken } : {}),
+          ...(oauthTokenUrl ? { tokenUrl: oauthTokenUrl } : {}),
+          ...(oauthClientId ? { clientId: oauthClientId } : {}),
+          ...(oauthClientSecret ? { clientSecret: oauthClientSecret } : {}),
         },
+        rateLimits: { maxPerHour, maxPerDay, maxPerRecipientDaily, maxFollowups: followupMax },
+        followupConfig: { enabled: followupEnabled, delayDays: followupDelayDays, maxFollowups: followupMax, action: followupAction },
         signatureConfig: { greeting, signature, footer },
       };
 
@@ -405,11 +460,15 @@ export function EmailSettingsPage() {
     setEditingRuleId(null);
     setRuleName("");
     setRuleSubjectKeywords("");
+    setRuleBodyKeywords("");
     setRuleSenders("");
+    setRuleDomains("");
     setRuleIsVip(false);
     setRulePriority("high");
     setRuleMode("");
     setRuleAgentId(agents[0]?.id || "");
+    setRuleRequireApproval(false);
+    setRuleCreateTask(false);
     setRuleDrawerOpen(true);
   }
 
@@ -417,11 +476,15 @@ export function EmailSettingsPage() {
     setEditingRuleId(rule.id);
     setRuleName(rule.name);
     setRuleSubjectKeywords((rule.conditions?.subjectKeywords || []).join(", "));
+    setRuleBodyKeywords((rule.conditions?.bodyKeywords || []).join(", "));
     setRuleSenders((rule.conditions?.senders || []).join(", "));
+    setRuleDomains((rule.conditions?.domains || []).join(", "));
     setRuleIsVip(rule.conditions?.isVip || false);
     setRulePriority(rule.actions?.setPriority || "");
     setRuleMode(rule.actions?.setMode || "");
     setRuleAgentId(rule.actions?.setAgentId || "");
+    setRuleRequireApproval(rule.actions?.requireApproval || false);
+    setRuleCreateTask(rule.actions?.createTask || false);
     setRuleDrawerOpen(true);
   }
 
@@ -436,14 +499,20 @@ export function EmailSettingsPage() {
       const conditions: any = {};
       const kw = ruleSubjectKeywords.split(",").map((s) => s.trim()).filter(Boolean);
       if (kw.length > 0) conditions.subjectKeywords = kw;
+      const bodyKw = ruleBodyKeywords.split(",").map((s) => s.trim()).filter(Boolean);
+      if (bodyKw.length > 0) conditions.bodyKeywords = bodyKw;
       const senders = ruleSenders.split(",").map((s) => s.trim()).filter(Boolean);
       if (senders.length > 0) conditions.senders = senders;
+      const domains = ruleDomains.split(",").map((s) => s.trim()).filter(Boolean);
+      if (domains.length > 0) conditions.domains = domains;
       if (ruleIsVip) conditions.isVip = true;
 
       const actions: any = {};
       if (rulePriority) actions.setPriority = rulePriority;
       if (ruleMode) actions.setMode = ruleMode;
       if (ruleAgentId) actions.setAgentId = ruleAgentId;
+      if (ruleRequireApproval) actions.requireApproval = true;
+      if (ruleCreateTask) actions.createTask = true;
 
       if (editingRuleId) {
         const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules/${editingRuleId}`, {
@@ -1311,6 +1380,24 @@ export function EmailSettingsPage() {
 
               <section>
                 <h3>IMAP Connection (Inbound Mail)</h3>
+                <label>
+                  <span>Authentication</span>
+                  <select value={mailAuthType} onChange={(e) => setMailAuthType(e.target.value as "password" | "oauth2")}>
+                    <option value="password">Username and password</option>
+                    <option value="oauth2">OAuth 2.0 / XOAUTH2 access token</option>
+                  </select>
+                </label>
+                {mailAuthType === "oauth2" && (
+                  <>
+                    <label><span>OAuth Access Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Paste provider access token"} value={oauthAccessToken} onChange={(e) => setOauthAccessToken(e.target.value)} /></label>
+                    <label><span>OAuth Refresh Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Provider refresh token"} value={oauthRefreshToken} onChange={(e) => setOauthRefreshToken(e.target.value)} /></label>
+                    <label><span>OAuth Token Endpoint</span><input placeholder="https://oauth2.googleapis.com/token" value={oauthTokenUrl} onChange={(e) => setOauthTokenUrl(e.target.value)} /></label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label><span>OAuth Client ID</span><input value={oauthClientId} onChange={(e) => setOauthClientId(e.target.value)} /></label>
+                      <label><span>OAuth Client Secret</span><input type="password" placeholder={editingId ? "Leave blank to keep it" : "Optional for PKCE/public clients"} value={oauthClientSecret} onChange={(e) => setOauthClientSecret(e.target.value)} /></label>
+                    </div>
+                  </>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
                     <span>IMAP Host</span>
@@ -1339,7 +1426,7 @@ export function EmailSettingsPage() {
                       onChange={(e) => setImapUser(e.target.value)}
                     />
                   </label>
-                  <label>
+                  {mailAuthType === "password" && <label>
                     <span>IMAP Password</span>
                     <input
                       type="password"
@@ -1347,7 +1434,7 @@ export function EmailSettingsPage() {
                       value={imapPass}
                       onChange={(e) => setImapPass(e.target.value)}
                     />
-                  </label>
+                  </label>}
                 </div>
               </section>
 
@@ -1381,7 +1468,7 @@ export function EmailSettingsPage() {
                       onChange={(e) => setSmtpUser(e.target.value)}
                     />
                   </label>
-                  <label>
+                  {mailAuthType === "password" && <label>
                     <span>SMTP Password</span>
                     <input
                       type="password"
@@ -1389,8 +1476,26 @@ export function EmailSettingsPage() {
                       value={smtpPass}
                       onChange={(e) => setSmtpPass(e.target.value)}
                     />
-                  </label>
+                  </label>}
                 </div>
+              </section>
+
+              <section>
+                <h3>Safety Limits & Follow-up</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                  <label><span>Emails / hour</span><input type="number" min="1" value={maxPerHour} onChange={(e) => setMaxPerHour(Number(e.target.value))} /></label>
+                  <label><span>Emails / day</span><input type="number" min="1" value={maxPerDay} onChange={(e) => setMaxPerDay(Number(e.target.value))} /></label>
+                  <label><span>Per recipient / day</span><input type="number" min="1" value={maxPerRecipientDaily} onChange={(e) => setMaxPerRecipientDaily(Number(e.target.value))} /></label>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={followupEnabled} onChange={(e) => setFollowupEnabled(e.target.checked)} />
+                  <span>Enable automatic follow-up</span>
+                </label>
+                {followupEnabled && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <label><span>Delay, days</span><input type="number" min="1" value={followupDelayDays} onChange={(e) => setFollowupDelayDays(Number(e.target.value))} /></label>
+                  <label><span>Maximum</span><input type="number" min="1" value={followupMax} onChange={(e) => setFollowupMax(Number(e.target.value))} /></label>
+                  <label><span>Action</span><select value={followupAction} onChange={(e) => setFollowupAction(e.target.value as any)}><option value="draft">Create draft</option><option value="auto_send">Send automatically</option><option value="create_task">Create Agent Task</option></select></label>
+                </div>}
               </section>
 
               <section>
@@ -1490,6 +1595,14 @@ export function EmailSettingsPage() {
                     onChange={(e) => setRuleSenders(e.target.value)}
                   />
                 </label>
+                <label>
+                  <span>Sender Domains (comma-separated)</span>
+                  <input placeholder="partner.com, *.trusted.org" value={ruleDomains} onChange={(e) => setRuleDomains(e.target.value)} />
+                </label>
+                <label>
+                  <span>Body Keywords (comma-separated)</span>
+                  <input placeholder="refund, contract, verification" value={ruleBodyKeywords} onChange={(e) => setRuleBodyKeywords(e.target.value)} />
+                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
                   <input
                     type="checkbox"
@@ -1531,6 +1644,14 @@ export function EmailSettingsPage() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={ruleRequireApproval} onChange={(e) => setRuleRequireApproval(e.target.checked)} />
+                  <span>Always require human approval</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={ruleCreateTask} onChange={(e) => setRuleCreateTask(e.target.checked)} />
+                  <span>Create an Agent Task when this rule matches</span>
                 </label>
               </section>
 

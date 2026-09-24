@@ -447,6 +447,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query('ROLLBACK'); throw error; }
       finally { client.release(); }
     }
+    const emailInboxRuntimeMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='038_email_ai_inbox_runtime'");
+    if (!emailInboxRuntimeMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration038 } = await import("./migration-038");
+        await runMigration038(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('038_email_ai_inbox_runtime') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
