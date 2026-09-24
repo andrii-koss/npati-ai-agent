@@ -52,6 +52,7 @@ import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
 import { registerEmailInboxRoutes } from "./email-routes";
+import { EmailInboxWorker } from "./email-worker";
 import { EmailAgentTools } from "./email-agent-tools";
 import { ApiKeysRepository } from "./api-keys-repository";
 import { registerApiKeyRoutes } from "./api-keys-routes";
@@ -560,7 +561,7 @@ async function prepareChatAttachments(
 }
 
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
   const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
   const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
   app.addHook("onClose", async () => { await activeSessionRegistry.close(); });
@@ -638,6 +639,22 @@ export function buildApp(config: AppConfig = {}) {
     } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo,auditRepo,
     async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown);
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
+  const emailAutomationHooks = {
+    createTask: async ({ ctx, companyId, thread, inboundMessage, assignedAgentId }: {
+      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
+      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; assignedAgentId?: string | null;
+    }) => {
+      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
+        task: `Handle inbound email "${thread.subject}" from ${thread.customerEmail}. Thread: ${thread.id}. Message: ${inboundMessage.id}.${assignedAgentId ? ` Assigned agent: ${assignedAgentId}.` : ""}`,
+        requestedMode: assignedAgentId ? "single" as const : "auto" as const,
+      }, `email-task:${inboundMessage.id}`);
+      if (created.created && companyRunQueue) {
+        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
+      }
+      return created.run.id;
+    },
+  };
+  const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
   const contentLibrary = new ContentLibraryStore(workspaceStore);
@@ -1548,7 +1565,7 @@ ${localized.next}`;
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
-  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo });
+  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerMemoryDocumentRoutes(app,authProvider,memoryDocuments);
@@ -1557,12 +1574,14 @@ ${localized.next}`;
   registerBrowserAutomationRoutes(app, authProvider);
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { storageReconciler?.stop(); emailInboxWorker.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
+    await emailInboxRepo.encryptLegacyAccountCredentials();
     await objectStorage?.initialize();
     if (chatFiles) { const legacy = await chatFiles.migrateLegacy(); if (legacy.failed) app.log.warn(legacy,"Some legacy attachments could not be migrated"); await chatFiles.cleanupPending(); }
     storageReconciler?.start();
+    emailInboxWorker.start();
   });
 
   app.get("/health", async (): Promise<HealthResponse> => {

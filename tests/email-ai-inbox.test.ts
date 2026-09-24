@@ -96,10 +96,10 @@ describe("Email / AI Inbox Module", () => {
       body: "Please initiate a refund for order #1234. The item was damaged.",
     });
 
-    expect(inbound.actionTaken).toBe("autopilot_sent");
-    expect(inbound.thread.status).toBe("answered");
+    expect(inbound.actionTaken).toBe("autopilot_queued");
+    expect(inbound.thread.status).toBe("ai_processing");
     expect(inbound.aiMessage?.isDraft).toBe(false);
-    expect(inbound.aiMessage?.deliveryStatus).toBe("sent");
+    expect(inbound.aiMessage?.deliveryStatus).toBe("sending");
   });
 
   it("6. Autopilot with Test Mode active simulates send without external dispatch", async () => {
@@ -221,7 +221,7 @@ describe("Email / AI Inbox Module", () => {
     });
 
     // First email uses up the 1 daily message quota for this recipient
-    repo.recordSentEmail(companyId, support.id, "rate_limited_client@org.com");
+    await repo.recordSentEmail(companyId, support.id, "rate_limited_client@org.com");
 
     const inbound = await processor.processInbound(mockAuth, companyId, {
       from: "rate_limited_client@org.com",
@@ -364,5 +364,71 @@ describe("Email / AI Inbox Module", () => {
     expect(updated.imapConfig.password).toBe("imap-secret");
     expect(updated.smtpConfig.host).toBe("smtp2.company.com");
     expect(updated.smtpConfig.password).toBe("smtp-secret");
+    const stored = (repo as any).memoryAccounts.get(account.id);
+    expect(stored.imapConfig.password).toMatch(/^v1\$/);
+    expect(stored.smtpConfig.password).toMatch(/^v1\$/);
+    expect(stored.imapConfig.password).not.toContain("imap-secret");
+  });
+
+  it("20. Serializes concurrent processing of the same provider Message-ID", async () => {
+    const payload = {
+      from: "concurrent@client.org",
+      to: "support@company.com",
+      subject: "Concurrent delivery",
+      body: "Two workers received this exact same provider message.",
+      messageId: "<concurrent-message-1@example.com>",
+    };
+
+    const results = await Promise.all([
+      processor.processInbound(mockAuth, companyId, payload),
+      processor.processInbound(mockAuth, companyId, payload),
+    ]);
+
+    expect(results.filter((result) => result.actionTaken === "duplicate_ignored")).toHaveLength(1);
+    expect(results[0]?.thread.id).toBe(results[1]?.thread.id);
+    expect(results[0]?.inboundMessage.id).toBe(results[1]?.inboundMessage.id);
+  });
+
+  it("21. Deduplicates durable jobs and requeues retryable failures", async () => {
+    const first = await repo.enqueueJob(mockAuth, companyId, {
+      jobType: "send", payload: { test: true }, idempotencyKey: "job-idempotency-1", maxAttempts: 3,
+    });
+    const duplicate = await repo.enqueueJob(mockAuth, companyId, {
+      jobType: "send", payload: { test: false }, idempotencyKey: "job-idempotency-1", maxAttempts: 3,
+    });
+    expect(duplicate.id).toBe(first.id);
+    const claimed = (await repo.claimJobs("test-worker", 10)).find((job) => job.id === first.id)!;
+    expect(claimed.status).toBe("processing");
+    expect(claimed.attemptCount).toBe(1);
+    await repo.failJob(claimed, new Error("temporary SMTP outage"));
+    const stored = (repo as any).memoryJobs.get(first.id);
+    expect(stored.status).toBe("queued");
+    expect(stored.lastError).toContain("temporary SMTP outage");
+  });
+
+  it("22. Uses the configured AI engine and creates an existing Company Task when a rule requests it", async () => {
+    await repo.createAccount(mockAuth, companyId, { emailAddress: "ai@company.com", mode: "approval" });
+    await repo.createRule(mockAuth, companyId, {
+      name: "Create task for task-domain senders",
+      priorityOrder: -20,
+      conditions: { domains: ["task.example"] },
+      actions: { createTask: true, setMode: "approval" },
+    });
+    const createdTasks: string[] = [];
+    const mockAi = {
+      chat: async () => ({ content: "Hello,\n\nThis response came from the configured AI engine.\n\nSupport" }),
+    } as any;
+    const integratedProcessor = new EmailAIProcessor(repo, undefined, mockAi, {
+      createTask: async ({ inboundMessage }) => {
+        createdTasks.push(inboundMessage.id);
+        return "company-run-1";
+      },
+    });
+    const result = await integratedProcessor.processInbound(mockAuth, companyId, {
+      from: "requester@task.example", to: "ai@company.com", subject: "Create a task",
+      body: "Please process this request through the company task system.", messageId: "<ai-task-1@task.example>",
+    });
+    expect(result.aiMessage?.bodyText).toContain("configured AI engine");
+    expect(createdTasks).toEqual([result.inboundMessage.id]);
   });
 });

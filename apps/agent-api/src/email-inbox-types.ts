@@ -9,23 +9,38 @@ export type EmailAccountStatus =
   | "disabled";
 
 export interface ImapConfig {
+  authType?: "password" | "oauth2";
   host?: string;
   port?: number;
   secure?: boolean;
   username?: string;
   password?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
   tls?: boolean;
   mailbox?: string;
+  lastUid?: number;
   lastSyncAt?: string | null;
   lastError?: string | null;
 }
 
 export interface SmtpConfig {
+  authType?: "password" | "oauth2";
   host?: string;
   port?: number;
   secure?: boolean;
   username?: string;
   password?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
   fromName?: string;
   fromEmail?: string;
   replyTo?: string;
@@ -276,4 +291,28 @@ export interface EmailAnalytics {
   volumeByDay: Array<{ date: string; received: number; sent: number }>;
   volumeByAgent: Array<{ agentId: string; agentName: string; count: number }>;
   volumeByAccount: Array<{ accountId: string; email: string; count: number }>;
+}
+
+export type EmailJobType = "send" | "followup" | "sync" | "delivery_check" | "attachment_analysis";
+export type EmailJobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+
+export interface CompanyEmailJob {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  emailAccountId?: string | null;
+  threadId?: string | null;
+  messageId?: string | null;
+  jobType: EmailJobType;
+  status: EmailJobStatus;
+  payload: Record<string, unknown>;
+  attemptCount: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedAt?: string | null;
+  lockedBy?: string | null;
+  lastError?: string | null;
+  idempotencyKey?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -115,6 +115,25 @@ export class AuditRepository {
     return result.rows;
   }
 
+  async listResourceLogs(
+    ctx: AuthContext,
+    companyId: string,
+    resourceType: string,
+    resourceId: string,
+    limit = 100
+  ): Promise<AuditLogEntry[]> {
+    const result = await this.pool.query<AuditLogEntry>(
+      `SELECT id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+        action, category, resource_type AS "resourceType", resource_id AS "resourceId",
+        details, ip_address AS "ipAddress", created_at AS "createdAt"
+       FROM company_audit_logs
+       WHERE workspace_id=$1 AND company_id=$2 AND resource_type=$3 AND resource_id=$4
+       ORDER BY created_at ASC LIMIT $5`,
+      [ctx.workspaceId, companyId, resourceType, resourceId, Math.min(200, Math.max(1, limit))]
+    );
+    return result.rows;
+  }
+
   // --- Usage Analytics & Quota Tracking (Items 102 & 103) ---
   async recordUsage(
     ctx: AuthContext,

@@ -48,9 +48,10 @@ interface EmailMessage {
   fromAddress: string;
   fromName?: string | null;
   toAddresses: string[];
+  ccAddresses?: string[];
   subject: string;
   bodyText: string;
-  attachments?: Array<{ filename: string; contentType: string; sizeBytes: number }>;
+  attachments?: Array<{ filename: string; contentType: string; sizeBytes: number; url?: string; contentBase64?: string }>;
   isDraft: boolean;
   isAiGenerated: boolean;
   deliveryStatus: string;
@@ -65,6 +66,14 @@ interface ContactDetails {
   isVip: boolean;
   isBlacklisted: boolean;
   notes?: string | null;
+}
+
+interface EmailAuditEntry {
+  id: string;
+  action: string;
+  userId: string;
+  details: Record<string, unknown>;
+  createdAt: string;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -92,6 +101,7 @@ export function EmailInboxPage() {
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [contact, setContact] = useState<ContactDetails | null>(null);
+  const [auditHistory, setAuditHistory] = useState<EmailAuditEntry[]>([]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -100,11 +110,42 @@ export function EmailInboxPage() {
 
   // Composer State
   const [replyText, setReplyText] = useState("");
+  const [composerMode, setComposerMode] = useState<"reply" | "reply_all" | "forward">("reply");
+  const [forwardTo, setForwardTo] = useState("");
   const [draftEditing, setDraftEditing] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  async function openAttachment(attachment: NonNullable<EmailMessage["attachments"]>[number]) {
+    if (attachment.contentBase64) {
+      const binary = atob(attachment.contentBase64);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const objectUrl = URL.createObjectURL(new Blob([bytes], { type: attachment.contentType }));
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = attachment.filename;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } else if (attachment.url) {
+      const inspected = await api<{ check: { requiresHumanApproval: boolean; warnings: string[] } }>(
+        `/companies/${selectedCompanyId}/email-inbox/inspect-link`,
+        { method: "POST", body: JSON.stringify({ url: attachment.url, senderEmail: activeThread?.customerEmail }) }
+      );
+      if (inspected.check.requiresHumanApproval) {
+        const approved = await confirmModal({
+          title: "Open external attachment?",
+          message: inspected.check.warnings.join(" ") || "This external link requires human approval.",
+          isDanger: true,
+        });
+        if (!approved) return;
+      }
+      window.open(attachment.url, "_blank", "noopener,noreferrer");
+    } else {
+      setNotice("Attachment content is not available for download.");
+    }
+  }
 
   // Load companies
   useEffect(() => {
@@ -158,16 +199,23 @@ export function EmailInboxPage() {
       setActiveThread(null);
       setMessages([]);
       setContact(null);
+      setAuditHistory([]);
       return;
     }
 
-    api<{ thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null }>(
-      `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
-    )
-      .then((res) => {
+    Promise.all([
+      api<{ thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null }>(
+        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
+      ),
+      api<{ logs: EmailAuditEntry[] }>(
+        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/audit`
+      ).catch(() => ({ logs: [] })),
+    ])
+      .then(([res, audit]) => {
         setActiveThread(res.thread);
         setMessages(res.messages);
         setContact(res.contact);
+        setAuditHistory(audit.logs);
 
         const draft = res.messages.find((m) => m.isDraft);
         if (draft) {
@@ -190,6 +238,20 @@ export function EmailInboxPage() {
     }).catch(() => undefined);
   }
 
+  async function updateActiveThread(patch: Partial<Pick<EmailThread, "priority" | "status" | "folder">>) {
+    if (!selectedCompanyId || !selectedThreadId) return;
+    try {
+      const response = await api<{ thread: EmailThread }>(
+        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`,
+        { method: "PATCH", body: JSON.stringify(patch) }
+      );
+      setActiveThread(response.thread);
+      setThreads((current) => current.map((thread) => thread.id === response.thread.id ? response.thread : thread));
+    } catch (error: any) {
+      setNotice(error.message);
+    }
+  }
+
   // Handle Send Reply
   async function handleSendReply(e: FormEvent) {
     e.preventDefault();
@@ -197,11 +259,31 @@ export function EmailInboxPage() {
 
     setSending(true);
     try {
+      const latestInbound = [...messages].reverse().find((message) => message.direction === "inbound");
+      const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+      const ownAddresses = new Set(accounts.map((account) => account.emailAddress.toLowerCase()));
+      const replyAllCc = composerMode === "reply_all"
+        ? [...(latestInbound?.toAddresses || []), ...(latestInbound?.ccAddresses || [])]
+            .filter((address, index, all) => !ownAddresses.has(address.toLowerCase()) && all.indexOf(address) === index)
+        : [];
+      const toAddresses = composerMode === "forward"
+        ? forwardTo.split(",").map((value) => value.trim()).filter(Boolean)
+        : undefined;
+      if (composerMode === "forward" && !toAddresses?.length) throw new Error("Enter at least one forwarding recipient.");
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ bodyText: replyText, isDraft: false }),
+        body: JSON.stringify({
+          bodyText: replyText,
+          isDraft: false,
+          toAddresses,
+          ccAddresses: replyAllCc,
+          subject: composerMode === "forward" ? `Fwd: ${activeThread?.subject || ""}` : undefined,
+          fromAddress: selectedAccount?.emailAddress,
+        }),
       });
       setReplyText("");
+      setForwardTo("");
+      setComposerMode("reply");
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
         method: "POST",
         body: JSON.stringify({ action: "release" }),
@@ -573,6 +655,16 @@ export function EmailInboxPage() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
+                  <select
+                    className="email-inbox-select"
+                    aria-label="Thread priority"
+                    value={activeThread.priority}
+                    onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
+                    style={{ width: 112 }}
+                  >
+                    <option value="low">Low</option><option value="normal">Normal</option>
+                    <option value="high">High</option><option value="urgent">Urgent</option>
+                  </select>
                   <button
                     type="button"
                     className="automation-action-btn"
@@ -685,9 +777,9 @@ export function EmailInboxPage() {
                       {m.attachments && m.attachments.length > 0 && (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
                           {m.attachments.map((att, i) => (
-                            <span key={i} className="automation-cron-pill" style={{ fontSize: 11 }}>
+                            <button key={i} type="button" className="automation-cron-pill" style={{ fontSize: 11, cursor: "pointer" }} onClick={() => openAttachment(att)}>
                               📎 {att.filename} ({Math.round(att.sizeBytes / 1024)} KB)
-                            </span>
+                            </button>
                           ))}
                         </div>
                       )}
@@ -696,8 +788,40 @@ export function EmailInboxPage() {
                 })}
               </div>
 
+              {auditHistory.length > 0 && (
+                <details style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                    Thread history ({auditHistory.length})
+                  </summary>
+                  <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                    {auditHistory.map((entry) => (
+                      <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
+                        <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
+                        <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
               {/* Composer */}
               <form onSubmit={handleSendReply} className="email-inbox-composer">
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {(["reply", "reply_all", "forward"] as const).map((modeOption) => (
+                    <button key={modeOption} type="button" className={`automation-action-btn ${composerMode === modeOption ? "active" : ""}`} onClick={() => setComposerMode(modeOption)}>
+                      {modeOption === "reply" ? "Reply" : modeOption === "reply_all" ? "Reply All" : "Forward"}
+                    </button>
+                  ))}
+                </div>
+                {composerMode === "forward" && (
+                  <input
+                    type="text"
+                    placeholder="Forward to (comma-separated email addresses)"
+                    value={forwardTo}
+                    onChange={(e) => setForwardTo(e.target.value)}
+                    style={{ width: "100%", marginBottom: 8, border: "1px solid #cbd5e1", borderRadius: 6, padding: "8px 10px" }}
+                  />
+                )}
                 <textarea
                   placeholder={`Write a reply to ${activeThread.customerName || activeThread.customerEmail}...`}
                   value={replyText}
