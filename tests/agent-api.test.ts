@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import ExcelJS from "exceljs";
 
 const apps: Array<ReturnType<typeof buildApp>> = [];
 const tempDirectories: string[] = [];
@@ -482,6 +483,87 @@ describe("Agent API", () => {
     expect(response.body).not.toContain("У вас немає компаній для видалення.");
     expect(receivedUserPrompt).toContain("Проаналізуй цей документ");
     expect(receivedUserPrompt).toContain("delete,company");
+  });
+
+  it("edits the spreadsheet attached in an earlier message and returns the modified workbook", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Roadmap");
+    sheet.addRow(["Feature", "Owner"]);
+    sheet.addRow(["OCR", "Anna"]);
+    sheet.addRow(["PDF capture", "Mark"]);
+    const source = Buffer.from(await workbook.xlsx.writeBuffer());
+    let streamCall = 0;
+    let secondSystemPrompt = "";
+    let secondUserPrompt = "";
+    const aiEngine: AIEngine = {
+      chat: async () => ({ content: "Conversation context." }),
+      async *stream(request) {
+        streamCall += 1;
+        if (streamCall === 1) {
+          yield "Короткий звіт за документом.";
+          return;
+        }
+        secondSystemPrompt = chatContentText(request.messages.find((item) => item.role === "system")?.content);
+        secondUserPrompt = chatContentText(request.messages.at(-1)?.content);
+        yield "Готово, я додав стовпець до завантаженого файла.\n\n```spreadsheet-edit\n";
+        yield JSON.stringify({ action: "add_column", newColumn: { header: "Статус", values: ["Готово", "В роботі"] } });
+        yield "\n```";
+      },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const dataDirectory = await mkdtemp(path.join(tmpdir(), "npati-spreadsheet-followup-"));
+    tempDirectories.push(dataDirectory);
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), aiEngine, marketplace, dataDirectory });
+    apps.push(app);
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: {
+        contextType: "none",
+        message: "Проаналізуй цей документ і зроби короткий звіт.",
+        attachments: [{
+          kind: "document",
+          name: "omniroute-roadmap.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          dataBase64: source.toString("base64"),
+        }],
+      },
+    });
+    const conversationId = first.body.match(/"conversationId":"([0-9a-f-]{36})"/)?.[1];
+    expect(conversationId).toBeTruthy();
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/chat/stream",
+      payload: {
+        contextType: "none",
+        conversationId,
+        message: "Додай новий стовпець «Статус», заповни його та поверни змінений файл.",
+      },
+    });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toContain("omniroute-roadmap_edited.xlsx");
+    expect(second.body).not.toContain("spreadsheet-edit");
+    expect(secondSystemPrompt).toContain("Apply the requested changes to that exact workbook");
+    expect(secondUserPrompt).toContain("Previously attached spreadsheet content (omniroute-roadmap.xlsx)");
+    expect(secondUserPrompt).toContain("OCR | Anna");
+
+    const conversation = await app.inject({ method: "GET", url: `/conversations/${conversationId}` });
+    const attachmentIds = [...conversation.body.matchAll(/npati-attachment:document:([0-9a-f-]{36}):omniroute-roadmap_edited\.xlsx/g)].map((match) => match[1]!);
+    expect(attachmentIds.length).toBeGreaterThan(0);
+    const download = await app.inject({ method: "GET", url: `/attachments/${attachmentIds.at(-1)}` });
+    expect(download.statusCode).toBe(200);
+    const edited = new ExcelJS.Workbook();
+    await edited.xlsx.load(download.rawPayload as any);
+    const editedSheet = edited.getWorksheet("Roadmap")!;
+    expect(editedSheet.getRow(1).values).toEqual([undefined, "Feature", "Owner", "Статус"]);
+    expect(editedSheet.getRow(2).values).toEqual([undefined, "OCR", "Anna", "Готово"]);
+    expect(editedSheet.getRow(3).values).toEqual([undefined, "PDF capture", "Mark", "В роботі"]);
   });
 
   it("starts and exposes aggregate health", async () => {
