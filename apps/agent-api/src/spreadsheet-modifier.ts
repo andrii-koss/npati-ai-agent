@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 
 export interface SpreadsheetEditOperation {
   sheet?: string;
-  action?: "insert_after" | "insert_rows" | "append_rows" | "update_cells" | "add_column" | "delete_rows" | "replace_sheet";
+  action?: "insert_after" | "insert_rows" | "append_rows" | "update_cells" | "add_column" | "map_column" | "delete_rows" | "replace_sheet";
   search?: string | number;
   searchColumn?: string | number;
   afterRow?: number;
@@ -17,6 +17,13 @@ export interface SpreadsheetEditOperation {
     header: string;
     values?: (string | number | boolean | null)[];
   };
+  sourceColumn?: string | number;
+  valueMap?: Array<{
+    match: string;
+    value: string | number | boolean | null;
+    mode?: "contains" | "equals" | "starts_with" | "regex";
+  }>;
+  defaultValue?: string | number | boolean | null;
   deleteSearch?: string | number;
 }
 
@@ -31,6 +38,9 @@ export interface SpreadsheetEditDirective {
   rows?: (string | number | boolean | null)[][];
   cellUpdates?: SpreadsheetEditOperation["cellUpdates"];
   newColumn?: SpreadsheetEditOperation["newColumn"];
+  sourceColumn?: SpreadsheetEditOperation["sourceColumn"];
+  valueMap?: SpreadsheetEditOperation["valueMap"];
+  defaultValue?: SpreadsheetEditOperation["defaultValue"];
 }
 
 function escapeCsvCell(val: unknown): string {
@@ -111,6 +121,9 @@ export class SpreadsheetModifier {
           rows: directive.rows,
           cellUpdates: directive.cellUpdates,
           newColumn: directive.newColumn,
+          sourceColumn: directive.sourceColumn,
+          valueMap: directive.valueMap,
+          defaultValue: directive.defaultValue,
         }];
 
     if (isCsv) {
@@ -169,6 +182,26 @@ export class SpreadsheetModifier {
         });
       }
       return `Додано нову колонку «${op.newColumn.header}» до аркуша «${sheet.name}»`;
+    }
+
+    if (action === "map_column" && op.newColumn && op.sourceColumn != null && op.valueMap?.length) {
+      const headerRow = sheet.getRow(1);
+      const headers = new Map<string, number>();
+      headerRow.eachCell((cell, colNumber) => headers.set(String(cell.text || cell.value || "").trim().toLowerCase(), colNumber));
+      const sourceIndex = typeof op.sourceColumn === "number"
+        ? op.sourceColumn
+        : headers.get(String(op.sourceColumn).trim().toLowerCase());
+      if (!sourceIndex) throw new Error(`Spreadsheet source column not found: ${String(op.sourceColumn)}`);
+      const newColIndex = sheet.columnCount + 1;
+      headerRow.getCell(newColIndex).value = op.newColumn.header;
+      let updated = 0;
+      for (let rowIndex = 2; rowIndex <= sheet.rowCount; rowIndex++) {
+        const source = String(sheet.getRow(rowIndex).getCell(sourceIndex).text ?? "").trim();
+        const mapped = this.mapValue(source, op.valueMap);
+        sheet.getRow(rowIndex).getCell(newColIndex).value = mapped === undefined ? (op.defaultValue ?? null) : mapped;
+        updated++;
+      }
+      return `Mapped ${updated} rows from «${String(op.sourceColumn)}» into «${op.newColumn.header}» on «${sheet.name}»`;
     }
 
     // 2. Cell updates
@@ -285,6 +318,21 @@ export class SpreadsheetModifier {
         continue;
       }
 
+      if (action === "map_column" && op.newColumn && op.sourceColumn != null && op.valueMap?.length) {
+        if (!rows[0]) continue;
+        const sourceIndex = typeof op.sourceColumn === "number"
+          ? op.sourceColumn - 1
+          : rows[0].findIndex((header) => header.trim().toLowerCase() === String(op.sourceColumn).trim().toLowerCase());
+        if (sourceIndex < 0) throw new Error(`Spreadsheet source column not found: ${String(op.sourceColumn)}`);
+        rows[0].push(op.newColumn.header);
+        for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+          const mapped = this.mapValue(rows[rowIndex]![sourceIndex] ?? "", op.valueMap);
+          rows[rowIndex]!.push(String(mapped === undefined ? (op.defaultValue ?? "") : mapped));
+        }
+        summaries.push(`Mapped ${Math.max(0, rows.length - 1)} rows into «${op.newColumn.header}»`);
+        continue;
+      }
+
       if (action === "update_cells" && op.cellUpdates?.length) {
         const headerMap = new Map<string, number>();
         if (rows[0]) rows[0].forEach((h, idx) => headerMap.set(h.toLowerCase(), idx));
@@ -360,7 +408,7 @@ export class SpreadsheetModifier {
           if (!operation) return false;
           const inferredAction = operation.action
             ?? (operation.newColumn ? "add_column" : operation.cellUpdates?.length ? "update_cells" : operation.rows?.length ? "append_rows" : "");
-          return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "delete_rows", "replace_sheet"].includes(inferredAction);
+          return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "map_column", "delete_rows", "replace_sheet"].includes(inferredAction);
         });
         if (!valid) continue;
         const cleanText = candidate.matched
@@ -372,5 +420,22 @@ export class SpreadsheetModifier {
       }
     }
     return null;
+  }
+
+  private static mapValue(source: string, mappings: NonNullable<SpreadsheetEditOperation["valueMap"]>) {
+    const normalized = source.trim().toLowerCase();
+    for (const mapping of mappings) {
+      const match = mapping.match.trim();
+      const needle = match.toLowerCase();
+      const matched = mapping.mode === "equals"
+        ? normalized === needle
+        : mapping.mode === "starts_with"
+          ? normalized.startsWith(needle)
+          : mapping.mode === "regex"
+            ? new RegExp(match, "iu").test(source)
+            : normalized.includes(needle);
+      if (matched) return mapping.value;
+    }
+    return undefined;
   }
 }

@@ -27,6 +27,34 @@ describe("SpreadsheetModifier", () => {
     expect(result.modifiedFilename).toBe("tasks_edited.csv");
   });
 
+  it("maps a new column across every row of the original workbook", async () => {
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet("Roadmap");
+    sheet.addRow(["Feature", "Current status"]);
+    for (let index = 1; index <= 300; index++) {
+      sheet.addRow([`Feature ${index}`, index % 2 ? "Already implemented" : "Planned"]);
+    }
+    const input = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const result = await SpreadsheetModifier.applyEdits(input, "roadmap.xlsx", {
+      action: "map_column",
+      sourceColumn: "Current status",
+      newColumn: { header: "Status" },
+      valueMap: [
+        { match: "Already implemented", value: "Done", mode: "contains" },
+        { match: "Planned", value: "Planned", mode: "equals" },
+      ],
+      defaultValue: "Needs review",
+    });
+
+    const edited = new ExcelJS.Workbook();
+    await edited.xlsx.load(result.buffer as any);
+    const editedSheet = edited.getWorksheet("Roadmap")!;
+    expect(editedSheet.rowCount).toBe(301);
+    expect(editedSheet.getRow(2).getCell(3).value).toBe("Done");
+    expect(editedSheet.getRow(301).getCell(3).value).toBe("Planned");
+  });
+
   it("modifies Excel workbook by inserting rows after row with ID", async () => {
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet("План");

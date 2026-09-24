@@ -26,6 +26,16 @@ async function setup(directory?:string){
 async function body(stream:NodeJS.ReadableStream){let value="";for await(const chunk of stream)value+=Buffer.from(chunk).toString();return value;}
 
 describe("ChatFileService",()=>{
+  it("finds the latest spreadsheet directly from chat storage", async () => {
+    const { business, conversation, service } = await setup();
+    await service.persist(context, business.id, conversation.id, [
+      { kind: "document", name: "notes.pdf", mimeType: "application/pdf", data: Buffer.from("pdf") },
+      { kind: "document", name: "source.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data: Buffer.from("xlsx") },
+    ]);
+    const latest = await service.latestChatSpreadsheet(context, conversation.id);
+    expect(latest?.originalFilename).toBe("source.xlsx");
+  });
+
   it("persists a private document idempotently and blocks another tenant",async()=>{
     const {business,conversation,repository,service}=await setup();
     const clientId=randomUUID(),data=Buffer.from("%PDF-1.7\nNPATI");
