@@ -1110,10 +1110,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             if (allMatch) {
               return current.map((cur, i) => {
                 const lod = loaded[i]!;
-                const shouldClearAttachments = lod.content.includes("[[npati-attachment:");
-                return cur.id === lod.id && cur.content === lod.content
-                  ? (shouldClearAttachments && cur.attachments?.length ? { ...cur, attachments: undefined } : cur)
-                  : { ...cur, id: lod.id, content: lod.content, ...(shouldClearAttachments ? { attachments: undefined } : {}) };
+                return cur.id === lod.id && cur.content === lod.content ? cur : { ...cur, id: lod.id, content: lod.content };
               });
             }
           }
@@ -1432,7 +1429,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         const found = current.some((item) => item.id === assistantId);
         if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
         return found
-          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item.id === optimisticId ? { ...item, attachments: undefined } : item)
+          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item)
           : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, createdAt: new Date().toISOString() }];
       });
       if (!privateRequest && result.conversationId) {
@@ -1542,13 +1539,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`}
                   aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
                 >
-                  <PendingMessageAttachments
-                    value={(message.attachments ?? []).filter((item) =>
-                      !message.content.includes("[[npati-attachment:") &&
-                      !message.content.includes(encodeURIComponent(item.name)) &&
-                      !message.content.includes(item.name)
-                    )}
-                  />
+                  <PendingMessageAttachments value={message.attachments ?? []} />
                   <ChatMessageContent content={message.content} />
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar

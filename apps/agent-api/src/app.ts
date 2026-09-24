@@ -421,12 +421,9 @@ function attachResearchSources(content: string, research?: { sources: Array<{ ur
   }).join("\n");
 }
 
-export function isSpreadsheetEditRequest(message: string, hasAttachedSpreadsheet = false): boolean {
-  const edit = /(?:дод|заповн|змін|онов|редаг|встав|видал|приб|добав|заполн|измен|обнов|редакт|встав|удал|перевір|виправ|скоригуй|поверн|відформат|add|fill|edit|update|change|insert|append|remove|delete|modify|fix|correct|format|clean|sort|ajout|rempl|modif|supprim|hinzuf|bearbeit|änder|lösch|agreg|rellen|edit|elimin|aggiung|modific|rimuov|dodaj|wypeł|edyt|zmień|usuń|adicion|preench|editar|alter|exclu|voeg|bewerk|wijzig|verwijder|ekle|doldur|düzenle|değiştir|sil|添加|填写|编辑|更新|删除|追加|入力|編集|変更|削除|추가|입력|편집|수정|삭제|أضف|املأ|عدّل|حدّث|احذف|जोड़|भर|संपादित|बदल|हटा)/iu.test(message);
-  if (hasAttachedSpreadsheet) {
-    return edit || /(?:поверни|ту саму|відредаговану|оновлену|збережи|експортуй|return|same|updated|edited)/iu.test(message);
-  }
-  const spreadsheet = /(?:xlsx|xlsm|xlsb|xls|csv|excel|spreadsheet|workbook|worksheet|table|column|row|cell|sheet|стовп|колон|ряд|клітин|аркуш|таблиц|файл|feuille|tableau|colonne|ligne|zelle|spalte|tabelle|hoja|tabla|columna|fila|foglio|tabella|colonna|riga|arkusz|tabela|kolumn|wiersz|planilha|coluna|linha|werkblad|tabel|kolom|rij|sayfa|tablo|sütun|satır|电子表格|表格|列|行|单元格|スプレッドシート|表|列|行|セル|스프레드시트|표|열|행|셀|جدول|عمود|صف|خلية|स्प्रेडशीट|तालिका|कॉलम|पंक्ति|सेल)/iu.test(message);
+export function isSpreadsheetEditRequest(message: string): boolean {
+  const edit = /(?:дод|заповн|змін|онов|редаг|встав|видал|приб|добав|заполн|измен|обнов|редакт|встав|удал|add|fill|edit|update|change|insert|append|remove|delete|modify|ajout|rempl|modif|supprim|hinzuf|bearbeit|änder|lösch|agreg|rellen|edit|elimin|aggiung|modific|rimuov|dodaj|wypeł|edyt|zmień|usuń|adicion|preench|editar|alter|exclu|voeg|bewerk|wijzig|verwijder|ekle|doldur|düzenle|değiştir|sil|添加|填写|编辑|更新|删除|追加|入力|編集|変更|削除|추가|입력|편집|수정|삭제|أضف|املأ|عدّل|حدّث|احذف|जोड़|भर|संपादित|बदल|हटा)/iu.test(message);
+  const spreadsheet = /(?:xlsx|xls|csv|excel|spreadsheet|workbook|worksheet|table|column|row|cell|sheet|стовп|колон|ряд|клітин|аркуш|таблиц|файл|feuille|tableau|colonne|ligne|zelle|spalte|tabelle|hoja|tabla|columna|fila|foglio|tabella|colonna|riga|arkusz|tabela|kolumn|wiersz|planilha|coluna|linha|werkblad|tabel|kolom|rij|sayfa|tablo|sütun|satır|电子表格|表格|列|行|单元格|スプレッドシート|表|列|行|セル|스프레드시트|표|열|행|셀|جدول|عمود|صف|خلية|स्प्रेडशीट|तालिका|कॉलम|पंक्ति|सेल)/iu.test(message);
   return edit && spreadsheet;
 }
 
@@ -1108,7 +1105,7 @@ ${localized.next}`;
     managementCompany?: { id: string; name: string },
   ) {
     const priorExisting = !memoryPolicy.noMemoryActive && conversationId
-      ? await workspaceStore.getNeutralConversation(auth, conversationId).catch(() => undefined)
+      ? await workspaceStore.getNeutralConversation(auth, conversationId)
       : undefined;
     const previousAssistant = [...(priorExisting?.messages ?? [])].reverse().find((item) => item.role === "assistant")?.content ?? "";
     const effectiveMessage = resolveContextualCompanyFollowUp(message, previousAssistant);
@@ -1127,60 +1124,45 @@ ${localized.next}`;
     const safeUserRequest = SecurityPolicyEngine.protectText(effectiveMessage).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
-      : priorExisting?.conversation
-        ?? await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
-    const existing = priorExisting ?? (conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id).catch(() => ({ messages: [] })) : { messages: [] });
+      : conversationId
+        ? priorExisting!.conversation
+        : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
+    const existing = priorExisting ?? (conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id) : { messages: [] });
     let previousSpreadsheet: { name: string; mimeType: string; data: Buffer; kind: "document" } | undefined;
     let promptWithAttachmentContext = media.prompt;
-    const currentSpreadsheet = media.decoded.find(
-      (item) => (item.kind === "document" || item.kind === "file") && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)
-    );
-    if (chatFiles && isSpreadsheetEditRequest(safeUserRequest, true) && !currentSpreadsheet) {
+    if (chatFiles && isSpreadsheetEditRequest(safeUserRequest) && !media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name))) {
       const storedSpreadsheet = conversation
         ? await chatFiles.latestChatSpreadsheet(auth, conversation.id)
         : null;
       const historyMarker = existing.messages
         .slice()
         .reverse()
-        .flatMap((item) => [...item.content.matchAll(/\[\[npati-attachment:(?:document|file):([0-9a-f-]{36}):([^\]]+)\]\]/gi)])
+        .flatMap((item) => [...item.content.matchAll(/\[\[npati-attachment:document:([0-9a-f-]{36}):([^\]]+)\]\]/gi)])
         .map((match) => ({ id: match[1]!, name: decodeURIComponent(match[2]!) }))
         .find((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name));
       const marker = storedSpreadsheet
         ? { id: storedSpreadsheet.id, name: storedSpreadsheet.originalFilename }
         : historyMarker;
       if (marker) {
-        let opened: Awaited<ReturnType<ChatFileService["open"]>> = null;
-        try {
-          opened = await chatFiles.open(auth, marker.id);
-        } catch (openErr) {
-          app.log.warn({ err: openErr }, "Could not open spreadsheet from chat files");
-        }
+        const opened = await chatFiles.open(auth, marker.id);
         if (opened) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
+          previousSpreadsheet = { name: marker.name, mimeType: opened.file.mimeType, data: Buffer.concat(chunks), kind: "document" };
+          progress?.({ type: "page_fetch_started", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
           try {
-            const chunks: Buffer[] = [];
-            for await (const chunk of opened.stream as AsyncIterable<Buffer | string | Uint8Array>) chunks.push(Buffer.from(chunk));
-            previousSpreadsheet = { name: marker.name, mimeType: opened.file.mimeType, data: Buffer.concat(chunks), kind: "document" };
-            progress?.({ type: "page_fetch_started", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
             const extracted = await extractDocumentText(previousSpreadsheet.data, previousSpreadsheet.mimeType, previousSpreadsheet.name);
-            const alreadyInHistory = existing.messages.some((m) => m.content.includes(marker.name) && m.content.length > 500);
-            if (alreadyInHistory) {
-              const preview = extracted.slice(0, 8_000);
-              promptWithAttachmentContext += `\n\nActive spreadsheet (${previousSpreadsheet.name}) structure & preview:\n\`\`\`\n${preview}\n\`\`\``;
-            } else {
-              promptWithAttachmentContext += `\n\nPreviously attached spreadsheet content (${previousSpreadsheet.name}):\n\`\`\`\n${extracted.slice(0, 24_000)}\n\`\`\``;
-            }
+            promptWithAttachmentContext += `\n\nPreviously attached spreadsheet content (${previousSpreadsheet.name}):\n\`\`\`\n${extracted}\n\`\`\``;
             progress?.({ type: "page_fetch_completed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
           } catch (error) {
-            app.log.warn({ err: error }, "Failed to extract previous spreadsheet");
-            progress?.({ type: "page_fetch_completed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name });
+            progress?.({ type: "page_fetch_failed", url: `file://${encodeURIComponent(marker.name)}`, domain: "file", title: marker.name, error: error instanceof Error ? error.message : String(error) });
           }
         }
       }
     }
     const safePrompt=SecurityPolicyEngine.protectText(promptWithAttachmentContext).sanitized;
-    const activeSpreadsheet = currentSpreadsheet ?? previousSpreadsheet;
-    const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest, Boolean(activeSpreadsheet))
-      && Boolean(activeSpreadsheet);
+    const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
+      && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
     const companySettingsRequest = CompanyChatActions.isManagementRequest(safeUserRequest)
       || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)));
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
@@ -1239,7 +1221,7 @@ ${localized.next}`;
     }
     let research: ResearchOutcome | undefined;
     let researchJob;
-    const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(activeSpreadsheet);
+    const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
     const webResearchRequested = !companySettingsRequest && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message));
     if (webResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
@@ -1280,7 +1262,6 @@ ${localized.next}`;
       model: ai.model,
       fallbackModel: ai.fallbackModel,
       messages: protectedHistory,
-      keepRecentTurns: spreadsheetEditRequested ? 2 : 4,
       signal,
     });
     if (!companySettingsRequest) progress?.({ type: "final_generation_started" });
@@ -1293,8 +1274,8 @@ ${localized.next}`;
         ? "The user attached documents/data files (spreadsheets, tables, PDFs, archives, text files). Analyze their extracted data and content directly to answer the user's questions. Do not claim you cannot view or read attachments when the file content is provided in the prompt."
         : "",
     ].filter(Boolean).join("\n\n");
-    const spreadsheetFollowUpInstruction = activeSpreadsheet
-      ? `The spreadsheet ${JSON.stringify(activeSpreadsheet.name)} is loaded and available for editing. Apply the requested changes to that exact workbook. You MUST return a \`\`\`spreadsheet-edit directive containing the required operations so the backend can modify and return the updated workbook. Do not replace it with a newly generated Markdown table or a detached spreadsheet.`
+    const spreadsheetFollowUpInstruction = previousSpreadsheet
+      ? `The existing spreadsheet ${JSON.stringify(previousSpreadsheet.name)} from the earlier message is loaded and available for editing. Apply the requested changes to that exact workbook. Return a spreadsheet-edit directive with the required operations so the backend can modify and return the workbook. Do not replace it with a newly generated Markdown table or a detached spreadsheet.`
       : "";
     const researchInstruction = research ? [
       "You have current public web research and live crawled pages supplied by NPATI Web Research & Crawler.",
@@ -1416,14 +1397,14 @@ ${localized.next}`;
     if (chatFiles && conversation) {
       try {
         let targetAttachment: { name: string; mimeType: string; data: Buffer; kind?: string } | undefined = media.decoded.find(
-          (d) => (d.kind === "document" || d.kind === "file") && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(d.name)
+          (d) => d.kind === "document" && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(d.name)
         ) ?? previousSpreadsheet;
 
         if (!targetAttachment) {
           const matchAtt = existing.messages
             .slice(-10)
             .reverse()
-            .map((m) => m.content.match(/\[\[npati-attachment:(?:document|file):([0-9a-f-]{36}):([^\]]+)\]\]/i))
+            .map((m) => m.content.match(/\[\[npati-attachment:document:([0-9a-f-]{36}):([^\]]+)\]\]/i))
             .find(Boolean);
           if (matchAtt) {
             const fileId = matchAtt[1]!;
@@ -1449,49 +1430,20 @@ ${localized.next}`;
           extractedDirective = { directive: markdownDirective, cleanText: spreadsheetEditedMessage(safeUserRequest) };
         }
         if (!extractedDirective && spreadsheetEditRequested && targetAttachment) {
-          try {
-            const planned = await aiEngine.chat({
-              model: ai.model,
-              fallbackModel: ai.fallbackModel,
-              admission: admissionFor(auth),
-              timeoutMs: 90_000,
-              signal,
-              messages: [
-                {
-                  role: "system",
-                  content: "Convert the user's spreadsheet edit request and draft response into exactly one executable spreadsheet-edit JSON object. Return only a ```spreadsheet-edit JSON code block or raw JSON object, no prose and no Markdown table. Allowed actions: add_column, map_column, update_cells, insert_after, append_rows, delete_rows, replace_sheet. Preserve the existing workbook structure and express only the requested changes.",
-                },
-                {
-                  role: "user",
-                  content: `User edit request: ${safeUserRequest}\n\nDraft response/table with proposed changes:\n${content.slice(0, 16_000)}`,
-                },
-              ],
-            });
-            const plannedDirective = SpreadsheetModifier.extractDirective(planned.content);
-            if (plannedDirective) {
-              extractedDirective = { directive: plannedDirective.directive, cleanText: spreadsheetEditedMessage(safeUserRequest) };
-            }
-          } catch (planError) {
-            app.log.warn({ err: planError }, "Spreadsheet edit planner fallback failed");
-          }
-        }
-
-        if (!extractedDirective && spreadsheetEditRequested && targetAttachment) {
-          const quotedHeader = /[«“"']([^»”"']{1,80})[»”"']/u.exec(safeUserRequest)?.[1]?.trim();
-          const namedHeader = /(?:column|стовп(?:ець|ця)|колонк[ауи]|colonne|spalte|columna|colonna|kolumn[ęa]|coluna|kolom|sütun|列|열|عمود|कॉलम)\s+([\p{L}\p{N}_ -]{1,40})/iu.exec(safeUserRequest)?.[1]?.trim();
-          const header = quotedHeader || namedHeader;
-          if (header && /дода[йи]|add|створи|встав/iu.test(safeUserRequest)) {
-            extractedDirective = {
-              directive: {
-                action: "add_column",
-                newColumn: {
-                  header,
-                  defaultValue: "✅ Заплановано",
-                },
-              },
-              cleanText: spreadsheetEditedMessage(safeUserRequest),
-            };
-          }
+          const planned = await aiEngine.chat({
+            model: ai.model,
+            fallbackModel: ai.fallbackModel,
+            admission: admissionFor(auth),
+            timeoutMs: 90_000,
+            signal,
+            messages: [
+              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON object. Return no prose and no Markdown table. Allowed actions: add_column, map_column, update_cells, insert_after, append_rows, delete_rows. Preserve the existing workbook and express only the requested changes. When a new column is derived from an existing column, prefer the compact map_column action: provide sourceColumn, newColumn.header, valueMap entries shaped as {match,value,mode} where mode is contains, equals, starts_with, or regex, plus optional defaultValue. These rules are applied by the backend to every row of the original workbook, including rows omitted from the prompt. Use add_column values only when values are not derived from an existing column." },
+              { role: "assistant", content: `The primary model proposed this edit. Convert its intended workbook changes into the executable JSON operation:\n${content.slice(0, 16_000)}` },
+              { role: "user", content: safePrompt },
+            ],
+          });
+          const plannedDirective = SpreadsheetModifier.extractDirective(planned.content);
+          if (plannedDirective) extractedDirective = { directive: plannedDirective.directive, cleanText: spreadsheetEditedMessage(safeUserRequest) };
         }
 
         if (extractedDirective && targetAttachment) {
@@ -1515,9 +1467,8 @@ ${localized.next}`;
             if (savedEdited.length > 0) {
               const editedFile = savedEdited[0]!;
               const fileCard = `\n\n[[npati-attachment:document:${editedFile.id}:${encodeURIComponent(editedFile.name)}]]`;
-              const cleanText = extractedDirective.cleanText.trim();
-              content = (cleanText || spreadsheetEditedMessage(safeUserRequest)) + fileCard;
-              if (onDelta) onDelta(content);
+              content = extractedDirective.cleanText + fileCard;
+              if (onDelta) onDelta(spreadsheetEditRequested ? content : fileCard);
             }
         }
       } catch (editError) {
@@ -1526,10 +1477,8 @@ ${localized.next}`;
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = spreadsheetEditRequested
-      ? { cleanText: executedAction.cleanText, companyAction: undefined }
-      : await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
-    const workspaceAction = (companySettingsRequest || spreadsheetEditRequested)
+    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+    const workspaceAction = companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     content = workspaceAction.cleanText;
@@ -1866,12 +1815,8 @@ ${localized.next}`;
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        const hasSpreadsheet = Boolean(
-          request.body.attachments?.some((a) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(a.name))
-          || (prompt && isSpreadsheetEditRequest(prompt, true))
-        );
-        if (hasSpreadsheet || (prompt && (isShortAffirmativeReply(prompt) || requestsCompositeCompanyDeletionIntent(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt)))) {
-          const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
+        if (prompt && (isShortAffirmativeReply(prompt) || requestsCompositeCompanyDeletionIntent(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
+          const result = await runNeutralMessage(auth, prompt, request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
         }
@@ -2006,20 +1951,10 @@ ${localized.next}`;
         return { ...result, conversationId: session.conversationId, onboarding: session, activeContext: resolved.context };
       }
       if (!request.body.message?.trim() && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
-      const businessPrompt = request.body.message?.trim() || "";
-      const hasBusinessSpreadsheet = Boolean(
-        request.body.attachments?.some((a) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(a.name))
-        || (businessPrompt && isSpreadsheetEditRequest(businessPrompt, true))
-      );
-      if (hasBusinessSpreadsheet) {
-        const result = await runNeutralMessage(auth, businessPrompt, request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined);
-        applyChatTelemetryHeaders(reply, result);
-        return { ...result, activeContext: resolved.context };
-      }
       const businessResult = await runBusinessMessage(
         auth,
         resolved.business!.id,
-        businessPrompt,
+        request.body.message?.trim() || String(),
         request.body.conversationId,
         request.log,
         undefined,
@@ -2113,13 +2048,8 @@ ${localized.next}`;
       }, 15_000);
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
-        const hasSpreadsheet = Boolean(
-          request.body.attachments?.some((a) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(a.name))
-          || (message && isSpreadsheetEditRequest(message, true))
-        );
-        if (resolved.context.contextType === "none" || hasSpreadsheet) {
-          const companyParam = resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined;
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, companyParam);
+        if (resolved.context.contextType === "none") {
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
           if (isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
