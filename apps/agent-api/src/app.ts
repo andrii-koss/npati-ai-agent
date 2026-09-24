@@ -470,6 +470,25 @@ function addColumnDirectiveFromMarkdown(content: string, request: string) {
   return { action: "add_column" as const, newColumn: { header, values } };
 }
 
+export function mapColumnDirectiveFromProposal(content: string, request: string) {
+  const header = /[«“"']([^»”"']{1,80})[»”"']/u.exec(request)?.[1]?.trim();
+  if (!header) return undefined;
+  const sourceColumn = /(?:based\s+on|from|на\s+основі|из\s+поля|à\s+partir|basierend|basado|in\s+base|na\s+podstawie|com\s+base|op\s+basis|temel|基于|基づ|기반|استناد|के\s+आधार)[^\n]{0,120}[«“"`]([^»”"`\n]{1,80})[»”"`]/iu.exec(content)?.[1]?.trim();
+  if (!sourceColumn) return undefined;
+  const valueMap: Array<{ match: string; value: string; mode: "contains" }> = [];
+  for (const line of content.split(/\r?\n/)) {
+    const labelled = /^\s*[-*]\s*([^:\n]{1,80}):\s*(.+)$/u.exec(line);
+    if (!labelled) continue;
+    const target = labelled[1]!.replace(/[*_]/g, "").trim();
+    for (const match of [...labelled[2]!.matchAll(/`([^`]{1,120})`/gu)]) {
+      valueMap.push({ match: match[1]!.trim(), value: target, mode: "contains" });
+    }
+  }
+  if (valueMap.length < 2) return undefined;
+  valueMap.sort((left, right) => right.match.length - left.match.length);
+  return { action: "map_column" as const, sourceColumn, newColumn: { header }, valueMap };
+}
+
 async function prepareChatAttachments(
   aiEngine: AIEngine,
   message: string,
@@ -1112,12 +1131,18 @@ ${localized.next}`;
     let previousSpreadsheet: { name: string; mimeType: string; data: Buffer; kind: "document" } | undefined;
     let promptWithAttachmentContext = media.prompt;
     if (chatFiles && isSpreadsheetEditRequest(safeUserRequest) && !media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name))) {
-      const marker = existing.messages
+      const storedSpreadsheet = conversation
+        ? await chatFiles.latestChatSpreadsheet(auth, conversation.id)
+        : null;
+      const historyMarker = existing.messages
         .slice()
         .reverse()
         .flatMap((item) => [...item.content.matchAll(/\[\[npati-attachment:document:([0-9a-f-]{36}):([^\]]+)\]\]/gi)])
         .map((match) => ({ id: match[1]!, name: decodeURIComponent(match[2]!) }))
         .find((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name));
+      const marker = storedSpreadsheet
+        ? { id: storedSpreadsheet.id, name: storedSpreadsheet.originalFilename }
+        : historyMarker;
       if (marker) {
         const opened = await chatFiles.open(auth, marker.id);
         if (opened) {
@@ -1396,7 +1421,11 @@ ${localized.next}`;
         }
 
         let extractedDirective = SpreadsheetModifier.extractDirective(content);
+        const mappedDirective = spreadsheetEditRequested ? mapColumnDirectiveFromProposal(content, safeUserRequest) : undefined;
         const markdownDirective = spreadsheetEditRequested ? addColumnDirectiveFromMarkdown(content, safeUserRequest) : undefined;
+        if (!extractedDirective && mappedDirective) {
+          extractedDirective = { directive: mappedDirective, cleanText: spreadsheetEditedMessage(safeUserRequest) };
+        }
         if (!extractedDirective && markdownDirective) {
           extractedDirective = { directive: markdownDirective, cleanText: spreadsheetEditedMessage(safeUserRequest) };
         }
@@ -1408,7 +1437,8 @@ ${localized.next}`;
             timeoutMs: 90_000,
             signal,
             messages: [
-              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON block. Return no prose and no Markdown table. Allowed actions: add_column, update_cells, insert_after, append_rows, delete_rows. Preserve the existing workbook and express only the requested changes. For add_column, provide newColumn.header and one value per existing data row when the user asks to fill it." },
+              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON object. Return no prose and no Markdown table. Allowed actions: add_column, map_column, update_cells, insert_after, append_rows, delete_rows. Preserve the existing workbook and express only the requested changes. When a new column is derived from an existing column, prefer the compact map_column action: provide sourceColumn, newColumn.header, valueMap entries shaped as {match,value,mode} where mode is contains, equals, starts_with, or regex, plus optional defaultValue. These rules are applied by the backend to every row of the original workbook, including rows omitted from the prompt. Use add_column values only when values are not derived from an existing column." },
+              { role: "assistant", content: `The primary model proposed this edit. Convert its intended workbook changes into the executable JSON operation:\n${content.slice(0, 16_000)}` },
               { role: "user", content: safePrompt },
             ],
           });

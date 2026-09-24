@@ -73,6 +73,13 @@ export class ChatFileService {
     await this.repository.attachMessage(context,ids,messageId);
   }
 
+  async latestChatSpreadsheet(context: AuthContext, chatId: string) {
+    const files = await this.repository.listChat(context, chatId);
+    return files
+      .filter((file) => file.status === "ready" && /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(file.originalFilename))
+      .at(-1) ?? null;
+  }
+
   async authorize(context: AuthContext, fileId: string) {
     const file = await this.repository.get(fileId);
     if (!file || file.deletedAt || file.status !== "ready") return null;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
-import { buildApp, isSpreadsheetEditRequest } from "../apps/agent-api/src/app";
+import { buildApp, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal } from "../apps/agent-api/src/app";
 import { chatLanguageInstruction } from "../apps/agent-api/src/company-chat-i18n";
 
 const auth: AuthContext = { userId: "language-user", workspaceId: "language-workspace", permissions: ["workspace:read", "business:manage"] };
@@ -35,6 +35,22 @@ describe("chat response language", () => {
     expect(chatLanguageInstruction("Crea una empresa")).toContain("Spanish (es)");
     expect(chatLanguageInstruction("会社を作成してください")).toContain("Japanese (ja)");
     expect(chatLanguageInstruction("أنشئ شركة جديدة")).toContain("Arabic (ar)");
+  });
+
+  it("converts a model's compact status mapping into a whole-workbook edit", () => {
+    const directive = mapColumnDirectiveFromProposal(
+      'Fill the new column based on "NPATI status":\n- Implemented: `Already implemented`\n- Planned: `Roadmap`',
+      'Add a new column "Status", fill it and return the edited file.',
+    );
+    expect(directive).toMatchObject({
+      action: "map_column",
+      sourceColumn: "NPATI status",
+      newColumn: { header: "Status" },
+      valueMap: [
+        { match: "Already implemented", value: "Implemented" },
+        { match: "Roadmap", value: "Planned" },
+      ],
+    });
   });
 
   it.each([
