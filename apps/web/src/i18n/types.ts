@@ -766,4 +766,90 @@ export interface TranslationSchema {
       deleteCancel: string;
     };
   };
+  capabilityInspector: {
+    eyebrow: string;
+    title: string;
+    backAria: string;
+    heroCopy: string;
+    stats: {
+      totalLabel: string;
+      totalDesc: string;
+      agentCallableLabel: string;
+      agentCallableDesc: string;
+      runtimeOnlyLabel: string;
+      runtimeOnlyDesc: string;
+      requiresApprovalLabel: string;
+      requiresApprovalDesc: string;
+    };
+    slices: {
+      all: string;
+      agentCallable: string;
+      runtimeOnly: string;
+      userVisible: string;
+      automatic: string;
+      allowed: string;
+      requiresApproval: string;
+    };
+    controls: {
+      searchPlaceholder: string;
+      searchAriaLabel: string;
+      clearSearch: string;
+      showing: string;
+      matching: string;
+      copied: string;
+      perPage: string;
+      allCount: string;
+    };
+    table: {
+      colId: string;
+      sortId: string;
+      colName: string;
+      sortName: string;
+      colCanonicalId: string;
+      sortCanonicalId: string;
+      colDomain: string;
+      sortDomain: string;
+      colType: string;
+      sortType: string;
+      colCallable: string;
+      colRisk: string;
+      sortRisk: string;
+      colStatus: string;
+      sortStatus: string;
+      copyTooltip: string;
+      empty: string;
+      prev: string;
+      next: string;
+    };
+    callable: {
+      callable: string;
+      internal: string;
+    };
+    risks: {
+      low: string;
+      medium: string;
+      high: string;
+      critical: string;
+    };
+    statuses: {
+      verified: string;
+      partial: string;
+      notImplemented: string;
+      blocked: string;
+      allowed: string;
+      denied: string;
+      unavailable: string;
+      requiresApproval: string;
+    };
+    types: {
+      runtime: string;
+      config: string;
+      orchestr: string;
+      tool: string;
+      article: string;
+      secOps: string;
+    };
+    connectedServices: string;
+    errorLoad: string;
+  };
 }

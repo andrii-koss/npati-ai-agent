@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { useTranslation } from "./i18n";
 
 type InspectorSlice =
   | "all"
@@ -49,39 +50,50 @@ interface InspectorReport {
 
 type SortField = "id" | "name" | "capabilityId" | "domain" | "type" | "risk" | "status";
 
-function formatStatus(status: string): { label: string; className: string } {
+function formatStatus(status: string, t: (key: string) => string): { label: string; className: string } {
   const s = status.toLowerCase();
-  if (s.includes("verified")) return { label: "Verified", className: "verified" };
-  if (s.includes("partially")) return { label: "Partial", className: "partial" };
-  if (s.includes("not_implemented") || s.includes("not implemented")) return { label: "Not implemented", className: "not-implemented" };
-  if (s.includes("blocked")) return { label: "Blocked", className: "blocked" };
-  if (s === "allowed") return { label: "Allowed", className: "allowed" };
-  if (s === "denied") return { label: "Denied", className: "denied" };
-  if (s === "unavailable") return { label: "Unavailable", className: "unavailable" };
-  if (s.includes("approval")) return { label: "Approval Req.", className: "requires-approval" };
+  if (s.includes("verified")) return { label: t("capabilityInspector.statuses.verified"), className: "verified" };
+  if (s.includes("partially")) return { label: t("capabilityInspector.statuses.partial"), className: "partial" };
+  if (s.includes("not_implemented") || s.includes("not implemented")) return { label: t("capabilityInspector.statuses.notImplemented"), className: "not-implemented" };
+  if (s.includes("blocked")) return { label: t("capabilityInspector.statuses.blocked"), className: "blocked" };
+  if (s === "allowed") return { label: t("capabilityInspector.statuses.allowed"), className: "allowed" };
+  if (s === "denied") return { label: t("capabilityInspector.statuses.denied"), className: "denied" };
+  if (s === "unavailable") return { label: t("capabilityInspector.statuses.unavailable"), className: "unavailable" };
+  if (s.includes("approval")) return { label: t("capabilityInspector.statuses.requiresApproval"), className: "requires-approval" };
   return { label: status.replace(/_/g, " "), className: "default" };
 }
 
-function formatType(type: string): string {
+function formatType(type: string, t: (key: string) => string): string {
   switch (type.toLowerCase()) {
-    case "runtime": return "Runtime";
-    case "configuration": return "Config";
-    case "orchestration": return "Orchestr.";
-    case "tool": return "Tool";
-    case "article": return "Article";
-    case "security_ops": return "SecOps";
+    case "runtime": return t("capabilityInspector.types.runtime");
+    case "configuration": return t("capabilityInspector.types.config");
+    case "orchestration": return t("capabilityInspector.types.orchestr");
+    case "tool": return t("capabilityInspector.types.tool");
+    case "article": return t("capabilityInspector.types.article");
+    case "security_ops": return t("capabilityInspector.types.secOps");
     default: return type.charAt(0).toUpperCase() + type.slice(1);
   }
 }
 
-export function getCapabilityDisplayName(item: { capabilityId?: string; name: string }): string {
+function formatRisk(risk: string, t: (key: string) => string): string {
+  switch (risk.toLowerCase()) {
+    case "low": return t("capabilityInspector.risks.low");
+    case "medium": return t("capabilityInspector.risks.medium");
+    case "high": return t("capabilityInspector.risks.high");
+    case "critical": return t("capabilityInspector.risks.critical");
+    default: return risk.charAt(0).toUpperCase() + risk.slice(1);
+  }
+}
+
+export function getCapabilityDisplayName(item: { capabilityId?: string; name: string }, t?: (key: string) => string): string {
   if (item.capabilityId === "system.dashboard" || item.name === "Dashboard") {
-    return "Connected Services";
+    return t ? t("capabilityInspector.connectedServices") : "Connected Services";
   }
   return item.name;
 }
 
 export function CapabilityInspectorPage() {
+  const { t } = useTranslation();
   const [slice, setSlice] = useState<InspectorSlice>("all");
   const [search, setSearch] = useState("");
   const [report, setReport] = useState<InspectorReport | null>(null);
@@ -117,7 +129,7 @@ export function CapabilityInspectorPage() {
       })
       .catch((err) => {
         if (active) {
-          setError(err instanceof Error ? err.message : "Failed to load capabilities");
+          setError(err instanceof Error ? err.message : t("capabilityInspector.errorLoad"));
           setLoading(false);
         }
       });
@@ -125,7 +137,7 @@ export function CapabilityInspectorPage() {
     return () => {
       active = false;
     };
-  }, [slice]);
+  }, [slice, t]);
 
   // Reset page on filter or search change
   useEffect(() => {
@@ -156,7 +168,7 @@ export function CapabilityInspectorPage() {
     const term = search.toLowerCase();
     return raw.filter(
       (item) =>
-        getCapabilityDisplayName(item).toLowerCase().includes(term) ||
+        getCapabilityDisplayName(item, t).toLowerCase().includes(term) ||
         item.name.toLowerCase().includes(term) ||
         item.capabilityId.toLowerCase().includes(term) ||
         item.domain.toLowerCase().includes(term) ||
@@ -164,7 +176,7 @@ export function CapabilityInspectorPage() {
         item.type.toLowerCase().includes(term) ||
         item.status.toLowerCase().includes(term)
     );
-  }, [report?.items, search]);
+  }, [report?.items, search, t]);
 
   const sortedItems = useMemo(() => {
     return [...filteredItems].sort((a, b) => {
@@ -190,31 +202,30 @@ export function CapabilityInspectorPage() {
   const endIdx = pageSize === -1 ? totalItems : Math.min(validPage * pageSize, totalItems);
 
   const slices: { label: string; value: InspectorSlice; count?: number }[] = [
-    { label: "All", value: "all", count: report?.counts.all ?? 306 },
-    { label: "Agent-Callable", value: "agent-callable", count: report?.counts.agentCallable ?? 42 },
-    { label: "Runtime-Only", value: "runtime-only", count: report?.counts.runtimeOnly ?? 264 },
-    { label: "User-Visible", value: "user-visible", count: report?.counts.userVisible ?? 42 },
-    { label: "Automatic", value: "automatic", count: report?.counts.automatic ?? 234 },
-    { label: "Allowed", value: "allowed", count: report?.counts.allowed ?? 306 },
-    { label: "Requires Approval", value: "requires-approval", count: report?.counts.requiresApproval ?? 23 },
+    { label: t("capabilityInspector.slices.all"), value: "all", count: report?.counts.all ?? 306 },
+    { label: t("capabilityInspector.slices.agentCallable"), value: "agent-callable", count: report?.counts.agentCallable ?? 42 },
+    { label: t("capabilityInspector.slices.runtimeOnly"), value: "runtime-only", count: report?.counts.runtimeOnly ?? 264 },
+    { label: t("capabilityInspector.slices.userVisible"), value: "user-visible", count: report?.counts.userVisible ?? 42 },
+    { label: t("capabilityInspector.slices.automatic"), value: "automatic", count: report?.counts.automatic ?? 234 },
+    { label: t("capabilityInspector.slices.allowed"), value: "allowed", count: report?.counts.allowed ?? 306 },
+    { label: t("capabilityInspector.slices.requiresApproval"), value: "requires-approval", count: report?.counts.requiresApproval ?? 23 },
   ];
 
   return (
     <main className="inspector-page">
       <header className="marketplace-hero inspector-header">
         <div>
-          <p className="eyebrow">Governance & Security</p>
+          <p className="eyebrow">{t("capabilityInspector.eyebrow")}</p>
           <h1>
-            <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+            <Link to="/settings" className="marketplace-back-button" aria-label={t("capabilityInspector.backAria")} title={t("capabilityInspector.backAria")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
             </Link>
-            <span>Capability Inspector</span>
+            <span>{t("capabilityInspector.title")}</span>
           </h1>
           <p className="hero-copy">
-            Explore and audit the 306 canonical capabilities of NPATI Agent. Verify Effective Capability Resolver
-            boundaries, tool visibility, and risk policies in actual runtime.
+            {t("capabilityInspector.heroCopy")}
           </p>
         </div>
       </header>
@@ -222,23 +233,23 @@ export function CapabilityInspectorPage() {
       <section className="overview-grid inspector-stats-grid">
         <div>
           <strong>{report?.counts.all ?? 306}</strong>
-          <span>total capabilities</span>
-          <small>Verified 1..306 canonical IDs</small>
+          <span>{t("capabilityInspector.stats.totalLabel")}</span>
+          <small>{t("capabilityInspector.stats.totalDesc")}</small>
         </div>
         <div>
           <strong>{report?.counts.agentCallable ?? 42}</strong>
-          <span>agent-callable</span>
-          <small>Exposed to models via Resolver</small>
+          <span>{t("capabilityInspector.stats.agentCallableLabel")}</span>
+          <small>{t("capabilityInspector.stats.agentCallableDesc")}</small>
         </div>
         <div>
           <strong>{report?.counts.runtimeOnly ?? 264}</strong>
-          <span>internal runtime</span>
-          <small>Isolated engine operations</small>
+          <span>{t("capabilityInspector.stats.runtimeOnlyLabel")}</span>
+          <small>{t("capabilityInspector.stats.runtimeOnlyDesc")}</small>
         </div>
         <div>
           <strong>{report?.counts.requiresApproval ?? 23}</strong>
-          <span>requires approval</span>
-          <small>Human-in-the-loop security gate</small>
+          <span>{t("capabilityInspector.stats.requiresApprovalLabel")}</span>
+          <small>{t("capabilityInspector.stats.requiresApprovalDesc")}</small>
         </div>
       </section>
 
@@ -248,19 +259,19 @@ export function CapabilityInspectorPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Filter capabilities by name, ID or domain..."
+            placeholder={t("capabilityInspector.controls.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter capabilities"
+            aria-label={t("capabilityInspector.controls.searchAriaLabel")}
           />
           {search && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearch("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("capabilityInspector.controls.clearSearch")}
+              title={t("capabilityInspector.controls.clearSearch")}
             >
               ×
             </button>
@@ -286,14 +297,14 @@ export function CapabilityInspectorPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            Showing <strong>{startIdx}–{endIdx}</strong> of <strong>{totalItems}</strong> capabilities
-            {search ? ` matching "${search}"` : ""}
+            {t("capabilityInspector.controls.showing", { start: startIdx, end: endIdx, total: totalItems })}
+            {search ? ` ${t("capabilityInspector.controls.matching", { term: search })}` : ""}
           </span>
-          {copiedId && <span className="copy-notice">✓ Copied {copiedId}</span>}
+          {copiedId && <span className="copy-notice">{t("capabilityInspector.controls.copied", { id: copiedId })}</span>}
         </div>
         <div className="status-right">
           <label className="page-size-label">
-            <span>Per page:</span>
+            <span>{t("capabilityInspector.controls.perPage")}</span>
             <select
               value={pageSize}
               onChange={(e) => setPageSize(Number(e.target.value))}
@@ -302,7 +313,7 @@ export function CapabilityInspectorPage() {
               <option value={25}>25</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
-              <option value={-1}>All ({totalItems})</option>
+              <option value={-1}>{t("capabilityInspector.controls.allCount", { total: totalItems })}</option>
             </select>
           </label>
         </div>
@@ -318,71 +329,71 @@ export function CapabilityInspectorPage() {
                   <th
                     style={{ width: "46px", textAlign: "center", cursor: "pointer" }}
                     onClick={() => handleSort("id")}
-                    title="Sort by ID"
+                    title={t("capabilityInspector.table.sortId")}
                   >
-                    ID {sortField === "id" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colId")} {sortField === "id" && (sortAsc ? "▲" : "▼")}
                   </th>
                   <th
                     style={{ minWidth: "140px", cursor: "pointer" }}
                     onClick={() => handleSort("name")}
-                    title="Sort by Name"
+                    title={t("capabilityInspector.table.sortName")}
                   >
-                    Name {sortField === "name" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colName")} {sortField === "name" && (sortAsc ? "▲" : "▼")}
                   </th>
                   <th
                     style={{ width: "170px", cursor: "pointer" }}
                     onClick={() => handleSort("capabilityId")}
-                    title="Sort by Canonical ID"
+                    title={t("capabilityInspector.table.sortCanonicalId")}
                   >
-                    Canonical ID {sortField === "capabilityId" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colCanonicalId")} {sortField === "capabilityId" && (sortAsc ? "▲" : "▼")}
                   </th>
                   <th
                     style={{ width: "85px", cursor: "pointer" }}
                     onClick={() => handleSort("domain")}
-                    title="Sort by Domain"
+                    title={t("capabilityInspector.table.sortDomain")}
                   >
-                    Domain {sortField === "domain" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colDomain")} {sortField === "domain" && (sortAsc ? "▲" : "▼")}
                   </th>
                   <th
                     style={{ width: "85px", cursor: "pointer" }}
                     onClick={() => handleSort("type")}
-                    title="Sort by Type"
+                    title={t("capabilityInspector.table.sortType")}
                   >
-                    Type {sortField === "type" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colType")} {sortField === "type" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th style={{ width: "90px" }}>Callable</th>
+                  <th style={{ width: "90px" }}>{t("capabilityInspector.table.colCallable")}</th>
                   <th
                     style={{ width: "70px", cursor: "pointer" }}
                     onClick={() => handleSort("risk")}
-                    title="Sort by Risk"
+                    title={t("capabilityInspector.table.sortRisk")}
                   >
-                    Risk {sortField === "risk" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colRisk")} {sortField === "risk" && (sortAsc ? "▲" : "▼")}
                   </th>
                   <th
                     style={{ width: "88px", cursor: "pointer" }}
                     onClick={() => handleSort("status")}
-                    title="Sort by Status"
+                    title={t("capabilityInspector.table.sortStatus")}
                   >
-                    Status {sortField === "status" && (sortAsc ? "▲" : "▼")}
+                    {t("capabilityInspector.table.colStatus")} {sortField === "status" && (sortAsc ? "▲" : "▼")}
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {pageItems.map((item) => {
-                  const st = formatStatus(item.status);
+                  const st = formatStatus(item.status, t);
                   return (
                     <tr key={item.id}>
                       <td style={{ textAlign: "center" }}>
                         <span className="inventory-badge">#{item.id}</span>
                       </td>
                       <td>
-                        <strong className="item-name">{getCapabilityDisplayName(item)}</strong>
+                        <strong className="item-name">{getCapabilityDisplayName(item, t)}</strong>
                       </td>
                       <td>
                         <code
                           className="canonical-code"
                           onClick={() => copyCanonicalId(item.capabilityId)}
-                          title="Click to copy canonical ID"
+                          title={t("capabilityInspector.table.copyTooltip")}
                         >
                           {item.capabilityId}
                         </code>
@@ -391,17 +402,17 @@ export function CapabilityInspectorPage() {
                         <span className={`domain-badge domain-${item.domain}`}>{item.domain}</span>
                       </td>
                       <td>
-                        <span className={`type-badge ${item.type}`}>{formatType(item.type)}</span>
+                        <span className={`type-badge ${item.type}`}>{formatType(item.type, t)}</span>
                       </td>
                       <td>
                         <span className={`callable-badge ${item.agentCallable ? "yes" : "no"}`}>
                           <span className="status-dot-sm" />
-                          {item.agentCallable ? "Callable" : "Internal"}
+                          {item.agentCallable ? t("capabilityInspector.callable.callable") : t("capabilityInspector.callable.internal")}
                         </span>
                       </td>
                       <td>
                         <span className={`risk-badge ${item.risk}`}>
-                          {item.risk.charAt(0).toUpperCase() + item.risk.slice(1)}
+                          {formatRisk(item.risk, t)}
                         </span>
                       </td>
                       <td>
@@ -416,7 +427,7 @@ export function CapabilityInspectorPage() {
                 {pageItems.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
-                      No capabilities match the selected filter.
+                      {t("capabilityInspector.table.empty")}
                     </td>
                   </tr>
                 )}
@@ -432,7 +443,7 @@ export function CapabilityInspectorPage() {
                 disabled={validPage <= 1}
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               >
-                ← Previous
+                {t("capabilityInspector.table.prev")}
               </button>
               <div className="pagination-pages">
                 {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
@@ -462,7 +473,7 @@ export function CapabilityInspectorPage() {
                 disabled={validPage >= totalPages}
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               >
-                Next →
+                {t("capabilityInspector.table.next")}
               </button>
             </div>
           )}
