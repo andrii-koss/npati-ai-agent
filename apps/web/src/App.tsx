@@ -1205,6 +1205,7 @@ import { ConnectionsPage } from "./ConnectionsPage";
 import { ContentPage } from "./ContentPage";
 import { EmailSettingsPage } from "./EmailSettingsPage";
 import { EmailInboxPage } from "./EmailInboxPage";
+import { IconsTestPage } from "./IconsTestPage";
 
 function SettingsPage() {
   const { t } = useTranslation();
@@ -1230,6 +1231,38 @@ function SettingsPage() {
         <h1>{t("settings.title")}</h1>
         <p>{t("settings.description")}</p>
       </div>
+      {/* Test Page Banner for Icons Selection */}
+      <div style={{
+        background: "#ffffff",
+        border: "1px solid #e5e5e5",
+        borderRadius: 14,
+        padding: "14px 20px",
+        marginBottom: 24,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 12,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.03)"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 24 }}>🧪</span>
+          <div>
+            <strong style={{ fontSize: 14, color: "#111", display: "block" }}>Тестова сторінка: вибір білих іконок на чорному фоні</strong>
+            <p style={{ margin: "2px 0 0 0", fontSize: 12.5, color: "#666" }}>
+              Оберіть стиль іконок для розділів замість 2 літер. Після вибору тестову сторінку буде видалено.
+            </p>
+          </div>
+        </div>
+        <Link
+          to="/settings/icons-test"
+          className="button-primary automations-action-primary"
+          style={{ padding: "8px 18px", textDecoration: "none", fontSize: 13, fontWeight: 650, borderRadius: 10 }}
+        >
+          Відкрити тестову сторінку &rarr;
+        </Link>
+      </div>
+
       <div className="settings-card-grid">
         {cards.map((card) => (
           <Link className="settings-ai-card" to={card.to} key={card.to}>
@@ -1291,6 +1324,8 @@ export function App() {
             <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/icons-test" element={<Workspace><IconsTestPage /></Workspace>} />
+            <Route path="/test-icons" element={<Workspace><IconsTestPage /></Workspace>} />
             <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
             <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
             <Route path="*" element={<Navigate to="/" replace />} />
