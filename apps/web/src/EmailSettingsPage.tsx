@@ -108,7 +108,8 @@ export function EmailSettingsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "contacts" | "templates" | "analytics">("accounts");
+  const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts">("accounts");
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -168,23 +169,25 @@ export function EmailSettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Load accounts and agents when company changes
+  // Load accounts, agents and analytics when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
     setLoading(true);
     Promise.all([
       api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
       api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
+      api<{ analytics: EmailAnalytics }>(`/companies/${selectedCompanyId}/email-inbox/analytics`).catch(() => ({ analytics: null })),
     ])
-      .then(([accRes, agentRes]) => {
+      .then(([accRes, agentRes, analRes]) => {
         setAccounts(accRes.accounts);
         setAgents(agentRes.agents);
+        if (analRes.analytics) setAnalytics(analRes.analytics);
       })
       .catch((e) => setNotice(e.message))
       .finally(() => setLoading(false));
   }, [selectedCompanyId]);
 
-  // Load tabs data on demand
+  // Load rules/templates/contacts on tab switch
   useEffect(() => {
     if (!selectedCompanyId) return;
     if (activeTab === "rules") {
@@ -195,9 +198,9 @@ export function EmailSettingsPage() {
       api<{ templates: EmailTemplate[] }>(`/companies/${selectedCompanyId}/email-inbox/templates`)
         .then((r) => setTemplates(r.templates))
         .catch(() => undefined);
-    } else if (activeTab === "analytics") {
-      api<{ analytics: EmailAnalytics }>(`/companies/${selectedCompanyId}/email-inbox/analytics`)
-        .then((r) => setAnalytics(r.analytics))
+    } else if (activeTab === "contacts") {
+      api<{ contacts: ContactItem[] }>(`/companies/${selectedCompanyId}/email-inbox/contacts`)
+        .then((r) => setContacts(r.contacts))
         .catch(() => undefined);
     }
   }, [selectedCompanyId, activeTab]);
@@ -353,219 +356,336 @@ export function EmailSettingsPage() {
     }
   }
 
+  const filteredAccounts = useMemo(() => {
+    if (!searchQuery.trim()) return accounts;
+    const q = searchQuery.toLowerCase();
+    return accounts.filter((acc) => {
+      const name = (acc.displayName || "").toLowerCase();
+      const addr = acc.emailAddress.toLowerCase();
+      const agent = agents.find((a) => a.id === acc.agentId)?.name.toLowerCase() || "";
+      return name.includes(q) || addr.includes(q) || agent.includes(q) || acc.mode.includes(q);
+    });
+  }, [accounts, searchQuery, agents]);
+
   return (
-    <div className="automations-page-container">
-      {/* Top Header */}
-      <div className="page-heading">
-        <p className="eyebrow">Communications & Automation</p>
-        <div className="automations-header-row">
+    <main className="automations-container">
+      {/* Hero Header matching /settings/automations and /settings/activity */}
+      <header className="inspector-header automations-header">
+        <div className="automations-header-top">
           <div>
-            <h1>Email / AI Inbox Settings</h1>
-            <p>Connect corporate email addresses, verify DNS, and configure AI agent inbox automation.</p>
+            <p className="eyebrow">Settings · Email & AI Inbox</p>
+            <h1>
+              <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+              </Link>
+              <span>Email Accounts & AI Automation</span>
+            </h1>
+            <p className="hero-copy">
+              Connect corporate email addresses, verify DNS records (MX, SPF, DKIM, DMARC), and configure autonomous AI inbox agents.
+            </p>
           </div>
           <div className="automations-header-actions">
-            <Link to="/inbox" className="button-secondary">
-              Open AI Inbox &rarr;
+            {companies.length > 1 && (
+              <select
+                aria-label="Select company"
+                value={selectedCompanyId}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setSearchParams({ company: e.target.value }, { replace: true });
+                }}
+                className="page-size-select"
+              >
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link
+              to="/inbox"
+              className="button-secondary automations-action-primary"
+              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+            >
+              Open AI Inbox →
             </Link>
-            <button type="button" className="button-primary" onClick={openCreateDrawer}>
+            <button
+              type="button"
+              className="button-primary automations-action-primary"
+              onClick={openCreateDrawer}
+            >
               + Add Email Address
             </button>
           </div>
         </div>
+      </header>
+
+      {/* 4 Stat Overview Cards matching /settings/activity and /settings/capabilities */}
+      <section className="overview-grid inspector-stats-grid automations-stats-grid">
+        <div>
+          <strong>{analytics?.receivedEmails ?? 0}</strong>
+          <span>Total Received</span>
+          <small>Inbound emails processed</small>
+        </div>
+        <div>
+          <strong>{analytics?.sentEmails ?? 0}</strong>
+          <span>Total Sent</span>
+          <small>Dispatched via SMTP & AI</small>
+        </div>
+        <div>
+          <strong>{Math.round((analytics?.automationRate ?? 0) * 100)}%</strong>
+          <span>AI Automation Rate</span>
+          <small>Autonomously handled</small>
+        </div>
+        <div>
+          <strong>{analytics?.draftedByAi ?? 0}</strong>
+          <span>Drafts Prepared</span>
+          <small>Awaiting human review</small>
+        </div>
+      </section>
+
+      {/* Search & Tabs Controls Bar matching /settings/automations */}
+      <div className="inspector-controls automations-controls">
+        <div className="inspector-search-box">
+          <span className="search-icon" aria-hidden="true">⌕</span>
+          <input
+            type="text"
+            role="searchbox"
+            placeholder="Filter accounts by email address, display name, agent..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="inspector-search-input"
+            aria-label="Filter email accounts"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        <div className="inspector-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "accounts"}
+            className={`inspector-tab ${activeTab === "accounts" ? "active" : ""}`}
+            onClick={() => setActiveTab("accounts")}
+          >
+            <span>Email Accounts</span>
+            <small className="tab-count">{accounts.length}</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "rules"}
+            className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
+            onClick={() => setActiveTab("rules")}
+          >
+            <span>Routing Rules</span>
+            <small className="tab-count">{rules.length}</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "templates"}
+            className={`inspector-tab ${activeTab === "templates" ? "active" : ""}`}
+            onClick={() => setActiveTab("templates")}
+          >
+            <span>Response Templates</span>
+            <small className="tab-count">{templates.length}</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "contacts"}
+            className={`inspector-tab ${activeTab === "contacts" ? "active" : ""}`}
+            onClick={() => setActiveTab("contacts")}
+          >
+            <span>Contacts & VIP</span>
+            <small className="tab-count">{contacts.length}</small>
+          </button>
+        </div>
       </div>
 
       {notice && (
-        <div className="workspace-notice error" style={{ margin: "16px 0" }}>
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>✕</button>
+        <div className="workspace-notice" style={{ marginBottom: 16 }}>
+          {notice}
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            style={{ float: "right", background: "none", border: "none", cursor: "pointer", fontWeight: "bold" }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Filter / Tabs Bar */}
-      <div className="automations-filter-bar">
-        <div className="automations-filter-group">
-          {companies.length > 1 && (
-            <select
-              className="automations-status-filter"
-              value={selectedCompanyId}
-              onChange={(e) => {
-                setSelectedCompanyId(e.target.value);
-                setSearchParams({ company: e.target.value });
-              }}
-            >
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          )}
-
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              type="button"
-              className={`automation-action-btn ${activeTab === "accounts" ? "run-btn" : ""}`}
-              onClick={() => setActiveTab("accounts")}
-            >
-              Email Accounts ({accounts.length})
-            </button>
-            <button
-              type="button"
-              className={`automation-action-btn ${activeTab === "rules" ? "run-btn" : ""}`}
-              onClick={() => setActiveTab("rules")}
-            >
-              Email Rules
-            </button>
-            <button
-              type="button"
-              className={`automation-action-btn ${activeTab === "templates" ? "run-btn" : ""}`}
-              onClick={() => setActiveTab("templates")}
-            >
-              Templates
-            </button>
-            <button
-              type="button"
-              className={`automation-action-btn ${activeTab === "analytics" ? "run-btn" : ""}`}
-              onClick={() => setActiveTab("analytics")}
-            >
-              Analytics
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* ACCOUNTS TAB */}
       {activeTab === "accounts" && (
-        <div className="automations-table-container">
-          {accounts.length === 0 && !loading ? (
-            <div className="empty-state" style={{ padding: "48px 24px", textAlign: "center" }}>
+        <>
+          <div className="inspector-table-status">
+            <div className="status-left">
+              <span>
+                Showing <strong>{filteredAccounts.length}</strong> of <strong>{accounts.length}</strong> email accounts
+              </span>
+            </div>
+          </div>
+
+          {filteredAccounts.length === 0 && !loading ? (
+            <div className="automations-empty-card">
+              <div className="automations-empty-icon">✉️</div>
               <h3>No email addresses connected yet</h3>
-              <p style={{ color: "#666", marginBottom: "16px" }}>
-                Add your company email address (e.g. support@company.com) to automate responses with AI agents.
-              </p>
-              <button type="button" className="button-primary" onClick={openCreateDrawer}>
+              <p>Connect your domain email address (e.g. support@company.com) to allow AI agents to handle corporate email.</p>
+              <button
+                type="button"
+                className="button-primary automations-action-primary"
+                onClick={openCreateDrawer}
+              >
                 + Add Email Address
               </button>
             </div>
           ) : (
-            <table className="automations-table">
-              <thead>
-                <tr>
-                  <th>Email Account</th>
-                  <th>Assigned Agent</th>
-                  <th>Operational Mode</th>
-                  <th>Connection & DNS</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.map((acc) => {
-                  const assigned = agents.find((a) => a.id === acc.agentId);
-                  const isTesting = testingId === acc.id;
-                  const testFeedback = testResult?.id === acc.id ? testResult : null;
+            <div className="automations-table-container">
+              <table className="automations-table">
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: "220px" }}>Email Account</th>
+                    <th style={{ minWidth: "160px" }}>Assigned Agent</th>
+                    <th style={{ minWidth: "150px" }}>Operational Mode</th>
+                    <th style={{ minWidth: "180px" }}>Connection & DNS</th>
+                    <th style={{ width: "240px", textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAccounts.map((acc) => {
+                    const assigned = agents.find((a) => a.id === acc.agentId);
+                    const isTesting = testingId === acc.id;
+                    const testFeedback = testResult?.id === acc.id ? testResult : null;
 
-                  return (
-                    <tr key={acc.id}>
-                      <td>
-                        <strong>{acc.displayName || acc.emailAddress}</strong>
-                        <div style={{ fontSize: "13px", color: "#666" }}>{acc.emailAddress}</div>
-                        {acc.testMode && (
-                          <span className="automation-cron-pill" style={{ background: "#fef3c7", color: "#b45309", marginTop: "4px" }}>
-                            Test Mode Active
+                    return (
+                      <tr key={acc.id}>
+                        <td>
+                          <div className="automation-title-cell">
+                            <strong>{acc.displayName || acc.emailAddress}</strong>
+                            <p>{acc.emailAddress}</p>
+                            {acc.testMode && (
+                              <span className="automation-cron-pill" style={{ background: "#fef3c7", color: "#b45309", borderColor: "#fde68a" }}>
+                                Sandbox / Test Mode Active
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span className="automation-agent-badge">
+                            <span>🤖</span>
+                            <span>{assigned ? assigned.name : "Unassigned"}</span>
                           </span>
-                        )}
-                      </td>
-                      <td>
-                        <span className="automation-agent-badge">
-                          <span>🤖</span>
-                          <span>{assigned ? assigned.name : "Unassigned"}</span>
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`automation-status-badge ${
-                            acc.mode === "autopilot" ? "active" : acc.mode === "approval" ? "paused" : ""
-                          }`}
-                          style={{ textTransform: "capitalize" }}
-                        >
-                          {acc.mode} Mode
-                        </span>
-                        <div style={{ fontSize: "11px", color: "#888", marginTop: "3px" }}>
-                          Threshold: {Math.round(acc.confidenceThreshold * 100)}%
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                          <span
-                            className={`automation-status-badge ${acc.status === "connected" ? "active" : "paused"}`}
-                            style={{ width: "fit-content" }}
-                          >
-                            {acc.status === "connected" ? "Connected" : acc.status.replace("_", " ")}
-                          </span>
-                          {testFeedback && (
-                            <div style={{ fontSize: "12px", color: testFeedback.success ? "#16a34a" : "#dc2626" }}>
-                              {testFeedback.message}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="automation-actions-cell" style={{ justifyContent: "flex-end" }}>
-                          <button
-                            type="button"
-                            className="automation-action-btn"
-                            disabled={isTesting}
-                            onClick={() => runConnectionTest(acc)}
-                          >
-                            {isTesting ? "Testing..." : "Test Connection"}
-                          </button>
-                          <button
-                            type="button"
-                            className="automation-action-btn"
-                            onClick={() => openDnsCheck(acc)}
-                          >
-                            Check DNS
-                          </button>
-                          <button
-                            type="button"
-                            className="automation-action-btn"
-                            onClick={() => openEditDrawer(acc)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="automation-action-btn danger"
-                            onClick={() => deleteAccount(acc.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            <span
+                              className={`automation-status-btn ${
+                                acc.mode === "autopilot" ? "active" : acc.mode === "approval" ? "paused" : ""
+                              }`}
+                              style={{ width: "fit-content", textTransform: "capitalize", cursor: "default" }}
+                            >
+                              <span className="automation-status-dot" />
+                              {acc.mode} Mode
+                            </span>
+                            <span className="automation-next-run">
+                              Threshold: {Math.round(acc.confidenceThreshold * 100)}%
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <span
+                              className={`automation-status-btn ${acc.status === "connected" ? "active" : "paused"}`}
+                              style={{ width: "fit-content", cursor: "default" }}
+                            >
+                              <span className="automation-status-dot" />
+                              {acc.status === "connected" ? "Connected" : acc.status.replace("_", " ")}
+                            </span>
+                            {testFeedback && (
+                              <small style={{ fontSize: "11px", color: testFeedback.success ? "#15803d" : "#dc2626" }}>
+                                {testFeedback.message}
+                              </small>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="automation-actions-cell">
+                            <button
+                              type="button"
+                              className="automation-action-btn"
+                              disabled={isTesting}
+                              onClick={() => runConnectionTest(acc)}
+                              title="Test IMAP & SMTP socket connection"
+                            >
+                              {isTesting ? "Testing..." : "Test Connection"}
+                            </button>
+                            <button
+                              type="button"
+                              className="automation-action-btn"
+                              onClick={() => openDnsCheck(acc)}
+                              title="Inspect MX, SPF, DKIM, and DMARC records"
+                            >
+                              Check DNS
+                            </button>
+                            <button
+                              type="button"
+                              className="automation-action-btn"
+                              onClick={() => openEditDrawer(acc)}
+                              title="Edit account credentials and mode"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="automation-action-btn danger"
+                              onClick={() => deleteAccount(acc.id)}
+                              title="Remove email account"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {/* RULES TAB */}
       {activeTab === "rules" && (
         <div className="automations-table-container">
-          <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eee" }}>
+          <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
             <div>
-              <h3 style={{ margin: 0 }}>Email Routing Rules</h3>
-              <small style={{ color: "#666" }}>Configure custom routing, priority overrides, and approval conditions.</small>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Email Routing Rules</h3>
+              <small style={{ color: "#64748b" }}>Configure automated routing, priority overrides, and VIP filtering rules.</small>
             </div>
             <button
               type="button"
-              className="button-primary"
+              className="button-primary automations-action-primary"
               onClick={async () => {
                 const name = prompt("Rule name (e.g. Invoices to Billing Agent):");
                 if (!name) return;
                 const r = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules`, {
                   method: "POST",
-                  body: JSON.stringify({ name, conditions: { subjectKeywords: ["invoice", "bill"] }, actions: { setPriority: "high" } }),
+                  body: JSON.stringify({ name, conditions: { subjectKeywords: ["invoice", "payment", "billing"] }, actions: { setPriority: "high" } }),
                 });
                 setRules((prev) => [...prev, r.rule]);
               }}
@@ -576,40 +696,50 @@ export function EmailSettingsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th>Rule Name</th>
+                <th style={{ width: "240px" }}>Rule Name</th>
                 <th>Conditions</th>
                 <th>Actions</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
+                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {rules.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: "center", padding: "32px", color: "#666" }}>
-                    No custom rules defined yet.
+                  <td colSpan={4} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    No custom rules configured yet. Default company routing rules apply.
                   </td>
                 </tr>
               ) : (
                 rules.map((rule) => (
                   <tr key={rule.id}>
-                    <td><strong>{rule.name}</strong></td>
                     <td>
-                      <code>{JSON.stringify(rule.conditions)}</code>
+                      <div className="automation-title-cell">
+                        <strong>{rule.name}</strong>
+                      </div>
                     </td>
                     <td>
-                      <code>{JSON.stringify(rule.actions)}</code>
+                      <span className="automation-cron-pill">
+                        {JSON.stringify(rule.conditions)}
+                      </span>
                     </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="automation-action-btn danger"
-                        onClick={async () => {
-                          await api(`/companies/${selectedCompanyId}/email-inbox/rules/${rule.id}`, { method: "DELETE" });
-                          setRules((prev) => prev.filter((r) => r.id !== rule.id));
-                        }}
-                      >
-                        Delete
-                      </button>
+                    <td>
+                      <span className="automation-agent-badge">
+                        {JSON.stringify(rule.actions)}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="automation-actions-cell">
+                        <button
+                          type="button"
+                          className="automation-action-btn danger"
+                          onClick={async () => {
+                            await api(`/companies/${selectedCompanyId}/email-inbox/rules/${rule.id}`, { method: "DELETE" });
+                            setRules((prev) => prev.filter((r) => r.id !== rule.id));
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -622,16 +752,16 @@ export function EmailSettingsPage() {
       {/* TEMPLATES TAB */}
       {activeTab === "templates" && (
         <div className="automations-table-container">
-          <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eee" }}>
+          <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
             <div>
-              <h3 style={{ margin: 0 }}>Response Templates & Signatures</h3>
-              <small style={{ color: "#666" }}>Canned responses and brand greetings for support agents.</small>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Response Templates & Canned Replies</h3>
+              <small style={{ color: "#64748b" }}>Standard corporate templates with placeholder support ({`{{customer_name}}`}, {`{{company_name}}`}).</small>
             </div>
             <button
               type="button"
-              className="button-primary"
+              className="button-primary automations-action-primary"
               onClick={async () => {
-                const title = prompt("Template title (e.g. Standard Refund Response):");
+                const title = prompt("Template title (e.g. Greeting & Acknowledgment):");
                 if (!title) return;
                 const body = prompt("Template body text:");
                 if (!body) return;
@@ -648,38 +778,48 @@ export function EmailSettingsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Category</th>
+                <th style={{ width: "240px" }}>Title</th>
+                <th style={{ width: "160px" }}>Category</th>
                 <th>Body Preview</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
+                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {templates.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: "center", padding: "32px", color: "#666" }}>
-                    No response templates saved.
+                  <td colSpan={4} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    No response templates saved yet.
                   </td>
                 </tr>
               ) : (
                 templates.map((t) => (
                   <tr key={t.id}>
-                    <td><strong>{t.title}</strong></td>
-                    <td><span className="automation-cron-pill">{t.category}</span></td>
-                    <td style={{ maxWidth: "350px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {t.bodyTemplate}
+                    <td>
+                      <div className="automation-title-cell">
+                        <strong>{t.title}</strong>
+                      </div>
                     </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="automation-action-btn danger"
-                        onClick={async () => {
-                          await api(`/companies/${selectedCompanyId}/email-inbox/templates/${t.id}`, { method: "DELETE" });
-                          setTemplates((prev) => prev.filter((item) => item.id !== t.id));
-                        }}
-                      >
-                        Delete
-                      </button>
+                    <td>
+                      <span className="automation-cron-pill">{t.category}</span>
+                    </td>
+                    <td>
+                      <div className="automation-prompt-preview" style={{ maxWidth: "500px" }}>
+                        {t.bodyTemplate}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="automation-actions-cell">
+                        <button
+                          type="button"
+                          className="automation-action-btn danger"
+                          onClick={async () => {
+                            await api(`/companies/${selectedCompanyId}/email-inbox/templates/${t.id}`, { method: "DELETE" });
+                            setTemplates((prev) => prev.filter((item) => item.id !== t.id));
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -689,157 +829,306 @@ export function EmailSettingsPage() {
         </div>
       )}
 
-      {/* ANALYTICS TAB */}
-      {activeTab === "analytics" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginTop: "16px" }}>
-          <div className="action-card" style={{ padding: "20px" }}>
-            <span style={{ fontSize: "13px", color: "#666" }}>Total Received</span>
-            <h2 style={{ margin: "8px 0" }}>{analytics?.receivedEmails ?? 0}</h2>
+      {/* CONTACTS & VIP TAB */}
+      {activeTab === "contacts" && (
+        <div className="automations-table-container">
+          <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Client Contacts & VIP Directory</h3>
+              <small style={{ color: "#64748b" }}>Manage VIP prioritization, delivery bounce tracking, and blacklisted senders.</small>
+            </div>
+            <button
+              type="button"
+              className="button-primary automations-action-primary"
+              onClick={async () => {
+                const email = prompt("Contact email (e.g. partner@corp.com):");
+                if (!email) return;
+                const name = prompt("Contact name:") || undefined;
+                const res = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts`, {
+                  method: "POST",
+                  body: JSON.stringify({ email, name, isVip: true }),
+                });
+                setContacts((prev) => [...prev.filter((c) => c.email !== email), res.contact]);
+              }}
+            >
+              + Add VIP Contact
+            </button>
           </div>
-          <div className="action-card" style={{ padding: "20px" }}>
-            <span style={{ fontSize: "13px", color: "#666" }}>Total Sent</span>
-            <h2 style={{ margin: "8px 0" }}>{analytics?.sentEmails ?? 0}</h2>
-          </div>
-          <div className="action-card" style={{ padding: "20px" }}>
-            <span style={{ fontSize: "13px", color: "#666" }}>AI Automation Rate</span>
-            <h2 style={{ margin: "8px 0", color: "#16a34a" }}>{analytics?.automationRate ?? 0}%</h2>
-          </div>
-          <div className="action-card" style={{ padding: "20px" }}>
-            <span style={{ fontSize: "13px", color: "#666" }}>Drafts Prepared</span>
-            <h2 style={{ margin: "8px 0" }}>{analytics?.draftedByAi ?? 0}</h2>
-          </div>
+          <table className="automations-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: "220px" }}>Contact</th>
+                <th style={{ minWidth: "140px" }}>VIP Status</th>
+                <th style={{ minWidth: "140px" }}>Blacklisted</th>
+                <th>Notes</th>
+                <th style={{ width: "120px", textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    No contacts recorded yet. Contacts will be populated automatically as inbound emails arrive.
+                  </td>
+                </tr>
+              ) : (
+                contacts.map((contact) => (
+                  <tr key={contact.id}>
+                    <td>
+                      <div className="automation-title-cell">
+                        <strong>{contact.name || contact.email}</strong>
+                        <p>{contact.email}</p>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`automation-status-btn ${contact.isVip ? "active" : "paused"}`} style={{ cursor: "default" }}>
+                        <span className="automation-status-dot" />
+                        {contact.isVip ? "VIP Sender" : "Standard"}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`automation-status-btn ${contact.isBlacklisted ? "active" : "paused"}`} style={{ cursor: "default" }}>
+                        <span className="automation-status-dot" />
+                        {contact.isBlacklisted ? "Blacklisted" : "Allowed"}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: "12px", color: "#64748b" }}>{contact.notes || "—"}</span>
+                    </td>
+                    <td>
+                      <div className="automation-actions-cell">
+                        <button
+                          type="button"
+                          className="automation-action-btn"
+                          onClick={async () => {
+                            const updated = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(contact.email)}`, {
+                              method: "PATCH",
+                              body: JSON.stringify({ isVip: !contact.isVip }),
+                            });
+                            setContacts((prev) => prev.map((c) => (c.id === contact.id ? updated.contact : c)));
+                          }}
+                        >
+                          {contact.isVip ? "Un-VIP" : "Make VIP"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* ADD / EDIT ACCOUNT DRAWER */}
       {drawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDrawerOpen(false)}>
-          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(620px, 94vw)" }}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(680px, 95vw)" }}>
             <header>
               <div>
                 <span>Email Accounts</span>
-                <h2>{editingId ? "Edit Email Account" : "Connect Email Address"}</h2>
+                <h2>{editingId ? "Edit Email Account" : "Add Corporate Email Account"}</h2>
               </div>
-              <button type="button" className="automations-drawer-close" onClick={() => setDrawerOpen(false)}>✕</button>
+              <button
+                type="button"
+                className="automations-drawer-close"
+                aria-label="Close"
+                onClick={() => setDrawerOpen(false)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
             </header>
-            <form onSubmit={saveAccount} style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+            <form onSubmit={saveAccount}>
               <section>
-                <h3>Account Information</h3>
+                <h3>Account & Agent Assignment</h3>
                 <label>
-                  <span>Corporate Email Address *</span>
+                  <span>Email Address</span>
                   <input
-                    required
                     type="email"
-                    placeholder="e.g. support@company.com"
+                    required
+                    placeholder="support@company.com"
                     value={emailAddress}
                     onChange={(e) => setEmailAddress(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Display Name</span>
+                  <span>Display Name / Sender Label</span>
                   <input
-                    placeholder="e.g. Customer Support"
+                    placeholder="Customer Support Team"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Assigned AI Agent</span>
+                  <span>Assigned Company Agent</span>
                   <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-                    <option value="">No Agent (Human Only)</option>
+                    <option value="">Unassigned (Manual Routing)</option>
                     {agents.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.role})
+                      </option>
                     ))}
                   </select>
                 </label>
               </section>
 
               <section>
-                <h3>AI Operational Mode (Section 5)</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-                  <button
-                    type="button"
-                    className={`automation-action-btn ${mode === "manual" ? "run-btn" : ""}`}
-                    onClick={() => setMode("manual")}
-                  >
-                    Manual
-                  </button>
-                  <button
-                    type="button"
-                    className={`automation-action-btn ${mode === "approval" ? "run-btn" : ""}`}
-                    onClick={() => setMode("approval")}
-                  >
-                    Approval
-                  </button>
-                  <button
-                    type="button"
-                    className={`automation-action-btn ${mode === "autopilot" ? "run-btn" : ""}`}
-                    onClick={() => setMode("autopilot")}
-                  >
-                    Autopilot
-                  </button>
-                </div>
-                <p style={{ fontSize: "12px", color: "#666", marginTop: "6px" }}>
-                  {mode === "manual" && "AI reads & classifies messages, but does not prepare or send replies."}
-                  {mode === "approval" && "AI generates response draft; human reviews, edits, and approves before sending."}
-                  {mode === "autopilot" && "AI autonomously sends response when confidence meets the threshold."}
-                </p>
-
-                <label style={{ marginTop: "12px" }}>
+                <h3>AI Operational Mode</h3>
+                <label>
+                  <span>Automation Level</span>
+                  <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
+                    <option value="approval">Approval Mode — AI drafts responses for human review</option>
+                    <option value="autopilot">Autopilot Mode — AI sends responses autonomously when confident</option>
+                    <option value="manual">Manual Mode — AI does not generate responses</option>
+                  </select>
+                </label>
+                <label>
                   <span>Confidence Threshold ({Math.round(confidenceThreshold * 100)}%)</span>
                   <input
                     type="range"
                     min="0.5"
-                    max="0.99"
+                    max="0.95"
                     step="0.05"
                     value={confidenceThreshold}
-                    onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
+                    onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
                   />
+                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>
+                    In Autopilot mode, responses with confidence below this threshold fall back to Approval mode.
+                  </small>
                 </label>
-
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "12px", background: "#fef3c7", padding: "10px", borderRadius: "8px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 8 }}>
                   <input
                     type="checkbox"
                     checked={testMode}
                     onChange={(e) => setTestMode(e.target.checked)}
                   />
-                  <span>
-                    <strong>Test Mode (Sandbox)</strong>
-                    <div style={{ fontSize: "12px", color: "#78350f" }}>
-                      AI simulates classifications, drafts, and responses without sending external emails.
-                    </div>
-                  </span>
+                  <span>Enable Sandbox Test Mode (captures emails without live SMTP dispatch)</span>
                 </label>
               </section>
 
               <section>
-                <h3>IMAP & SMTP Settings</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
+                <h3>IMAP Connection (Inbound Mail)</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
-                    <span>IMAP Server</span>
-                    <input placeholder="imap.company.com" value={imapHost} onChange={(e) => setImapHost(e.target.value)} />
+                    <span>IMAP Host</span>
+                    <input
+                      placeholder="imap.company.com"
+                      value={imapHost}
+                      onChange={(e) => setImapHost(e.target.value)}
+                    />
                   </label>
                   <label>
                     <span>Port</span>
-                    <input type="number" value={imapPort} onChange={(e) => setImapPort(Number(e.target.value))} />
+                    <input
+                      type="number"
+                      placeholder="993"
+                      value={imapPort}
+                      onChange={(e) => setImapPort(parseInt(e.target.value, 10))}
+                    />
                   </label>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
-                    <span>SMTP Server</span>
-                    <input placeholder="smtp.company.com" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                    <span>IMAP Username</span>
+                    <input
+                      placeholder="support@company.com"
+                      value={imapUser}
+                      onChange={(e) => setImapUser(e.target.value)}
+                    />
                   </label>
                   <label>
-                    <span>Port</span>
-                    <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(Number(e.target.value))} />
+                    <span>IMAP Password</span>
+                    <input
+                      type="password"
+                      placeholder="••••••••••••"
+                      value={imapPass}
+                      onChange={(e) => setImapPass(e.target.value)}
+                    />
                   </label>
                 </div>
               </section>
 
-              <footer style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
-                <button type="button" className="button-secondary" onClick={() => setDrawerOpen(false)}>Cancel</button>
-                <button type="submit" className="button-primary" disabled={saving}>
-                  {saving ? "Saving..." : editingId ? "Update Account" : "Connect Account"}
+              <section>
+                <h3>SMTP Connection (Outbound Mail)</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+                  <label>
+                    <span>SMTP Host</span>
+                    <input
+                      placeholder="smtp.company.com"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Port</span>
+                    <input
+                      type="number"
+                      placeholder="465"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(parseInt(e.target.value, 10))}
+                    />
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label>
+                    <span>SMTP Username</span>
+                    <input
+                      placeholder="support@company.com"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>SMTP Password</span>
+                    <input
+                      type="password"
+                      placeholder="••••••••••••"
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section>
+                <h3>Signatures & Greeting</h3>
+                <label>
+                  <span>Default Greeting</span>
+                  <input
+                    placeholder="Hello,"
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Closing Signature</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Best regards,&#10;Support Team"
+                    value={signature}
+                    onChange={(e) => setSignature(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <footer style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setDrawerOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button-primary automations-action-primary"
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : editingId ? "Save Changes" : "Connect Account"}
                 </button>
               </footer>
             </form>
@@ -847,70 +1136,104 @@ export function EmailSettingsPage() {
         </div>
       )}
 
-      {/* DNS CHECK DRAWER */}
-      {dnsDrawerOpen && dnsAccount && (
+      {/* DNS AUDIT DRAWER */}
+      {dnsDrawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDnsDrawerOpen(false)}>
-          <aside className="company-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(680px, 94vw)" }}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(640px, 95vw)" }}>
             <header>
               <div>
                 <span>DNS Verification</span>
-                <h2>{dnsAccount.emailAddress.split("@")[1]}</h2>
+                <h2>{dnsAccount?.emailAddress.split("@")[1] || "Domain"} Audit</h2>
               </div>
-              <button type="button" className="automations-drawer-close" onClick={() => setDnsDrawerOpen(false)}>✕</button>
+              <button
+                type="button"
+                className="automations-drawer-close"
+                aria-label="Close"
+                onClick={() => setDnsDrawerOpen(false)}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
             </header>
-            <div style={{ padding: "20px" }}>
+
+            <div style={{ padding: "20px 24px" }}>
               {dnsChecking ? (
-                <div style={{ padding: "40px", textAlign: "center" }}>Checking DNS records (MX, SPF, DKIM, DMARC)...</div>
+                <div style={{ textAlign: "center", padding: "40px" }}>
+                  <p>Querying DNS resolvers for MX, SPF, DKIM, and DMARC records...</p>
+                </div>
               ) : dnsResult ? (
-                <div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div
-                    className={`automation-status-badge ${dnsResult.verified ? "active" : "paused"}`}
-                    style={{ marginBottom: "16px", padding: "8px 14px", fontSize: "14px" }}
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: "10px",
+                      background: dnsResult.verified ? "#ecfdf5" : "#fffbeb",
+                      border: `1px solid ${dnsResult.verified ? "#a7f3d0" : "#fde68a"}`,
+                      color: dnsResult.verified ? "#065f46" : "#92400e",
+                      fontSize: "13px",
+                      lineHeight: 1.5,
+                    }}
                   >
-                    {dnsResult.summary}
+                    <strong>{dnsResult.verified ? "Domain Fully Verified ✓" : "Configuration Action Recommended ⚠️"}</strong>
+                    <div>{dnsResult.summary}</div>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {dnsResult.records.map((record) => (
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {dnsResult.records.map((rec) => (
                       <div
-                        key={record.recordType}
+                        key={rec.recordType}
                         style={{
-                          border: "1px solid #e5e7eb",
-                          borderRadius: "8px",
-                          padding: "14px",
-                          background: record.valid ? "#f0fdf4" : "#fff1f2",
+                          padding: "14px 16px",
+                          borderRadius: "10px",
+                          border: "1px solid #e2e8f0",
+                          background: "#ffffff",
                         }}
                       >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <strong>{record.recordType} Record ({record.name})</strong>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, fontSize: "14px" }}>{rec.recordType} Record ({rec.name})</span>
                           <span
-                            style={{
-                              fontWeight: 600,
-                              fontSize: "12px",
-                              color: record.valid ? "#16a34a" : "#dc2626",
-                            }}
+                            className={`automation-status-btn ${rec.valid ? "active" : "paused"}`}
+                            style={{ cursor: "default" }}
                           >
-                            {record.valid ? "✓ Valid" : "✕ Attention Required"}
+                            <span className="automation-status-dot" />
+                            {rec.valid ? "Valid" : rec.found ? "Invalid Syntax" : "Missing"}
                           </span>
                         </div>
-                        {record.currentValue && (
-                          <div style={{ fontSize: "12px", fontFamily: "monospace", marginTop: "6px", wordBreak: "break-all" }}>
-                            Value: {record.currentValue}
+
+                        {rec.currentValue && (
+                          <div style={{ fontSize: "12px", color: "#475569", marginBottom: 4, fontFamily: "monospace" }}>
+                            Current: {rec.currentValue}
                           </div>
                         )}
-                        {record.recommendation && (
-                          <div style={{ fontSize: "13px", color: "#4b5563", marginTop: "6px" }}>
-                            Recommendation: {record.recommendation}
+
+                        {rec.recommendation && (
+                          <div style={{ fontSize: "12px", color: "#b45309", background: "#fef3c7", padding: "6px 10px", borderRadius: "6px", marginTop: 6 }}>
+                            💡 <strong>Recommendation:</strong> {rec.recommendation}
                           </div>
                         )}
                       </div>
                     ))}
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <p>No DNS audit result available.</p>
+              )}
             </div>
+
+            <footer style={{ padding: "16px 24px", borderTop: "1px solid #f1f5f9", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="button-primary automations-action-primary"
+                onClick={() => setDnsDrawerOpen(false)}
+              >
+                Close Audit
+              </button>
+            </footer>
           </aside>
         </div>
       )}
-    </div>
+    </main>
   );
 }
