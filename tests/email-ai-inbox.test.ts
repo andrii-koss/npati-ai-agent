@@ -269,4 +269,100 @@ describe("Email / AI Inbox Module", () => {
     expect(analytics.confidenceDistribution).toBeDefined();
     expect(analytics.volumeByDay.length).toBeGreaterThan(0);
   });
+
+  it("16. Lists contacts and updates rules and templates without creating duplicates", async () => {
+    const listedContacts = await repo.listContacts(mockAuth, companyId);
+    expect(listedContacts.some((contact) => contact.email === "ceo@vipcustomer.com")).toBe(true);
+    expect(listedContacts.some((contact) => contact.email === "spammer@badsource.net")).toBe(true);
+    expect(listedContacts[0]?.isVip).toBe(true);
+
+    const template = await repo.createTemplate(mockAuth, companyId, {
+      title: "Initial response",
+      category: "support",
+      bodyTemplate: "Hello {{customer_name}}",
+    });
+    const updatedTemplate = await repo.updateTemplate(mockAuth, companyId, template.id, {
+      title: "Updated response",
+      category: "information",
+      bodyTemplate: "Welcome {{customer_name}}",
+    });
+    expect(updatedTemplate.id).toBe(template.id);
+    expect(updatedTemplate.title).toBe("Updated response");
+    expect(updatedTemplate.category).toBe("information");
+
+    const rule = await repo.createRule(mockAuth, companyId, {
+      name: "VIP approval",
+      conditions: { isVip: true },
+      actions: { setMode: "approval" },
+    });
+    const updatedRule = await repo.updateRule(mockAuth, companyId, rule.id, {
+      name: "VIP autopilot",
+      actions: { setMode: "autopilot", setPriority: "urgent" },
+      isActive: false,
+    });
+    expect(updatedRule.id).toBe(rule.id);
+    expect(updatedRule.name).toBe("VIP autopilot");
+    expect(updatedRule.actions.setPriority).toBe("urgent");
+    expect(updatedRule.isActive).toBe(false);
+  });
+
+  it("17. Ignores an IMAP retry with the same provider Message-ID", async () => {
+    const payload = {
+      from: "retry@client.org",
+      to: "support@company.com",
+      subject: "Idempotent delivery check",
+      body: "This provider message must only be processed once.",
+      messageId: "<provider-message-123@example.com>",
+    };
+
+    const first = await processor.processInbound(mockAuth, companyId, payload);
+    const messageCountAfterFirst = (await repo.listMessages(mockAuth, companyId, first.thread.id)).length;
+    const duplicate = await processor.processInbound(mockAuth, companyId, payload);
+    const messageCountAfterDuplicate = (await repo.listMessages(mockAuth, companyId, first.thread.id)).length;
+
+    expect(duplicate.actionTaken).toBe("duplicate_ignored");
+    expect(duplicate.inboundMessage.id).toBe(first.inboundMessage.id);
+    expect(duplicate.thread.id).toBe(first.thread.id);
+    expect(messageCountAfterDuplicate).toBe(messageCountAfterFirst);
+  });
+
+  it("18. Applies wildcard sender rules to mode, priority, and agent assignment", async () => {
+    await repo.createRule(mockAuth, companyId, {
+      name: "Route partner mail to a human",
+      conditions: { senders: ["*@rules.example"] },
+      actions: { setMode: "manual", setPriority: "urgent", setAgentId: "agent_rules_1" },
+      priorityOrder: -10,
+    });
+
+    const result = await processor.processInbound(mockAuth, companyId, {
+      from: "partner@rules.example",
+      to: "support@company.com",
+      subject: "Partnership question",
+      body: "Please ask the assigned account owner to review this request.",
+      messageId: "<rules-message-1@rules.example>",
+    });
+
+    expect(result.actionTaken).toBe("manual_recorded");
+    expect(result.priority).toBe("urgent");
+    expect(result.thread.priority).toBe("urgent");
+    expect(result.thread.assignedAgentId).toBe("agent_rules_1");
+  });
+
+  it("19. Preserves stored mail passwords when a partial account patch omits them", async () => {
+    const account = await repo.createAccount(mockAuth, companyId, {
+      emailAddress: "secure@company.com",
+      imapConfig: { host: "imap.company.com", password: "imap-secret" },
+      smtpConfig: { host: "smtp.company.com", password: "smtp-secret" },
+    });
+
+    const updated = await repo.updateAccount(mockAuth, companyId, account.id, {
+      imapConfig: { host: "imap2.company.com" },
+      smtpConfig: { host: "smtp2.company.com" },
+    });
+
+    expect(updated.imapConfig.host).toBe("imap2.company.com");
+    expect(updated.imapConfig.password).toBe("imap-secret");
+    expect(updated.smtpConfig.host).toBe("smtp2.company.com");
+    expect(updated.smtpConfig.password).toBe("smtp-secret");
+  });
 });

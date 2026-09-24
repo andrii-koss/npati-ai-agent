@@ -8,10 +8,17 @@ import { EmailDnsVerifier } from "./email-dns-verifier";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailAgentTools } from "./email-agent-tools";
 import type {
+  CompanyEmailAccount,
   EmailFolder,
   EmailPriority,
   EmailThreadStatus,
 } from "./email-inbox-types";
+
+function presentEmailAccount(account: CompanyEmailAccount): CompanyEmailAccount {
+  const { password: _imapPassword, ...imapConfig } = account.imapConfig;
+  const { password: _smtpPassword, ...smtpConfig } = account.smtpConfig;
+  return { ...account, imapConfig, smtpConfig };
+}
 
 function err(reply: FastifyReply, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -61,7 +68,7 @@ export function registerEmailInboxRoutes(
       const c = await ctx(auth, r, "workspace:read");
       await store.getCompany(c, r.params.companyId);
       const accounts = await repo.listAccounts(c, r.params.companyId);
-      return reply.code(200).send({ accounts });
+      return reply.code(200).send({ accounts: accounts.map(presentEmailAccount) });
     } catch (e) {
       return err(reply, e);
     }
@@ -105,7 +112,7 @@ export function registerEmailInboxRoutes(
           })
           .catch(() => undefined);
       }
-      return reply.code(201).send({ account });
+      return reply.code(201).send({ account: presentEmailAccount(account) });
     } catch (e) {
       return err(reply, e);
     }
@@ -119,7 +126,7 @@ export function registerEmailInboxRoutes(
         await store.getCompany(c, r.params.companyId);
         const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
         if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
-        return reply.code(200).send({ account });
+        return reply.code(200).send({ account: presentEmailAccount(account) });
       } catch (e) {
         return err(reply, e);
       }
@@ -134,7 +141,7 @@ export function registerEmailInboxRoutes(
       const c = await ctx(auth, r, "business:manage");
       await store.getCompany(c, r.params.companyId);
       const account = await repo.updateAccount(c, r.params.companyId, r.params.accountId, r.body || {});
-      return reply.code(200).send({ account });
+      return reply.code(200).send({ account: presentEmailAccount(account) });
     } catch (e) {
       return err(reply, e);
     }
@@ -469,6 +476,8 @@ export function registerEmailInboxRoutes(
       bodyHtml?: string;
       attachments?: any[];
       threadKey?: string;
+      messageId?: string;
+      inReplyTo?: string;
     };
   }>("/companies/:companyId/email-inbox/inbound", async (r, reply) => {
     try {
@@ -517,6 +526,20 @@ export function registerEmailInboxRoutes(
   // =========================================================================
   // 4. Contacts & VIP / Blacklist (Items 10, 20)
   // =========================================================================
+
+  app.get<{ Params: { companyId: string } }>(
+    "/companies/:companyId/email-inbox/contacts",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "workspace:read");
+        await store.getCompany(c, r.params.companyId);
+        const contacts = await repo.listContacts(c, r.params.companyId);
+        return reply.code(200).send({ contacts });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
 
   app.get<{ Params: { companyId: string; email: string } }>(
     "/companies/:companyId/email-inbox/contacts/:email",
@@ -585,6 +608,20 @@ export function registerEmailInboxRoutes(
     }
   });
 
+  app.patch<{
+    Params: { companyId: string; templateId: string };
+    Body: { title?: string; category?: string; subjectTemplate?: string | null; bodyTemplate?: string };
+  }>("/companies/:companyId/email-inbox/templates/:templateId", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "business:manage");
+      await store.getCompany(c, r.params.companyId);
+      const template = await repo.updateTemplate(c, r.params.companyId, r.params.templateId, r.body || {});
+      return reply.code(200).send({ template });
+    } catch (e) {
+      return err(reply, e);
+    }
+  });
+
   app.delete<{ Params: { companyId: string; templateId: string } }>(
     "/companies/:companyId/email-inbox/templates/:templateId",
     async (r, reply) => {
@@ -623,6 +660,20 @@ export function registerEmailInboxRoutes(
       await store.getCompany(c, r.params.companyId);
       const rule = await repo.createRule(c, r.params.companyId, r.body);
       return reply.code(201).send({ rule });
+    } catch (e) {
+      return err(reply, e);
+    }
+  });
+
+  app.patch<{
+    Params: { companyId: string; ruleId: string };
+    Body: { name?: string; conditions?: any; actions?: any; isActive?: boolean; priorityOrder?: number };
+  }>("/companies/:companyId/email-inbox/rules/:ruleId", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "business:manage");
+      await store.getCompany(c, r.params.companyId);
+      const rule = await repo.updateRule(c, r.params.companyId, r.params.ruleId, r.body || {});
+      return reply.code(200).send({ rule });
     } catch (e) {
       return err(reply, e);
     }
