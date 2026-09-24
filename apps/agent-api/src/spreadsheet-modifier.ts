@@ -343,17 +343,34 @@ export class SpreadsheetModifier {
    * Parses ```spreadsheet-edit ... ``` block from text if present.
    */
   static extractDirective(text: string): { directive: SpreadsheetEditDirective; cleanText: string } | null {
-    const match = text.match(/```(?:spreadsheet-edit|table-edit|excel-edit)\s*([\s\S]*?)```/i);
-    if (!match) return null;
+    const explicit = text.match(/```(?:spreadsheet-edit|table-edit|excel-edit)\s*([\s\S]*?)```/i);
+    const jsonFence = text.match(/```json\s*([\s\S]*?)```/i);
+    const candidates: Array<{ raw: string; matched?: string }> = [];
+    if (explicit?.[1]) candidates.push({ raw: explicit[1], matched: explicit[0] });
+    if (jsonFence?.[1]) candidates.push({ raw: jsonFence[1], matched: jsonFence[0] });
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push({ raw: text.slice(firstBrace, lastBrace + 1) });
 
-    try {
-      const rawJson = match[1]!.trim();
-      const parsed = JSON.parse(rawJson);
-      // Remove the code block from the user-facing text
-      const cleanText = text.replace(match[0], "").trim();
-      return { directive: parsed, cleanText };
-    } catch {
-      return null;
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate.raw.trim()) as SpreadsheetEditDirective;
+        const operations = parsed.operations?.length ? parsed.operations : [parsed];
+        const valid = operations.every((operation) => {
+          if (!operation) return false;
+          const inferredAction = operation.action
+            ?? (operation.newColumn ? "add_column" : operation.cellUpdates?.length ? "update_cells" : operation.rows?.length ? "append_rows" : "");
+          return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "delete_rows", "replace_sheet"].includes(inferredAction);
+        });
+        if (!valid) continue;
+        const cleanText = candidate.matched
+          ? text.replace(candidate.matched, "").trim()
+          : (text.slice(0, firstBrace) + text.slice(lastBrace + 1)).trim();
+        return { directive: parsed, cleanText };
+      } catch {
+        // Try the next supported representation.
+      }
     }
+    return null;
   }
 }

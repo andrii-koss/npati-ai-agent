@@ -3,6 +3,14 @@ import ExcelJS from "exceljs";
 import { SpreadsheetModifier } from "../apps/agent-api/src/spreadsheet-modifier";
 
 describe("SpreadsheetModifier", () => {
+  it("extracts edit directives from raw JSON and generic JSON fences", () => {
+    const raw = SpreadsheetModifier.extractDirective('{"action":"add_column","newColumn":{"header":"Status","values":["Done"]}}');
+    expect(raw?.directive).toMatchObject({ action: "add_column", newColumn: { header: "Status" } });
+    const fenced = SpreadsheetModifier.extractDirective('```json\n{"action":"update_cells","cellUpdates":[{"row":2,"column":"Status","value":"Done"}]}\n```');
+    expect(fenced?.directive).toMatchObject({ action: "update_cells" });
+    expect(fenced?.cleanText).toBe("");
+  });
+
   it("modifies CSV by inserting rows after a search term", async () => {
     const csv = "ID,Name,Status\r\n1,Task A,Pending\r\n2,Task B,Pending\r\n";
     const buf = Buffer.from(csv, "utf8");
