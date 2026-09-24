@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { useTranslation } from "./i18n";
 
 interface ToolAuditItem {
   id: string;
@@ -75,6 +76,7 @@ function visibleRunTask(task: string): string {
 }
 
 export function ActivityPage() {
+  const { t } = useTranslation();
   const [companies, setCompanies] = useState<CompanyItem[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [runs, setRuns] = useState<CompanyRun[]>([]);
@@ -152,7 +154,7 @@ export function ActivityPage() {
         setActiveRunDetails(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load activity");
+      setError(err instanceof Error ? err.message : t("activity.errors.loadRunsFailed"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -241,14 +243,14 @@ export function ActivityPage() {
         setTaskPrompt("");
         setDispatchNotice({
           type: "success",
-          message: `Run dispatched: ${data.run.id.slice(0, 8)} (${data.run.status})`,
+          message: t("activity.dispatch.dispatchedNotice", { id: data.run.id.slice(0, 8), status: data.run.status }),
         });
         setTimeout(() => setDispatchNotice(null), 4000);
       }
     } catch (err) {
       setDispatchNotice({
         type: "error",
-        message: err instanceof Error ? err.message : "Failed to dispatch agent run",
+        message: err instanceof Error ? err.message : t("activity.dispatch.dispatchFailed"),
       });
     } finally {
       setDispatching(false);
@@ -285,11 +287,11 @@ export function ActivityPage() {
     });
   }, [runs, statusFilter, searchQuery]);
 
-  const quickPrompts = [
-    { label: "Market & Competitor Audit", prompt: "Conduct comprehensive competitor research and market positioning analysis" },
-    { label: "Security & Capability Verification", prompt: "Audit company tool permissions, API access rules, and security gates" },
-    { label: "Strategic Growth Roadmap", prompt: "Synthesize target customer ICP and actionable 90-day growth roadmap" },
-  ];
+  const quickPrompts = useMemo(() => [
+    { label: t("activity.dispatch.presets.marketAuditLabel"), prompt: t("activity.dispatch.presets.marketAuditPrompt") },
+    { label: t("activity.dispatch.presets.securityAuditLabel"), prompt: t("activity.dispatch.presets.securityAuditPrompt") },
+    { label: t("activity.dispatch.presets.growthRoadmapLabel"), prompt: t("activity.dispatch.presets.growthRoadmapPrompt") },
+  ], [t]);
 
   const currentCompany = companies.find((c) => c.id === selectedCompanyId);
 
@@ -298,17 +300,17 @@ export function ActivityPage() {
       {/* Hero Header matching /settings/capabilities */}
       <header className="marketplace-hero activity-header">
         <div>
-          <p className="eyebrow">Observability & Audit</p>
+          <p className="eyebrow">{t("activity.eyebrow")}</p>
           <h1>
-            <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+            <Link to="/settings" className="marketplace-back-button" aria-label={t("activity.backAria")} title={t("activity.backAria")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
             </Link>
-            <span>Activity & Run Trace</span>
+            <span>{t("activity.title")}</span>
           </h1>
           <p className="hero-copy">
-            Detailed real-time execution trace, delegation steps, tool calls, latencies, and security decisions across company agent runs.
+            {t("activity.heroCopy")}
           </p>
         </div>
       </header>
@@ -317,23 +319,23 @@ export function ActivityPage() {
       <section className="overview-grid activity-stats-grid">
         <div>
           <strong>{totalRunsCount}</strong>
-          <span>Total Runs</span>
-          <small>Recorded agent executions</small>
+          <span>{t("activity.stats.totalRuns")}</span>
+          <small>{t("activity.stats.totalRunsDesc")}</small>
         </div>
         <div>
           <strong>{completedRunsCount}</strong>
-          <span>Completed</span>
-          <small>Successful without faults</small>
+          <span>{t("activity.stats.completed")}</span>
+          <small>{t("activity.stats.completedDesc")}</small>
         </div>
         <div>
           <strong>{activeRunsCount}</strong>
-          <span>In Progress / Queued</span>
-          <small>Active agent workloads</small>
+          <span>{t("activity.stats.inProgress")}</span>
+          <small>{t("activity.stats.inProgressDesc")}</small>
         </div>
         <div>
           <strong>{totalSecurityDecisions}</strong>
-          <span>Security Decisions</span>
-          <small>Audited tool checks</small>
+          <span>{t("activity.stats.securityDecisions")}</span>
+          <small>{t("activity.stats.securityDecisionsDesc")}</small>
         </div>
       </section>
 
@@ -346,7 +348,7 @@ export function ActivityPage() {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" />
                 </svg>
-                Company:
+                {t("activity.controls.companyLabel")}
               </label>
               <select
                 id="activity-company-select"
@@ -369,28 +371,28 @@ export function ActivityPage() {
               className={`activity-tab ${statusFilter === "all" ? "active" : ""}`}
               onClick={() => { setViewMode("trace"); setStatusFilter("all"); }}
             >
-              All <span className="tab-count">{totalRunsCount}</span>
+              {t("activity.controls.all")} <span className="tab-count">{totalRunsCount}</span>
             </button>
             <button
               type="button"
               className={`activity-tab ${viewMode === "trace" && statusFilter === "completed" ? "active" : ""}`}
               onClick={() => { setViewMode("trace"); setStatusFilter("completed"); }}
             >
-              Completed <span className="tab-count">{completedRunsCount}</span>
+              {t("activity.controls.completed")} <span className="tab-count">{completedRunsCount}</span>
             </button>
             <button
               type="button"
               className={`activity-tab ${viewMode === "trace" && statusFilter === "running" ? "active" : ""}`}
               onClick={() => { setViewMode("trace"); setStatusFilter("running"); }}
             >
-              Running <span className="tab-count">{activeRunsCount}</span>
+              {t("activity.controls.running")} <span className="tab-count">{activeRunsCount}</span>
             </button>
             <button
               type="button"
               className={`activity-tab ${viewMode === "trace" && statusFilter === "failed" ? "active" : ""}`}
               onClick={() => { setViewMode("trace"); setStatusFilter("failed"); }}
             >
-              Failed <span className="tab-count">{failedRunsCount}</span>
+              {t("activity.controls.failed")} <span className="tab-count">{failedRunsCount}</span>
             </button>
           </div>
 
@@ -399,19 +401,19 @@ export function ActivityPage() {
             <input
               type="text"
               role="searchbox"
-              placeholder="Search runs by task or ID..."
+              placeholder={t("activity.controls.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="activity-search-input"
-              aria-label="Search runs"
+              aria-label={t("activity.controls.searchAriaLabel")}
             />
             {searchQuery && (
               <button
                 type="button"
                 className="search-clear-btn"
                 onClick={() => setSearchQuery("")}
-                aria-label="Clear search"
-                title="Clear search"
+                aria-label={t("activity.controls.clearSearch")}
+                title={t("activity.controls.clearSearch")}
               >
                 ×
               </button>
@@ -423,7 +425,7 @@ export function ActivityPage() {
             className="activity-refresh-btn"
             onClick={() => selectedCompanyId && loadRuns(selectedCompanyId, true)}
             disabled={refreshing || loading}
-            title="Refresh runs"
+            title={t("activity.controls.refreshTitle")}
           >
             <svg
               width="15"
@@ -438,7 +440,7 @@ export function ActivityPage() {
             >
               <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
             </svg>
-            <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
+            <span>{refreshing ? t("activity.controls.refreshing") : t("activity.controls.refresh")}</span>
           </button>
         </div>
       </div>
@@ -449,22 +451,22 @@ export function ActivityPage() {
           <div className="activity-dispatch-title">
             <span className="activity-dispatch-icon">⚡</span>
             <div>
-              <h3>Dispatch Company Agent Task</h3>
-              <p>Trigger an autonomous multi-agent task execution and inspect real-time traces</p>
+              <h3>{t("activity.dispatch.title")}</h3>
+              <p>{t("activity.dispatch.subtitle")}</p>
             </div>
           </div>
           <div className="activity-mode-selector">
-            <label htmlFor="activity-mode-select">Execution Mode:</label>
+            <label htmlFor="activity-mode-select">{t("activity.dispatch.modeLabel")}</label>
             <select
               id="activity-mode-select"
               value={runMode}
               onChange={(e) => setRunMode(e.target.value as any)}
               className="select-input"
             >
-              <option value="auto">Auto Orchestrate (Adaptive)</option>
-              <option value="pipeline">Pipeline (Multi-Agent)</option>
-              <option value="single">Single Agent (Fast)</option>
-              <option value="fusion">Fusion (Multi-Model)</option>
+              <option value="auto">{t("activity.dispatch.modes.auto")}</option>
+              <option value="pipeline">{t("activity.dispatch.modes.pipeline")}</option>
+              <option value="single">{t("activity.dispatch.modes.single")}</option>
+              <option value="fusion">{t("activity.dispatch.modes.fusion")}</option>
             </select>
           </div>
         </div>
@@ -475,8 +477,8 @@ export function ActivityPage() {
             className="activity-task-input"
             placeholder={
               currentCompany
-                ? `Enter task for ${currentCompany.name} agents (e.g. 'Analyze competitor offerings and pricing')...`
-                : "Enter task prompt for company agents..."
+                ? t("activity.dispatch.placeholderWithCompany", { name: currentCompany.name })
+                : t("activity.dispatch.placeholderDefault")
             }
             value={taskPrompt}
             onChange={(e) => setTaskPrompt(e.target.value)}
@@ -498,11 +500,11 @@ export function ActivityPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="spin">
                   <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                 </svg>
-                <span>Dispatching...</span>
+                <span>{t("activity.dispatch.dispatching")}</span>
               </>
             ) : (
               <>
-                <span>Dispatch Task</span>
+                <span>{t("activity.dispatch.dispatchTask")}</span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
@@ -512,7 +514,7 @@ export function ActivityPage() {
         </div>
 
         <div className="activity-quick-prompts">
-          <span className="quick-prompts-label">Presets:</span>
+          <span className="quick-prompts-label">{t("activity.dispatch.presetsLabel")}</span>
           {quickPrompts.map((qp, idx) => (
             <button
               key={idx}
@@ -539,21 +541,21 @@ export function ActivityPage() {
 
       {!loading && companies.length === 0 && (
         <div className="activity-empty-state">
-          <h2>No Companies Found</h2>
-          <p>Activity & Run Trace tracks multi-agent runs dispatched within an AI Company context.</p>
+          <h2>{t("activity.empty.noCompaniesTitle")}</h2>
+          <p>{t("activity.empty.noCompaniesCopy")}</p>
           <Link to="/settings/company" className="button-primary automations-action-primary primary-action-btn">
-            Create AI Company
+            {t("activity.empty.createCompanyBtn")}
           </Link>
         </div>
       )}
 
       {!loading && companies.length > 0 && (runs.length === 0 || viewMode === "presets") && (
         <div className="activity-empty-state">
-          <h2>{runs.length === 0 ? "No Runs Recorded Yet" : "Task Presets & Starter Scenarios"}</h2>
+          <h2>{runs.length === 0 ? t("activity.empty.noRunsTitle") : t("activity.empty.presetsTitle")}</h2>
           <p>
             {runs.length === 0
-              ? "This company has no dispatched agent runs. Use the task dispatcher above or select a preset to generate real-time execution traces, delegation steps, and security tool audits."
-              : "Select a preset below or enter a custom task above to generate real-time execution traces, delegation steps, and security tool audits."}
+              ? t("activity.empty.noRunsCopy")
+              : t("activity.empty.presetsCopy")}
           </p>
           <div className="activity-empty-actions">
             {quickPrompts.map((qp, idx) => (
@@ -567,7 +569,7 @@ export function ActivityPage() {
                   setViewMode("trace");
                 }}
               >
-                Dispatch: {qp.label} →
+                {t("activity.empty.dispatchPresetBtn", { label: qp.label })}
               </button>
             ))}
           </div>
@@ -578,7 +580,7 @@ export function ActivityPage() {
                 className="activity-switch-view-btn"
                 onClick={() => setViewMode("trace")}
               >
-                <span>View Execution History & Trace ({runs.length}) →</span>
+                <span>{t("activity.empty.viewTraceBtn", { count: runs.length })}</span>
               </button>
             </div>
           )}
@@ -592,22 +594,22 @@ export function ActivityPage() {
             <aside className="activity-runs-sidebar" aria-label="Runs list">
               <div className="activity-sidebar-header">
                 <div className="sidebar-header-row">
-                  <h3>Recent Executions ({filteredRuns.length})</h3>
+                  <h3>{t("activity.sidebar.recentExecutions", { count: filteredRuns.length })}</h3>
                   <button
                     type="button"
                     className="sidebar-back-to-presets-btn"
                     onClick={() => setViewMode("presets")}
-                    title="Back to presets"
+                    title={t("activity.sidebar.backToPresets")}
                   >
-                    ← 3 Presets
+                    {t("activity.sidebar.backToPresets")}
                   </button>
                 </div>
               </div>
               {filteredRuns.length === 0 ? (
                 <div className="activity-empty-filter">
-                  <p>No runs match current filter criteria.</p>
+                  <p>{t("activity.sidebar.noFilteredRuns")}</p>
                   <button type="button" className="clear-filter-btn" onClick={() => { setStatusFilter("all"); setSearchQuery(""); }}>
-                    Clear Filters
+                    {t("activity.sidebar.clearFiltersBtn")}
                   </button>
                 </div>
               ) : (
@@ -653,8 +655,8 @@ export function ActivityPage() {
                         type="button"
                         className="trace-back-arrow-btn"
                         onClick={() => setViewMode("presets")}
-                        title="Back to presets"
-                        aria-label="Back to presets"
+                        title={t("activity.trace.backToPresetsAria")}
+                        aria-label={t("activity.trace.backToPresetsAria")}
                       >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -665,11 +667,11 @@ export function ActivityPage() {
                           {activeRunDetails.run.status}
                         </span>
                         <span className="trace-mode-pill">
-                          Mode: {activeRunDetails.run.executionMode || activeRunDetails.run.requestedMode || "auto"}
+                          {t("activity.trace.modePrefix", { mode: activeRunDetails.run.executionMode || activeRunDetails.run.requestedMode || "auto" })}
                         </span>
                         {activeRunDetails.run.omnirouteComboName && (
                           <span className="trace-combo-pill">
-                            Combo: {activeRunDetails.run.omnirouteComboName}
+                            {t("activity.trace.comboPrefix", { combo: activeRunDetails.run.omnirouteComboName })}
                           </span>
                         )}
                       </div>
@@ -678,30 +680,30 @@ export function ActivityPage() {
                       <h2>{visibleRunTask(activeRunDetails.run.task)}</h2>
                     <div className="trace-meta-row">
                       <div className="trace-meta-item">
-                        <span>Run ID:</span>
+                        <span>{t("activity.trace.runIdLabel")}:</span>
                         <code>{activeRunDetails.run.id}</code>
                         <button
                           type="button"
                           className="copy-btn"
                           onClick={() => copyToClipboard(activeRunDetails.run.id, "runId")}
-                          title="Copy Run ID"
+                          title={t("activity.trace.copyRunIdTitle")}
                         >
-                          {copiedId === "runId" ? "Copied" : "Copy"}
+                          {copiedId === "runId" ? t("activity.trace.copied") : t("activity.trace.copy")}
                         </button>
                       </div>
                       <div className="trace-meta-item">
-                        <span>Started:</span>
+                        <span>{t("activity.trace.startedLabel")}:</span>
                         <strong>{new Date(activeRunDetails.run.createdAt).toLocaleString()}</strong>
                       </div>
                       {activeRunDetails.run.completedAt && (
                         <div className="trace-meta-item">
-                          <span>Completed:</span>
+                          <span>{t("activity.trace.completedLabel")}:</span>
                           <strong>{new Date(activeRunDetails.run.completedAt).toLocaleTimeString()}</strong>
                         </div>
                       )}
                       {activeRunDetails.run.totalDurationMs !== undefined && (
                         <div className="trace-meta-item">
-                          <span>Duration:</span>
+                          <span>{t("activity.trace.durationLabel")}:</span>
                           <strong>{(activeRunDetails.run.totalDurationMs / 1000).toFixed(2)}s</strong>
                         </div>
                       )}
@@ -716,15 +718,15 @@ export function ActivityPage() {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                        <strong>Final Output Result</strong>
+                        <strong>{t("activity.trace.finalOutput")}</strong>
                       </div>
                       <button
                         type="button"
                         className="copy-btn"
                         onClick={() => copyToClipboard(activeRunDetails.run.result || "", "result")}
-                        title="Copy Result"
+                        title={t("activity.trace.copyResultTitle")}
                       >
-                        {copiedId === "result" ? "Copied" : "Copy"}
+                        {copiedId === "result" ? t("activity.trace.copied") : t("activity.trace.copy")}
                       </button>
                     </div>
                     <p>{activeRunDetails.run.result}</p>
@@ -740,7 +742,7 @@ export function ActivityPage() {
                           <line x1="12" y1="8" x2="12" y2="12" />
                           <line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
-                        <strong>Execution Fault</strong>
+                        <strong>{t("activity.trace.executionFault")}</strong>
                       </div>
                     </div>
                     <p>{activeRunDetails.run.errorMessage}</p>
@@ -750,19 +752,24 @@ export function ActivityPage() {
                 {activeRunDetails.completionReport && (
                   <div className={`trace-completion-report ${activeRunDetails.completionReport.status}`}>
                     <div>
-                      <strong>Background Completion Report</strong>
+                      <strong>{t("activity.trace.completionReportTitle")}</strong>
                       <span>{activeRunDetails.completionReport.status}</span>
                     </div>
                     <p>
-                      Attempt {activeRunDetails.completionReport.attemptCount} · {activeRunDetails.completionReport.totalTokens} tokens · ${activeRunDetails.completionReport.totalCost.toFixed(6)} · {(activeRunDetails.completionReport.totalDurationMs / 1000).toFixed(2)}s
+                      {t("activity.trace.attemptSummary", {
+                        attempt: activeRunDetails.completionReport.attemptCount,
+                        tokens: activeRunDetails.completionReport.totalTokens,
+                        cost: activeRunDetails.completionReport.totalCost.toFixed(6),
+                        seconds: (activeRunDetails.completionReport.totalDurationMs / 1000).toFixed(2),
+                      })}
                     </p>
                   </div>
                 )}
 
                 <div className="trace-section">
                   <div className="trace-section-header">
-                    <h3>Background Execution Timeline ({activeRunDetails.backgroundEvents?.length ?? 0})</h3>
-                    <small>Durable worker claims, retries and terminal completion events</small>
+                    <h3>{t("activity.trace.timelineTitle", { count: activeRunDetails.backgroundEvents?.length ?? 0 })}</h3>
+                    <small>{t("activity.trace.timelineDesc")}</small>
                   </div>
                   <div className="background-event-list">
                     {(activeRunDetails.backgroundEvents ?? []).map((event) => (
@@ -771,12 +778,12 @@ export function ActivityPage() {
                         <div>
                           <strong>{event.eventType.replace("_", " ")}</strong>
                           <p>{event.message}</p>
-                          <small>Attempt {event.attemptCount}{event.workerId ? ` · ${event.workerId}` : ""} · {new Date(event.createdAt).toLocaleTimeString()}</small>
+                          <small>{t("activity.trace.attemptLabel", { attempt: event.attemptCount })}{event.workerId ? ` · ${event.workerId}` : ""} · {new Date(event.createdAt).toLocaleTimeString()}</small>
                         </div>
                       </div>
                     ))}
                     {(!activeRunDetails.backgroundEvents || activeRunDetails.backgroundEvents.length === 0) && (
-                      <div className="trace-empty-notice">This run was executed synchronously; no background worker events were emitted.</div>
+                      <div className="trace-empty-notice">{t("activity.trace.synchronousNotice")}</div>
                     )}
                   </div>
                 </div>
@@ -785,9 +792,9 @@ export function ActivityPage() {
                 <div className="trace-section">
                   <div className="trace-section-header">
                     <h3>
-                      Agent Delegation Pipeline ({activeRunDetails.steps?.length ?? 0})
+                      {t("activity.trace.delegationTitle", { count: activeRunDetails.steps?.length ?? 0 })}
                     </h3>
-                    <small>Multi-agent role coordination and handoffs</small>
+                    <small>{t("activity.trace.delegationDesc")}</small>
                   </div>
                   <div className="trace-steps-list">
                     {(activeRunDetails.steps ?? []).map((step, idx) => (
@@ -797,18 +804,18 @@ export function ActivityPage() {
                           <div className="trace-step-top">
                             <span className={`role-badge ${step.role}`}>{step.role}</span>
                             <span className={`step-status-badge ${step.status}`}>{step.status}</span>
-                            <code className="trace-agent-id">Agent: {step.agentId.slice(0, 10)}...</code>
+                            <code className="trace-agent-id">{t("activity.trace.agentPrefix", { id: step.agentId.slice(0, 10) })}...</code>
                           </div>
                           <div className="trace-step-meta">
-                            <span>Model: <strong>{step.modelId || "auto"}</strong></span>
-                            {step.lane !== undefined && <span>Lane: {step.lane}</span>}
+                            <span>{t("activity.trace.modelPrefix")} <strong>{step.modelId || "auto"}</strong></span>
+                            {step.lane !== undefined && <span>{t("activity.trace.lanePrefix", { lane: step.lane })}</span>}
                           </div>
                         </div>
                       </div>
                     ))}
                     {(!activeRunDetails.steps || activeRunDetails.steps.length === 0) && (
                       <div className="trace-empty-notice">
-                        No delegation steps recorded for this single-turn task.
+                        {t("activity.trace.noStepsNotice")}
                       </div>
                     )}
                   </div>
@@ -818,9 +825,9 @@ export function ActivityPage() {
                 <div className="trace-section">
                   <div className="trace-section-header">
                     <h3>
-                      Tool Executions & Security Policy Gates ({activeRunDetails.toolAudit?.length ?? 0})
+                      {t("activity.trace.toolsTitle", { count: activeRunDetails.toolAudit?.length ?? 0 })}
                     </h3>
-                    <small>Canonical capability resolver checks and safety audits</small>
+                    <small>{t("activity.trace.toolsDesc")}</small>
                   </div>
                   <div className="trace-tool-list">
                     {(activeRunDetails.toolAudit ?? []).map((tool, idx) => (
@@ -836,14 +843,14 @@ export function ActivityPage() {
                         {tool.errorMessage && <p className="trace-tool-error">{tool.errorMessage}</p>}
                         {tool.reasonCode && (
                           <div className="trace-tool-reason">
-                            <span>Policy Reason:</span> <code>{tool.reasonCode}</code>
+                            <span>{t("activity.trace.policyReason")}</span> <code>{tool.reasonCode}</code>
                           </div>
                         )}
                       </div>
                     ))}
                     {(!activeRunDetails.toolAudit || activeRunDetails.toolAudit.length === 0) && (
                       <div className="trace-empty-notice">
-                        No external tool invocations triggered during this run.
+                        {t("activity.trace.noToolsNotice")}
                       </div>
                     )}
                   </div>
@@ -852,8 +859,8 @@ export function ActivityPage() {
             ) : (
               <div className="activity-placeholder-card">
                 <span className="placeholder-icon">👈</span>
-                <h3>Select a Run to Inspect</h3>
-                <p>Pick an execution run from the left panel to review its timeline, delegation steps, and security audits.</p>
+                <h3>{t("activity.trace.selectRunTitle")}</h3>
+                <p>{t("activity.trace.selectRunCopy")}</p>
               </div>
             )}
           </section>
