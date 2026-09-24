@@ -92,6 +92,39 @@ function translatedTool(t: Translate, tool: CapabilityItem) {
 const emptyCompany: CompanyDraft = { name: "", businessId: "", website: "", industry: "", description: "", productsServices: "", languages: "", brandTone: "", companyInstructions: "", status: "active" };
 const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: [], isActive: true, parentAgentId: "" };
 
+const COMPANIES_CACHE_KEY = "npati_companies_cache_v1";
+const SELECTED_COMPANY_ID_KEY = "npati_selected_company_id_v1";
+
+function getCachedCompanies(): Company[] {
+  try {
+    const raw = sessionStorage.getItem(COMPANIES_CACHE_KEY) || localStorage.getItem(COMPANIES_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* storage may be restricted */ }
+  return [];
+}
+
+function getCachedSelectedCompanyId(): string {
+  try {
+    return sessionStorage.getItem(SELECTED_COMPANY_ID_KEY) || localStorage.getItem(SELECTED_COMPANY_ID_KEY) || "";
+  } catch { /* storage may be restricted */ }
+  return "";
+}
+
+function updateCachedCompanies(list: Company[], currentId?: string) {
+  try {
+    const serialized = JSON.stringify(list);
+    sessionStorage.setItem(COMPANIES_CACHE_KEY, serialized);
+    localStorage.setItem(COMPANIES_CACHE_KEY, serialized);
+    if (currentId) {
+      sessionStorage.setItem(SELECTED_COMPANY_ID_KEY, currentId);
+      localStorage.setItem(SELECTED_COMPANY_ID_KEY, currentId);
+    }
+  } catch { /* storage may be restricted */ }
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = getStoredAuthToken();
@@ -198,10 +231,11 @@ export function CompanyPage() {
   const [searchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
   const { overview } = useWorkspace();
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const cachedCompaniesRef = useRef(getCachedCompanies());
+  const [companies, setCompanies] = useState<Company[]>(cachedCompaniesRef.current);
+  const [companiesLoading, setCompaniesLoading] = useState(() => cachedCompaniesRef.current.length === 0);
   const [companiesLoadError, setCompaniesLoadError] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => requestedCompanyId || getCachedSelectedCompanyId() || cachedCompaniesRef.current[0]?.id || "");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [agentCursor, setAgentCursor] = useState<string | null>(null);
@@ -259,6 +293,7 @@ export function CompanyPage() {
     setCompanies(list);
     const nextId = preferredId && list.some((item) => item.id === preferredId) ? preferredId : (list[0]?.id ?? "");
     setSelectedId(nextId);
+    updateCachedCompanies(list, nextId);
     return list;
   }
 
@@ -326,11 +361,12 @@ export function CompanyPage() {
   }, [selectedId, requestedCompanyId]);
 
   async function initializeCompanies() {
-    setCompaniesLoading(true);
+    if (companies.length === 0) setCompaniesLoading(true);
     setCompaniesLoadError("");
     try {
-      const items = await loadCompanies(requestedCompanyId);
-      const first = items.find((company) => company.id === requestedCompanyId) ?? items[0];
+      const targetId = requestedCompanyId || selectedId;
+      const items = await loadCompanies(targetId);
+      const first = items.find((company) => company.id === targetId) ?? items[0];
       if (first) await loadOrganization(first.id, undefined, false, items);
     } catch (error) {
       setCompaniesLoadError(error instanceof Error ? error.message : t("companySettings.errors.couldNotLoadCompanies"));
@@ -791,7 +827,7 @@ export function CompanyPage() {
       </div>
     )}
 
-    {!selected ? <section className="company-first-run">
+    {companiesLoading ? null : !selected ? <section className="company-first-run">
       <span className="provider-avatar">CO</span><h2>{t("companySettings.firstRun.title")}</h2>
       <p>{t("companySettings.firstRun.description")}</p>
       <button className="button-primary" onClick={() => openCompanyEditor()}>{t("companySettings.firstRun.createButton")}</button>
@@ -807,7 +843,14 @@ export function CompanyPage() {
             <select
               aria-label={t("companySettings.strip.selectCompany")}
               value={selectedId}
-              onChange={(event) => setSelectedId(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setSelectedId(next);
+                try {
+                  sessionStorage.setItem(SELECTED_COMPANY_ID_KEY, next);
+                  localStorage.setItem(SELECTED_COMPANY_ID_KEY, next);
+                } catch {}
+              }}
               className="company-strip-select"
             >
               {companies.map((company) => (
