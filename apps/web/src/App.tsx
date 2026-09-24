@@ -1032,8 +1032,8 @@ function Workspace({ children }: { children: ReactNode }) {
     setMobileNavOpen(false);
   }, [location.pathname]);
 
-  if (isLoading) {
-    return <div className="workspace"><div className="workspace-notice">Loading workspace…</div></div>;
+  if (isLoading && !isAuthenticated) {
+    return <div className="workspace" />;
   }
   if (!isAuthenticated) {
     return <Navigate to="/" replace state={{ from: location.pathname }} />;
