@@ -14882,6 +14882,46 @@ body:has(.npati-dialog-backdrop) .sidebar {
   margin-left: auto !important;
 }
 
+/* Composer Mode Buttons (Reply, Reply All, Forward) with subtle shadow, static on hover */
+.email-composer-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  user-select: none;
+}
+
+.email-composer-mode-btn:hover {
+  background: #ffffff;
+  color: #334155;
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transform: none;
+}
+
+.email-composer-mode-btn.active {
+  background: var(--npati-red);
+  color: #ffffff;
+  border-color: var(--npati-red);
+  box-shadow: 0 1px 4px rgba(225, 29, 46, 0.25);
+}
+
+.email-composer-mode-btn.active:hover {
+  background: var(--npati-red);
+  color: #ffffff;
+  border-color: var(--npati-red);
+  box-shadow: 0 1px 4px rgba(225, 29, 46, 0.25);
+  transform: none;
+}
+
 .email-inbox-draft-box {
   margin: 12px 20px 0;
   padding: 12px 16px;

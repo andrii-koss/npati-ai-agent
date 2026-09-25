@@ -229,6 +229,15 @@ export function EmailInboxPage() {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Auto-dismiss notification after 4 seconds
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => {
+      setNotice(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   // Layout & Resizing Controls
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [readingFocus, setReadingFocus] = useState(false);
@@ -450,6 +459,18 @@ export function EmailInboxPage() {
     }
   }
 
+  // Reset thread selection when mailbox scope / company changes
+  useEffect(() => {
+    setSelectedThreadId(null);
+    setActiveThread(null);
+    setMessages([]);
+    setContact(null);
+    setCustomerContext({ previousThreads: [], tasks: [] });
+    setAuditHistory([]);
+    setDraftMessageId(null);
+    setDraftText("");
+  }, [selectedCompanyId]);
+
   // Load threads
   async function loadThreads() {
     if (!selectedCompanyId) return;
@@ -465,7 +486,16 @@ export function EmailInboxPage() {
         `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
       );
       setThreads(res.threads);
-      if (res.threads.length > 0 && !selectedThreadId) {
+      if (res.threads.length === 0) {
+        setSelectedThreadId(null);
+        setActiveThread(null);
+        setMessages([]);
+        setContact(null);
+        setCustomerContext({ previousThreads: [], tasks: [] });
+        setAuditHistory([]);
+        setDraftMessageId(null);
+        setDraftText("");
+      } else if (!selectedThreadId || !res.threads.some((t) => t.id === selectedThreadId)) {
         setSelectedThreadId(res.threads[0]!.id);
       }
     } catch (err: any) {
@@ -514,7 +544,16 @@ export function EmailInboxPage() {
           setDraftIsAiGenerated(false);
         }
       })
-      .catch((e) => setNotice(e.message));
+      .catch((e) => {
+        setActiveThread(null);
+        setMessages([]);
+        setContact(null);
+        setCustomerContext({ previousThreads: [], tasks: [] });
+        setAuditHistory([]);
+        setDraftMessageId(null);
+        setDraftText("");
+        setNotice(e.message);
+      });
   }, [selectedCompanyId, selectedThreadId]);
 
   // Handle Acquire Lock when typing reply
@@ -738,14 +777,6 @@ export function EmailInboxPage() {
             >
               ⚙️ Email Settings
             </Link>
-            <button
-              type="button"
-              className="automation-action-btn"
-              onClick={handleSimulateEmail}
-              title="Process a simulated inbound client email without an external mailbox"
-            >
-              Simulate Inbound
-            </button>
           </div>
         </div>
       </header>
@@ -1547,7 +1578,12 @@ export function EmailInboxPage() {
               <form onSubmit={handleSendReply} className="email-inbox-composer">
                 <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                   {(["reply", "reply_all", "forward"] as const).map((modeOption) => (
-                    <button key={modeOption} type="button" className={`automation-action-btn ${composerMode === modeOption ? "active" : ""}`} onClick={() => setComposerMode(modeOption)}>
+                    <button
+                      key={modeOption}
+                      type="button"
+                      className={`email-composer-mode-btn ${composerMode === modeOption ? "active" : ""}`}
+                      onClick={() => setComposerMode(modeOption)}
+                    >
                       {modeOption === "reply" ? "Reply" : modeOption === "reply_all" ? "Reply All" : "Forward"}
                     </button>
                   ))}
