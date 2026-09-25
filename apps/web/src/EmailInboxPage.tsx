@@ -167,7 +167,12 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredAuthToken();
   if (token) headers.set("authorization", `Bearer ${token}`);
   if (init?.body != null && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetch(`/api${path}`, { ...init, headers });
+  const method = (init?.method || "GET").toUpperCase();
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers,
+    cache: init?.cache || (method === "GET" ? "no-store" : undefined),
+  });
   const body = (await response.json().catch(() => null)) as T & { error?: { message?: string } | string; message?: string };
   if (!response.ok) {
     const apiMessage = typeof body?.error === "string" ? body?.message || body.error : body?.error?.message || body?.message;
@@ -203,6 +208,9 @@ export function EmailInboxPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
   const [folder, setFolder] = useState<"inbox" | "sent" | "drafts" | "archived" | "spam">("inbox");
+  const [folderCounts, setFolderCounts] = useState<Record<"inbox" | "sent" | "drafts" | "archived" | "spam", number>>({
+    inbox: 0, sent: 0, drafts: 0, archived: 0, spam: 0,
+  });
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
@@ -211,6 +219,9 @@ export function EmailInboxPage() {
   const [customerContext, setCustomerContext] = useState<CustomerContext>({ previousThreads: [], tasks: [] });
   const [notifications, setNotifications] = useState<EmailNotification[]>([]);
   const [auditHistory, setAuditHistory] = useState<EmailAuditEntry[]>([]);
+  const [mailboxRefreshVersion, setMailboxRefreshVersion] = useState(0);
+  const threadRequestIdRef = useRef(0);
+  const deletedThreadIdsRef = useRef(new Set<string>());
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -461,6 +472,8 @@ export function EmailInboxPage() {
 
   // Reset thread selection when mailbox scope / company changes
   useEffect(() => {
+    threadRequestIdRef.current += 1;
+    deletedThreadIdsRef.current.clear();
     setSelectedThreadId(null);
     setActiveThread(null);
     setMessages([]);
@@ -474,6 +487,7 @@ export function EmailInboxPage() {
   // Load threads
   async function loadThreads() {
     if (!selectedCompanyId) return;
+    const requestId = ++threadRequestIdRef.current;
     try {
       const q = new URLSearchParams();
       q.set("folder", folder);
@@ -482,11 +496,21 @@ export function EmailInboxPage() {
       if (priorityFilter !== "all") q.set("priority", priorityFilter);
       if (searchQuery.trim()) q.set("search", searchQuery.trim());
 
-      const res = await api<{ threads: EmailThread[] }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
-      );
-      setThreads(res.threads);
-      if (res.threads.length === 0) {
+      const countQuery = selectedAccountId !== "all" ? `?accountId=${encodeURIComponent(selectedAccountId)}` : "";
+      const [res, countResult] = await Promise.all([
+        api<{ threads: EmailThread[] }>(
+          `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
+        ),
+        api<{ counts: Record<"inbox" | "sent" | "drafts" | "archived" | "spam", number> }>(
+          `/companies/${selectedCompanyId}/email-inbox/folder-counts${countQuery}`
+        ),
+      ]);
+      if (requestId !== threadRequestIdRef.current) return;
+      const visibleThreads = res.threads.filter((thread) => !deletedThreadIdsRef.current.has(thread.id));
+      setFolderCounts(countResult.counts);
+      setThreads(visibleThreads);
+      setMailboxRefreshVersion((current) => current + 1);
+      if (visibleThreads.length === 0) {
         setSelectedThreadId(null);
         setActiveThread(null);
         setMessages([]);
@@ -495,8 +519,10 @@ export function EmailInboxPage() {
         setAuditHistory([]);
         setDraftMessageId(null);
         setDraftText("");
-      } else if (!selectedThreadId || !res.threads.some((t) => t.id === selectedThreadId)) {
-        setSelectedThreadId(res.threads[0]!.id);
+      } else {
+        setSelectedThreadId((current) =>
+          current && visibleThreads.some((thread) => thread.id === current) ? current : visibleThreads[0]!.id
+        );
       }
     } catch (err: any) {
       setNotice(err.message);
@@ -504,7 +530,11 @@ export function EmailInboxPage() {
   }
 
   useEffect(() => {
-    loadThreads();
+    void loadThreads();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadThreads();
+    }, 15_000);
+    return () => window.clearInterval(timer);
   }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
 
   // Load thread detail
@@ -554,7 +584,7 @@ export function EmailInboxPage() {
         setDraftText("");
         setNotice(e.message);
       });
-  }, [selectedCompanyId, selectedThreadId]);
+  }, [selectedCompanyId, selectedThreadId, mailboxRefreshVersion]);
 
   // Handle Acquire Lock when typing reply
   async function onReplyFocus() {
@@ -595,11 +625,17 @@ export function EmailInboxPage() {
       isDanger: true,
     });
     if (!approved) return;
+    const deletedId = selectedThreadId;
+    deletedThreadIdsRef.current.add(deletedId);
+    threadRequestIdRef.current += 1;
+    setThreads((current) => current.filter((thread) => thread.id !== deletedId));
+    setSelectedThreadId(null); setActiveThread(null); setMessages([]);
     try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`, { method: "DELETE" });
-      setSelectedThreadId(null); setActiveThread(null); setMessages([]);
+      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${deletedId}`, { method: "DELETE" });
       await loadThreads();
     } catch (error) {
+      deletedThreadIdsRef.current.delete(deletedId);
+      await loadThreads();
       setNotice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -937,8 +973,8 @@ export function EmailInboxPage() {
                   <span className="email-folder-icon">{f.icon}</span>
                   {!sidebarCollapsed && <span>{f.label}</span>}
                 </span>
-                {!sidebarCollapsed && folder === f.id && threads.length > 0 && (
-                  <span className="email-folder-count">({threads.length})</span>
+                {!sidebarCollapsed && (
+                  <span className="email-folder-count">({folderCounts[f.id as keyof typeof folderCounts]})</span>
                 )}
               </button>
             ))}
@@ -1004,7 +1040,13 @@ export function EmailInboxPage() {
               <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
                 <strong style={{ display: "block", marginBottom: 4 }}>No emails in {folder}</strong>
-                <small>Incoming messages will appear here automatically.</small>
+                <small>{({
+                  inbox: "Incoming messages will appear here automatically.",
+                  sent: "Emails you send will appear here.",
+                  drafts: "Saved drafts will appear here.",
+                  archived: "Archived conversations will appear here.",
+                  spam: "Messages marked as spam will appear here.",
+                } as const)[folder]}</small>
               </div>
             ) : (
               threads.map((t) => {

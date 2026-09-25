@@ -342,6 +342,10 @@ export function EmailSettingsPage() {
 
   async function createPermissionKey(event: FormEvent) {
     event.preventDefault();
+    if (selectedCompanyId === "personal") {
+      setNotice("Scoped integration keys require a Company. Your signed-in user permissions protect the personal mailbox.");
+      return;
+    }
     if (!selectedCompanyId || selectedEmailPermissions.length === 0) return;
     setSavingPermissionKey(true);
     setCreatedPermissionToken(null);
@@ -694,12 +698,12 @@ export function EmailSettingsPage() {
       const actions: any = {};
       if (rulePriority) actions.setPriority = rulePriority;
       if (ruleMode) actions.setMode = ruleMode;
-      if (ruleAgentId) actions.setAgentId = ruleAgentId;
+      if (selectedCompanyId !== "personal" && ruleAgentId) actions.setAgentId = ruleAgentId;
       if (ruleRequireApproval) actions.requireApproval = true;
-      if (ruleCreateTask) actions.createTask = true;
+      if (selectedCompanyId !== "personal" && ruleCreateTask) actions.createTask = true;
       if (ruleAutoTagSpam) actions.autoTagSpam = true;
       if (ruleTemplateId) actions.autoReplyTemplateId = ruleTemplateId;
-      if (ruleWorkflowId) actions.startWorkflowId = ruleWorkflowId;
+      if (selectedCompanyId !== "personal" && ruleWorkflowId) actions.startWorkflowId = ruleWorkflowId;
 
       if (editingRuleId) {
         const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules/${editingRuleId}`, {
@@ -949,6 +953,10 @@ export function EmailSettingsPage() {
                 value={selectedCompanyId}
                 onChange={(e) => {
                   setSelectedCompanyId(e.target.value);
+                setAgentId("");
+                setRuleAgentId("");
+                setRuleWorkflowId("");
+                setRuleCreateTask(false);
                   setSearchParams({ company: e.target.value }, { replace: true });
                 }}
                 className="email-scope-select"
@@ -1833,6 +1841,13 @@ export function EmailSettingsPage() {
 
       {/* GRANULAR EMAIL PERMISSIONS */}
       {activeTab === "permissions" && (
+        selectedCompanyId === "personal" ? (
+          <div className="automations-empty-card">
+            <div className="automations-empty-icon">🔒</div>
+            <h3>Personal mailbox access</h3>
+            <p>Your personal mailbox is protected by your signed-in user permissions. Scoped integration keys are available only when a Company mailbox owner is selected.</p>
+          </div>
+        ) : (
         <div className="automations-table-container">
           <div style={{ padding: "20px", borderBottom: "1px solid #f1f5f9" }}>
             <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Scoped Email Access</h3>
@@ -1886,6 +1901,7 @@ export function EmailSettingsPage() {
             </tbody>
           </table>
         </div>
+        )
       )}
 
       {/* ADD / EDIT ACCOUNT DRAWER */}
@@ -1895,7 +1911,7 @@ export function EmailSettingsPage() {
             <header>
               <div>
                 <span>Email Accounts</span>
-                <h2>{editingId ? "Edit Email Account" : "Add Corporate Email Account"}</h2>
+                <h2>{editingId ? "Edit Email Account" : "Add Email Account"}</h2>
               </div>
               <button
                 type="button"
@@ -1923,7 +1939,7 @@ export function EmailSettingsPage() {
                 </p>
                 <label>
                   <span>Mailbox Owner <strong style={{ color: "#dc2626" }}>*</strong></span>
-                  <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setAgentId(""); }}>
+                  <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setAgentId(""); setRuleAgentId(""); setRuleWorkflowId(""); setRuleCreateTask(false); }}>
                     <option value="personal">Personal / No Company</option>
                     {companies.map((company) => <option key={company.id} value={company.id}>Company: {company.name}</option>)}
                   </select>
@@ -2159,8 +2175,8 @@ export function EmailSettingsPage() {
                   <label><span>Per recipient / day</span><input type="number" min="1" value={maxPerRecipientDaily} onChange={(e) => setMaxPerRecipientDaily(Number(e.target.value))} /></label>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label><span>Company emails / hour</span><input type="number" min="1" value={maxCompanyPerHour} onChange={(e) => setMaxCompanyPerHour(Number(e.target.value))} /></label>
-                  <label><span>Company emails / day</span><input type="number" min="1" value={maxCompanyPerDay} onChange={(e) => setMaxCompanyPerDay(Number(e.target.value))} /></label>
+                  <label><span>{selectedCompanyId === "personal" ? "Personal mailbox / hour" : "Company emails / hour"}</span><input type="number" min="1" value={maxCompanyPerHour} onChange={(e) => setMaxCompanyPerHour(Number(e.target.value))} /></label>
+                  <label><span>{selectedCompanyId === "personal" ? "Personal mailbox / day" : "Company emails / day"}</span><input type="number" min="1" value={maxCompanyPerDay} onChange={(e) => setMaxCompanyPerDay(Number(e.target.value))} /></label>
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={followupEnabled} onChange={(e) => setFollowupEnabled(e.target.checked)} />
@@ -2333,7 +2349,7 @@ export function EmailSettingsPage() {
                 </label>
                 <label>
                   <span>Assign to Agent</span>
-                  <select value={ruleAgentId} onChange={(e) => setRuleAgentId(e.target.value)}>
+                  <select value={ruleAgentId} onChange={(e) => setRuleAgentId(e.target.value)} disabled={selectedCompanyId === "personal"}>
                     <option value="">Don't reassign agent</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
@@ -2353,7 +2369,7 @@ export function EmailSettingsPage() {
                 </label>
                 <label>
                   <span>Start Existing Workflow</span>
-                  <select value={ruleWorkflowId} onChange={(e) => setRuleWorkflowId(e.target.value)}>
+                  <select value={ruleWorkflowId} onChange={(e) => setRuleWorkflowId(e.target.value)} disabled={selectedCompanyId === "personal"}>
                     <option value="">Do not start a workflow</option>
                     {workflows.map((workflow) => (
                       <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
@@ -2365,8 +2381,8 @@ export function EmailSettingsPage() {
                   <span>Always require human approval</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input type="checkbox" checked={ruleCreateTask} onChange={(e) => setRuleCreateTask(e.target.checked)} />
-                  <span>Create an Agent Task when this rule matches</span>
+                  <input type="checkbox" checked={ruleCreateTask} disabled={selectedCompanyId === "personal"} onChange={(e) => setRuleCreateTask(e.target.checked)} />
+                  <span>{selectedCompanyId === "personal" ? "Agent Tasks require a Company mailbox" : "Create an Agent Task when this rule matches"}</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleAutoTagSpam} onChange={(e) => setRuleAutoTagSpam(e.target.checked)} />
