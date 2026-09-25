@@ -691,4 +691,38 @@ describe("Email / AI Inbox Module", () => {
     expect(response.json().account.smtpConfig.password).toBeUndefined();
     await app.close();
   });
+
+  it("33. Supports a private mailbox without a Company and rejects duplicate connections", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const app = Fastify();
+    registerEmailInboxRoutes(app, {
+      auth: { authenticate: async () => mockAuth },
+      store: {
+        getCompany: async (_context: AuthContext, companyId: string) => {
+          if (companyId === "personal" || companyId.startsWith("personal:")) throw new Error("Personal scope must not require a Company");
+          return { id: companyId, name: "Company" };
+        },
+      } as any,
+      repo: isolatedRepo,
+    });
+    const mailbox = {
+      emailAddress: "personal@example.com", mode: "manual", testMode: true,
+      imapConfig: { authType: "password", host: "mail.example.com", port: 993, secure: true, username: "personal@example.com", password: "secret" },
+      smtpConfig: { authType: "password", host: "mail.example.com", port: 465, secure: true, username: "personal@example.com", password: "secret" },
+    };
+
+    const created = await app.inject({ method: "POST", url: "/companies/personal/email-accounts", payload: mailbox });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().account).toMatchObject({ emailAddress: "personal@example.com", agentId: null, testMode: true });
+    expect(created.json().account.companyId).toMatch(/^personal:[0-9a-f]{32}$/);
+
+    const listed = await app.inject({ method: "GET", url: "/companies/personal/email-accounts" });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().accounts).toHaveLength(1);
+
+    const duplicate = await app.inject({ method: "POST", url: "/companies/another-company/email-accounts", payload: mailbox });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error.message).toMatch(/already connected/i);
+    await app.close();
+  });
 });

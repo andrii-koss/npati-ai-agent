@@ -25,8 +25,12 @@ function presentEmailAccount(account: CompanyEmailAccount): CompanyEmailAccount 
 }
 
 function err(reply: FastifyReply, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  const status = (error as any)?.status || 400;
+  const duplicateMailbox = (error as any)?.code === "23505"
+    && (error as any)?.constraint === "company_email_accounts_user_address_unique";
+  const message = duplicateMailbox
+    ? "This email address is already connected. Edit the existing account instead of adding it again."
+    : error instanceof Error ? error.message : String(error);
+  const status = duplicateMailbox ? 409 : (error as any)?.status || 400;
   return reply.code(status).send({ error: { message } });
 }
 
@@ -57,6 +61,22 @@ async function ctx(auth: AuthProvider, r: FastifyRequest, permission: EmailPermi
   return scope;
 }
 
+const PERSONAL_EMAIL_SCOPE = "personal";
+
+function personalEmailScopeId(context: AuthContext): string {
+  return `personal:${createHash("sha256").update(`${context.workspaceId}:${context.userId}`).digest("hex").slice(0, 32)}`;
+}
+
+async function resolveEmailScope(store: WorkspaceStore, context: AuthContext, requestedScope: string): Promise<string> {
+  const personalScope = personalEmailScopeId(context);
+  if (requestedScope === PERSONAL_EMAIL_SCOPE || requestedScope === personalScope) return personalScope;
+  if (requestedScope.startsWith(`${PERSONAL_EMAIL_SCOPE}:`)) {
+    throw Object.assign(new Error("This personal email scope belongs to another user."), { status: 403 });
+  }
+  await store.getCompany(context, requestedScope);
+  return requestedScope;
+}
+
 export function registerEmailInboxRoutes(
   app: FastifyInstance,
   options: {
@@ -80,7 +100,7 @@ export function registerEmailInboxRoutes(
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-accounts", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:view");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const accounts = await repo.listAccounts(c, r.params.companyId);
       return reply.code(200).send({ accounts: accounts.map(presentEmailAccount) });
     } catch (e) {
@@ -108,10 +128,15 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-accounts", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       if (!r.body?.emailAddress || !r.body.emailAddress.includes("@")) {
         throw new Error("Valid emailAddress is required.");
+      }
+
+      const duplicate = await repo.findUserAccountByEmail(c, r.body.emailAddress);
+      if (duplicate) {
+        throw Object.assign(new Error("This email address is already connected. Edit the existing account instead of adding it again with another authentication method."), { status: 409 });
       }
 
       const account = await repo.createAccount(c, r.params.companyId, r.body);
@@ -137,7 +162,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:view");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
         if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
         return reply.code(200).send({ account: presentEmailAccount(account) });
@@ -153,7 +178,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-accounts/:accountId", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const account = await repo.updateAccount(c, r.params.companyId, r.params.accountId, r.body || {});
       return reply.code(200).send({ account: presentEmailAccount(account) });
     } catch (e) {
@@ -166,7 +191,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:manage_accounts");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         await repo.deleteAccount(c, r.params.companyId, r.params.accountId);
         return reply.code(200).send({ deleted: true });
       } catch (e) {
@@ -181,7 +206,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-accounts/:accountId/oauth/authorize", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
       if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
       const authorizationUrl = new URL(r.body.authorizationUrl);
@@ -263,7 +288,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-accounts/:accountId/test-connection", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
       if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
 
@@ -300,7 +325,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-accounts/:accountId/dns-check", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:view");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
       if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
 
@@ -327,7 +352,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/compose", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:send_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const accounts = await repo.listAccounts(c, r.params.companyId);
       const account = accounts.find((item) => item.id === r.body?.accountId);
       if (!account) throw Object.assign(new Error("Select a valid company email account."), { status: 400 });
@@ -411,7 +436,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:read_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       const threads = await repo.listThreads(c, r.params.companyId, {
         folder: r.query.folder,
@@ -434,7 +459,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:read_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
         if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
@@ -443,7 +468,10 @@ export function registerEmailInboxRoutes(
         const previousThreads = (await repo.listThreads(c, r.params.companyId, { search: thread.customerEmail, limit: 50 }))
           .filter((item) => item.id !== thread.id && item.customerEmail === thread.customerEmail)
           .map((item) => ({ id: item.id, subject: item.subject, status: item.status, priority: item.priority, lastMessageAt: item.lastMessageAt }));
-        const relatedTasks = (await store.listCompanyAgentRuns(c, r.params.companyId, 100))
+        const companyRuns = r.params.companyId.startsWith(`${PERSONAL_EMAIL_SCOPE}:`)
+          ? []
+          : await store.listCompanyAgentRuns(c, r.params.companyId, 100);
+        const relatedTasks = companyRuns
           .filter((run) => run.task.includes(thread.customerEmail) || run.task.includes(thread.id))
           .slice(0, 20)
           .map((run) => ({ id: run.id, task: run.task, status: run.status, createdAt: run.createdAt }));
@@ -477,7 +505,7 @@ export function registerEmailInboxRoutes(
           ? "email:read_messages"
           : "email:send_messages";
       const c = await ctx(auth, r, requiredPermission);
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const before = await repo.getThread(c, r.params.companyId, r.params.threadId);
       if (!before) throw Object.assign(new Error("Thread not found"), { status: 404 });
       const thread = await repo.updateThread(c, r.params.companyId, r.params.threadId, r.body || {});
@@ -502,7 +530,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:delete_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
         if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
         const threadMessages = attachmentStorage ? await repo.listMessages(c, r.params.companyId, thread.id) : [];
@@ -531,7 +559,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:read_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const logs = auditRepo
           ? await auditRepo.listResourceLogs(c, r.params.companyId, "company_email_thread", r.params.threadId)
           : [];
@@ -559,7 +587,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages", async (r, reply) => {
     try {
       const c = await ctx(auth, r, r.body?.approvedDraftMessageId ? "email:approve_drafts" : "email:send_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
       if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
@@ -675,7 +703,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages/:messageId", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:send_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const existing = (await repo.listMessages(c, r.params.companyId, r.params.threadId))
         .find((message) => message.id === r.params.messageId);
       if (!existing) throw Object.assign(new Error("Message not found"), { status: 404 });
@@ -706,7 +734,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages/:messageId/delivery-event", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const allowed = new Set(["delivered", "bounced", "rejected", "failed"]);
       if (!allowed.has(r.body?.status)) throw new Error("Unsupported delivery status");
       const message = await repo.updateMessage(c, r.params.companyId, r.params.messageId, {
@@ -738,7 +766,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads/:threadId/lock", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:read_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       if (r.body?.action === "acquire") {
         const acquired = await repo.acquireLock(c, r.params.companyId, r.params.threadId);
@@ -759,7 +787,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/threads/:threadId/takeover", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const thread = await repo.setHumanTakeover(c, r.params.companyId, r.params.threadId, r.body?.takeover ?? true);
 
       if (auditRepo) {
@@ -800,7 +828,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/inbound", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       const result = await aiProcessor.processInbound(c, r.params.companyId, r.body);
       return reply.code(200).send(result);
@@ -821,7 +849,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/simulate", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
       const accounts = await repo.listAccounts(c, r.params.companyId);
       const targetAccount = accounts[0];
@@ -850,7 +878,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:view");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const contacts = await repo.listContacts(c, r.params.companyId);
         return reply.code(200).send({ contacts });
       } catch (e) {
@@ -864,7 +892,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:view");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const contact = await repo.getContact(c, r.params.companyId, r.params.email);
         return reply.code(200).send({ contact });
       } catch (e) {
@@ -886,7 +914,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/contacts/:email", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:manage_accounts");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const contact = await repo.upsertContact(c, r.params.companyId, {
         email: r.params.email,
         ...r.body,
@@ -904,7 +932,7 @@ export function registerEmailInboxRoutes(
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/templates", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:view");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const templates = await repo.listTemplates(c, r.params.companyId);
       return reply.code(200).send({ templates });
     } catch (e) {
@@ -918,7 +946,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/templates", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const template = await repo.createTemplate(c, r.params.companyId, r.body);
       return reply.code(201).send({ template });
     } catch (e) {
@@ -932,7 +960,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/templates/:templateId", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const template = await repo.updateTemplate(c, r.params.companyId, r.params.templateId, r.body || {});
       return reply.code(200).send({ template });
     } catch (e) {
@@ -945,7 +973,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:configure_autopilot");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         await repo.deleteTemplate(c, r.params.companyId, r.params.templateId);
         return reply.code(200).send({ deleted: true });
       } catch (e) {
@@ -961,7 +989,7 @@ export function registerEmailInboxRoutes(
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/rules", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:view");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const rules = await repo.listRules(c, r.params.companyId);
       return reply.code(200).send({ rules });
     } catch (e) {
@@ -975,7 +1003,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/rules", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const rule = await repo.createRule(c, r.params.companyId, r.body);
       return reply.code(201).send({ rule });
     } catch (e) {
@@ -989,7 +1017,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/rules/:ruleId", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:configure_autopilot");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const rule = await repo.updateRule(c, r.params.companyId, r.params.ruleId, r.body || {});
       return reply.code(200).send({ rule });
     } catch (e) {
@@ -1002,7 +1030,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:configure_autopilot");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         await repo.deleteRule(c, r.params.companyId, r.params.ruleId);
         return reply.code(200).send({ deleted: true });
       } catch (e) {
@@ -1018,7 +1046,7 @@ export function registerEmailInboxRoutes(
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-inbox/analytics", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:view_analytics");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const analytics = await repo.getAnalytics(c, r.params.companyId);
       return reply.code(200).send({ analytics });
     } catch (e) {
@@ -1031,7 +1059,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:read_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         const notifications = await repo.listNotifications(c, r.params.companyId, Number(r.query.limit || 50));
         return reply.code(200).send({ notifications });
       } catch (e) { return err(reply, e); }
@@ -1043,7 +1071,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:read_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         await repo.markNotificationRead(c, r.params.companyId, r.params.notificationId);
         return reply.code(200).send({ read: true });
       } catch (e) { return err(reply, e); }
@@ -1055,7 +1083,7 @@ export function registerEmailInboxRoutes(
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "email:read_messages");
-        await store.getCompany(c, r.params.companyId);
+        r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
         if (!attachmentStorage || !/^[0-9a-f-]{36}$/i.test(r.params.attachmentId)) return reply.code(404).send();
         const opened = await attachmentStorage.open(c, r.params.companyId, r.params.attachmentId);
         if (!opened) return reply.code(404).send();
@@ -1080,7 +1108,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/inspect-link", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:read_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const sender = r.body.senderEmail?.trim();
       const contact = sender ? await repo.getContact(c, r.params.companyId, sender) : null;
       const result = agentTools.inspectLinkSecurity(r.body.url, sender, contact?.isBlacklisted === true);
@@ -1102,7 +1130,7 @@ export function registerEmailInboxRoutes(
   }>("/companies/:companyId/email-inbox/extract-code", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:read_messages");
-      await store.getCompany(c, r.params.companyId);
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const result = agentTools.extractVerification(r.body.text || "");
       return reply.code(200).send(result);
     } catch (e) {

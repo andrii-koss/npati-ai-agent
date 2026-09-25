@@ -283,6 +283,24 @@ export class EmailInboxRepository {
     return null;
   }
 
+  async findUserAccountByEmail(ctx: AuthContext, emailAddress: string): Promise<CompanyEmailAccount | null> {
+    const normalized = emailAddress.trim().toLowerCase();
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailAccount>(
+        `SELECT ${accountCols} FROM company_email_accounts
+         WHERE workspace_id = $1 AND user_id = $2 AND LOWER(email_address) = $3 AND deleted_at IS NULL
+         LIMIT 1`,
+        [ctx.workspaceId, ctx.userId, normalized]
+      );
+      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
+    }
+    for (const account of this.memoryAccounts.values()) {
+      if (account.workspaceId === ctx.workspaceId && account.userId === ctx.userId
+        && account.emailAddress.toLowerCase() === normalized) return this.decryptAccountSecrets(account);
+    }
+    return null;
+  }
+
   async listAccountsForWorker(): Promise<CompanyEmailAccount[]> {
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailAccount>(

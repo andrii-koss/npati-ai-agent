@@ -4,10 +4,10 @@
 
 Позначення: ✅ реалізовано; 🟡 реалізовано частково; ⬜ не реалізовано.
 
-1. ✅ **Settings → Email і декілька незалежних адрес.** Є сторінки Email Settings та AI Inbox, CRUD email accounts і прив’язка до Company.
+1. ✅ **Settings → Email і декілька незалежних адрес.** Є сторінки Email Settings та AI Inbox, CRUD email accounts, персональний режим без Company і опційна прив’язка до Company. Одна адреса не може бути повторно підключена тим самим користувачем іншим способом авторизації.
 2. ✅ **Підключення Email.** Реальні IMAP/SMTP, password/XOAUTH2, automatic refresh, encrypted credentials, background polling, SMTP dispatch і browser OAuth authorization-code + PKCE callback реалізовані. Test Connection виконує справжню автентифікацію.
 3. ✅ **DNS перевірка.** MX/SPF/DKIM/DMARC, статуси та рекомендації доступні в UI.
-4. ✅ **Призначення AI агента.** Email account і routing rules використовують наявні Company Agents.
+4. ✅ **Призначення AI агента.** Призначення Company Agent опційне й за замовчуванням Unassigned; для Company-scoped email account і routing rules використовуються наявні Company Agents.
 5. ✅ **Manual / Approval / Autopilot.** Реалізовані draft approval, SMTP queue, створення Task і запуск наявної Automation за правилом.
 6. ✅ **Inbox.** Inbox/Sent/Drafts/Archived/Spam, threads, фільтри, пошук, статуси, priority, вкладення й повний thread реалізовані.
 7. ✅ **Статуси листів.** New, AI Processing, Draft Ready, Waiting Approval/Customer/Human, Answered, Closed і Failed підтримуються.
@@ -31,7 +31,7 @@
 25. ✅ **Email Rules.** Account, sender/domain wildcard, subject/body, intent, priority, language, VIP, attachments/MIME type; mode/priority/agent/approval/template/Task/workflow/spam actions реалізовані.
 26. ✅ **Human Takeover.** Take Over / Return to AI та блокування Autopilot реалізовані.
 27. ✅ **Архітектурні інтеграції.** Company/Users/Agents/Tasks/Contacts/Automations/Tools/Notifications/Analytics/Audit/Permissions/document extractor та спільний object-storage/file lifecycle для email attachments інтегровані.
-28. ✅ **UI / UX.** Використані наявні layouts, tables, drawers, status badges, confirmation dialog, empty/loading/error patterns; нових UI libraries немає.
+28. ✅ **UI / UX.** Використані наявні layouts, tables, drawers, status badges, confirmation dialog, empty/loading/error patterns; нових UI libraries немає. Обов’язкові поля позначені, мають пояснення та inline validation/error у drawer з підсвічуванням і фокусом першого некоректного поля.
 29. ✅ **Permissions.** API перевіряє окремі email scopes із сумісним fallback до наявних workspace/business/admin ролей; scopes підтримані API/remote keys, а Settings → Email має UI створення й відкликання granular email access profiles.
 30. 🟡 **Фінальна перевірка.** Автоматизовані сценарії покривають idempotency, concurrency, locks, retry queue, rate limits, test mode, takeover, rules, AI engine, task continuation, real local SMTP/IMAP та attachments. Повний staging E2E з реальними зовнішніми mailbox/OAuth/provider delivery credentials потребує відповідного середовища й секретів.
 

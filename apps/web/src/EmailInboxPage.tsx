@@ -173,7 +173,7 @@ export function EmailInboxPage() {
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("personal");
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
@@ -306,7 +306,7 @@ export function EmailInboxPage() {
       .then((res) => {
         setCompanies(res.companies);
         const requested = searchParams.get("company");
-        const sel = requested && res.companies.some((company) => company.id === requested) ? requested : res.companies[0]?.id ?? "";
+        const sel = requested === "personal" || (requested && res.companies.some((company) => company.id === requested)) ? requested : "personal";
         setSelectedCompanyId(sel);
       })
       .catch((e) => setNotice(e.message));
@@ -624,20 +624,17 @@ export function EmailInboxPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            {companies.length > 1 && (
-              <select
-                aria-label="Select company"
-                value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-                className="page-size-select"
-              >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              aria-label="Select mailbox owner"
+              value={selectedCompanyId}
+              onChange={(e) => setSelectedCompanyId(e.target.value)}
+              className="page-size-select"
+            >
+              <option value="personal">Personal / No Company</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>Company: {c.name}</option>
+              ))}
+            </select>
             <button
               type="button"
               className="button-primary automations-action-primary"
@@ -648,7 +645,7 @@ export function EmailInboxPage() {
               + Compose Email
             </button>
             <Link
-              to="/settings/email"
+              to={`/settings/email?company=${encodeURIComponent(selectedCompanyId)}`}
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >

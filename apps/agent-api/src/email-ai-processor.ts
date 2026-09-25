@@ -458,7 +458,8 @@ export class EmailAIProcessor {
       };
     }
 
-    if (shouldCreateTask && this.hooks.createTask) {
+    const hasCompanyScope = !companyId.startsWith("personal:");
+    if (hasCompanyScope && shouldCreateTask && this.hooks.createTask) {
       const taskId = await this.hooks.createTask({ ctx, companyId, thread, inboundMessage, assignedAgentId: overrideAgentId });
       if (this.auditRepo) {
         await this.auditRepo.log(ctx, companyId, {
@@ -468,7 +469,7 @@ export class EmailAIProcessor {
       }
     }
 
-    if (workflowId && this.hooks.startWorkflow) {
+    if (hasCompanyScope && workflowId && this.hooks.startWorkflow) {
       const workflowRunId = await this.hooks.startWorkflow({
         ctx, companyId, thread, inboundMessage, workflowId,
       });
