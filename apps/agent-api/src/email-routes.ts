@@ -379,7 +379,10 @@ export function registerEmailInboxRoutes(
         if (!account.testMode && account.status !== "connected") {
           throw Object.assign(new Error(`Email account is not connected (${account.status}). Open Email Settings and run Test Connection first.`), { status: 409 });
         }
-        const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!);
+        const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!, {
+          isHuman: true,
+          skipRecipientLimit: true,
+        });
         if (!quota.allowed) throw Object.assign(new Error(`Rate limit exceeded: ${quota.reason}`), { status: 429 });
       }
 
@@ -614,7 +617,13 @@ export function registerEmailInboxRoutes(
 
       // Rate limit check if sending live
       if (!isDraft && account) {
-        const rateLimit = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0] || thread.customerEmail);
+        const isHuman = Boolean(c.userId);
+        const rateLimit = await repo.reserveSendQuota(
+          r.params.companyId,
+          account,
+          toAddresses[0] || thread.customerEmail,
+          { isHuman, skipRecipientLimit: isHuman }
+        );
         if (!rateLimit.allowed) {
           throw new Error(`Rate limit exceeded: ${rateLimit.reason}`);
         }

@@ -174,7 +174,7 @@ export class EmailAIProcessor {
       fallbackLanguage: "en",
       imapConfig: {},
       smtpConfig: {},
-      rateLimits: { maxPerHour: 50, maxPerDay: 500, maxPerRecipientDaily: 5, maxFollowups: 3 },
+      rateLimits: { maxPerHour: 100, maxPerDay: 1000, maxPerRecipientDaily: 100, maxFollowups: 3 },
       signatureConfig: {},
       followupConfig: { enabled: false, delayDays: 2, maxFollowups: 2, action: "draft" },
       createdAt: new Date().toISOString(),
