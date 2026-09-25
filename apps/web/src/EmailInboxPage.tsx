@@ -72,6 +72,31 @@ interface ContactDetails {
   previousThreadsCount?: number;
 }
 
+function getStatusLabel(status: EmailThread["status"]): string {
+  switch (status) {
+    case "draft_ready":
+      return "AI Draft Ready";
+    case "waiting_approval":
+      return "waiting approval";
+    case "waiting_customer":
+      return "waiting customer";
+    case "waiting_human":
+      return "waiting human";
+    case "ai_processing":
+      return "AI processing";
+    case "answered":
+      return "answered";
+    case "closed":
+      return "closed";
+    case "failed":
+      return "failed";
+    case "new":
+      return "new";
+    default:
+      return (status as string).replace("_", " ");
+  }
+}
+
 function sanitizeEmailHtml(rawHtml: string): string {
   const source = new DOMParser().parseFromString(rawHtml, "text/html");
   const target = document.implementation.createHTMLDocument("");
@@ -974,16 +999,9 @@ export function EmailInboxPage() {
                     </div>
 
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                      <span
-                        className={`automation-status-btn ${
-                          t.status === "answered" ? "active" : t.status === "draft_ready" ? "paused" : ""
-                        }`}
-                        style={{ fontSize: 10, padding: "2px 8px", cursor: "default" }}
-                      >
-                        <span className="automation-status-dot" />
-                        {t.status === "draft_ready"
-                          ? "AI Draft Ready"
-                          : t.status.replace("_", " ")}
+                      <span className={`email-status-pill status-${t.status}`}>
+                        <span className="email-status-dot" />
+                        {getStatusLabel(t.status)}
                       </span>
 
                       {t.priority === "urgent" && (
@@ -1054,14 +1072,9 @@ export function EmailInboxPage() {
                         {activeThread.subject}
                       </strong>
 
-                      <span
-                        className={`automation-status-btn ${
-                          activeThread.status === "answered" ? "active" : activeThread.status === "draft_ready" ? "paused" : ""
-                        }`}
-                        style={{ fontSize: 10, padding: "2px 6px", cursor: "default", flexShrink: 0 }}
-                      >
-                        <span className="automation-status-dot" />
-                        {activeThread.status === "draft_ready" ? "AI Draft Ready" : activeThread.status.replace("_", " ")}
+                      <span className={`email-status-pill status-${activeThread.status}`} style={{ flexShrink: 0 }}>
+                        <span className="email-status-dot" />
+                        {getStatusLabel(activeThread.status)}
                       </span>
 
                       <span className="email-header-compact-sender">
@@ -1126,14 +1139,9 @@ export function EmailInboxPage() {
                               VIP
                             </span>
                           )}
-                          <span
-                            className={`automation-status-btn ${
-                              activeThread.status === "answered" ? "active" : activeThread.status === "draft_ready" ? "paused" : ""
-                            }`}
-                            style={{ fontSize: 11, cursor: "default" }}
-                          >
-                            <span className="automation-status-dot" />
-                            {activeThread.status === "draft_ready" ? "AI Draft Ready" : activeThread.status.replace("_", " ")}
+                          <span className={`email-status-pill status-${activeThread.status}`}>
+                            <span className="email-status-dot" />
+                            {getStatusLabel(activeThread.status)}
                           </span>
                         </div>
                         <div className="email-detail-sender-row">
@@ -1560,7 +1568,7 @@ export function EmailInboxPage() {
                   onChange={(e) => setReplyText(e.target.value)}
                   style={{ minHeight: "65px", maxHeight: "150px", resize: "vertical" }}
                 />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+                <div className="email-composer-footer-row" style={{ marginTop: 4 }}>
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#475569", cursor: "pointer", margin: 0 }}>
                     <span style={{ fontWeight: 600 }}>Attach files</span>
                     <input
@@ -1580,9 +1588,9 @@ export function EmailInboxPage() {
                   </label>
                   <button
                     type="submit"
-                    className="button-primary automations-action-primary"
+                    className="button-primary automations-action-primary email-composer-send-btn"
                     disabled={sending || !replyText.trim()}
-                    style={{ fontSize: 13, padding: "7px 20px", fontWeight: 700 }}
+                    style={{ fontSize: 13, padding: "7px 20px", fontWeight: 700, marginLeft: "auto" }}
                   >
                     {sending ? "Sending..." : "Send Reply"}
                   </button>
