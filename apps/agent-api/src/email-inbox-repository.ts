@@ -64,6 +64,11 @@ export function normalizeEmailSubject(subject?: string | null): string {
   return clean.replace(/\s+/g, " ").trim();
 }
 
+export function subjectCompareKey(subject?: string | null): string {
+  const norm = normalizeEmailSubject(subject);
+  return norm.toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
 export function extractCandidateMessageIds(headerValue?: string | null): string[] {
   if (!headerValue || typeof headerValue !== "string") return [];
   const candidates = new Set<string>();
@@ -534,6 +539,7 @@ export class EmailInboxRepository {
     } = {}
   ): Promise<CompanyEmailThread[]> {
     const limit = Math.min(100, Math.max(1, filter.limit || 50));
+    await this.consolidateCustomerDuplicates(ctx, companyId).catch(() => undefined);
 
     if (this.pool) {
       const conditions: string[] = ["workspace_id = $1", "company_id = $2"];
@@ -636,6 +642,60 @@ export class EmailInboxRepository {
     return null;
   }
 
+  async mergeThreads(
+    ctx: AuthContext,
+    companyId: string,
+    targetThreadId: string,
+    sourceThreadId: string
+  ): Promise<void> {
+    if (!targetThreadId || !sourceThreadId || targetThreadId === sourceThreadId) return;
+    if (this.pool) {
+      await this.pool.query(
+        `UPDATE company_email_messages SET thread_id = $1 WHERE workspace_id = $2 AND thread_id = $3`,
+        [targetThreadId, ctx.workspaceId, sourceThreadId]
+      );
+      await this.pool.query(
+        `DELETE FROM company_email_threads WHERE workspace_id = $1 AND id = $2`,
+        [ctx.workspaceId, sourceThreadId]
+      );
+      return;
+    }
+    for (const m of this.memoryMessages.values()) {
+      if (m.threadId === sourceThreadId) {
+        m.threadId = targetThreadId;
+      }
+    }
+    this.memoryThreads.delete(sourceThreadId);
+  }
+
+  async consolidateCustomerDuplicates(ctx: AuthContext, companyId: string): Promise<void> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailThread>(
+        `SELECT ${threadCols} FROM company_email_threads
+         WHERE workspace_id = $1
+         ORDER BY last_message_at DESC
+         LIMIT 100`,
+        [ctx.workspaceId]
+      );
+      const threads = result.rows;
+      const seen = new Map<string, CompanyEmailThread>();
+      for (const t of threads) {
+        const compare = subjectCompareKey(t.subject);
+        if (!compare) continue;
+        const key = `${t.customerEmail.toLowerCase()}:${compare}`;
+        const existing = seen.get(key);
+        if (existing) {
+          const target = existing.folder === "inbox" ? existing : t;
+          const source = target === existing ? t : existing;
+          await this.mergeThreads(ctx, companyId, target.id, source.id);
+          seen.set(key, target);
+        } else {
+          seen.set(key, t);
+        }
+      }
+    }
+  }
+
   async findMessageByReferenceIds(
     ctx: AuthContext,
     companyId: string,
@@ -653,17 +713,17 @@ export class EmailInboxRepository {
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailMessage>(
         `SELECT ${messageCols} FROM company_email_messages
-         WHERE workspace_id = $1 AND company_id = $2
-           AND (message_id = ANY($3::text[]) OR id::text = ANY($3::text[]))
+         WHERE workspace_id = $1
+           AND (message_id = ANY($2::text[]) OR id::text = ANY($2::text[]))
          ORDER BY created_at DESC
          LIMIT 1`,
-        [ctx.workspaceId, companyId, idList]
+        [ctx.workspaceId, idList]
       );
       return result.rows[0] ?? null;
     }
 
     for (const m of this.memoryMessages.values()) {
-      if (m.workspaceId === ctx.workspaceId && m.companyId === companyId) {
+      if (m.workspaceId === ctx.workspaceId) {
         if ((m.messageId && idList.includes(m.messageId)) || idList.includes(m.id)) {
           return m;
         }
@@ -676,22 +736,22 @@ export class EmailInboxRepository {
     ctx: AuthContext,
     companyId: string,
     customerEmail: string,
-    limit = 15
+    limit = 25
   ): Promise<CompanyEmailThread[]> {
     const cleanEmail = customerEmail.trim().toLowerCase();
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailThread>(
         `SELECT ${threadCols} FROM company_email_threads
-         WHERE workspace_id = $1 AND company_id = $2
-           AND LOWER(customer_email) = $3
+         WHERE workspace_id = $1
+           AND LOWER(customer_email) = $2
          ORDER BY last_message_at DESC
-         LIMIT $4`,
-        [ctx.workspaceId, companyId, cleanEmail, limit]
+         LIMIT $3`,
+        [ctx.workspaceId, cleanEmail, limit]
       );
       return result.rows;
     }
     return Array.from(this.memoryThreads.values())
-      .filter((t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId && t.customerEmail.toLowerCase() === cleanEmail)
+      .filter((t) => t.workspaceId === ctx.workspaceId && t.customerEmail.toLowerCase() === cleanEmail)
       .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
       .slice(0, limit);
   }
@@ -707,25 +767,44 @@ export class EmailInboxRepository {
       threadKey?: string | null;
     }
   ): Promise<CompanyEmailThread | null> {
-    // 1. Try In-Reply-To and References header lookup (Message-ID linkage)
+    // 1. Try In-Reply-To and References header lookup (Message-ID linkage across workspace)
     if (params.inReplyTo || params.references) {
       const parentMsg = await this.findMessageByReferenceIds(ctx, companyId, [params.inReplyTo, params.references]);
       if (parentMsg?.threadId) {
-        const thread = await this.getThread(ctx, companyId, parentMsg.threadId);
+        const thread = (await this.getThread(ctx, parentMsg.companyId, parentMsg.threadId))
+          || (await this.getThread(ctx, companyId, parentMsg.threadId));
         if (thread) return thread;
       }
     }
 
-    // 2. Try explicit threadKey if provided
+    const cleanEmail = params.customerEmail.trim().toLowerCase();
+    const targetCompare = subjectCompareKey(params.subject);
+    const recentThreads = await this.listRecentThreadsForCustomer(ctx, companyId, cleanEmail, 25);
+
+    // 2. Search recent threads for this customer email by normalized subject words
+    if (targetCompare) {
+      for (const candidate of recentThreads) {
+        const candidateCompare = subjectCompareKey(candidate.subject);
+        if (candidateCompare && candidateCompare === targetCompare) {
+          // Auto-merge any duplicate threads with this customer that share the topic
+          for (const other of recentThreads) {
+            if (other.id !== candidate.id && subjectCompareKey(other.subject) === targetCompare) {
+              await this.mergeThreads(ctx, companyId, candidate.id, other.id);
+            }
+          }
+          return candidate;
+        }
+      }
+    }
+
+    // 3. Try explicit threadKey if provided
     if (params.threadKey) {
       const thread = await this.findThreadByKey(ctx.workspaceId, companyId, params.threadKey);
       if (thread) return thread;
     }
 
-    const cleanEmail = params.customerEmail.trim().toLowerCase();
+    // 4. Try normalized threadKey and legacy key formats
     const cleanSubject = normalizeEmailSubject(params.subject);
-
-    // 3. Try normalized threadKey and legacy key formats
     if (cleanSubject) {
       const normalizedKey = `th_${cleanEmail.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent(cleanSubject.slice(0, 50).toLowerCase())}`;
       const thread = await this.findThreadByKey(ctx.workspaceId, companyId, normalizedKey);
@@ -746,12 +825,13 @@ export class EmailInboxRepository {
       if (legacyThreadRaw2) return legacyThreadRaw2;
     }
 
-    // 4. Fallback: Search recent threads for this customer email with matching normalized subject
-    const recentThreads = await this.listRecentThreadsForCustomer(ctx, companyId, cleanEmail, 15);
-    for (const candidate of recentThreads) {
-      const candidateNorm = normalizeEmailSubject(candidate.subject).toLowerCase();
-      if (candidateNorm && cleanSubject.toLowerCase() === candidateNorm) {
-        return candidate;
+    // 5. If this is a reply (subject starts with Re:, Fwd:, etc.) and there is an active ongoing thread
+    // with this customer, match the active thread!
+    const isReply = /^(re|fwd|fw|aw|antw|wg|odp)\s*[:\-]/i.test(params.subject.trim());
+    if (isReply) {
+      const activeRecent = recentThreads.find((t) => t.status !== "closed" && t.folder !== "spam");
+      if (activeRecent) {
+        return activeRecent;
       }
     }
 

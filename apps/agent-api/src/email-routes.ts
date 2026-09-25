@@ -388,11 +388,22 @@ export function registerEmailInboxRoutes(
         || rawAttachments.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0) > 25 * 1024 * 1024) {
         throw Object.assign(new Error("Attachments exceed the 20-file, 10 MB per file, or 25 MB total limit."), { status: 413 });
       }
-      const thread = await repo.createThread(c, r.params.companyId, {
-        emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
-        status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
-        folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
+      let thread = await repo.findMatchingThread(c, r.params.companyId, {
+        customerEmail: toAddresses[0]!,
+        subject,
       });
+      if (!thread) {
+        thread = await repo.createThread(c, r.params.companyId, {
+          emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
+          status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
+          folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
+        });
+      } else {
+        thread = await repo.updateThread(c, r.params.companyId, thread.id, {
+          lastMessageAt: new Date().toISOString(),
+          folder: isDraft ? "drafts" : "sent",
+        });
+      }
       const attachments = rawAttachments.length && attachmentStorage
         ? await attachmentStorage.persist(c, r.params.companyId, thread.id, rawAttachments)
         : rawAttachments;
