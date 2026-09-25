@@ -655,4 +655,40 @@ describe("Email / AI Inbox Module", () => {
     expect(jobs).toEqual([expect.objectContaining({ jobType: "send", emailAccountId: account.id })]);
     await app.close();
   });
+
+  it("32. Creates an SSL/TLS IMAP and SMTP account through the public API route", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const app = Fastify();
+    registerEmailInboxRoutes(app, {
+      auth: { authenticate: async () => mockAuth },
+      store: { getCompany: async () => ({ id: "mail-company", name: "Mail Company" }) } as any,
+      repo: isolatedRepo,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/companies/mail-company/email-accounts",
+      payload: {
+        emailAddress: "test@example.com",
+        displayName: "Test mailbox",
+        mode: "manual",
+        testMode: false,
+        imapConfig: { authType: "password", host: "mail.example.com", port: 993, secure: true, username: "test@example.com", password: "secret" },
+        smtpConfig: { authType: "password", host: "mail.example.com", port: 465, secure: true, username: "test@example.com", password: "secret" },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      account: {
+        emailAddress: "test@example.com",
+        status: "pending",
+        imapConfig: { host: "mail.example.com", port: 993, secure: true, username: "test@example.com" },
+        smtpConfig: { host: "mail.example.com", port: 465, secure: true, username: "test@example.com" },
+      },
+    });
+    expect(response.json().account.imapConfig.password).toBeUndefined();
+    expect(response.json().account.smtpConfig.password).toBeUndefined();
+    await app.close();
+  });
 });
