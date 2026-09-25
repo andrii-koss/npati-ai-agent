@@ -43,6 +43,14 @@ interface EmailThread {
   detectedLanguage?: string | null;
 }
 
+interface EmailAttachmentView {
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  url?: string;
+  contentBase64?: string;
+}
+
 interface EmailMessage {
   id: string;
   threadId: string;
@@ -54,7 +62,7 @@ interface EmailMessage {
   subject: string;
   bodyText: string;
   bodyHtml?: string | null;
-  attachments?: Array<{ filename: string; contentType: string; sizeBytes: number; url?: string; contentBase64?: string }>;
+  attachments?: EmailAttachmentView[];
   isDraft: boolean;
   isAiGenerated: boolean;
   deliveryStatus: string;
@@ -200,6 +208,68 @@ async function fileToEmailAttachment(file: File) {
   };
 }
 
+function EmailImageAttachment({
+  attachment,
+  onPreview,
+  onFallbackOpen,
+}: {
+  attachment: EmailAttachmentView;
+  onPreview: (source: string, filename: string) => void;
+  onFallbackOpen: () => void;
+}) {
+  const [source, setSource] = useState<string | null>(
+    attachment.contentBase64 ? `data:${attachment.contentType};base64,${attachment.contentBase64}` : null
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (attachment.contentBase64 || !attachment.url) return;
+    let active = true;
+    let objectUrl: string | null = null;
+    const headers = new Headers();
+    const token = getStoredAuthToken();
+    if (token) headers.set("authorization", `Bearer ${token}`);
+    fetch(attachment.url, { headers, cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Image load failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.contentBase64, attachment.url]);
+
+  if (failed || (!source && !attachment.url)) {
+    return (
+      <button type="button" className="automation-cron-pill" onClick={onFallbackOpen}>
+        📎 {attachment.filename}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="email-image-attachment"
+      onClick={() => source && onPreview(source, attachment.filename)}
+      disabled={!source}
+      title={source ? `Open ${attachment.filename}` : `Loading ${attachment.filename}`}
+    >
+      {source ? <img src={source} alt={attachment.filename} /> : <span>Loading image…</span>}
+      <small>{attachment.filename}</small>
+    </button>
+  );
+}
+
 export function EmailInboxPage() {
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -221,6 +291,8 @@ export function EmailInboxPage() {
   const [notifications, setNotifications] = useState<EmailNotification[]>([]);
   const [auditHistory, setAuditHistory] = useState<EmailAuditEntry[]>([]);
   const [mailboxRefreshVersion, setMailboxRefreshVersion] = useState(0);
+  const [threadOpenVersion, setThreadOpenVersion] = useState(0);
+  const [imagePreview, setImagePreview] = useState<{ source: string; filename: string } | null>(null);
   const threadRequestIdRef = useRef(0);
   const deletedThreadIdsRef = useRef(new Set<string>());
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -352,14 +424,20 @@ export function EmailInboxPage() {
 
   useEffect(() => {
     if (!latestInboundId) return;
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       const container = messageScrollRef.current;
       const latestInbound = latestInboundMessageRef.current;
       if (container && latestInbound) {
-        container.scrollTop = Math.max(0, latestInbound.offsetTop - container.offsetTop - 16);
+        const containerRect = container.getBoundingClientRect();
+        const messageRect = latestInbound.getBoundingClientRect();
+        container.scrollTo({
+          top: Math.max(0, container.scrollTop + messageRect.top - containerRect.top - 12),
+          behavior: "smooth",
+        });
       }
     });
-  }, [selectedThreadId, latestInboundId]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedThreadId, latestInboundId, threadOpenVersion]);
 
   function openCompose() {
     setComposeAccountId(selectedAccountId !== "all" ? selectedAccountId : accounts[0]?.id || "");
@@ -491,6 +569,8 @@ export function EmailInboxPage() {
 
   function openThread(thread: EmailThread) {
     setSelectedThreadId(thread.id);
+    setThreadOpenVersion((current) => current + 1);
+    setMailboxRefreshVersion((current) => current + 1);
     if (thread.unreadCount <= 0) return;
     const unreadCount = thread.unreadCount;
     setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, unreadCount: 0 } : item));
@@ -1100,12 +1180,9 @@ export function EmailInboxPage() {
                         {t.isVip && <span style={{ color: "#eab308", marginRight: 4 }}>★</span>}
                         {t.customerName || t.customerEmail}
                       </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
-                        <small className="email-thread-message-count" title="Messages in this conversation">✉ {t.messagesCount ?? 0}</small>
-                        <small style={{ fontSize: 11, color: "#64748b" }}>
-                          {new Date(t.lastMessageAt).toLocaleDateString()}
-                        </small>
-                      </span>
+                      <small style={{ fontSize: 11, color: "#64748b", flexShrink: 0 }}>
+                        {new Date(t.lastMessageAt).toLocaleDateString()}
+                      </small>
                     </div>
 
                     <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1128,6 +1205,7 @@ export function EmailInboxPage() {
                           High
                         </span>
                       )}
+                      <small className="email-thread-message-count" title="Messages in this conversation">✉ {t.messagesCount ?? 0}</small>
                     </div>
                   </div>
                 );
@@ -1548,8 +1626,15 @@ export function EmailInboxPage() {
 
                           {m.attachments && m.attachments.length > 0 && (
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-                              {m.attachments.map((att, i) => (
-                                <button key={i} type="button" className="automation-cron-pill" style={{ fontSize: 11, cursor: "pointer" }} onClick={() => openAttachment(att)}>
+                              {m.attachments.map((att, i) => /^image\//i.test(att.contentType) ? (
+                                <EmailImageAttachment
+                                  key={`${m.id}-image-${i}`}
+                                  attachment={att}
+                                  onPreview={(source, filename) => setImagePreview({ source, filename })}
+                                  onFallbackOpen={() => void openAttachment(att)}
+                                />
+                              ) : (
+                                <button key={`${m.id}-file-${i}`} type="button" className="automation-cron-pill" style={{ fontSize: 11, cursor: "pointer" }} onClick={() => openAttachment(att)}>
                                   📎 {att.filename} ({Math.round(att.sizeBytes / 1024)} KB)
                                 </button>
                               ))}
@@ -1837,6 +1922,16 @@ export function EmailInboxPage() {
               </footer>
             </form>
           </aside>
+        </div>
+      )}
+
+      {imagePreview && (
+        <div className="email-image-preview-backdrop" role="dialog" aria-modal="true" aria-label={imagePreview.filename} onClick={() => setImagePreview(null)}>
+          <button type="button" className="email-image-preview-close" aria-label="Close image preview" onClick={() => setImagePreview(null)}>×</button>
+          <figure onClick={(event) => event.stopPropagation()}>
+            <img src={imagePreview.source} alt={imagePreview.filename} />
+            <figcaption>{imagePreview.filename}</figcaption>
+          </figure>
         </div>
       )}
     </main>
