@@ -1,7 +1,10 @@
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { ImapEmailTransport, SmtpEmailTransport } from "../apps/agent-api/src/email-transport";
+import { EmailInboxRepository } from "../apps/agent-api/src/email-inbox-repository";
+import { EmailInboxWorker } from "../apps/agent-api/src/email-worker";
 import type { CompanyEmailAccount, CompanyEmailMessage } from "../apps/agent-api/src/email-inbox-types";
+import type { AuthContext } from "@npati/workspace";
 
 const servers: net.Server[] = [];
 afterEach(async () => {
@@ -68,6 +71,7 @@ describe("Email transport", () => {
       isDraft: false, isAiGenerated: true, createdAt: now,
     };
 
+    await SmtpEmailTransport.verify(mailAccount.smtpConfig, 3_000);
     await SmtpEmailTransport.send(mailAccount, message, 3_000);
     expect(receivedData).toContain("Subject: SMTP integration");
     expect(receivedData).toContain("Actual transport body");
@@ -101,11 +105,64 @@ describe("Email transport", () => {
     });
     const port = await listen(server);
     const mailAccount = account({ imapConfig: { host: "127.0.0.1", port, secure: false, username: "support@example.com", password: "secret" } });
+    await ImapEmailTransport.verify(mailAccount.imapConfig, 3_000);
     const messages = await ImapEmailTransport.poll(mailAccount, 3_000);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.messageId).toBe("<imap-42@example.net>");
     expect(messages[0]?.body).toContain("Please review the invoice");
     expect(messages[0]?.attachments[0]).toMatchObject({ filename: "invoice.pdf", contentType: "application/pdf" });
     expect(Buffer.from(messages[0]!.attachments[0]!.contentBase64!, "base64").toString()).toBe("fake pdf content");
+  });
+
+  it("claims a durable send job and marks the message sent only after SMTP accepts it", async () => {
+    const server = net.createServer((socket) => {
+      socket.write("220 worker smtp\r\n");
+      let buffer = "";
+      let dataMode = false;
+      socket.on("data", (chunk) => {
+        buffer += chunk.toString("utf8");
+        if (dataMode && buffer.includes("\r\n.\r\n")) {
+          buffer = "";
+          dataMode = false;
+          socket.write("250 accepted\r\n");
+          return;
+        }
+        while (!dataMode && buffer.includes("\r\n")) {
+          const index = buffer.indexOf("\r\n");
+          const line = buffer.slice(0, index); buffer = buffer.slice(index + 2);
+          if (/^EHLO /.test(line)) socket.write("250 local\r\n");
+          else if (/^AUTH PLAIN /.test(line)) socket.write("235 authenticated\r\n");
+          else if (/^(MAIL FROM|RCPT TO):/.test(line)) socket.write("250 ok\r\n");
+          else if (line === "DATA") { dataMode = true; socket.write("354 continue\r\n"); }
+          else if (line === "QUIT") { socket.write("221 bye\r\n"); socket.end(); }
+        }
+      });
+    });
+    const port = await listen(server);
+    const repo = new EmailInboxRepository();
+    const ctx: AuthContext = { userId: "worker-user", workspaceId: "worker-workspace", permissions: ["admin:all"] };
+    const createdAccount = await repo.createAccount(ctx, "worker-company", {
+      emailAddress: "support@example.com",
+      mode: "manual",
+      smtpConfig: { host: "127.0.0.1", port, secure: false, username: "support@example.com", password: "secret" },
+    });
+    const thread = await repo.createThread(ctx, "worker-company", {
+      emailAccountId: createdAccount.id, subject: "Worker dispatch", customerEmail: "client@example.net",
+    });
+    const message = await repo.createMessage(ctx, "worker-company", {
+      threadId: thread.id, emailAccountId: createdAccount.id, direction: "outbound",
+      fromAddress: createdAccount.emailAddress, toAddresses: [thread.customerEmail], subject: thread.subject,
+      bodyText: "Send through the queue", isDraft: false, deliveryStatus: "sending",
+    });
+    await repo.enqueueJob(ctx, "worker-company", {
+      jobType: "send", emailAccountId: createdAccount.id, threadId: thread.id,
+      messageId: message.id, idempotencyKey: `send:${message.id}`,
+    });
+
+    const worker = new EmailInboxWorker(repo, undefined, undefined, {}, 60_000);
+    await worker.tick();
+
+    await expect(repo.getMessage(ctx, "worker-company", message.id)).resolves.toMatchObject({ deliveryStatus: "sent" });
+    await expect(repo.getThread(ctx, "worker-company", thread.id)).resolves.toMatchObject({ status: "waiting_customer" });
   });
 });

@@ -8,6 +8,7 @@ export interface LinkSecurityCheckResult {
   threatLevel: "safe" | "suspicious" | "dangerous";
   warnings: string[];
   requiresHumanApproval: boolean;
+  redirectDomains?: string[];
 }
 
 export class EmailAgentTools {
@@ -26,6 +27,7 @@ export class EmailAgentTools {
       fromEmail?: string;
       cc?: string[];
       replyTo?: string;
+      taskRunId?: string;
     }
   ) {
     if (!input.to || !input.subject || !input.body) {
@@ -62,6 +64,16 @@ export class EmailAgentTools {
       });
     }
 
+    if (input.taskRunId) {
+      thread = await this.repo.updateThread(context, company.id, thread.id, {
+        metadata: {
+          ...thread.metadata,
+          awaitingAgentRunId: input.taskRunId,
+          awaitingAgentReplySince: new Date().toISOString(),
+        },
+      });
+    }
+
     const message = await this.repo.createMessage(context, company.id, {
       threadId: thread.id,
       emailAccountId: account.id,
@@ -91,6 +103,7 @@ export class EmailAgentTools {
       subject: input.subject,
       testMode: account.testMode,
       status: account.testMode ? "simulated_send" : "queued",
+      awaitingReplyForTaskRunId: input.taskRunId || null,
     };
   }
 
@@ -174,7 +187,7 @@ export class EmailAgentTools {
   /**
    * 4. Security Inspector for Links & Verification (Item 19)
    */
-  inspectLinkSecurity(rawUrl: string, senderEmail?: string): LinkSecurityCheckResult {
+  inspectLinkSecurity(rawUrl: string, senderEmail?: string, senderBlacklisted = false): LinkSecurityCheckResult {
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(rawUrl);
@@ -193,8 +206,24 @@ export class EmailAgentTools {
     const warnings: string[] = [];
     let threatLevel: "safe" | "suspicious" | "dangerous" = "safe";
 
+    if (senderBlacklisted) {
+      warnings.push("The email sender is on the company blacklist.");
+      threatLevel = "dangerous";
+    }
+
+    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+      warnings.push(`Unsupported URL protocol: ${parsedUrl.protocol}`);
+      threatLevel = "dangerous";
+    }
+
     // Suspicious TLDs or IP hosts
-    if (/^[0-9.]+$/.test(domain) || domain.endsWith(".xyz") || domain.endsWith(".top") || domain.endsWith(".click")) {
+    const isPrivateHost = domain === "localhost" || domain === "0.0.0.0" || domain === "127.0.0.1"
+      || /^10\./.test(domain) || /^192\.168\./.test(domain)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(domain) || domain === "::1";
+    if (isPrivateHost) {
+      warnings.push("Link targets a local or private network address.");
+      threatLevel = "dangerous";
+    } else if (/^[0-9.]+$/.test(domain) || domain.endsWith(".xyz") || domain.endsWith(".top") || domain.endsWith(".click")) {
       warnings.push("Domain uses suspicious TLD or raw IP address.");
       threatLevel = "suspicious";
     }
@@ -210,7 +239,25 @@ export class EmailAgentTools {
       const senderDomain = senderEmail.split("@")[1]?.toLowerCase();
       if (senderDomain && !domain.endsWith(senderDomain) && !senderDomain.endsWith(domain)) {
         warnings.push(`Link domain (${domain}) differs from email sender domain (${senderDomain}).`);
-        threatLevel = "suspicious";
+        if (threatLevel === "safe") threatLevel = "suspicious";
+      }
+    }
+
+    const redirectDomains: string[] = [];
+    for (const key of ["url", "redirect", "redirect_url", "redirect_uri", "continue", "next", "return", "return_to"]) {
+      const target = parsedUrl.searchParams.get(key);
+      if (!target) continue;
+      try {
+        const redirect = new URL(target, parsedUrl);
+        const redirectDomain = redirect.hostname.toLowerCase();
+        if (!redirectDomains.includes(redirectDomain)) redirectDomains.push(redirectDomain);
+        if (redirect.protocol !== "https:" || (redirectDomain !== domain && !redirectDomain.endsWith(`.${domain}`))) {
+          warnings.push(`Redirect parameter leads to a different or insecure domain (${redirectDomain || redirect.protocol}).`);
+          if (threatLevel === "safe") threatLevel = "suspicious";
+        }
+      } catch {
+        warnings.push(`Redirect parameter "${key}" is malformed.`);
+        if (threatLevel === "safe") threatLevel = "suspicious";
       }
     }
 
@@ -222,6 +269,7 @@ export class EmailAgentTools {
       threatLevel,
       warnings,
       requiresHumanApproval,
+      redirectDomains,
     };
   }
 }

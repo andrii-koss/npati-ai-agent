@@ -4,6 +4,9 @@ import { EmailAIProcessor } from "../apps/agent-api/src/email-ai-processor";
 import { EmailDnsVerifier } from "../apps/agent-api/src/email-dns-verifier";
 import { EmailConnectionTester } from "../apps/agent-api/src/email-connection-tester";
 import { EmailAgentTools } from "../apps/agent-api/src/email-agent-tools";
+import { EmailAttachmentStorage } from "../apps/agent-api/src/email-attachment-storage";
+import { InMemoryFileMetadataRepository } from "../apps/agent-api/src/file-metadata";
+import { InMemoryObjectStorage } from "../apps/agent-api/src/object-storage";
 import type { AuthContext } from "@npati/workspace";
 
 const mockAuth: AuthContext = {
@@ -259,7 +262,7 @@ describe("Email / AI Inbox Module", () => {
     const suspCheck = agentTools.inspectLinkSecurity("http://192.168.1.1/signin/password", "support@trustedbank.com");
     expect(suspCheck.isSafe).toBe(false);
     expect(suspCheck.requiresHumanApproval).toBe(true);
-    expect(suspCheck.threatLevel).toBe("suspicious");
+    expect(suspCheck.threatLevel).toBe("dangerous");
   });
 
   it("15. Analytics accurately aggregates email metrics and automation rate", async () => {
@@ -430,5 +433,185 @@ describe("Email / AI Inbox Module", () => {
     });
     expect(result.aiMessage?.bodyText).toContain("configured AI engine");
     expect(createdTasks).toEqual([result.inboundMessage.id]);
+  });
+
+  it("23. Matches a detected intent and renders the selected response template", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const isolatedProcessor = new EmailAIProcessor(isolatedRepo);
+    await isolatedRepo.createAccount(mockAuth, "intent-company", {
+      emailAddress: "refunds@company.com", mode: "approval",
+    });
+    const template = await isolatedRepo.createTemplate(mockAuth, "intent-company", {
+      title: "Refund acknowledgement", category: "billing",
+      subjectTemplate: "Refund request from {{customer_name}}",
+      bodyTemplate: "Hello {{customer_name}}, your refund request is now being reviewed.",
+    });
+    await isolatedRepo.createRule(mockAuth, "intent-company", {
+      name: "Refund intent", priorityOrder: 1,
+      conditions: { detectedIntent: "refund" },
+      actions: { autoReplyTemplateId: template.id, setPriority: "high" },
+    });
+
+    const result = await isolatedProcessor.processInbound(mockAuth, "intent-company", {
+      from: "buyer@example.net", to: "refunds@company.com", subject: "Money back request",
+      body: "Please refund the charge on my card.", messageId: "<refund-intent@example.net>",
+    });
+
+    expect(result.priority).toBe("high");
+    expect(result.aiMessage).toMatchObject({
+      subject: "Refund request from buyer",
+      bodyText: "Hello buyer, your refund request is now being reviewed.",
+      isDraft: true,
+    });
+  });
+
+  it("24. Matches attachment-type rules and starts the selected existing workflow", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    await isolatedRepo.createAccount(mockAuth, "workflow-company", {
+      emailAddress: "docs@company.com", mode: "manual",
+    });
+    await isolatedRepo.createRule(mockAuth, "workflow-company", {
+      name: "Invoice image workflow", priorityOrder: 1,
+      conditions: { attachmentTypes: ["image/*"] },
+      actions: { startWorkflowId: "workflow-invoice" },
+    });
+    const started: string[] = [];
+    const workflowProcessor = new EmailAIProcessor(isolatedRepo, undefined, undefined, {
+      startWorkflow: async ({ workflowId }) => {
+        started.push(workflowId);
+        return "workflow-run-1";
+      },
+    });
+
+    await workflowProcessor.processInbound(mockAuth, "workflow-company", {
+      from: "vendor@example.net", to: "docs@company.com", subject: "Invoice scan", body: "Attached.",
+      messageId: "<workflow-image@example.net>",
+      attachments: [{ filename: "invoice.png", contentType: "image/png", sizeBytes: 3, contentBase64: "YWJj" }],
+    });
+
+    expect(started).toEqual(["workflow-invoice"]);
+  });
+
+  it("25. Continues an Agent Task once its awaited email reply arrives", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const account = await isolatedRepo.createAccount(mockAuth, "continuation-company", {
+      emailAddress: "automation@company.com", mode: "manual", testMode: true,
+    });
+    const tools = new EmailAgentTools(isolatedRepo);
+    const sendResult = await tools.sendEmail(mockAuth, { id: "continuation-company", name: "Continuation", workspaceId: mockAuth.workspaceId } as any, {
+      to: "service@example.net", subject: "Verify registration", body: "Please send the verification code.",
+      fromEmail: account.emailAddress, taskRunId: "agent-run-original",
+    });
+    const linkedThread = (await isolatedRepo.listThreads(mockAuth, "continuation-company", { limit: 10 }))[0]!;
+    expect(linkedThread.metadata.awaitingAgentRunId).toBe("agent-run-original");
+    const continuations: string[] = [];
+    const continuationProcessor = new EmailAIProcessor(isolatedRepo, undefined, undefined, {
+      continueTask: async ({ awaitingRunId }) => {
+        continuations.push(awaitingRunId);
+        return "agent-run-continuation";
+      },
+    });
+
+    const result = await continuationProcessor.processInbound(mockAuth, "continuation-company", {
+      from: "service@example.net", to: account.emailAddress, subject: "Verify registration",
+      body: "Your verification code is 123456.", threadKey: linkedThread.threadKey,
+      inReplyTo: sendResult.messageId, messageId: "<verification-reply@example.net>",
+    });
+
+    expect(continuations).toEqual(["agent-run-original"]);
+    expect(result.thread.metadata).toMatchObject({
+      awaitingAgentRunId: null,
+      continuedFromAgentRunId: "agent-run-original",
+      continuationRunId: "agent-run-continuation",
+    });
+  });
+
+  it("26. Enforces a company-wide send limit across independent accounts", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const limits = {
+      maxPerHour: 10, maxPerDay: 100, maxPerRecipientDaily: 10, maxFollowups: 2,
+      maxCompanyPerHour: 1, maxCompanyPerDay: 10,
+    };
+    const first = await isolatedRepo.createAccount(mockAuth, "limited-company", {
+      emailAddress: "first@company.com", rateLimits: limits,
+    });
+    const second = await isolatedRepo.createAccount(mockAuth, "limited-company", {
+      emailAddress: "second@company.com", rateLimits: limits,
+    });
+
+    await expect(isolatedRepo.reserveSendQuota("limited-company", first, "one@example.net"))
+      .resolves.toEqual({ allowed: true });
+    await expect(isolatedRepo.reserveSendQuota("limited-company", second, "two@example.net"))
+      .resolves.toMatchObject({ allowed: false });
+  });
+
+  it("27. Requires approval for private hosts and cross-domain redirect parameters", () => {
+    const privateLink = agentTools.inspectLinkSecurity("http://127.0.0.1/admin", "security@example.com");
+    expect(privateLink).toMatchObject({ threatLevel: "dangerous", requiresHumanApproval: true });
+    const redirect = agentTools.inspectLinkSecurity(
+      "https://example.com/verify?redirect=https%3A%2F%2Fevil.test%2Flogin",
+      "security@example.com"
+    );
+    expect(redirect.requiresHumanApproval).toBe(true);
+    expect(redirect.redirectDomains).toContain("evil.test");
+    expect(agentTools.inspectLinkSecurity("https://example.com/help", "blocked@example.com", true)).toMatchObject({
+      threatLevel: "dangerous",
+      requiresHumanApproval: true,
+    });
+  });
+
+  it("28. Consumes OAuth PKCE state exactly once", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const account = await isolatedRepo.createAccount(mockAuth, "oauth-company", { emailAddress: "oauth@company.com" });
+    await isolatedRepo.createOAuthState(mockAuth, "oauth-company", account.id, {
+      stateHash: "state-hash", verifier: "pkce-verifier", tokenUrl: "https://provider.test/token",
+      clientId: "client-id", clientSecret: "client-secret", redirectUri: "https://app.test/api/email/oauth/callback",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await expect(isolatedRepo.consumeOAuthState("state-hash")).resolves.toMatchObject({
+      accountId: account.id, verifier: "pkce-verifier", clientSecret: "client-secret",
+    });
+    await expect(isolatedRepo.consumeOAuthState("state-hash")).resolves.toBeNull();
+  });
+
+  it("29. Stores tenant-scoped email notifications and marks them read", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    const notification = await isolatedRepo.createNotification(mockAuth, "notification-company", {
+      userId: mockAuth.userId, notificationType: "followup_due", title: "Follow-up due", body: "No reply received.",
+    });
+    await expect(isolatedRepo.listNotifications(mockAuth, "notification-company")).resolves.toEqual([
+      expect.objectContaining({ id: notification.id, isRead: false }),
+    ]);
+    await isolatedRepo.markNotificationRead(mockAuth, "notification-company", notification.id);
+    await expect(isolatedRepo.listNotifications(mockAuth, "notification-company")).resolves.toEqual([
+      expect.objectContaining({ id: notification.id, isRead: true }),
+    ]);
+  });
+
+  it("30. Persists email attachments in the shared object-storage lifecycle", async () => {
+    const objects = new InMemoryObjectStorage();
+    const files = new InMemoryFileMetadataRepository();
+    const storage = new EmailAttachmentStorage(objects, files);
+    await objects.initialize();
+    const payload = Buffer.from("durable email attachment");
+    const [attachment] = await storage.persist(mockAuth, "attachment-company", "thread-1", [{
+      filename: "evidence.txt",
+      contentType: "text/plain",
+      sizeBytes: payload.length,
+      contentBase64: payload.toString("base64"),
+    }]);
+
+    expect(attachment).toMatchObject({ filename: "evidence.txt", contentType: "text/plain", sizeBytes: payload.length });
+    expect(attachment!.contentBase64).toBeUndefined();
+    expect(attachment!.url).toMatch(/^\/api\/companies\/attachment-company\/email-inbox\/attachments\/[0-9a-f-]{36}$/i);
+    const fileId = attachment!.url!.split("/").at(-1)!;
+    const opened = await storage.open(mockAuth, "attachment-company", fileId);
+    const chunks: Buffer[] = [];
+    for await (const chunk of opened!.stream as AsyncIterable<Buffer | Uint8Array | string>) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks).toString()).toBe(payload.toString());
+    await expect(storage.open({ ...mockAuth, workspaceId: "another-workspace" }, "attachment-company", fileId)).resolves.toBeNull();
+    await expect(files.listCompany(mockAuth, "attachment-company")).resolves.toEqual([
+      expect.objectContaining({ id: fileId, status: "ready", companyId: "attachment-company" }),
+    ]);
   });
 });

@@ -6,6 +6,7 @@ import type {
   CompanyEmailContact,
   CompanyEmailJob,
   CompanyEmailMessage,
+  CompanyEmailNotification,
   CompanyEmailRule,
   CompanyEmailTemplate,
   CompanyEmailThread,
@@ -64,6 +65,11 @@ export class EmailInboxRepository {
   private memoryJobs = new Map<string, CompanyEmailJob>();
   private sentTimestamps = new Map<string, number[]>(); // key: `${companyId}:${accountId}:${recipient}` -> array of epoch ms
   private inboundLocks = new Map<string, Promise<void>>();
+  private memoryOAuthStates = new Map<string, {
+    workspaceId: string; companyId: string; accountId: string; userId: string; verifier: string;
+    tokenUrl: string; clientId: string; clientSecret?: string; redirectUri: string; expiresAt: string;
+  }>();
+  private memoryNotifications = new Map<string, CompanyEmailNotification>();
 
   constructor(databaseUrl?: string, pool?: Pool, vault: CryptoVault = defaultVault) {
     this.vault = vault;
@@ -175,6 +181,52 @@ export class EmailInboxRepository {
     }
   }
 
+  async createOAuthState(ctx: AuthContext, companyId: string, accountId: string, input: {
+    stateHash: string; verifier: string; tokenUrl: string; clientId: string; clientSecret?: string;
+    redirectUri: string; expiresAt: string;
+  }): Promise<void> {
+    if (this.pool) {
+      await this.pool.query("DELETE FROM company_email_oauth_states WHERE expires_at <= now()");
+      await this.pool.query(
+        `INSERT INTO company_email_oauth_states
+          (state_hash, workspace_id, company_id, account_id, user_id, encrypted_verifier, token_url,
+           client_id, encrypted_client_secret, redirect_uri, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [input.stateHash, ctx.workspaceId, companyId, accountId, ctx.userId, this.vault.encrypt(input.verifier),
+          input.tokenUrl, input.clientId, input.clientSecret ? this.vault.encrypt(input.clientSecret) : null,
+          input.redirectUri, input.expiresAt]
+      );
+      return;
+    }
+    this.memoryOAuthStates.set(input.stateHash, { workspaceId: ctx.workspaceId, companyId, accountId, userId: ctx.userId,
+      verifier: input.verifier, tokenUrl: input.tokenUrl, clientId: input.clientId, clientSecret: input.clientSecret,
+      redirectUri: input.redirectUri, expiresAt: input.expiresAt });
+  }
+
+  async consumeOAuthState(stateHash: string): Promise<{
+    workspaceId: string; companyId: string; accountId: string; userId: string; verifier: string;
+    tokenUrl: string; clientId: string; clientSecret?: string; redirectUri: string;
+  } | null> {
+    if (this.pool) {
+      const result = await this.pool.query<any>(
+        `DELETE FROM company_email_oauth_states WHERE state_hash=$1 AND expires_at > now()
+         RETURNING workspace_id AS "workspaceId", company_id AS "companyId", account_id AS "accountId",
+           user_id AS "userId", encrypted_verifier AS "encryptedVerifier", token_url AS "tokenUrl",
+           client_id AS "clientId", encrypted_client_secret AS "encryptedClientSecret", redirect_uri AS "redirectUri"`,
+        [stateHash]
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return { ...row, verifier: this.vault.decrypt(row.encryptedVerifier),
+        clientSecret: row.encryptedClientSecret ? this.vault.decrypt(row.encryptedClientSecret) : undefined };
+    }
+    const item = this.memoryOAuthStates.get(stateHash);
+    this.memoryOAuthStates.delete(stateHash);
+    if (!item || new Date(item.expiresAt).getTime() <= Date.now()) return null;
+    const { expiresAt: _expiresAt, ...state } = item;
+    return state;
+  }
+
   // =========================================================================
   // 1. Email Accounts
   // =========================================================================
@@ -273,6 +325,8 @@ export class EmailInboxRepository {
         maxPerDay: 500,
         maxPerRecipientDaily: 5,
         maxFollowups: 3,
+        maxCompanyPerHour: 500,
+        maxCompanyPerDay: 5000,
       },
       signatureConfig: input.signatureConfig || {},
       followupConfig: input.followupConfig || {
@@ -999,11 +1053,22 @@ export class EmailInboxRepository {
          WHERE workspace_id = $1 AND company_id = $2 AND email = $3`,
         [ctx.workspaceId, companyId, cleanEmail]
       );
-      return result.rows[0] ?? null;
+      const contact = result.rows[0];
+      if (!contact) return null;
+      const countResult = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM company_email_threads
+         WHERE workspace_id = $1 AND company_id = $2 AND customer_email = $3`,
+        [ctx.workspaceId, companyId, cleanEmail]
+      );
+      return { ...contact, previousThreadsCount: Number(countResult.rows[0]?.count || 0) };
     }
 
     const key = `${ctx.workspaceId}:${companyId}:${cleanEmail}`;
-    return this.memoryContacts.get(key) ?? null;
+    const contact = this.memoryContacts.get(key);
+    if (!contact) return null;
+    const previousThreadsCount = Array.from(this.memoryThreads.values()).filter((thread) =>
+      thread.workspaceId === ctx.workspaceId && thread.companyId === companyId && thread.customerEmail === cleanEmail).length;
+    return { ...contact, previousThreadsCount };
   }
 
   async upsertContact(
@@ -1345,18 +1410,28 @@ export class EmailInboxRepository {
   ): Promise<{ allowed: boolean; reason?: string }> {
     const normalizedRecipient = recipientEmail.trim().toLowerCase();
     if (this.pool) {
-      const result = await this.pool.query<{ hour_count: string; day_count: string; recipient_count: string }>(
+      const result = await this.pool.query<{ hour_count: string; day_count: string; recipient_count: string; company_hour_count: string; company_day_count: string }>(
         `SELECT
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS hour_count,
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS day_count,
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour' AND email_account_id = $3)::text AS hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND email_account_id = $3)::text AS day_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS company_hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS company_day_count
          FROM company_email_send_events
-         WHERE workspace_id = $1 AND company_id = $2 AND email_account_id = $3`,
+         WHERE workspace_id = $1 AND company_id = $2`,
         [account.workspaceId, companyId, account.id, normalizedRecipient]
       );
       const sentLastHour = Number(result.rows[0]?.hour_count || 0);
       const sentLastDay = Number(result.rows[0]?.day_count || 0);
       const sentToRecipient = Number(result.rows[0]?.recipient_count || 0);
+      const companyLastHour = Number(result.rows[0]?.company_hour_count || 0);
+      const companyLastDay = Number(result.rows[0]?.company_day_count || 0);
+      if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
+        return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
+      }
+      if (companyLastDay >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+        return { allowed: false, reason: `Company daily limit reached (${companyLastDay}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
+      }
       if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
         return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
       }
@@ -1377,7 +1452,17 @@ export class EmailInboxRepository {
     const oneDayAgo = now - 86400_000;
 
     const accountKey = `${companyId}:${account.id}`;
-    const recipientKey = `${companyId}:${account.id}:${recipientEmail.trim().toLowerCase()}`;
+    const companyKey = `${companyId}:company`;
+    const recipientKey = `${companyId}:recipient:${recipientEmail.trim().toLowerCase()}`;
+    const companySent = (this.sentTimestamps.get(companyKey) || []).filter((t) => t > oneDayAgo);
+    this.sentTimestamps.set(companyKey, companySent);
+    const companyLastHour = companySent.filter((t) => t > oneHourAgo).length;
+    if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
+      return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
+    }
+    if (companySent.length >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+      return { allowed: false, reason: `Company daily limit reached (${companySent.length}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
+    }
 
     const accountSent = (this.sentTimestamps.get(accountKey) || []).filter((t) => t > oneDayAgo);
     this.sentTimestamps.set(accountKey, accountSent);
@@ -1420,7 +1505,12 @@ export class EmailInboxRepository {
 
     const now = Date.now();
     const accountKey = `${companyId}:${accountId}`;
-    const recipientKey = `${companyId}:${accountId}:${recipientEmail.trim().toLowerCase()}`;
+    const companyKey = `${companyId}:company`;
+    const recipientKey = `${companyId}:recipient:${recipientEmail.trim().toLowerCase()}`;
+
+    const companyEvents = this.sentTimestamps.get(companyKey) || [];
+    companyEvents.push(now);
+    this.sentTimestamps.set(companyKey, companyEvents);
 
     const acc = this.sentTimestamps.get(accountKey) || [];
     acc.push(now);
@@ -1447,22 +1537,30 @@ export class EmailInboxRepository {
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-        `email-rate:${account.workspaceId}:${companyId}:${account.id}`,
+        `email-rate:${account.workspaceId}:${companyId}`,
       ]);
-      const counts = await client.query<{ hour_count: string; day_count: string; recipient_count: string }>(
+      const counts = await client.query<{ hour_count: string; day_count: string; recipient_count: string; company_hour_count: string; company_day_count: string }>(
         `SELECT
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS hour_count,
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS day_count,
-           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour' AND email_account_id = $3)::text AS hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND email_account_id = $3)::text AS day_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day' AND recipient_email = $4)::text AS recipient_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 hour')::text AS company_hour_count,
+           COUNT(*) FILTER (WHERE sent_at > now() - interval '1 day')::text AS company_day_count
          FROM company_email_send_events
-         WHERE workspace_id = $1 AND company_id = $2 AND email_account_id = $3`,
+         WHERE workspace_id = $1 AND company_id = $2`,
         [account.workspaceId, companyId, account.id, recipient]
       );
       const hourCount = Number(counts.rows[0]?.hour_count || 0);
       const dayCount = Number(counts.rows[0]?.day_count || 0);
       const recipientCount = Number(counts.rows[0]?.recipient_count || 0);
+      const companyHourCount = Number(counts.rows[0]?.company_hour_count || 0);
+      const companyDayCount = Number(counts.rows[0]?.company_day_count || 0);
       let deniedReason: string | undefined;
-      if (hourCount >= (account.rateLimits.maxPerHour || 50)) {
+      if (companyHourCount >= (account.rateLimits.maxCompanyPerHour || 500)) {
+        deniedReason = `Company hourly limit reached (${companyHourCount}/${account.rateLimits.maxCompanyPerHour || 500} emails).`;
+      } else if (companyDayCount >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+        deniedReason = `Company daily limit reached (${companyDayCount}/${account.rateLimits.maxCompanyPerDay || 5000} emails).`;
+      } else if (hourCount >= (account.rateLimits.maxPerHour || 50)) {
         deniedReason = `Hourly limit reached (${hourCount}/${account.rateLimits.maxPerHour} emails).`;
       } else if (dayCount >= (account.rateLimits.maxPerDay || 500)) {
         deniedReason = `Daily limit reached (${dayCount}/${account.rateLimits.maxPerDay} emails).`;
@@ -1621,6 +1719,65 @@ export class EmailInboxRepository {
     }
   }
 
+  async createNotification(ctx: AuthContext, companyId: string, input: {
+    userId?: string | null; threadId?: string | null;
+    notificationType: CompanyEmailNotification["notificationType"]; title: string; body: string;
+  }): Promise<CompanyEmailNotification> {
+    const notification: CompanyEmailNotification = {
+      id: randomUUID(), workspaceId: ctx.workspaceId, companyId, userId: input.userId || null,
+      threadId: input.threadId || null, notificationType: input.notificationType,
+      title: input.title.trim().slice(0, 300), body: input.body.trim().slice(0, 4000),
+      isRead: false, createdAt: new Date().toISOString(),
+    };
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailNotification>(
+        `INSERT INTO company_email_notifications
+          (id, workspace_id, company_id, user_id, thread_id, notification_type, title, body)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+           thread_id AS "threadId", notification_type AS "notificationType", title, body,
+           is_read AS "isRead", created_at AS "createdAt"`,
+        [notification.id, notification.workspaceId, companyId, notification.userId, notification.threadId,
+          notification.notificationType, notification.title, notification.body]
+      );
+      return result.rows[0]!;
+    }
+    this.memoryNotifications.set(notification.id, notification);
+    return notification;
+  }
+
+  async listNotifications(ctx: AuthContext, companyId: string, limit = 50): Promise<CompanyEmailNotification[]> {
+    if (this.pool) {
+      return (await this.pool.query<CompanyEmailNotification>(
+        `SELECT id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+           thread_id AS "threadId", notification_type AS "notificationType", title, body,
+           is_read AS "isRead", created_at AS "createdAt"
+         FROM company_email_notifications
+         WHERE workspace_id=$1 AND company_id=$2 AND (user_id IS NULL OR user_id=$3)
+         ORDER BY created_at DESC LIMIT $4`,
+        [ctx.workspaceId, companyId, ctx.userId, Math.max(1, Math.min(limit, 100))]
+      )).rows;
+    }
+    return Array.from(this.memoryNotifications.values()).filter((item) => item.workspaceId === ctx.workspaceId
+      && item.companyId === companyId && (!item.userId || item.userId === ctx.userId))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+  }
+
+  async markNotificationRead(ctx: AuthContext, companyId: string, notificationId: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(
+        `UPDATE company_email_notifications SET is_read=true
+         WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND (user_id IS NULL OR user_id=$4)`,
+        [notificationId, ctx.workspaceId, companyId, ctx.userId]
+      );
+      return;
+    }
+    const item = this.memoryNotifications.get(notificationId);
+    if (item && item.workspaceId === ctx.workspaceId && item.companyId === companyId && (!item.userId || item.userId === ctx.userId)) {
+      this.memoryNotifications.set(notificationId, { ...item, isRead: true });
+    }
+  }
+
   // =========================================================================
   // 9. Analytics (Item 23)
   // =========================================================================
@@ -1639,7 +1796,10 @@ export class EmailInboxRepository {
           .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
     const receivedEmails = messages.filter((message) => message.direction === "inbound").length;
-    const completedOutbound = messages.filter((message) => message.direction === "outbound" && !message.isDraft);
+    const completedOutbound = messages.filter((message) =>
+      message.direction === "outbound"
+      && !message.isDraft
+      && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered"));
     const sentEmails = completedOutbound.length;
     const aiAnswered = completedOutbound.filter((message) => message.isAiGenerated).length;
     const humanAnswered = completedOutbound.filter((message) => !message.isAiGenerated).length;
@@ -1648,6 +1808,13 @@ export class EmailInboxRepository {
     const failedEmails = messages.filter((message) => message.deliveryStatus === "failed" || message.deliveryStatus === "rejected").length;
     const bouncedEmails = messages.filter((message) => message.deliveryStatus === "bounced").length;
     const escalatedToHuman = threads.filter((thread) => thread.status === "waiting_human" || thread.isHumanTakeover).length;
+    const editedAiResponsesCount = this.pool
+      ? Number((await this.pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM company_audit_logs
+           WHERE workspace_id = $1 AND company_id = $2 AND action = 'email.ai_draft_edited'`,
+          [ctx.workspaceId, companyId]
+        )).rows[0]?.count || 0)
+      : 0;
     let highConf = 0;
     let medConf = 0;
     let lowConf = 0;
@@ -1661,11 +1828,15 @@ export class EmailInboxRepository {
     }
 
     const responseTimes: number[] = [];
+    const threadById = new Map(threads.map((thread) => [thread.id, thread]));
     for (const thread of threads) {
       const threadMessages = messages.filter((message) => message.threadId === thread.id);
       const firstInbound = threadMessages.find((message) => message.direction === "inbound");
       const firstResponse = firstInbound && threadMessages.find((message) =>
-        message.direction === "outbound" && !message.isDraft && new Date(message.createdAt) >= new Date(firstInbound.createdAt));
+        message.direction === "outbound"
+        && !message.isDraft
+        && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered")
+        && new Date(message.createdAt) >= new Date(firstInbound.createdAt));
       if (firstInbound && firstResponse) {
         responseTimes.push((new Date(firstResponse.createdAt).getTime() - new Date(firstInbound.createdAt).getTime()) / 60_000);
       }
@@ -1681,10 +1852,13 @@ export class EmailInboxRepository {
       const day = new Date(message.createdAt).toISOString().slice(0, 10);
       const entry = dayMap.get(day) || { received: 0, sent: 0 };
       if (message.direction === "inbound") entry.received++;
-      else if (!message.isDraft) entry.sent++;
+      else if (!message.isDraft && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered")) entry.sent++;
       dayMap.set(day, entry);
       if (message.emailAccountId) accountMap.set(message.emailAccountId, (accountMap.get(message.emailAccountId) || 0) + 1);
-      if (message.sentByAgentId) agentMap.set(message.sentByAgentId, (agentMap.get(message.sentByAgentId) || 0) + 1);
+      const creditedAgentId = message.sentByAgentId || (message.isAiGenerated ? threadById.get(message.threadId)?.assignedAgentId : undefined);
+      if (creditedAgentId && completedOutbound.some((outbound) => outbound.id === message.id)) {
+        agentMap.set(creditedAgentId, (agentMap.get(creditedAgentId) || 0) + 1);
+      }
     }
 
     return {
@@ -1699,7 +1873,7 @@ export class EmailInboxRepository {
       bouncedEmails,
       averageResponseTimeMinutes: averageResponse,
       averageFirstResponseTimeMinutes: averageResponse,
-      editedAiResponsesCount: 0,
+      editedAiResponsesCount,
       automationRate,
       confidenceDistribution: {
         high: highConf,

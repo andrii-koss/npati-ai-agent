@@ -15,6 +15,12 @@ interface Agent {
   role: string;
 }
 
+interface CompanyAutomation {
+  id: string;
+  name: string;
+  status: "active" | "paused" | "deleted";
+}
+
 interface EmailAccount {
   id: string;
   emailAddress: string;
@@ -28,8 +34,8 @@ interface EmailAccount {
   fallbackLanguage: string;
   imapConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; lastError?: string | null };
   smtpConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; fromName?: string; replyTo?: string; lastError?: string | null };
-  rateLimits: { maxPerHour: number; maxPerDay: number; maxPerRecipientDaily: number; maxFollowups: number };
-  followupConfig: { enabled: boolean; delayDays: number; maxFollowups: number; action: "draft" | "auto_send" | "create_task" };
+  rateLimits: { maxPerHour: number; maxPerDay: number; maxPerRecipientDaily: number; maxFollowups: number; maxCompanyPerHour?: number; maxCompanyPerDay?: number };
+  followupConfig: { enabled: boolean; delayDays: number; maxFollowups: number; action: "draft" | "auto_send" | "create_task" | "notify_user" };
   signatureConfig: { greeting?: string; signature?: string; footer?: string };
   createdAt: string;
   updatedAt: string;
@@ -57,8 +63,8 @@ interface EmailRule {
   name: string;
   priorityOrder: number;
   isActive: boolean;
-  conditions: { senders?: string[]; domains?: string[]; subjectKeywords?: string[]; bodyKeywords?: string[]; isVip?: boolean };
-  actions: { setMode?: string; setPriority?: string; setAgentId?: string; requireApproval?: boolean; createTask?: boolean };
+  conditions: { senders?: string[]; domains?: string[]; subjectKeywords?: string[]; bodyKeywords?: string[]; detectedIntent?: string; attachmentTypes?: string[]; isVip?: boolean };
+  actions: { setMode?: string; setPriority?: string; setAgentId?: string; requireApproval?: boolean; createTask?: boolean; autoTagSpam?: boolean; autoReplyTemplateId?: string; startWorkflowId?: string };
 }
 
 interface EmailTemplate {
@@ -86,10 +92,42 @@ interface EmailAnalytics {
   aiAnswered: number;
   humanAnswered: number;
   draftedByAi: number;
+  approvedByHuman: number;
+  escalatedToHuman: number;
+  failedEmails: number;
+  bouncedEmails: number;
+  averageResponseTimeMinutes: number;
+  averageFirstResponseTimeMinutes: number;
+  editedAiResponsesCount: number;
   automationRate: number;
   confidenceDistribution: { high: number; medium: number; low: number };
   volumeByDay: Array<{ date: string; received: number; sent: number }>;
+  volumeByAgent: Array<{ agentId: string; agentName: string; count: number }>;
+  volumeByAccount: Array<{ accountId: string; email: string; count: number }>;
 }
+
+interface EmailPermissionKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+const EMAIL_PERMISSION_OPTIONS = [
+  ["email:view", "View email module"],
+  ["email:manage_accounts", "Manage email accounts"],
+  ["email:read_messages", "Read messages"],
+  ["email:send_messages", "Send messages"],
+  ["email:delete_messages", "Delete messages"],
+  ["email:approve_drafts", "Approve AI drafts"],
+  ["email:configure_autopilot", "Configure Autopilot"],
+  ["email:configure_agents", "Configure agents and rules"],
+  ["email:view_analytics", "View analytics"],
+] as const;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -109,7 +147,7 @@ export function EmailSettingsPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts">("accounts");
+  const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -130,6 +168,9 @@ export function EmailSettingsPage() {
   const [oauthTokenUrl, setOauthTokenUrl] = useState("");
   const [oauthClientId, setOauthClientId] = useState("");
   const [oauthClientSecret, setOauthClientSecret] = useState("");
+  const [oauthAuthorizationUrl, setOauthAuthorizationUrl] = useState("");
+  const [oauthScopes, setOauthScopes] = useState("");
+  const [oauthRedirectUri, setOauthRedirectUri] = useState(() => `${window.location.origin}/api/email/oauth/callback`);
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState(993);
   const [imapSecure, setImapSecure] = useState(true);
@@ -143,10 +184,12 @@ export function EmailSettingsPage() {
   const [maxPerHour, setMaxPerHour] = useState(50);
   const [maxPerDay, setMaxPerDay] = useState(500);
   const [maxPerRecipientDaily, setMaxPerRecipientDaily] = useState(5);
+  const [maxCompanyPerHour, setMaxCompanyPerHour] = useState(500);
+  const [maxCompanyPerDay, setMaxCompanyPerDay] = useState(5000);
   const [followupEnabled, setFollowupEnabled] = useState(false);
   const [followupDelayDays, setFollowupDelayDays] = useState(2);
   const [followupMax, setFollowupMax] = useState(2);
-  const [followupAction, setFollowupAction] = useState<"draft" | "auto_send" | "create_task">("draft");
+  const [followupAction, setFollowupAction] = useState<"draft" | "auto_send" | "create_task" | "notify_user">("draft");
   const [greeting, setGreeting] = useState("Hello,");
   const [signature, setSignature] = useState("Best regards,\nCustomer Support");
   const [footer, setFooter] = useState("");
@@ -171,12 +214,18 @@ export function EmailSettingsPage() {
   const [ruleBodyKeywords, setRuleBodyKeywords] = useState("");
   const [ruleSenders, setRuleSenders] = useState("");
   const [ruleDomains, setRuleDomains] = useState("");
+  const [ruleDetectedIntent, setRuleDetectedIntent] = useState("");
+  const [ruleAttachmentTypes, setRuleAttachmentTypes] = useState("");
   const [ruleIsVip, setRuleIsVip] = useState(false);
   const [rulePriority, setRulePriority] = useState("");
   const [ruleMode, setRuleMode] = useState("");
   const [ruleAgentId, setRuleAgentId] = useState("");
   const [ruleRequireApproval, setRuleRequireApproval] = useState(false);
   const [ruleCreateTask, setRuleCreateTask] = useState(false);
+  const [ruleAutoTagSpam, setRuleAutoTagSpam] = useState(false);
+  const [ruleTemplateId, setRuleTemplateId] = useState("");
+  const [ruleWorkflowId, setRuleWorkflowId] = useState("");
+  const [workflows, setWorkflows] = useState<CompanyAutomation[]>([]);
   const [savingRule, setSavingRule] = useState(false);
 
   // Templates Drawer & State
@@ -204,6 +253,13 @@ export function EmailSettingsPage() {
 
   // Analytics
   const [analytics, setAnalytics] = useState<EmailAnalytics | null>(null);
+
+  // Granular permissions are delegated through the existing scoped API-key system.
+  const [permissionKeys, setPermissionKeys] = useState<EmailPermissionKey[]>([]);
+  const [permissionKeyName, setPermissionKeyName] = useState("Email integration");
+  const [selectedEmailPermissions, setSelectedEmailPermissions] = useState<string[]>(["email:view", "email:read_messages"]);
+  const [createdPermissionToken, setCreatedPermissionToken] = useState<string | null>(null);
+  const [savingPermissionKey, setSavingPermissionKey] = useState(false);
 
   // Load companies
   useEffect(() => {
@@ -242,8 +298,16 @@ export function EmailSettingsPage() {
   useEffect(() => {
     if (!selectedCompanyId) return;
     if (activeTab === "rules") {
-      api<{ rules: EmailRule[] }>(`/companies/${selectedCompanyId}/email-inbox/rules`)
-        .then((r) => setRules(r.rules))
+      Promise.all([
+        api<{ rules: EmailRule[] }>(`/companies/${selectedCompanyId}/email-inbox/rules`),
+        api<{ templates: EmailTemplate[] }>(`/companies/${selectedCompanyId}/email-inbox/templates`),
+        api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`),
+      ])
+        .then(([ruleResult, templateResult, automationResult]) => {
+          setRules(ruleResult.rules);
+          setTemplates(templateResult.templates);
+          setWorkflows(automationResult.automations.filter((automation) => automation.status === "active"));
+        })
         .catch(() => undefined);
     } else if (activeTab === "templates") {
       api<{ templates: EmailTemplate[] }>(`/companies/${selectedCompanyId}/email-inbox/templates`)
@@ -253,8 +317,38 @@ export function EmailSettingsPage() {
       api<{ contacts: ContactItem[] }>(`/companies/${selectedCompanyId}/email-inbox/contacts`)
         .then((r) => setContacts(r.contacts))
         .catch(() => undefined);
+    } else if (activeTab === "permissions") {
+      api<{ keys: EmailPermissionKey[] }>(`/companies/${selectedCompanyId}/api-keys`)
+        .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope) => scope.startsWith("email:")))))
+        .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     }
   }, [selectedCompanyId, activeTab]);
+
+  async function createPermissionKey(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedCompanyId || selectedEmailPermissions.length === 0) return;
+    setSavingPermissionKey(true);
+    setCreatedPermissionToken(null);
+    try {
+      const result = await api<{ key: EmailPermissionKey & { rawToken: string } }>(`/companies/${selectedCompanyId}/api-keys`, {
+        method: "POST",
+        body: JSON.stringify({ name: permissionKeyName.trim(), scopes: selectedEmailPermissions }),
+      });
+      setPermissionKeys((current) => [result.key, ...current]);
+      setCreatedPermissionToken(result.key.rawToken);
+      setPermissionKeyName("Email integration");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingPermissionKey(false);
+    }
+  }
+
+  async function revokePermissionKey(keyId: string) {
+    if (!selectedCompanyId || !await confirmModal({ title: "Revoke email access?", message: "This integration key will stop working immediately.", confirmText: "Revoke", isDanger: true })) return;
+    await api(`/companies/${selectedCompanyId}/api-keys/${keyId}`, { method: "DELETE" });
+    setPermissionKeys((current) => current.filter((key) => key.id !== keyId));
+  }
 
   function openCreateDrawer() {
     setEditingId(null);
@@ -268,6 +362,7 @@ export function EmailSettingsPage() {
     setMailAuthType("password");
     setOauthAccessToken("");
     setOauthRefreshToken(""); setOauthTokenUrl(""); setOauthClientId(""); setOauthClientSecret("");
+    setOauthAuthorizationUrl(""); setOauthScopes(""); setOauthRedirectUri(`${window.location.origin}/api/email/oauth/callback`);
     setImapHost("imap.company.com");
     setImapPort(993);
     setImapSecure(true);
@@ -281,6 +376,8 @@ export function EmailSettingsPage() {
     setMaxPerHour(50);
     setMaxPerDay(500);
     setMaxPerRecipientDaily(5);
+    setMaxCompanyPerHour(500);
+    setMaxCompanyPerDay(5000);
     setFollowupEnabled(false);
     setFollowupDelayDays(2);
     setFollowupMax(2);
@@ -306,6 +403,9 @@ export function EmailSettingsPage() {
     setOauthTokenUrl(account.imapConfig.tokenUrl || account.smtpConfig.tokenUrl || "");
     setOauthClientId(account.imapConfig.clientId || account.smtpConfig.clientId || "");
     setOauthClientSecret("");
+    setOauthAuthorizationUrl("");
+    setOauthScopes("");
+    setOauthRedirectUri(`${window.location.origin}/api/email/oauth/callback`);
     setImapHost(account.imapConfig.host || "");
     setImapPort(account.imapConfig.port || 993);
     setImapSecure(account.imapConfig.secure ?? true);
@@ -319,6 +419,8 @@ export function EmailSettingsPage() {
     setMaxPerHour(account.rateLimits.maxPerHour);
     setMaxPerDay(account.rateLimits.maxPerDay);
     setMaxPerRecipientDaily(account.rateLimits.maxPerRecipientDaily);
+    setMaxCompanyPerHour(account.rateLimits.maxCompanyPerHour ?? 500);
+    setMaxCompanyPerDay(account.rateLimits.maxCompanyPerDay ?? 5000);
     setFollowupEnabled(account.followupConfig?.enabled || false);
     setFollowupDelayDays(account.followupConfig?.delayDays || 2);
     setFollowupMax(account.followupConfig?.maxFollowups || 2);
@@ -371,7 +473,7 @@ export function EmailSettingsPage() {
           ...(oauthClientId ? { clientId: oauthClientId } : {}),
           ...(oauthClientSecret ? { clientSecret: oauthClientSecret } : {}),
         },
-        rateLimits: { maxPerHour, maxPerDay, maxPerRecipientDaily, maxFollowups: followupMax },
+        rateLimits: { maxPerHour, maxPerDay, maxPerRecipientDaily, maxFollowups: followupMax, maxCompanyPerHour, maxCompanyPerDay },
         followupConfig: { enabled: followupEnabled, delayDays: followupDelayDays, maxFollowups: followupMax, action: followupAction },
         signatureConfig: { greeting, signature, footer },
       };
@@ -410,6 +512,33 @@ export function EmailSettingsPage() {
       setAccounts((prev) => prev.filter((a) => a.id !== id));
     } catch (err: any) {
       setNotice(err.message);
+    }
+  }
+
+  async function startOAuthAuthorization() {
+    if (!editingId) {
+      setNotice("Save the email account first, then edit it to start OAuth authorization.");
+      return;
+    }
+    try {
+      const response = await api<{ authorizationUrl: string }>(
+        `/companies/${selectedCompanyId}/email-accounts/${editingId}/oauth/authorize`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            authorizationUrl: oauthAuthorizationUrl,
+            tokenUrl: oauthTokenUrl,
+            clientId: oauthClientId,
+            clientSecret: oauthClientSecret || undefined,
+            scopes: oauthScopes.split(/[ ,]+/).map((value) => value.trim()).filter(Boolean),
+            redirectUri: oauthRedirectUri,
+          }),
+        }
+      );
+      window.open(response.authorizationUrl, "npati-email-oauth", "popup,width=640,height=760,noopener,noreferrer");
+      setNotice("OAuth authorization opened. After completing it, run Test Connection.");
+    } catch (error: any) {
+      setNotice(error.message);
     }
   }
 
@@ -463,12 +592,17 @@ export function EmailSettingsPage() {
     setRuleBodyKeywords("");
     setRuleSenders("");
     setRuleDomains("");
+    setRuleDetectedIntent("");
+    setRuleAttachmentTypes("");
     setRuleIsVip(false);
     setRulePriority("high");
     setRuleMode("");
     setRuleAgentId(agents[0]?.id || "");
     setRuleRequireApproval(false);
     setRuleCreateTask(false);
+    setRuleAutoTagSpam(false);
+    setRuleTemplateId("");
+    setRuleWorkflowId("");
     setRuleDrawerOpen(true);
   }
 
@@ -479,12 +613,17 @@ export function EmailSettingsPage() {
     setRuleBodyKeywords((rule.conditions?.bodyKeywords || []).join(", "));
     setRuleSenders((rule.conditions?.senders || []).join(", "));
     setRuleDomains((rule.conditions?.domains || []).join(", "));
+    setRuleDetectedIntent(rule.conditions?.detectedIntent || "");
+    setRuleAttachmentTypes((rule.conditions?.attachmentTypes || []).join(", "));
     setRuleIsVip(rule.conditions?.isVip || false);
     setRulePriority(rule.actions?.setPriority || "");
     setRuleMode(rule.actions?.setMode || "");
     setRuleAgentId(rule.actions?.setAgentId || "");
     setRuleRequireApproval(rule.actions?.requireApproval || false);
     setRuleCreateTask(rule.actions?.createTask || false);
+    setRuleAutoTagSpam(rule.actions?.autoTagSpam || false);
+    setRuleTemplateId(rule.actions?.autoReplyTemplateId || "");
+    setRuleWorkflowId(rule.actions?.startWorkflowId || "");
     setRuleDrawerOpen(true);
   }
 
@@ -505,6 +644,9 @@ export function EmailSettingsPage() {
       if (senders.length > 0) conditions.senders = senders;
       const domains = ruleDomains.split(",").map((s) => s.trim()).filter(Boolean);
       if (domains.length > 0) conditions.domains = domains;
+      if (ruleDetectedIntent) conditions.detectedIntent = ruleDetectedIntent;
+      const attachmentTypes = ruleAttachmentTypes.split(",").map((value) => value.trim()).filter(Boolean);
+      if (attachmentTypes.length > 0) conditions.attachmentTypes = attachmentTypes;
       if (ruleIsVip) conditions.isVip = true;
 
       const actions: any = {};
@@ -513,6 +655,9 @@ export function EmailSettingsPage() {
       if (ruleAgentId) actions.setAgentId = ruleAgentId;
       if (ruleRequireApproval) actions.requireApproval = true;
       if (ruleCreateTask) actions.createTask = true;
+      if (ruleAutoTagSpam) actions.autoTagSpam = true;
+      if (ruleTemplateId) actions.autoReplyTemplateId = ruleTemplateId;
+      if (ruleWorkflowId) actions.startWorkflowId = ruleWorkflowId;
 
       if (editingRuleId) {
         const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules/${editingRuleId}`, {
@@ -763,7 +908,7 @@ export function EmailSettingsPage() {
           <small>Dispatched via SMTP & AI</small>
         </div>
         <div>
-          <strong>{Math.round((analytics?.automationRate ?? 0) * 100)}%</strong>
+          <strong>{Math.round(analytics?.automationRate ?? 0)}%</strong>
           <span>AI Automation Rate</span>
           <small>Autonomously handled</small>
         </div>
@@ -773,6 +918,52 @@ export function EmailSettingsPage() {
           <small>Awaiting human review</small>
         </div>
       </section>
+
+      {analytics && (
+        <>
+          <section className="email-stats-grid" aria-label="Detailed email analytics">
+            {[
+              ["AI Answered", analytics.aiAnswered],
+              ["Human Answered", analytics.humanAnswered],
+              ["Approved by Human", analytics.approvedByHuman],
+              ["Escalated to Human", analytics.escalatedToHuman],
+              ["Edited AI Responses", analytics.editedAiResponsesCount],
+              ["Failed", analytics.failedEmails],
+              ["Bounced", analytics.bouncedEmails],
+              ["Avg. Response", `${analytics.averageResponseTimeMinutes} min`],
+              ["Avg. First Response", `${analytics.averageFirstResponseTimeMinutes} min`],
+              ["High Confidence", analytics.confidenceDistribution.high],
+              ["Medium Confidence", analytics.confidenceDistribution.medium],
+              ["Low Confidence", analytics.confidenceDistribution.low],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <strong>{value}</strong>
+                <span>{label}</span>
+              </div>
+            ))}
+          </section>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 20 }}>
+            <section className="automations-panel-card">
+              <h3>Email Volume by Day</h3>
+              <table className="automations-table"><thead><tr><th>Date</th><th>Received</th><th>Sent</th></tr></thead><tbody>
+                {analytics.volumeByDay.map((row) => <tr key={row.date}><td>{row.date}</td><td>{row.received}</td><td>{row.sent}</td></tr>)}
+              </tbody></table>
+            </section>
+            <section className="automations-panel-card">
+              <h3>Volume by Agent</h3>
+              <table className="automations-table"><thead><tr><th>Agent</th><th>Messages</th></tr></thead><tbody>
+                {analytics.volumeByAgent.map((row) => <tr key={row.agentId}><td>{row.agentName}</td><td>{row.count}</td></tr>)}
+              </tbody></table>
+            </section>
+            <section className="automations-panel-card">
+              <h3>Volume by Account</h3>
+              <table className="automations-table"><thead><tr><th>Account</th><th>Messages</th></tr></thead><tbody>
+                {analytics.volumeByAccount.map((row) => <tr key={row.accountId}><td>{row.email}</td><td>{row.count}</td></tr>)}
+              </tbody></table>
+            </section>
+          </div>
+        </>
+      )}
 
       {/* Search & Tabs Controls Bar matching /settings/automations */}
       <div className="inspector-controls automations-controls">
@@ -840,6 +1031,16 @@ export function EmailSettingsPage() {
           >
             <span>Contacts & VIP</span>
             <small className="tab-count">{contacts.length}</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "permissions"}
+            className={`inspector-tab ${activeTab === "permissions" ? "active" : ""}`}
+            onClick={() => setActiveTab("permissions")}
+          >
+            <span>Permissions</span>
+            <small className="tab-count">{permissionKeys.length}</small>
           </button>
         </div>
       </div>
@@ -1288,6 +1489,63 @@ export function EmailSettingsPage() {
         </div>
       )}
 
+      {/* GRANULAR EMAIL PERMISSIONS */}
+      {activeTab === "permissions" && (
+        <div className="automations-table-container">
+          <div style={{ padding: "20px", borderBottom: "1px solid #f1f5f9" }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Scoped Email Access</h3>
+            <p style={{ margin: "0 0 18px", color: "#64748b", fontSize: 12 }}>
+              Create a restricted integration identity using the existing company permission system. Company admins retain full access; each key receives only the selected email permissions.
+            </p>
+            <form onSubmit={createPermissionKey} style={{ display: "grid", gap: 14 }}>
+              <label style={{ display: "grid", gap: 6, maxWidth: 460 }}>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>Access profile name</span>
+                <input value={permissionKeyName} onChange={(event) => setPermissionKeyName(event.target.value)} required maxLength={120} />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 8 }}>
+                {EMAIL_PERMISSION_OPTIONS.map(([scope, label]) => (
+                  <label key={scope} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedEmailPermissions.includes(scope)}
+                      onChange={(event) => setSelectedEmailPermissions((current) => event.target.checked
+                        ? [...current, scope]
+                        : current.filter((permission) => permission !== scope))}
+                    />
+                    <span>{label} <code style={{ color: "#64748b" }}>{scope}</code></span>
+                  </label>
+                ))}
+              </div>
+              <div>
+                <button className="button-primary" disabled={savingPermissionKey || selectedEmailPermissions.length === 0}>
+                  {savingPermissionKey ? "Creating…" : "Create scoped access key"}
+                </button>
+              </div>
+            </form>
+            {createdPermissionToken && (
+              <div className="workspace-notice" style={{ marginTop: 16 }}>
+                Copy this token now; it will not be shown again: <code style={{ wordBreak: "break-all" }}>{createdPermissionToken}</code>
+              </div>
+            )}
+          </div>
+          <table className="automations-table">
+            <thead><tr><th>Name</th><th>Granted email permissions</th><th>Last used</th><th style={{ textAlign: "right" }}>Actions</th></tr></thead>
+            <tbody>
+              {permissionKeys.length === 0 ? (
+                <tr><td colSpan={4} style={{ textAlign: "center", padding: 36, color: "#64748b" }}>No scoped email access profiles yet.</td></tr>
+              ) : permissionKeys.map((key) => (
+                <tr key={key.id}>
+                  <td><strong>{key.name}</strong><div><code>{key.keyPrefix}…</code></div></td>
+                  <td>{key.scopes.map((scope) => <span key={scope} className="record-status" style={{ margin: "2px 4px 2px 0" }}>{scope.replace("email:", "")}</span>)}</td>
+                  <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never"}</td>
+                  <td style={{ textAlign: "right" }}><button type="button" className="automation-action-btn" onClick={() => void revokePermissionKey(key.id)}>Revoke</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* ADD / EDIT ACCOUNT DRAWER */}
       {drawerOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => setDrawerOpen(false)}>
@@ -1392,10 +1650,16 @@ export function EmailSettingsPage() {
                     <label><span>OAuth Access Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Paste provider access token"} value={oauthAccessToken} onChange={(e) => setOauthAccessToken(e.target.value)} /></label>
                     <label><span>OAuth Refresh Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Provider refresh token"} value={oauthRefreshToken} onChange={(e) => setOauthRefreshToken(e.target.value)} /></label>
                     <label><span>OAuth Token Endpoint</span><input placeholder="https://oauth2.googleapis.com/token" value={oauthTokenUrl} onChange={(e) => setOauthTokenUrl(e.target.value)} /></label>
+                    <label><span>OAuth Authorization Endpoint</span><input placeholder="https://accounts.google.com/o/oauth2/v2/auth" value={oauthAuthorizationUrl} onChange={(e) => setOauthAuthorizationUrl(e.target.value)} /></label>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <label><span>OAuth Client ID</span><input value={oauthClientId} onChange={(e) => setOauthClientId(e.target.value)} /></label>
                       <label><span>OAuth Client Secret</span><input type="password" placeholder={editingId ? "Leave blank to keep it" : "Optional for PKCE/public clients"} value={oauthClientSecret} onChange={(e) => setOauthClientSecret(e.target.value)} /></label>
                     </div>
+                    <label><span>OAuth Scopes</span><input placeholder="openid email https://mail.google.com/" value={oauthScopes} onChange={(e) => setOauthScopes(e.target.value)} /></label>
+                    <label><span>OAuth Redirect URI</span><input value={oauthRedirectUri} onChange={(e) => setOauthRedirectUri(e.target.value)} /></label>
+                    <button type="button" className="button-secondary" disabled={!editingId || !oauthAuthorizationUrl || !oauthTokenUrl || !oauthClientId} onClick={() => void startOAuthAuthorization()}>
+                      Connect with OAuth (PKCE)
+                    </button>
                   </>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
@@ -1487,6 +1751,10 @@ export function EmailSettingsPage() {
                   <label><span>Emails / day</span><input type="number" min="1" value={maxPerDay} onChange={(e) => setMaxPerDay(Number(e.target.value))} /></label>
                   <label><span>Per recipient / day</span><input type="number" min="1" value={maxPerRecipientDaily} onChange={(e) => setMaxPerRecipientDaily(Number(e.target.value))} /></label>
                 </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label><span>Company emails / hour</span><input type="number" min="1" value={maxCompanyPerHour} onChange={(e) => setMaxCompanyPerHour(Number(e.target.value))} /></label>
+                  <label><span>Company emails / day</span><input type="number" min="1" value={maxCompanyPerDay} onChange={(e) => setMaxCompanyPerDay(Number(e.target.value))} /></label>
+                </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={followupEnabled} onChange={(e) => setFollowupEnabled(e.target.checked)} />
                   <span>Enable automatic follow-up</span>
@@ -1494,7 +1762,7 @@ export function EmailSettingsPage() {
                 {followupEnabled && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label><span>Delay, days</span><input type="number" min="1" value={followupDelayDays} onChange={(e) => setFollowupDelayDays(Number(e.target.value))} /></label>
                   <label><span>Maximum</span><input type="number" min="1" value={followupMax} onChange={(e) => setFollowupMax(Number(e.target.value))} /></label>
-                  <label><span>Action</span><select value={followupAction} onChange={(e) => setFollowupAction(e.target.value as any)}><option value="draft">Create draft</option><option value="auto_send">Send automatically</option><option value="create_task">Create Agent Task</option></select></label>
+                  <label><span>Action</span><select value={followupAction} onChange={(e) => setFollowupAction(e.target.value as any)}><option value="draft">Create draft</option><option value="auto_send">Send automatically</option><option value="create_task">Create Agent Task</option><option value="notify_user">Notify responsible user</option></select></label>
                 </div>}
               </section>
 
@@ -1603,6 +1871,28 @@ export function EmailSettingsPage() {
                   <span>Body Keywords (comma-separated)</span>
                   <input placeholder="refund, contract, verification" value={ruleBodyKeywords} onChange={(e) => setRuleBodyKeywords(e.target.value)} />
                 </label>
+                <label>
+                  <span>Detected Intent</span>
+                  <select value={ruleDetectedIntent} onChange={(e) => setRuleDetectedIntent(e.target.value)}>
+                    <option value="">Any intent</option>
+                    <option value="support">Support / technical issue</option>
+                    <option value="billing">Billing / payment</option>
+                    <option value="refund">Refund</option>
+                    <option value="cancellation">Cancellation</option>
+                    <option value="sales">Sales / quote</option>
+                    <option value="marketing">Marketing / unsubscribe</option>
+                    <option value="general">General</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Attachment Types (comma-separated)</span>
+                  <input
+                    placeholder="application/pdf, image/*, .xlsx"
+                    value={ruleAttachmentTypes}
+                    onChange={(e) => setRuleAttachmentTypes(e.target.value)}
+                  />
+                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>Supports MIME wildcards and filename extensions.</small>
+                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
                   <input
                     type="checkbox"
@@ -1645,6 +1935,24 @@ export function EmailSettingsPage() {
                     ))}
                   </select>
                 </label>
+                <label>
+                  <span>Automatic Response Template</span>
+                  <select value={ruleTemplateId} onChange={(e) => setRuleTemplateId(e.target.value)}>
+                    <option value="">Generate a response with AI</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>{template.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Start Existing Workflow</span>
+                  <select value={ruleWorkflowId} onChange={(e) => setRuleWorkflowId(e.target.value)}>
+                    <option value="">Do not start a workflow</option>
+                    {workflows.map((workflow) => (
+                      <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
+                    ))}
+                  </select>
+                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleRequireApproval} onChange={(e) => setRuleRequireApproval(e.target.checked)} />
                   <span>Always require human approval</span>
@@ -1652,6 +1960,10 @@ export function EmailSettingsPage() {
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleCreateTask} onChange={(e) => setRuleCreateTask(e.target.checked)} />
                   <span>Create an Agent Task when this rule matches</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={ruleAutoTagSpam} onChange={(e) => setRuleAutoTagSpam(e.target.checked)} />
+                  <span>Move matching sender or domain to Spam without starting AI</span>
                 </label>
               </section>
 

@@ -1,6 +1,7 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
 import type { ConnectionTestResult, ImapConfig, SmtpConfig } from "./email-inbox-types";
+import { ImapEmailTransport, SmtpEmailTransport } from "./email-transport";
 
 export class EmailConnectionTester {
   /**
@@ -141,9 +142,23 @@ export class EmailConnectionTester {
       };
     }
 
+    const verify = async (service: "IMAP" | "SMTP", operation: () => Promise<void>) => {
+      const startedAt = Date.now();
+      try {
+        await operation();
+        return { ok: true, message: `${service} authentication verified successfully.`, latencyMs: Date.now() - startedAt };
+      } catch (error) {
+        return { ok: false, message: `${service} authentication failed: ${error instanceof Error ? error.message : String(error)}`,
+          latencyMs: Date.now() - startedAt };
+      }
+    };
     const [imapRes, smtpRes] = await Promise.all([
-      imap.host ? this.testImap(imap) : Promise.resolve({ ok: true, message: "IMAP not configured", latencyMs: 0 }),
-      smtp.host ? this.testSmtp(smtp) : Promise.resolve({ ok: true, message: "SMTP not configured", latencyMs: 0 }),
+      imap.host
+        ? verify("IMAP", () => ImapEmailTransport.verify(imap, 5_000))
+        : Promise.resolve({ ok: true, message: "IMAP not configured", latencyMs: 0 }),
+      smtp.host
+        ? verify("SMTP", () => SmtpEmailTransport.verify(smtp, 5_000))
+        : Promise.resolve({ ok: true, message: "SMTP not configured", latencyMs: 0 }),
     ]);
 
     const success = imapRes.ok && smtpRes.ok;

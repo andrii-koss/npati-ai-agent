@@ -52,6 +52,8 @@ export interface EmailRateLimits {
   maxPerDay: number;
   maxPerRecipientDaily: number;
   maxFollowups: number;
+  maxCompanyPerHour?: number;
+  maxCompanyPerDay?: number;
 }
 
 export interface EmailSignatureConfig {
@@ -65,7 +67,7 @@ export interface EmailFollowupConfig {
   enabled: boolean;
   delayDays: number;
   maxFollowups: number;
-  action: "draft" | "auto_send" | "create_task";
+  action: "draft" | "auto_send" | "create_task" | "notify_user";
 }
 
 export interface CompanyEmailAccount {
@@ -212,6 +214,7 @@ export interface EmailRuleConditions {
   subjectKeywords?: string[];
   bodyKeywords?: string[];
   detectedIntent?: string;
+  attachmentTypes?: string[];
   priority?: EmailPriority;
   hasAttachments?: boolean;
   isVip?: boolean;
@@ -226,6 +229,7 @@ export interface EmailRuleActions {
   autoTagSpam?: boolean;
   createTask?: boolean;
   autoReplyTemplateId?: string;
+  startWorkflowId?: string;
 }
 
 export interface CompanyEmailRule {
@@ -315,4 +319,17 @@ export interface CompanyEmailJob {
   idempotencyKey?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CompanyEmailNotification {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  userId?: string | null;
+  threadId?: string | null;
+  notificationType: "urgent_email" | "followup_due" | "delivery_failed";
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
 }

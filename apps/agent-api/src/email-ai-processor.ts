@@ -1,5 +1,5 @@
 import type { AuthContext } from "@npati/workspace";
-import type { AIEngine } from "@npati/omniroute-adapter";
+import type { AIEngine, ChatContentPart } from "@npati/omniroute-adapter";
 import { ImapEmailTrigger } from "./automation-flow-engine";
 import { CredentialMasker, PromptInjectionGuard } from "./security-guardrails";
 import { detectCompanyChatLanguage } from "./company-chat-i18n";
@@ -25,6 +25,28 @@ function matchesEmailPattern(email: string, rawPattern: string): boolean {
   return new RegExp(`^${escaped}$`, "i").test(value);
 }
 
+function detectEmailIntent(text: string): string {
+  const normalized = text.toLowerCase();
+  if (/refund|chargeback|money back|повернен|повернути кошти/.test(normalized)) return "refund";
+  if (/invoice|billing|payment|receipt|рахунок|оплат|платіж/.test(normalized)) return "billing";
+  if (/cancel|cancellation|terminate|скасув|відмін/.test(normalized)) return "cancellation";
+  if (/bug|error|broken|not working|issue|помил|не працю|збій/.test(normalized)) return "support";
+  if (/price|pricing|quote|proposal|ціна|вартіст|пропозиці/.test(normalized)) return "sales";
+  if (/unsubscribe|newsletter|promo|відписат|розсилк|реклам/.test(normalized)) return "marketing";
+  return "general";
+}
+
+function matchesAttachmentType(attachment: EmailAttachment, rawPattern: string): boolean {
+  const pattern = rawPattern.trim().toLowerCase();
+  const contentType = attachment.contentType.toLowerCase();
+  const filename = attachment.filename.toLowerCase();
+  if (!pattern) return false;
+  if (pattern.startsWith(".")) return filename.endsWith(pattern);
+  if (!pattern.includes("*")) return contentType === pattern;
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`, "i").test(contentType);
+}
+
 export interface InboundEmailPayload {
   from: string;
   to?: string;
@@ -41,7 +63,7 @@ export interface InboundProcessingResult {
   thread: CompanyEmailThread;
   inboundMessage: CompanyEmailMessage;
   aiMessage?: CompanyEmailMessage | null;
-  actionTaken: "manual_recorded" | "draft_created" | "autopilot_queued" | "test_mode_simulated" | "blacklisted_ignored" | "collision_hold" | "rate_limited_draft" | "duplicate_ignored";
+  actionTaken: "manual_recorded" | "draft_created" | "autopilot_queued" | "test_mode_simulated" | "blacklisted_ignored" | "rule_spam_filtered" | "collision_hold" | "rate_limited_draft" | "duplicate_ignored";
   confidenceScore: number;
   priority: EmailPriority;
   detectedLanguage: string;
@@ -56,6 +78,26 @@ export interface EmailAutomationHooks {
     inboundMessage: CompanyEmailMessage;
     assignedAgentId?: string | null;
   }) => Promise<string | undefined>;
+  continueTask?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    thread: CompanyEmailThread;
+    inboundMessage: CompanyEmailMessage;
+    awaitingRunId: string;
+  }) => Promise<string | undefined>;
+  startWorkflow?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    thread: CompanyEmailThread;
+    inboundMessage: CompanyEmailMessage;
+    workflowId: string;
+  }) => Promise<string | undefined>;
+  persistAttachments?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    thread: CompanyEmailThread;
+    attachments: EmailAttachment[];
+  }) => Promise<EmailAttachment[]>;
 }
 
 export class EmailAIProcessor {
@@ -171,6 +213,10 @@ export class EmailAIProcessor {
 
     const isBlacklisted = contact.isBlacklisted || false;
     const isVip = contact.isVip || false;
+    const customerHistory = (await this.repo.listThreads(ctx, companyId, { search: parsed.from, limit: 100 }))
+      .filter((item) => item.customerEmail.toLowerCase() === parsed.from.toLowerCase());
+    const hasRecentEscalation = customerHistory.some((item) =>
+      item.status === "failed" || item.status === "waiting_human" || item.priority === "urgent");
 
     // 5. Language Detection (Item 14)
     const detectedLanguage =
@@ -180,6 +226,7 @@ export class EmailAIProcessor {
 
     // 6. Attachment analysis (Item 17)
     let attachmentNotes = "";
+    let attachmentAnalysisPerformed = false;
     if (payload.attachments && payload.attachments.length > 0) {
       const notes: string[] = [];
       for (const attachment of payload.attachments) {
@@ -193,9 +240,10 @@ export class EmailAIProcessor {
           if (!data.length || data.length > 10 * 1024 * 1024) {
             notes.push(label + " Content skipped because it is empty or exceeds the 10 MB analysis limit.");
           } else if (attachment.contentType.startsWith("image/")) {
-            notes.push(label + " Image received; metadata is available but no text extraction was possible.");
+            notes.push(label + " Image received and eligible for multimodal vision analysis.");
           } else {
             const extracted = await extractDocumentText(data, attachment.contentType, attachment.filename);
+            attachmentAnalysisPerformed = attachmentAnalysisPerformed || extracted.trim().length > 0;
             notes.push(`${label}\nExtracted content:\n${extracted.slice(0, 20_000)}`);
           }
         } catch (error) {
@@ -208,6 +256,7 @@ export class EmailAIProcessor {
     // 7. Priority Analysis (Item 9)
     let priority: EmailPriority = isVip ? "urgent" : "normal";
     const textForAnalysis = (parsed.subject + " " + parsed.bodyText).toLowerCase();
+    const detectedIntent = detectEmailIntent(textForAnalysis);
     if (
       /urgent|critical|asap|terrible|emergency|down|broken|негайно|срочно|помилка|збій|блоку|швидко/i.test(
         textForAnalysis
@@ -219,6 +268,7 @@ export class EmailAIProcessor {
     } else if (/newsletter|unsubscribe|promo|знижка|реклама|digest/i.test(textForAnalysis)) {
       priority = "low";
     }
+    if (!isVip && priority === "normal" && hasRecentEscalation) priority = "high";
 
     // 8. Find or create Thread (Item 6)
     const threadKey =
@@ -252,7 +302,11 @@ export class EmailAIProcessor {
       });
     }
 
-    // 9. Save Inbound Message
+    // 9. Save Inbound Message. Keep the decoded payload for AI analysis, while
+    // persisting the durable message copy through the shared object lifecycle.
+    const storedAttachments = payload.attachments?.length && this.hooks.persistAttachments
+      ? await this.hooks.persistAttachments({ ctx, companyId, thread, attachments: payload.attachments })
+      : payload.attachments || [];
     const inboundMessage = await this.repo.createMessage(ctx, companyId, {
       threadId: thread.id,
       emailAccountId: effectiveAccount.id,
@@ -264,7 +318,7 @@ export class EmailAIProcessor {
       bodyHtml: payload.bodyHtml,
       messageId: externalMessageId,
       inReplyTo: payload.inReplyTo,
-      attachments: payload.attachments || [],
+      attachments: storedAttachments,
       deliveryStatus: "delivered",
     });
     await this.repo.cancelPendingFollowups(thread.id);
@@ -278,6 +332,12 @@ export class EmailAIProcessor {
 
     // If blacklisted, stop here
     if (isBlacklisted) {
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.spam_filtered", category: "security", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: inboundMessage.id, from: parsed.from, reason: "blacklisted_contact" },
+        }).catch(() => undefined);
+      }
       return {
         thread,
         inboundMessage,
@@ -289,12 +349,48 @@ export class EmailAIProcessor {
       };
     }
 
+    if (priority === "urgent") {
+      await this.repo.createNotification(ctx, companyId, {
+        userId: thread.assignedUserId, threadId: thread.id, notificationType: "urgent_email",
+        title: `Urgent email: ${thread.subject}`,
+        body: `Urgent message received from ${thread.customerEmail}.`,
+      });
+    }
+
+    const awaitingRunId = typeof thread.metadata.awaitingAgentRunId === "string"
+      ? thread.metadata.awaitingAgentRunId
+      : undefined;
+    if (awaitingRunId && this.hooks.continueTask) {
+      const continuationRunId = await this.hooks.continueTask({
+        ctx, companyId, thread, inboundMessage, awaitingRunId,
+      });
+      thread = await this.repo.updateThread(ctx, companyId, thread.id, {
+        metadata: {
+          ...thread.metadata,
+          awaitingAgentRunId: null,
+          continuedFromAgentRunId: awaitingRunId,
+          continuationRunId: continuationRunId || null,
+          continuedAt: new Date().toISOString(),
+        },
+      });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.agent_task_continued", category: "automation",
+          resourceType: "company_email_thread", resourceId: thread.id,
+          details: { awaitingRunId, continuationRunId, messageId: inboundMessage.id },
+        }).catch(() => undefined);
+      }
+    }
+
     // 10. Check Rules (Item 25)
     const rules = await this.repo.listRules(ctx, companyId);
+    const analyzedPriority = priority;
     let effectiveMode = effectiveAccount.mode;
     let overrideAgentId = effectiveAccount.agentId;
     let autoReplyTemplateId: string | undefined;
     let shouldCreateTask = false;
+    let workflowId: string | undefined;
+    let shouldTagSpam = false;
 
     for (const rule of rules) {
       if (!rule.isActive) continue;
@@ -319,8 +415,11 @@ export class EmailAIProcessor {
       }
       if (cond.priority && cond.priority !== priority) matched = false;
       if (cond.hasAttachments !== undefined && cond.hasAttachments !== ((parsed.attachments?.length || 0) > 0)) matched = false;
+      if (cond.attachmentTypes?.length && !parsed.attachments?.some((attachment) =>
+        cond.attachmentTypes!.some((pattern) => matchesAttachmentType(attachment, pattern)))) matched = false;
       if (cond.language && cond.language.toLowerCase() !== detectedLanguage.toLowerCase()) matched = false;
       if (cond.isVip !== undefined && cond.isVip !== isVip) matched = false;
+      if (cond.detectedIntent && cond.detectedIntent.toLowerCase() !== detectedIntent) matched = false;
 
       if (matched) {
         if (rule.actions.setMode) effectiveMode = rule.actions.setMode;
@@ -329,12 +428,57 @@ export class EmailAIProcessor {
         if (rule.actions.setAgentId) overrideAgentId = rule.actions.setAgentId;
         if (rule.actions.autoReplyTemplateId) autoReplyTemplateId = rule.actions.autoReplyTemplateId;
         if (rule.actions.createTask) shouldCreateTask = true;
+        if (rule.actions.startWorkflowId) workflowId = rule.actions.startWorkflowId;
+        if (rule.actions.autoTagSpam) shouldTagSpam = true;
         break;
       }
     }
 
+    if (priority !== analyzedPriority && this.auditRepo) {
+      await this.auditRepo.log(ctx, companyId, {
+        action: "email.priority_changed", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+        details: { from: analyzedPriority, to: priority, source: "routing_rule", detectedIntent },
+      }).catch(() => undefined);
+    }
+
+    if (shouldTagSpam) {
+      thread = await this.repo.updateThread(ctx, companyId, thread.id, {
+        folder: "spam", status: "closed", priority: "low", isBlacklisted: true,
+      });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.spam_filtered", category: "security",
+          resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: inboundMessage.id, reason: "email_rule", from: parsed.from },
+        }).catch(() => undefined);
+      }
+      return {
+        thread, inboundMessage, aiMessage: null, actionTaken: "rule_spam_filtered",
+        confidenceScore: 0.99, priority: "low", detectedLanguage,
+      };
+    }
+
     if (shouldCreateTask && this.hooks.createTask) {
-      await this.hooks.createTask({ ctx, companyId, thread, inboundMessage, assignedAgentId: overrideAgentId });
+      const taskId = await this.hooks.createTask({ ctx, companyId, thread, inboundMessage, assignedAgentId: overrideAgentId });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.task_created", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { taskId, messageId: inboundMessage.id, assignedAgentId: overrideAgentId, detectedIntent },
+        }).catch(() => undefined);
+      }
+    }
+
+    if (workflowId && this.hooks.startWorkflow) {
+      const workflowRunId = await this.hooks.startWorkflow({
+        ctx, companyId, thread, inboundMessage, workflowId,
+      });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.workflow_started", category: "automation",
+          resourceType: "company_email_thread", resourceId: thread.id,
+          details: { workflowId, workflowRunId, messageId: inboundMessage.id },
+        }).catch(() => undefined);
+      }
     }
 
     // 11. Check Collision Lock & Takeover (Items 11 & 26)
@@ -345,6 +489,12 @@ export class EmailAIProcessor {
         priority,
         assignedAgentId: overrideAgentId,
       });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.collision_hold", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: inboundMessage.id, reason: collision.reason },
+        }).catch(() => undefined);
+      }
       return {
         thread,
         inboundMessage,
@@ -363,6 +513,12 @@ export class EmailAIProcessor {
         priority,
         assignedAgentId: overrideAgentId,
       });
+      if (this.auditRepo) {
+        await this.auditRepo.log(ctx, companyId, {
+          action: "email.agent_escalated", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: inboundMessage.id, reason: "manual_mode", mode: effectiveMode, detectedIntent },
+        }).catch(() => undefined);
+      }
       return {
         thread,
         inboundMessage,
@@ -372,6 +528,13 @@ export class EmailAIProcessor {
         priority,
         detectedLanguage,
       };
+    }
+
+    if (this.auditRepo) {
+      await this.auditRepo.log(ctx, companyId, {
+        action: "email.agent_started", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+        details: { messageId: inboundMessage.id, agentId: overrideAgentId, mode: effectiveMode, detectedIntent },
+      }).catch(() => undefined);
     }
 
     // 12. Calculate Confidence Score (Item 12)
@@ -390,7 +553,10 @@ export class EmailAIProcessor {
 
     let responseContent = "";
     if (detectedLanguage === "uk") {
-      responseContent = `${greeting}\n\nДякуємо за ваше звернення щодо "${parsed.subject}". Ми отримали ваш лист та опрацьовуємо запит. Наш агент уже розпочав виконання необхідних дій.${attachmentNotes ? `\nМи також проаналізували додані вкладення.` : ""}\n\nЯкщо у вас виникнуть додаткові запитання, будь ласка, повідомте нас у відповіді на цей лист.\n\n${signature}${footer ? `\n\n---\n${footer}` : ""}`;
+      const attachmentStatus = payload.attachments?.length
+        ? attachmentAnalysisPerformed ? "\nМи також проаналізували вміст доданих вкладень." : "\nМи також отримали додані вкладення."
+        : "";
+      responseContent = `${greeting}\n\nДякуємо за ваше звернення щодо "${parsed.subject}". Ми отримали ваш лист та опрацьовуємо запит. Наш агент уже розпочав виконання необхідних дій.${attachmentStatus}\n\nЯкщо у вас виникнуть додаткові запитання, будь ласка, повідомте нас у відповіді на цей лист.\n\n${signature}${footer ? `\n\n---\n${footer}` : ""}`;
     } else {
       responseContent = `${greeting}\n\nThank you for reaching out regarding "${parsed.subject}". We have received your message and are processing your request.${attachmentNotes ? `\nYour attachments were received.` : ""}\n\nIf you have any further details to add, simply reply to this email.\n\n${signature}${footer ? `\n\n---\n${footer}` : ""}`;
     }
@@ -413,6 +579,26 @@ export class EmailAIProcessor {
 
     if (this.aiEngine && !selectedTemplate) {
       try {
+        const userPrompt = [
+          `Sender: ${parsed.from}`,
+          `Subject: ${parsed.subject}`,
+          `Customer context: ${contact.name || "unknown"}; company: ${contact.companyName || "unknown"}; VIP: ${isVip}`,
+          `Previous customer threads: ${customerHistory.length}; prior escalation: ${hasRecentEscalation}`,
+          attachmentNotes || "Attachments: none",
+          `Inbound email:\n${parsed.bodyText}`,
+        ].join("\n\n");
+        const imageParts: ChatContentPart[] = (payload.attachments || [])
+          .filter((attachment) => Boolean(attachment.contentBase64)
+            && /^image\/(png|jpeg|jpg|webp)$/i.test(attachment.contentType)
+            && attachment.sizeBytes <= 10 * 1024 * 1024)
+          .slice(0, 5)
+          .map((attachment) => ({
+            type: "image_url" as const,
+            image_url: { url: `data:${attachment.contentType};base64,${attachment.contentBase64}`, detail: "high" as const },
+          }));
+        const userContent: string | ChatContentPart[] = imageParts.length
+          ? [{ type: "text", text: userPrompt }, ...imageParts]
+          : userPrompt;
         const generated = await this.aiEngine.chat({
           idempotencyKey: `email-draft:${thread.id}:${externalMessageId || inboundMessage.id}`,
           admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
@@ -433,17 +619,14 @@ export class EmailAIProcessor {
             },
             {
               role: "user",
-              content: [
-                `Sender: ${parsed.from}`,
-                `Subject: ${parsed.subject}`,
-                `Customer context: ${contact.name || "unknown"}; company: ${contact.companyName || "unknown"}; VIP: ${isVip}`,
-                attachmentNotes || "Attachments: none",
-                `Inbound email:\n${parsed.bodyText}`,
-              ].join("\n\n"),
+              content: userContent,
             },
           ],
         });
-        if (generated.content.trim()) responseContent = generated.content.trim();
+        if (generated.content.trim()) {
+          responseContent = generated.content.trim();
+          attachmentAnalysisPerformed = attachmentAnalysisPerformed || imageParts.length > 0;
+        }
       } catch {
         // Preserve deterministic fallback so transient model outages never lose inbound mail.
       }
@@ -478,6 +661,13 @@ export class EmailAIProcessor {
           aiConfidenceScore: confidenceScore,
           aiClassificationSummary: `Rate limit triggered: ${rateLimit.reason}. Converted to draft.`,
         });
+
+        if (this.auditRepo) {
+          await this.auditRepo.log(ctx, companyId, {
+            action: "email.rate_limited", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
+            details: { messageId: draftMsg.id, reason: rateLimit.reason, convertedToDraft: true },
+          }).catch(() => undefined);
+        }
 
         return {
           thread,
@@ -585,7 +775,11 @@ export class EmailAIProcessor {
     if (this.auditRepo) {
       await this.auditRepo
         .log(ctx, companyId, {
-          action: isAutopilot ? "email.auto_reply_sent" : "email.draft_generated",
+          action: actionTaken === "autopilot_queued"
+            ? "email.auto_reply_queued"
+            : actionTaken === "test_mode_simulated"
+              ? "email.test_mode_simulated"
+              : "email.draft_generated",
           category: "automation",
           resourceType: "company_email_thread",
           resourceId: thread.id,
@@ -597,6 +791,7 @@ export class EmailAIProcessor {
             priority,
             account: effectiveAccount.emailAddress,
             testMode: effectiveAccount.testMode,
+            detectedIntent,
           },
         })
         .catch(() => undefined);

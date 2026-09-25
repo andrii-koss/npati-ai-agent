@@ -667,6 +667,7 @@ export class CompanyDelegationRuntime {
             ? (adapterInput.topic as string).trim()
             : company.name || "company information";
         }
+        if (tool === "email.send" || tool === "communications.email_send") adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,

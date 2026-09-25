@@ -58,7 +58,11 @@ export interface ApiKeyAuthResult {
 export const API_KEY_SCOPES = [
   "workspace:read", "workspace:write", "business:manage", "chat:use",
   "chat:write", "memory:read", "memory:write",
-    "mcp:read", "mcp:execute", "agent:exec", "*",
+  "mcp:read", "mcp:execute", "agent:exec",
+  "email:view", "email:manage_accounts", "email:read_messages",
+  "email:send_messages", "email:delete_messages", "email:approve_drafts",
+  "email:configure_autopilot", "email:configure_agents", "email:view_analytics",
+  "*",
 ] as const;
 
 export type ApiKeyScope = typeof API_KEY_SCOPES[number];

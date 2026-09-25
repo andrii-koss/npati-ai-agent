@@ -139,6 +139,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
           if (s === "agent:exec") permissions.push("agent:exec");
           if (s === "memory:read") permissions.push("memory:read");
           if (s === "memory:write") permissions.push("memory:write");
+          if (s.startsWith("email:")) permissions.push(s);
         }
       }
 
@@ -185,6 +186,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
           if (s === "memory:read") permissions.push("memory:read");
           if (s === "memory:write") permissions.push("memory:write");
           if (s === "tools:read") permissions.push("tools:read", "workspace:read");
+          if (s.startsWith("email:")) permissions.push(s);
         }
       }
       const requestedCompanyId = String((request.params as { companyId?: string } | undefined)?.companyId || "");
