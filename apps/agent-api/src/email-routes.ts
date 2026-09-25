@@ -308,14 +308,11 @@ export function registerEmailInboxRoutes(
       const result = await EmailConnectionTester.testAll(imap, smtp, account.testMode);
 
       // Update account status based on test result
-      const authenticationFailed = /auth(?:entication)? failed|credentials|oauth/i.test(
-        [result.imapStatus?.message, result.smtpStatus?.message].filter(Boolean).join(" ")
-      );
       const newStatus = result.success
         ? "connected"
-        : authenticationFailed
-          ? "auth_error"
-          : !result.imapStatus?.ok ? "imap_error" : "smtp_error";
+        : !result.smtpStatus?.ok
+          ? "smtp_error"
+          : "imap_error";
       await repo.updateAccount(c, r.params.companyId, account.id, {
         status: newStatus,
         imapConfig: { ...account.imapConfig, lastError: result.imapStatus?.ok ? null : result.imapStatus?.message },
@@ -386,8 +383,10 @@ export function registerEmailInboxRoutes(
       const isDraft = r.body?.isDraft === true;
 
       if (!isDraft) {
-        if (!account.testMode && account.status !== "connected") {
-          throw Object.assign(new Error(`Email account is not connected (${account.status}). Open Email Settings and run Test Connection first.`), { status: 409 });
+        const smtpBlocked = account.status === "pending" || account.status === "disabled" ||
+          Boolean(account.smtpConfig.lastError);
+        if (!account.testMode && smtpBlocked) {
+          throw Object.assign(new Error(`SMTP sending is unavailable (${account.status}). Open Email Settings and test the SMTP connection.`), { status: 409 });
         }
         const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!);
         if (!quota.allowed) throw Object.assign(new Error(`Rate limit exceeded: ${quota.reason}`), { status: 429 });

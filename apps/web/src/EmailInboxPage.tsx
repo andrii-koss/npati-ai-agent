@@ -199,22 +199,6 @@ async function fileToEmailAttachment(file: File) {
   };
 }
 
-function splitQuotedReply(body: string): { reply: string; quoted: string } {
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
-  const quoteStart = lines.findIndex((line, index) => {
-    const value = line.trim();
-    return /^On .+wrote:$/i.test(value) ||
-      /^(?:В|У) .+(?:писав|писала|написав|написала):$/i.test(value) ||
-      /^-{2,}\s*(?:Original Message|Forwarded message)/i.test(value) ||
-      (value.startsWith(">") && index > 0);
-  });
-  if (quoteStart < 0) return { reply: body.trim(), quoted: "" };
-  return {
-    reply: lines.slice(0, quoteStart).join("\n").trim(),
-    quoted: lines.slice(quoteStart).join("\n").trim(),
-  };
-}
-
 export function EmailInboxPage() {
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -240,7 +224,6 @@ export function EmailInboxPage() {
   const deletedThreadIdsRef = useRef(new Set<string>());
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const latestInboundMessageRef = useRef<HTMLDivElement | null>(null);
-  const [expandedQuotedMessages, setExpandedQuotedMessages] = useState<Set<string>>(() => new Set());
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -360,10 +343,9 @@ export function EmailInboxPage() {
   const [composeBody, setComposeBody] = useState("");
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const [composeSending, setComposeSending] = useState(false);
-  const visibleMessages = useMemo(() => messages.filter((message) => !message.isDraft), [messages]);
   const latestInboundId = useMemo(
-    () => [...visibleMessages].reverse().find((message) => message.direction === "inbound")?.id,
-    [visibleMessages]
+    () => [...messages].reverse().find((message) => message.direction === "inbound")?.id,
+    [messages]
   );
 
   useEffect(() => {
@@ -1103,10 +1085,6 @@ export function EmailInboxPage() {
                       </small>
                     </div>
 
-                    {t.unreadCount > 0 && (
-                      <div className="email-thread-new-count">{t.unreadCount} new {t.unreadCount === 1 ? "message" : "messages"}</div>
-                    )}
-
                     <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {t.subject}
                     </div>
@@ -1489,44 +1467,32 @@ export function EmailInboxPage() {
 
                 {/* Messages Scroll Timeline */}
                 <div className="email-inbox-messages-scroll" ref={messageScrollRef}>
-                  {visibleMessages.length === 0 ? (
+                  {messages.length === 0 ? (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                       <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
                       <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
                       <small>Write a reply below to start the conversation.</small>
                     </div>
                   ) : (
-                    visibleMessages.map((m) => {
+                    messages.map((m) => {
                       const isInbound = m.direction === "inbound";
                       const isLatestInbound = isInbound && m.id === latestInboundId;
-                      const content = splitQuotedReply(m.bodyText);
-                      const quotedExpanded = expandedQuotedMessages.has(m.id);
                       return (
                         <div
                           key={m.id}
                           ref={isLatestInbound ? latestInboundMessageRef : undefined}
-                          className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
-                            } ${isLatestInbound ? "latest-inbound" : ""
-                            }`}
+                          className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"}`}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
-                                {isInbound ? `Customer — ${m.fromName || m.fromAddress}` : m.isAiGenerated ? "AI Assistant" : "You"}
-                              </div>
-                              <span className={`email-message-direction ${isInbound ? "received" : "sent"}`}>
-                                {isInbound ? "Received" : "Sent"}
-                              </span>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
+                              {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? "AI Assistant" : "Support Agent"}
                             </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                              {isLatestInbound && <span className="email-latest-reply-badge">Latest customer message</span>}
-                              <small style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>
-                                {new Date(m.createdAt).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                              </small>
-                            </div>
+                            <small style={{ fontSize: 11, color: "#64748b" }}>
+                              {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </small>
                           </div>
 
-                          {m.bodyHtml && !content.quoted ? (
+                          {m.bodyHtml ? (
                             <div
                               className="email-sanitized-html"
                               style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55 }}
@@ -1542,7 +1508,7 @@ export function EmailInboxPage() {
                             />
                           ) : (
                             <div style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                              {(content.reply || "(No new message text)").split(/(https?:\/\/[^\s<>"')]+)/gi).map((part, index) =>
+                              {m.bodyText.split(/(https?:\/\/[^\s<>"')]+)/gi).map((part, index) =>
                                 /^https?:\/\//i.test(part) ? (
                                   <button
                                     key={`${m.id}-link-${index}`}
@@ -1554,23 +1520,6 @@ export function EmailInboxPage() {
                                   </button>
                                 ) : part
                               )}
-                            </div>
-                          )}
-
-                          {content.quoted && (
-                            <div>
-                              <button
-                                type="button"
-                                className="email-quoted-toggle"
-                                onClick={() => setExpandedQuotedMessages((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
-                                  return next;
-                                })}
-                              >
-                                {quotedExpanded ? "Hide quoted conversation" : "Show quoted conversation"}
-                              </button>
-                              {quotedExpanded && <div className="email-quoted-content">{content.quoted}</div>}
                             </div>
                           )}
 
