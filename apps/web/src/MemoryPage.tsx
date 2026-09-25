@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 export type MemoryType =
   | "business_fact"
@@ -46,64 +47,54 @@ const initialForm: MemoryFormData = {
 
 export const MEMORY_TYPE_META: Record<
   MemoryType,
-  { label: string; icon: string; badgeClass: string; categoryGroup: string }
+  { icon: string; badgeClass: string; categoryGroup: string }
 > = {
   business_fact: {
-    label: "Business Fact",
     icon: "📌",
     badgeClass: "badge-fact",
     categoryGroup: "facts",
   },
   audience: {
-    label: "Audience & ICP",
     icon: "🎯",
     badgeClass: "badge-audience",
     categoryGroup: "audience",
   },
   brand: {
-    label: "Brand & Voice",
     icon: "✨",
     badgeClass: "badge-brand",
     categoryGroup: "brand",
   },
   decision: {
-    label: "Strategic Decision",
     icon: "⚖️",
     badgeClass: "badge-decision",
     categoryGroup: "decisions",
   },
   product: {
-    label: "Product & Service",
     icon: "📦",
     badgeClass: "badge-product",
     categoryGroup: "product",
   },
   channel: {
-    label: "Marketing Channel",
     icon: "📢",
     badgeClass: "badge-channel",
     categoryGroup: "audience",
   },
   preference: {
-    label: "User Preference",
     icon: "⚙️",
     badgeClass: "badge-preference",
     categoryGroup: "brand",
   },
   experiment: {
-    label: "Experiment",
     icon: "🧪",
     badgeClass: "badge-experiment",
     categoryGroup: "decisions",
   },
   result: {
-    label: "Result & Metric",
     icon: "📈",
     badgeClass: "badge-result",
     categoryGroup: "decisions",
   },
   other: {
-    label: "Other Knowledge",
     icon: "📝",
     badgeClass: "badge-other",
     categoryGroup: "other",
@@ -156,6 +147,7 @@ function updateCachedMemory(businessId: string, items: MemoryItem[]) {
 }
 
 export function MemoryPage() {
+  const { t } = useTranslation();
   const { overview, loading: workspaceLoading, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
   const businessId = business?.id;
@@ -200,43 +192,42 @@ export function MemoryPage() {
     void loadMemory();
   }, [businessId, workspaceLoading]);
 
-
   // Tab definitions
   const tabs = useMemo(() => {
     return [
-      { id: "all", label: "All Items", count: items.length },
+      { id: "all", label: t("memoryPage.tabs.all"), count: items.length },
       {
         id: "facts",
-        label: "Business Facts",
+        label: t("memoryPage.tabs.facts"),
         count: items.filter((i) => i.type === "business_fact").length,
       },
       {
         id: "audience",
-        label: "Audience & ICP",
+        label: t("memoryPage.tabs.audience"),
         count: items.filter((i) => i.type === "audience" || i.type === "channel").length,
       },
       {
         id: "brand",
-        label: "Brand & Voice",
+        label: t("memoryPage.tabs.brand"),
         count: items.filter((i) => i.type === "brand" || i.type === "preference").length,
       },
       {
         id: "decisions",
-        label: "Decisions & Strategy",
+        label: t("memoryPage.tabs.decisions"),
         count: items.filter((i) => i.type === "decision" || i.type === "experiment" || i.type === "result").length,
       },
       {
         id: "product",
-        label: "Products & Services",
+        label: t("memoryPage.tabs.product"),
         count: items.filter((i) => i.type === "product").length,
       },
       {
         id: "other",
-        label: "Other",
+        label: t("memoryPage.tabs.other"),
         count: items.filter((i) => i.type === "other").length,
       },
     ];
-  }, [items]);
+  }, [items, t]);
 
   // Filtering
   const filteredItems = useMemo(() => {
@@ -260,7 +251,7 @@ export function MemoryPage() {
       // Search filter
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        const typeLabel = MEMORY_TYPE_META[item.type]?.label.toLowerCase() || "";
+        const typeLabel = t(`memoryPage.types.${item.type}`).toLowerCase();
         return (
           item.title.toLowerCase().includes(q) ||
           item.content.toLowerCase().includes(q) ||
@@ -271,7 +262,7 @@ export function MemoryPage() {
 
       return true;
     });
-  }, [items, selectedTab, search]);
+  }, [items, selectedTab, search, t]);
 
   const openCreateDrawer = () => {
     setEditingItem(null);
@@ -295,27 +286,27 @@ export function MemoryPage() {
   const handleCopyContent = (item: MemoryItem) => {
     void navigator.clipboard.writeText(`${item.title}\n\n${item.content}`);
     setCopiedId(item.id);
-    showToast("Memory fact copied to clipboard");
+    showToast(t("memoryPage.toasts.copied"));
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleDeleteItem = async (item: MemoryItem) => {
     if (!businessId) return;
     const confirmed = await confirmModal({
-      title: "Delete memory fact?",
-      message: `Delete memory item "${item.title}"? This cannot be undone.`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("memoryPage.dialogs.deleteTitle"),
+      message: t("memoryPage.dialogs.deleteMessage", { title: item.title }),
+      confirmText: t("memoryPage.dialogs.deleteConfirm"),
+      cancelText: t("memoryPage.dialogs.deleteCancel"),
       isDanger: true,
     });
     if (!confirmed) return;
 
     try {
       await api(`/businesses/${businessId}/memory/${item.id}`, { method: "DELETE" });
-      showToast(`Deleted: "${item.title}"`);
+      showToast(t("memoryPage.toasts.deleted", { title: item.title }));
       await loadMemory();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Could not delete memory item";
+      const msg = err instanceof Error ? err.message : t("memoryPage.toasts.deleteError");
       showToast(msg);
     }
   };
@@ -323,11 +314,11 @@ export function MemoryPage() {
   const saveMemoryForm = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.title.trim()) {
-      setFormError("Title is required");
+      setFormError(t("memoryPage.drawer.errors.titleRequired"));
       return;
     }
     if (!form.content.trim()) {
-      setFormError("Fact content description is required");
+      setFormError(t("memoryPage.drawer.errors.contentRequired"));
       return;
     }
 
@@ -342,7 +333,7 @@ export function MemoryPage() {
         const created = await api<{ id: string }>("/businesses", {
           method: "POST",
           body: JSON.stringify({
-            name: "My Business",
+            name: t("memoryPage.drawer.defaultBusinessName"),
             businessType: "starting",
             businessStage: "idea",
           }),
@@ -364,19 +355,19 @@ export function MemoryPage() {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
-        showToast("Memory item updated");
+        showToast(t("memoryPage.toasts.updated"));
       } else {
         await api(`/businesses/${targetBusinessId}/memory`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        showToast("New memory item saved");
+        showToast(t("memoryPage.toasts.saved"));
       }
 
       setDrawerOpen(false);
       await loadMemory();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to save memory item";
+      const msg = err instanceof Error ? err.message : t("memoryPage.drawer.errors.saveFailed");
       setFormError(msg);
     } finally {
       setSaving(false);
@@ -384,10 +375,10 @@ export function MemoryPage() {
   };
 
   const formatSourceLabel = (src: string) => {
-    if (!src) return "Manual";
-    if (src === "chat_confirmed") return "Chat Confirmed";
-    if (src === "onboarding") return "Onboarding";
-    if (src === "user") return "User Verified";
+    if (!src) return t("memoryPage.sources.manual");
+    if (src === "chat_confirmed") return t("memoryPage.sources.chatConfirmed");
+    if (src === "onboarding") return t("memoryPage.sources.onboarding");
+    if (src === "user") return t("memoryPage.sources.userVerified");
     return src.replace(/_/g, " ");
   };
 
@@ -398,14 +389,14 @@ export function MemoryPage() {
         <div className="automations-header-top">
           <div>
             <p className="eyebrow">
-              {business ? `${business.name} · ` : ""}Business Context & Knowledge
+              {business ? `${business.name} · ` : ""}{t("memoryPage.eyebrow")}
             </p>
             <h1>
               <Link
                 to="/settings"
                 className="marketplace-back-button"
-                aria-label="Back to settings"
-                title="Back to settings"
+                aria-label={t("memoryPage.backToSettings")}
+                title={t("memoryPage.backToSettings")}
               >
                 <svg
                   width="20"
@@ -420,10 +411,10 @@ export function MemoryPage() {
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>Business Memory</span>
+              <span>{t("memoryPage.title")}</span>
             </h1>
             <p className="hero-copy">
-              Curate durable facts, verified audience profiles, brand voice rules, and strategic decisions that NPATI Agent leverages across all chats and tasks.
+              {t("memoryPage.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
@@ -431,14 +422,13 @@ export function MemoryPage() {
               type="button"
               className="button-primary automations-action-primary"
               onClick={openCreateDrawer}
-              title="Add a new business fact or decision"
+              title={t("memoryPage.addFactTitle")}
             >
-              + Add Memory Fact
+              {t("memoryPage.addFactBtn")}
             </button>
           </div>
         </div>
       </header>
-
 
       {/* Search & Filter Tabs Controls Bar */}
       <div className="inspector-controls memory-controls">
@@ -449,19 +439,19 @@ export function MemoryPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Search memory by keyword, title, fact content or source..."
+            placeholder={t("memoryPage.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter memory items"
+            aria-label={t("memoryPage.searchAria")}
           />
           {search && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearch("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("memoryPage.clearSearch")}
+              title={t("memoryPage.clearSearch")}
             >
               ×
             </button>
@@ -489,17 +479,14 @@ export function MemoryPage() {
       {!loading && items.length === 0 && (
         <div className="automations-empty-card memory-empty-card">
           <div className="automations-empty-icon">🧠</div>
-          <h3>No Durable Memory Items Yet</h3>
-          <p>
-            Add core facts about your business, target audience, brand tone, or agreed decisions.
-            NPATI Agent will automatically recall these during chat reasoning without hallucinating.
-          </p>
+          <h3>{t("memoryPage.empty.title")}</h3>
+          <p>{t("memoryPage.empty.description")}</p>
           <button
             type="button"
             className="button-primary automations-action-primary"
             onClick={openCreateDrawer}
           >
-            + Add First Fact
+            {t("memoryPage.empty.addFirstBtn")}
           </button>
         </div>
       )}
@@ -507,8 +494,8 @@ export function MemoryPage() {
       {!loading && items.length > 0 && filteredItems.length === 0 && (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🔍</div>
-          <h3>No matching memories</h3>
-          <p>Try adjusting your search keywords or switching category filters.</p>
+          <h3>{t("memoryPage.emptyFiltered.title")}</h3>
+          <p>{t("memoryPage.emptyFiltered.description")}</p>
           <button
             type="button"
             className="button-secondary"
@@ -517,7 +504,7 @@ export function MemoryPage() {
               setSelectedTab("all");
             }}
           >
-            Reset Filters
+            {t("memoryPage.emptyFiltered.resetFilters")}
           </button>
         </div>
       )}
@@ -534,37 +521,15 @@ export function MemoryPage() {
                     <div className="memory-card-top-left">
                       <span className={`memory-type-badge ${meta.badgeClass}`}>
                         <span className="memory-type-icon">{meta.icon}</span>
-                        <span>{meta.label}</span>
+                        <span>{t(`memoryPage.types.${item.type}`)}</span>
                       </span>
-                      <span className="memory-source-tag" title={`Source: ${item.source || "user"}`}>
+                      <span
+                        className="memory-source-tag"
+                        title={`${t("memoryPage.sources.sourcePrefix")}: ${item.source || "user"}`}
+                      >
                         {formatSourceLabel(item.source)}
                       </span>
                     </div>
-
-                    {false && <button
-                      type="button"
-                      className="memory-card-top-delete"
-                      onClick={() => void handleDeleteItem(item)}
-                      title="Delete memory fact"
-                      aria-label="Delete memory fact"
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        <line x1="10" y1="11" x2="10" y2="17" />
-                        <line x1="14" y1="11" x2="14" y2="17" />
-                      </svg>
-                      <span>Delete</span>
-                    </button>}
                   </div>
 
                   <h3 className="memory-card-title">{item.title}</h3>
@@ -584,8 +549,11 @@ export function MemoryPage() {
                       })}
                     </span>
                     {item.confidence !== undefined && (
-                      <span className="memory-confidence-pill" title={`Confidence score: ${item.confidence}`}>
-                        {item.confidence >= 0.9 ? "✓ Verified" : `${Math.round(item.confidence * 100)}%`}
+                      <span
+                        className="memory-confidence-pill"
+                        title={t("memoryPage.card.confidenceTooltip", { score: String(item.confidence) })}
+                      >
+                        {item.confidence >= 0.9 ? t("memoryPage.card.verified") : `${Math.round(item.confidence * 100)}%`}
                       </span>
                     )}
                   </div>
@@ -595,23 +563,23 @@ export function MemoryPage() {
                       type="button"
                       className={`memory-action-btn copy ${copiedId === item.id ? "copied" : ""}`}
                       onClick={() => handleCopyContent(item)}
-                      title="Copy fact content"
+                      title={t("memoryPage.card.copyTitle")}
                     >
-                      {copiedId === item.id ? "✓ Copied" : "Copy"}
+                      {copiedId === item.id ? t("memoryPage.card.copied") : t("memoryPage.card.copy")}
                     </button>
                     <button
                       type="button"
                       className="memory-action-btn edit"
                       onClick={() => openEditDrawer(item)}
-                      title="Edit this memory fact"
+                      title={t("memoryPage.card.editTitle")}
                     >
-                      Edit
+                      {t("memoryPage.card.edit")}
                     </button>
                     <button
                       type="button"
                       className="memory-action-btn delete"
                       onClick={() => void handleDeleteItem(item)}
-                      title="Delete this memory fact"
+                      title={t("memoryPage.card.deleteTitle")}
                     >
                       <svg
                         width="13"
@@ -628,7 +596,7 @@ export function MemoryPage() {
                         <line x1="10" y1="11" x2="10" y2="17" />
                         <line x1="14" y1="11" x2="14" y2="17" />
                       </svg>
-                      <span>Delete</span>
+                      <span>{t("memoryPage.card.delete")}</span>
                     </button>
                   </div>
                 </div>
@@ -644,13 +612,13 @@ export function MemoryPage() {
           <aside className="company-drawer automations-drawer memory-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Business Knowledge</span>
-                <h2>{editingItem ? "Edit Memory Fact" : "New Memory Fact"}</h2>
+                <span>{t("memoryPage.drawer.eyebrow")}</span>
+                <h2>{editingItem ? t("memoryPage.drawer.editTitle") : t("memoryPage.drawer.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="automations-drawer-close"
-                aria-label="Close"
+                aria-label={t("memoryPage.drawer.closeAria")}
                 onClick={() => setDrawerOpen(false)}
               >
                 <svg
@@ -673,66 +641,66 @@ export function MemoryPage() {
               {formError && <div className="workspace-notice error">{formError}</div>}
 
               <section>
-                <h3>Category & Classification</h3>
+                <h3>{t("memoryPage.drawer.categorySection")}</h3>
                 <label>
-                  <span>Memory Type *</span>
+                  <span>{t("memoryPage.drawer.typeLabel")}</span>
                   <select
                     value={form.type}
                     onChange={(e) => setForm({ ...form, type: e.target.value as MemoryType })}
                     className="memory-drawer-select"
                   >
-                    <option value="business_fact">📌 Business Fact (Operating rules, pricing, facts)</option>
-                    <option value="audience">🎯 Target Audience & ICP (Personas, demographics, pains)</option>
-                    <option value="brand">✨ Brand & Voice (Tone, voice, positioning rules)</option>
-                    <option value="decision">⚖️ Strategic Decision (Confirmed roadmap, choices)</option>
-                    <option value="product">📦 Product & Service (Offerings, specs, features)</option>
-                    <option value="channel">📢 Marketing Channel (Distribution, platforms)</option>
-                    <option value="preference">⚙️ User Preference (Format, prompt instructions)</option>
-                    <option value="experiment">🧪 Experiment (Growth tests, active hypotheses)</option>
-                    <option value="result">📈 Result & Metric (Outcomes, verified findings)</option>
-                    <option value="other">📝 Other Knowledge</option>
+                    <option value="business_fact">{t("memoryPage.drawer.types.businessFact")}</option>
+                    <option value="audience">{t("memoryPage.drawer.types.audience")}</option>
+                    <option value="brand">{t("memoryPage.drawer.types.brand")}</option>
+                    <option value="decision">{t("memoryPage.drawer.types.decision")}</option>
+                    <option value="product">{t("memoryPage.drawer.types.product")}</option>
+                    <option value="channel">{t("memoryPage.drawer.types.channel")}</option>
+                    <option value="preference">{t("memoryPage.drawer.types.preference")}</option>
+                    <option value="experiment">{t("memoryPage.drawer.types.experiment")}</option>
+                    <option value="result">{t("memoryPage.drawer.types.result")}</option>
+                    <option value="other">{t("memoryPage.drawer.types.other")}</option>
                   </select>
                 </label>
               </section>
 
               <section>
-                <h3>Memory Details</h3>
+                <h3>{t("memoryPage.drawer.detailsSection")}</h3>
                 <label>
-                  <span>Title *</span>
+                  <span>{t("memoryPage.drawer.titleLabel")}</span>
                   <input
                     type="text"
                     required
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    placeholder="e.g. Primary Target Customer: B2B Founders in Europe"
+                    placeholder={t("memoryPage.drawer.titlePlaceholder")}
                     className="memory-drawer-input"
                   />
                 </label>
                 <label>
-                  <span>Fact Content / Guidelines *</span>
+                  <span>{t("memoryPage.drawer.contentLabel")}</span>
                   <textarea
                     rows={6}
                     required
                     value={form.content}
                     onChange={(e) => setForm({ ...form, content: e.target.value })}
-                    placeholder="Detail the verified facts, numbers, boundaries or rules that NPATI Agent must adhere to..."
+                    placeholder={t("memoryPage.drawer.contentPlaceholder")}
                     className="memory-drawer-textarea"
                   />
                 </label>
               </section>
 
               <section>
-                <h3>Confidence Level</h3>
+                <h3>{t("memoryPage.drawer.confidenceSection")}</h3>
                 <label>
-                  <span>Verification Level</span>
+                  <span>{t("memoryPage.drawer.confidenceLabel")}</span>
                   <select
                     value={form.confidence}
                     onChange={(e) => setForm({ ...form, confidence: e.target.value })}
                     className="memory-drawer-select"
                   >
-                    <option value="1.0">Verified Fact (100% - Ground truth rule)</option>
-                    <option value="0.8">High Confidence (80% - Strongly observed)</option>
-                    <option value="0.5">Hypothesis (50% - Under exploration)</option>
+                    <option value="1.0">{t("memoryPage.drawer.confidenceOptions.high100")}</option>
+                    <option value="0.8">{t("memoryPage.drawer.confidenceOptions.med80")}</option>
+                    <option value="0.5">{t("memoryPage.drawer.confidenceOptions.low50")}</option>
                   </select>
                 </label>
               </section>
@@ -744,14 +712,18 @@ export function MemoryPage() {
                   onClick={() => setDrawerOpen(false)}
                   disabled={saving}
                 >
-                  Cancel
+                  {t("memoryPage.drawer.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary"
                   disabled={saving}
                 >
-                  {saving ? "Saving Fact..." : editingItem ? "Save Changes" : "Save Memory Fact"}
+                  {saving
+                    ? t("memoryPage.drawer.saving")
+                    : editingItem
+                    ? t("memoryPage.drawer.saveChanges")
+                    : t("memoryPage.drawer.saveFact")}
                 </button>
               </footer>
             </form>
@@ -764,3 +736,4 @@ export function MemoryPage() {
     </main>
   );
 }
+

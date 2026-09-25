@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 export interface Goal {
   id: string;
@@ -92,6 +93,7 @@ function updateCachedGoals(businessId: string, items: Goal[]) {
 }
 
 export function GoalsPage() {
+  const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
   const businessId = business?.id;
@@ -122,7 +124,7 @@ export function GoalsPage() {
       setGoals(data);
       updateCachedGoals(businessId, data);
     } catch (err: any) {
-      setNotice(`Failed to load goals: ${err.message}`);
+      setNotice(t("goalsPage.notices.failedToLoad", { message: err.message }));
     } finally {
       setLoading(false);
     }
@@ -199,7 +201,7 @@ export function GoalsPage() {
     if (!businessId) return;
 
     if (!form.title.trim()) {
-      setNotice("Goal title is required");
+      setNotice(t("goalsPage.notices.titleRequired"));
       return;
     }
 
@@ -223,18 +225,18 @@ export function GoalsPage() {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
-        setNotice(`Goal "${payload.title}" updated successfully.`);
+        setNotice(t("goalsPage.notices.updatedSuccess", { title: payload.title }));
       } else {
         await api(`/businesses/${businessId}/goals`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        setNotice(`Goal "${payload.title}" created successfully.`);
+        setNotice(t("goalsPage.notices.createdSuccess", { title: payload.title }));
       }
       setDrawerOpen(false);
       await loadGoals();
     } catch (err: any) {
-      setNotice(`Failed to save goal: ${err.message}`);
+      setNotice(t("goalsPage.notices.failedToSave", { message: err.message }));
     } finally {
       setSaving(false);
     }
@@ -243,10 +245,10 @@ export function GoalsPage() {
   const deleteGoal = async (goal: Goal) => {
     if (!businessId) return;
     const confirmed = await confirmModal({
-      title: "Delete goal?",
-      message: `Are you sure you want to delete goal "${goal.title}"?`,
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("goalsPage.dialogs.deleteTitle"),
+      message: t("goalsPage.dialogs.deleteMessage", { title: goal.title }),
+      confirmText: t("goalsPage.dialogs.deleteConfirm"),
+      cancelText: t("goalsPage.dialogs.deleteCancel"),
       isDanger: true,
     });
     if (!confirmed) return;
@@ -255,24 +257,35 @@ export function GoalsPage() {
       await api(`/businesses/${businessId}/goals/${goal.id}`, {
         method: "DELETE",
       });
-      setNotice(`Goal "${goal.title}" deleted.`);
+      setNotice(t("goalsPage.notices.deletedSuccess", { title: goal.title }));
       await loadGoals();
     } catch (err: any) {
-      setNotice(`Failed to delete goal: ${err.message}`);
+      setNotice(t("goalsPage.notices.failedToDelete", { message: err.message }));
     }
   };
 
   const updateGoalStatus = async (goal: Goal, newStatus: Goal["status"]) => {
     if (!businessId) return;
+    const statusLabels: Record<Goal["status"], string> = {
+      active: t("goalsPage.statuses.active"),
+      paused: t("goalsPage.statuses.paused"),
+      completed: t("goalsPage.statuses.completed"),
+      cancelled: t("goalsPage.statuses.cancelled"),
+    };
     try {
       await api(`/businesses/${businessId}/goals/${goal.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setNotice(`Goal "${goal.title}" status updated to ${newStatus}.`);
+      setNotice(
+        t("goalsPage.notices.statusUpdated", {
+          title: goal.title,
+          status: statusLabels[newStatus] || newStatus,
+        })
+      );
       await loadGoals();
     } catch (err: any) {
-      setNotice(`Status update error: ${err.message}`);
+      setNotice(t("goalsPage.notices.statusUpdateError", { message: err.message }));
     }
   };
 
@@ -282,7 +295,7 @@ export function GoalsPage() {
       return (
         <span className="goal-priority-badge high">
           <span className="priority-indicator red" />
-          High P1
+          {t("goalsPage.priorityBadges.high")}
         </span>
       );
     }
@@ -290,14 +303,14 @@ export function GoalsPage() {
       return (
         <span className="goal-priority-badge normal">
           <span className="priority-indicator blue" />
-          Normal P2
+          {t("goalsPage.priorityBadges.normal")}
         </span>
       );
     }
     return (
       <span className="goal-priority-badge low">
         <span className="priority-indicator gray" />
-        Low P3
+        {t("goalsPage.priorityBadges.low")}
       </span>
     );
   };
@@ -316,13 +329,13 @@ export function GoalsPage() {
       <header className="inspector-header automations-header goals-header">
         <div className="automations-header-top">
           <div>
-            <p className="eyebrow">Settings · Goals</p>
+            <p className="eyebrow">{t("goalsPage.eyebrow")}</p>
             <h1>
               <Link
                 to="/settings"
                 className="marketplace-back-button"
-                aria-label="Back to settings"
-                title="Back to settings"
+                aria-label={t("goalsPage.backToSettings")}
+                title={t("goalsPage.backToSettings")}
               >
                 <svg
                   width="20"
@@ -337,10 +350,10 @@ export function GoalsPage() {
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>Goals & Objectives</span>
+              <span>{t("goalsPage.title")}</span>
             </h1>
             <p className="hero-copy">
-              Define measurable outcomes, metric targets, and priority milestones for autonomous AI agent alignment.
+              {t("goalsPage.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
@@ -349,7 +362,7 @@ export function GoalsPage() {
               className="button-primary automations-action-primary goals-action-primary"
               onClick={openCreateDrawer}
             >
-              + New Goal
+              {t("goalsPage.newGoal")}
             </button>
           </div>
         </div>
@@ -359,23 +372,23 @@ export function GoalsPage() {
       <section className="overview-grid inspector-stats-grid automations-stats-grid goals-stats-grid">
         <div>
           <strong>{stats.total}</strong>
-          <span>total goals</span>
-          <small>Defined business targets</small>
+          <span>{t("goalsPage.stats.totalGoals")}</span>
+          <small>{t("goalsPage.stats.totalGoalsDesc")}</small>
         </div>
         <div>
           <strong>{stats.active}</strong>
-          <span>active outcomes</span>
-          <small>In-flight agent priorities</small>
+          <span>{t("goalsPage.stats.activeOutcomes")}</span>
+          <small>{t("goalsPage.stats.activeOutcomesDesc")}</small>
         </div>
         <div>
           <strong>{stats.completed}</strong>
-          <span>completed goals</span>
-          <small>Milestones achieved</small>
+          <span>{t("goalsPage.stats.completedGoals")}</span>
+          <small>{t("goalsPage.stats.completedGoalsDesc")}</small>
         </div>
         <div>
           <strong>{stats.highPriority}</strong>
-          <span>high priority</span>
-          <small>Critical P1 objectives</small>
+          <span>{t("goalsPage.stats.highPriority")}</span>
+          <small>{t("goalsPage.stats.highPriorityDesc")}</small>
         </div>
       </section>
 
@@ -386,19 +399,19 @@ export function GoalsPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Filter goals by title, description, or metric unit..."
+            placeholder={t("goalsPage.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter goals"
+            aria-label={t("goalsPage.searchAria")}
           />
           {searchQuery && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("goalsPage.clearSearch")}
+              title={t("goalsPage.clearSearch")}
             >
               ×
             </button>
@@ -413,7 +426,7 @@ export function GoalsPage() {
             className={`inspector-tab ${statusFilter === "all" ? "active" : ""}`}
             onClick={() => setStatusFilter("all")}
           >
-            <span>All</span>
+            <span>{t("goalsPage.tabs.all")}</span>
             <small className="tab-count">{goals.length}</small>
           </button>
           <button
@@ -423,7 +436,7 @@ export function GoalsPage() {
             className={`inspector-tab ${statusFilter === "active" ? "active" : ""}`}
             onClick={() => setStatusFilter("active")}
           >
-            <span>Active</span>
+            <span>{t("goalsPage.tabs.active")}</span>
             <small className="tab-count">{stats.active}</small>
           </button>
           <button
@@ -433,7 +446,7 @@ export function GoalsPage() {
             className={`inspector-tab ${statusFilter === "paused" ? "active" : ""}`}
             onClick={() => setStatusFilter("paused")}
           >
-            <span>Paused</span>
+            <span>{t("goalsPage.tabs.paused")}</span>
             <small className="tab-count">{stats.paused}</small>
           </button>
           <button
@@ -443,7 +456,7 @@ export function GoalsPage() {
             className={`inspector-tab ${statusFilter === "completed" ? "active" : ""}`}
             onClick={() => setStatusFilter("completed")}
           >
-            <span>Completed</span>
+            <span>{t("goalsPage.tabs.completed")}</span>
             <small className="tab-count">{stats.completed}</small>
           </button>
         </div>
@@ -453,12 +466,12 @@ export function GoalsPage() {
             value={priorityFilter}
             onChange={(e) => setPriorityFilter(e.target.value as any)}
             className="page-size-select goals-select"
-            aria-label="Filter by priority"
+            aria-label={t("goalsPage.filterByPriority")}
           >
-            <option value="all">All Priorities</option>
-            <option value="1">High Priority (P1)</option>
-            <option value="2">Normal Priority (P2)</option>
-            <option value="3">Low Priority (P3)</option>
+            <option value="all">{t("goalsPage.priorities.all")}</option>
+            <option value="1">{t("goalsPage.priorities.high")}</option>
+            <option value="2">{t("goalsPage.priorities.normal")}</option>
+            <option value="3">{t("goalsPage.priorities.low")}</option>
           </select>
         </div>
       </div>
@@ -473,8 +486,8 @@ export function GoalsPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            Showing <strong>{filteredGoals.length}</strong> of <strong>{goals.length}</strong> goals
-            {searchQuery ? ` matching "${searchQuery}"` : ""}
+            {t("goalsPage.showingGoals", { count: filteredGoals.length, total: goals.length })}
+            {searchQuery ? t("goalsPage.matchingQuery", { query: searchQuery }) : ""}
             {priorityFilter !== "all" ? ` (P${priorityFilter})` : ""}
           </span>
         </div>
@@ -484,23 +497,23 @@ export function GoalsPage() {
       {loading ? null : goals.length === 0 ? (
         <div className="automations-empty-card goals-empty-card">
           <div className="automations-empty-icon">🎯</div>
-          <h3>No Goals Configured Yet</h3>
+          <h3>{t("goalsPage.empty.noGoalsTitle")}</h3>
           <p>
-            Define concrete business outcomes, metric targets, or strategic milestones for NPATI agents to prioritize in autonomous execution and chat recommendations.
+            {t("goalsPage.empty.noGoalsDesc")}
           </p>
           <button
             type="button"
             className="button-primary automations-action-primary goals-action-primary"
             onClick={openCreateDrawer}
           >
-            + Create First Goal
+            {t("goalsPage.empty.createFirstGoal")}
           </button>
         </div>
       ) : filteredGoals.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🔍</div>
-          <h3>No matching goals</h3>
-          <p>Try adjusting your search terms or filter selection to find what you're looking for.</p>
+          <h3>{t("goalsPage.empty.noMatchingTitle")}</h3>
+          <p>{t("goalsPage.empty.noMatchingDesc")}</p>
           <button
             type="button"
             className="button-secondary"
@@ -510,7 +523,7 @@ export function GoalsPage() {
               setPriorityFilter("all");
             }}
           >
-            Clear Filters
+            {t("goalsPage.empty.clearFilters")}
           </button>
         </div>
       ) : (
@@ -518,12 +531,12 @@ export function GoalsPage() {
           <table className="automations-table goals-table">
             <thead>
               <tr>
-                <th style={{ width: "90px" }}>Status</th>
-                <th>Goal & Outcome</th>
-                <th style={{ width: "135px" }}>Progress</th>
-                <th style={{ width: "95px" }}>Priority</th>
-                <th style={{ width: "100px" }}>Due Date</th>
-                <th style={{ width: "155px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "90px" }}>{t("goalsPage.table.status")}</th>
+                <th>{t("goalsPage.table.goalAndOutcome")}</th>
+                <th style={{ width: "135px" }}>{t("goalsPage.table.progress")}</th>
+                <th style={{ width: "95px" }}>{t("goalsPage.table.priority")}</th>
+                <th style={{ width: "100px" }}>{t("goalsPage.table.dueDate")}</th>
+                <th style={{ width: "155px", textAlign: "right" }}>{t("goalsPage.table.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -545,21 +558,27 @@ export function GoalsPage() {
                         }}
                         title={
                           goal.status === "active"
-                            ? "Click to Pause"
+                            ? t("goalsPage.statusTooltips.pause")
                             : goal.status === "paused"
-                            ? "Click to Resume"
-                            : "Click to Reactivate"
+                            ? t("goalsPage.statusTooltips.resume")
+                            : t("goalsPage.statusTooltips.reactivate")
                         }
                       >
                         <span className="automation-status-dot" />
-                        {goal.status.toUpperCase()}
+                        {goal.status === "active"
+                          ? t("goalsPage.statuses.active")
+                          : goal.status === "paused"
+                          ? t("goalsPage.statuses.paused")
+                          : goal.status === "completed"
+                          ? t("goalsPage.statuses.completed")
+                          : t("goalsPage.statuses.cancelled")}
                       </button>
                     </td>
                     <td className="automation-title-cell goal-title-cell">
                       <strong
                         className="goal-title-link"
                         onClick={() => openEditDrawer(goal)}
-                        title="Click to edit goal"
+                        title={t("goalsPage.editGoalTooltip")}
                       >
                         {goal.title}
                       </strong>
@@ -582,19 +601,19 @@ export function GoalsPage() {
                           </div>
                         </div>
                       ) : (
-                        <span className="goal-metric-untracked">Qualitative goal</span>
+                        <span className="goal-metric-untracked">{t("goalsPage.qualitativeGoal")}</span>
                       )}
                     </td>
                     <td>{renderPriorityBadge(goal.priority)}</td>
                     <td>
                       {targetDate ? (
                         <span className={`goal-date-badge ${isOverdue ? "overdue" : ""}`}>
-                          {targetDate.toLocaleDateString([], {
+                          {targetDate.toLocaleDateString(language, {
                             month: "short",
                             day: "numeric",
                             year: "numeric",
                           })}
-                          {isOverdue && <span className="overdue-tag">Overdue</span>}
+                          {isOverdue && <span className="overdue-tag">{t("goalsPage.overdue")}</span>}
                         </span>
                       ) : (
                         <span className="goal-no-date">—</span>
@@ -607,35 +626,35 @@ export function GoalsPage() {
                             type="button"
                             className="goal-btn goal-btn-complete"
                             onClick={() => updateGoalStatus(goal, "completed")}
-                            title="Mark goal as completed"
+                            title={t("goalsPage.actions.markCompleted")}
                           >
-                            ✓ Done
+                            {t("goalsPage.actions.done")}
                           </button>
                         ) : (
                           <button
                             type="button"
                             className="goal-btn goal-btn-reopen"
                             onClick={() => updateGoalStatus(goal, "active")}
-                            title="Reopen goal"
+                            title={t("goalsPage.actions.reopenTitle")}
                           >
-                            Reopen
+                            {t("goalsPage.actions.reopen")}
                           </button>
                         )}
                         <button
                           type="button"
                           className="goal-btn goal-btn-edit"
                           onClick={() => openEditDrawer(goal)}
-                          title="Edit goal parameters"
+                          title={t("goalsPage.actions.editTitle")}
                         >
-                          Edit
+                          {t("goalsPage.actions.edit")}
                         </button>
                         <button
                           type="button"
                           className="goal-btn goal-btn-delete"
                           onClick={() => deleteGoal(goal)}
-                          title="Delete goal"
+                          title={t("goalsPage.actions.deleteTitle")}
                         >
-                          Delete
+                          {t("goalsPage.actions.delete")}
                         </button>
                       </div>
                     </td>
@@ -653,13 +672,13 @@ export function GoalsPage() {
           <aside className="company-drawer automations-drawer goals-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Goals</span>
-                <h2>{editingGoal ? "Edit Goal" : "New Goal"}</h2>
+                <span>{t("goalsPage.drawer.kicker")}</span>
+                <h2>{editingGoal ? t("goalsPage.drawer.editGoal") : t("goalsPage.drawer.newGoal")}</h2>
               </div>
               <button
                 type="button"
                 className="automations-drawer-close goals-drawer-close"
-                aria-label="Close"
+                aria-label={t("goalsPage.drawer.close")}
                 onClick={() => setDrawerOpen(false)}
               >
                 <svg
@@ -680,99 +699,99 @@ export function GoalsPage() {
 
             <form onSubmit={saveGoal}>
               <section>
-                <h3>Goal Objective</h3>
+                <h3>{t("goalsPage.drawer.objectiveSection")}</h3>
                 <label>
-                  <span>Goal Title *</span>
+                  <span>{t("goalsPage.drawer.titleLabel")}</span>
                   <input
                     type="text"
                     required
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    placeholder="e.g., Acquire first 100 paying customers"
+                    placeholder={t("goalsPage.drawer.titlePlaceholder")}
                   />
                 </label>
                 <label>
-                  <span>Description / Success Criteria</span>
+                  <span>{t("goalsPage.drawer.descLabel")}</span>
                   <textarea
                     rows={3}
                     value={form.description}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    placeholder="What does success look like? What specific outcomes are agents striving toward?"
+                    placeholder={t("goalsPage.drawer.descPlaceholder")}
                   />
                 </label>
               </section>
 
               <section>
-                <h3>Priority & Status</h3>
+                <h3>{t("goalsPage.drawer.priorityStatusSection")}</h3>
                 <div className="goals-form-grid">
                   <label>
-                    <span>Priority</span>
+                    <span>{t("goalsPage.drawer.priorityLabel")}</span>
                     <select
                       value={form.priority}
                       onChange={(e) => setForm({ ...form, priority: e.target.value })}
                     >
-                      <option value="1">High Priority (P1)</option>
-                      <option value="2">Normal Priority (P2)</option>
-                      <option value="3">Low Priority (P3)</option>
+                      <option value="1">{t("goalsPage.priorities.high")}</option>
+                      <option value="2">{t("goalsPage.priorities.normal")}</option>
+                      <option value="3">{t("goalsPage.priorities.low")}</option>
                     </select>
                   </label>
                   <label>
-                    <span>Status</span>
+                    <span>{t("goalsPage.drawer.statusLabel")}</span>
                     <select
                       value={form.status}
                       onChange={(e) => setForm({ ...form, status: e.target.value as any })}
                     >
-                      <option value="active">Active</option>
-                      <option value="paused">Paused</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
+                      <option value="active">{t("goalsPage.statuses.active")}</option>
+                      <option value="paused">{t("goalsPage.statuses.paused")}</option>
+                      <option value="completed">{t("goalsPage.statuses.completed")}</option>
+                      <option value="cancelled">{t("goalsPage.statuses.cancelled")}</option>
                     </select>
                   </label>
                 </div>
               </section>
 
               <section>
-                <h3>Metric Tracking (Optional)</h3>
+                <h3>{t("goalsPage.drawer.metricSection")}</h3>
                 <p className="goals-form-hint">
-                  Specify numeric targets if this goal can be measured and tracked quantitatively.
+                  {t("goalsPage.drawer.metricHint")}
                 </p>
                 <div className="goals-form-grid-3">
                   <label>
-                    <span>Target Value</span>
+                    <span>{t("goalsPage.drawer.targetValueLabel")}</span>
                     <input
                       type="number"
                       step="any"
                       value={form.targetValue}
                       onChange={(e) => setForm({ ...form, targetValue: e.target.value })}
-                      placeholder="e.g. 100"
+                      placeholder={t("goalsPage.drawer.targetValuePlaceholder")}
                     />
                   </label>
                   <label>
-                    <span>Current Value</span>
+                    <span>{t("goalsPage.drawer.currentValueLabel")}</span>
                     <input
                       type="number"
                       step="any"
                       value={form.currentValue}
                       onChange={(e) => setForm({ ...form, currentValue: e.target.value })}
-                      placeholder="e.g. 42"
+                      placeholder={t("goalsPage.drawer.currentValuePlaceholder")}
                     />
                   </label>
                   <label>
-                    <span>Unit</span>
+                    <span>{t("goalsPage.drawer.unitLabel")}</span>
                     <input
                       type="text"
                       value={form.targetUnit}
                       onChange={(e) => setForm({ ...form, targetUnit: e.target.value })}
-                      placeholder="e.g. $, users, %"
+                      placeholder={t("goalsPage.drawer.unitPlaceholder")}
                     />
                   </label>
                 </div>
               </section>
 
               <section>
-                <h3>Target Due Date</h3>
+                <h3>{t("goalsPage.drawer.dueDateSection")}</h3>
                 <label>
-                  <span>Milestone Deadline</span>
+                  <span>{t("goalsPage.drawer.deadlineLabel")}</span>
                   <input
                     type="date"
                     value={form.targetDate}
@@ -787,14 +806,14 @@ export function GoalsPage() {
                   className="button-secondary"
                   onClick={() => setDrawerOpen(false)}
                 >
-                  Cancel
+                  {t("goalsPage.drawer.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary goals-action-primary"
                   disabled={saving}
                 >
-                  {saving ? "Saving..." : editingGoal ? "Save Goal Changes" : "Create Goal"}
+                  {saving ? t("goalsPage.drawer.saving") : editingGoal ? t("goalsPage.drawer.saveChanges") : t("goalsPage.drawer.createGoal")}
                 </button>
               </footer>
             </form>
