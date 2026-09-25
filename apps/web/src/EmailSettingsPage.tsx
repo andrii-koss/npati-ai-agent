@@ -150,7 +150,7 @@ export function EmailSettingsPage() {
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("personal");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
@@ -200,6 +200,8 @@ export function EmailSettingsPage() {
   const [signature, setSignature] = useState("Best regards,\nCustomer Support");
   const [footer, setFooter] = useState("");
   const [saving, setSaving] = useState(false);
+  const [accountFormError, setAccountFormError] = useState<string | null>(null);
+  const [accountFieldErrors, setAccountFieldErrors] = useState<Record<string, string>>({});
 
   // DNS Check Drawer
   const [dnsDrawerOpen, setDnsDrawerOpen] = useState(false);
@@ -273,9 +275,9 @@ export function EmailSettingsPage() {
       .then((res) => {
         setCompanies(res.companies);
         const requested = searchParams.get("company");
-        const selected = requested && res.companies.some((c) => c.id === requested)
+        const selected = requested === "personal" || (requested && res.companies.some((c) => c.id === requested))
           ? requested
-          : res.companies[0]?.id ?? "";
+          : "personal";
         setSelectedCompanyId(selected);
       })
       .catch((e) => setNotice(e.message))
@@ -286,9 +288,10 @@ export function EmailSettingsPage() {
   useEffect(() => {
     if (!selectedCompanyId) return;
     setLoading(true);
+    const personalScope = selectedCompanyId === "personal";
     Promise.all([
       api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
-      api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
+      personalScope ? Promise.resolve({ agents: [] as Agent[] }) : api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
       api<{ analytics: EmailAnalytics }>(`/companies/${selectedCompanyId}/email-inbox/analytics`).catch(() => ({ analytics: null })),
     ])
       .then(([accRes, agentRes, analRes]) => {
@@ -307,7 +310,9 @@ export function EmailSettingsPage() {
       Promise.all([
         api<{ rules: EmailRule[] }>(`/companies/${selectedCompanyId}/email-inbox/rules`),
         api<{ templates: EmailTemplate[] }>(`/companies/${selectedCompanyId}/email-inbox/templates`),
-        api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`),
+        selectedCompanyId === "personal"
+          ? Promise.resolve({ automations: [] as CompanyAutomation[] })
+          : api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`),
       ])
         .then(([ruleResult, templateResult, automationResult]) => {
           setRules(ruleResult.rules);
@@ -324,6 +329,10 @@ export function EmailSettingsPage() {
         .then((r) => setContacts(r.contacts))
         .catch(() => undefined);
     } else if (activeTab === "permissions") {
+      if (selectedCompanyId === "personal") {
+        setPermissionKeys([]);
+        return;
+      }
       api<{ keys: EmailPermissionKey[] }>(`/companies/${selectedCompanyId}/api-keys`)
         .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope) => scope.startsWith("email:")))))
         .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
@@ -360,7 +369,9 @@ export function EmailSettingsPage() {
     setEditingId(null);
     setEmailAddress("");
     setDisplayName("");
-    setAgentId(agents[0]?.id || "");
+    setAgentId("");
+    setAccountFormError(null);
+    setAccountFieldErrors({});
     setMode("approval");
     setTestMode(false);
     setConfidenceThreshold(0.8);
@@ -369,12 +380,12 @@ export function EmailSettingsPage() {
     setOauthAccessToken("");
     setOauthRefreshToken(""); setOauthTokenUrl(""); setOauthClientId(""); setOauthClientSecret("");
     setOauthAuthorizationUrl(""); setOauthScopes(""); setOauthRedirectUri(`${window.location.origin}/api/email/oauth/callback`);
-    setImapHost("imap.company.com");
+    setImapHost("");
     setImapPort(993);
     setImapSecure(true);
     setImapUser("");
     setImapPass("");
-    setSmtpHost("smtp.company.com");
+    setSmtpHost("");
     setSmtpPort(465);
     setSmtpSecure(true);
     setSmtpUser("");
@@ -399,6 +410,8 @@ export function EmailSettingsPage() {
     setEmailAddress(account.emailAddress);
     setDisplayName(account.displayName || "");
     setAgentId(account.agentId || "");
+    setAccountFormError(null);
+    setAccountFieldErrors({});
     setMode(account.mode);
     setTestMode(account.testMode);
     setConfidenceThreshold(account.confidenceThreshold);
@@ -439,14 +452,35 @@ export function EmailSettingsPage() {
 
   async function saveAccount(e: FormEvent) {
     e.preventDefault();
-    if (!emailAddress.includes("@")) {
-      setNotice("Please enter a valid email address.");
+    const errors: Record<string, string> = {};
+    const normalizedEmail = emailAddress.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) errors.emailAddress = "Enter a valid email address.";
+    if (!imapHost.trim()) errors.imapHost = "IMAP host is required for receiving mail.";
+    if (!Number.isInteger(imapPort) || imapPort < 1 || imapPort > 65535) errors.imapPort = "Enter a valid IMAP port (1–65535).";
+    if (!imapUser.trim()) errors.imapUser = "IMAP username is required.";
+    if (!smtpHost.trim()) errors.smtpHost = "SMTP host is required for sending mail.";
+    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) errors.smtpPort = "Enter a valid SMTP port (1–65535).";
+    if (!smtpUser.trim()) errors.smtpUser = "SMTP username is required.";
+    if (mailAuthType === "password" && !editingId && !imapPass) errors.imapPass = "IMAP password is required.";
+    if (mailAuthType === "password" && !editingId && !smtpPass) errors.smtpPass = "SMTP password is required.";
+    if (mailAuthType === "oauth2" && !editingId && !oauthAccessToken && (!oauthAuthorizationUrl || !oauthTokenUrl || !oauthClientId)) {
+      errors.oauth = "Provide an access token, or the authorization endpoint, token endpoint, and client ID.";
+    }
+    const duplicate = accounts.find((account) => account.id !== editingId && account.emailAddress.trim().toLowerCase() === normalizedEmail);
+    if (duplicate) errors.emailAddress = "This email address is already connected. Edit the existing account instead.";
+    if (Object.keys(errors).length) {
+      setAccountFieldErrors(errors);
+      setAccountFormError("Please correct the highlighted required fields before saving.");
+      const firstField = Object.keys(errors)[0];
+      requestAnimationFrame(() => (document.querySelector(`[data-email-field="${firstField}"]`) as HTMLElement | null)?.focus());
       return;
     }
+    setAccountFieldErrors({});
+    setAccountFormError(null);
     setSaving(true);
     try {
       const payload = {
-        emailAddress,
+        emailAddress: normalizedEmail,
         displayName: displayName.trim() || undefined,
         agentId: agentId || undefined,
         mode,
@@ -499,7 +533,8 @@ export function EmailSettingsPage() {
       }
       setDrawerOpen(false);
     } catch (err: any) {
-      setNotice(err.message);
+      setAccountFormError(err.message);
+      if (/already connected/i.test(err.message)) setAccountFieldErrors({ emailAddress: err.message });
     } finally {
       setSaving(false);
     }
@@ -866,23 +901,22 @@ export function EmailSettingsPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            {companies.length > 1 && (
-              <select
-                aria-label="Select company"
-                value={selectedCompanyId}
-                onChange={(e) => {
-                  setSelectedCompanyId(e.target.value);
-                  setSearchParams({ company: e.target.value }, { replace: true });
-                }}
-                className="page-size-select"
-              >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              aria-label="Select mailbox owner"
+              value={selectedCompanyId}
+              onChange={(e) => {
+                setSelectedCompanyId(e.target.value);
+                setSearchParams({ company: e.target.value }, { replace: true });
+              }}
+              className="page-size-select"
+            >
+              <option value="personal">Personal / No Company</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  Company: {c.name}
+                </option>
+              ))}
+            </select>
             <Link
               to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
               className="button-primary automations-action-primary"
@@ -903,6 +937,7 @@ export function EmailSettingsPage() {
               type="button"
               className="button-secondary automations-action-primary"
               onClick={openCreateDrawer}
+              title="Add an email address to the selected personal or Company scope"
             >
               + Add Email Address
             </button>
@@ -1590,21 +1625,40 @@ export function EmailSettingsPage() {
               </button>
             </header>
 
-            <form onSubmit={saveAccount}>
+            <form onSubmit={saveAccount} noValidate>
+              {accountFormError && (
+                <div className="workspace-notice" role="alert" style={{ margin: "0 20px 12px", borderColor: "#dc2626", color: "#991b1b" }}>
+                  <strong>Account was not saved.</strong> {accountFormError}
+                </div>
+              )}
               <section>
                 <h3>Account & Agent Assignment</h3>
+                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>
+                  Fields marked <strong style={{ color: "#dc2626" }}>*</strong> are required. Company and AI agent assignment are optional.
+                </p>
                 <label>
-                  <span>Email Address</span>
-                  <input
-                    type="email"
-                    required
-                    placeholder="support@company.com"
-                    value={emailAddress}
-                    onChange={(e) => setEmailAddress(e.target.value)}
-                  />
+                  <span>Mailbox Owner <strong style={{ color: "#dc2626" }}>*</strong></span>
+                  <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setAgentId(""); }}>
+                    <option value="personal">Personal / No Company</option>
+                    {companies.map((company) => <option key={company.id} value={company.id}>Company: {company.name}</option>)}
+                  </select>
+                  <small style={{ color: "#64748b" }}>Choose Personal to use email without creating or assigning a Company.</small>
                 </label>
                 <label>
-                  <span>Display Name / Sender Label</span>
+                  <span>Email Address <strong style={{ color: "#dc2626" }}>*</strong></span>
+                  <input
+                    type="email"
+                    placeholder="support@company.com"
+                    value={emailAddress}
+                    data-email-field="emailAddress"
+                    aria-invalid={Boolean(accountFieldErrors.emailAddress)}
+                    style={accountFieldErrors.emailAddress ? { borderColor: "#dc2626" } : undefined}
+                    onChange={(e) => { setEmailAddress(e.target.value); setAccountFieldErrors((current) => ({ ...current, emailAddress: "" })); }}
+                  />
+                  {accountFieldErrors.emailAddress && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.emailAddress}</small>}
+                </label>
+                <label>
+                  <span>Display Name / Sender Label <small>(optional)</small></span>
                   <input
                     placeholder="Customer Support Team"
                     value={displayName}
@@ -1612,15 +1666,16 @@ export function EmailSettingsPage() {
                   />
                 </label>
                 <label>
-                  <span>Assigned Company Agent</span>
-                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-                    <option value="">Unassigned (Manual Routing)</option>
+                  <span>Assigned Company Agent <small>(optional)</small></span>
+                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={selectedCompanyId === "personal"}>
+                    <option value="">Unassigned / No Company Agent</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name} ({a.role})
                       </option>
                     ))}
                   </select>
+                  <small style={{ color: "#64748b" }}>{selectedCompanyId === "personal" ? "Personal mailboxes are not assigned to a Company agent." : "Leave unassigned to route and answer messages manually."}</small>
                 </label>
               </section>
 
@@ -1660,8 +1715,9 @@ export function EmailSettingsPage() {
 
               <section>
                 <h3>IMAP Connection (Inbound Mail)</h3>
+                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>Required to receive and synchronize incoming messages.</p>
                 <label>
-                  <span>Authentication</span>
+                  <span>Authentication <strong style={{ color: "#dc2626" }}>*</strong></span>
                   <select value={mailAuthType} onChange={(e) => setMailAuthType(e.target.value as "password" | "oauth2")}>
                     <option value="password">Username and password</option>
                     <option value="oauth2">OAuth 2.0 / XOAUTH2 access token</option>
@@ -1669,6 +1725,7 @@ export function EmailSettingsPage() {
                 </label>
                 {mailAuthType === "oauth2" && (
                   <>
+                    {accountFieldErrors.oauth && <small role="alert" data-email-field="oauth" tabIndex={-1} style={{ color: "#dc2626" }}>{accountFieldErrors.oauth}</small>}
                     <label><span>OAuth Access Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Paste provider access token"} value={oauthAccessToken} onChange={(e) => setOauthAccessToken(e.target.value)} /></label>
                     <label><span>OAuth Refresh Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Provider refresh token"} value={oauthRefreshToken} onChange={(e) => setOauthRefreshToken(e.target.value)} /></label>
                     <label><span>OAuth Token Endpoint</span><input placeholder="https://oauth2.googleapis.com/token" value={oauthTokenUrl} onChange={(e) => setOauthTokenUrl(e.target.value)} /></label>
@@ -1686,84 +1743,127 @@ export function EmailSettingsPage() {
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
-                    <span>IMAP Host</span>
+                    <span>IMAP Host <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="imap.company.com"
                       value={imapHost}
-                      onChange={(e) => setImapHost(e.target.value)}
+                      data-email-field="imapHost"
+                      aria-invalid={Boolean(accountFieldErrors.imapHost)}
+                      style={accountFieldErrors.imapHost ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setImapHost(e.target.value); setAccountFieldErrors((current) => ({ ...current, imapHost: "" })); }}
                     />
+                    {accountFieldErrors.imapHost && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapHost}</small>}
                   </label>
                   <label>
-                    <span>Port</span>
+                    <span>Port <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       type="number"
                       placeholder="993"
                       value={imapPort}
+                      data-email-field="imapPort"
+                      aria-invalid={Boolean(accountFieldErrors.imapPort)}
+                      style={accountFieldErrors.imapPort ? { borderColor: "#dc2626" } : undefined}
                       onChange={(e) => setImapPort(parseInt(e.target.value, 10))}
                     />
+                    {accountFieldErrors.imapPort && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapPort}</small>}
                   </label>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
-                    <span>IMAP Username</span>
+                    <span>IMAP Username <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="support@company.com"
                       value={imapUser}
-                      onChange={(e) => setImapUser(e.target.value)}
+                      data-email-field="imapUser"
+                      aria-invalid={Boolean(accountFieldErrors.imapUser)}
+                      style={accountFieldErrors.imapUser ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setImapUser(e.target.value); setAccountFieldErrors((current) => ({ ...current, imapUser: "" })); }}
                     />
+                    {accountFieldErrors.imapUser && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapUser}</small>}
                   </label>
                   {mailAuthType === "password" && <label>
-                    <span>IMAP Password</span>
+                    <span>IMAP Password {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
                     <input
                       type="password"
                       placeholder="••••••••••••"
                       value={imapPass}
-                      onChange={(e) => setImapPass(e.target.value)}
+                      data-email-field="imapPass"
+                      aria-invalid={Boolean(accountFieldErrors.imapPass)}
+                      style={accountFieldErrors.imapPass ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setImapPass(e.target.value); setAccountFieldErrors((current) => ({ ...current, imapPass: "" })); }}
                     />
+                    {editingId && <small style={{ color: "#64748b" }}>Leave blank to keep the saved password.</small>}
+                    {accountFieldErrors.imapPass && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapPass}</small>}
                   </label>}
                 </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={imapSecure} onChange={(e) => setImapSecure(e.target.checked)} />
+                  <span>Use secure SSL/TLS for IMAP (normally enabled for port 993)</span>
+                </label>
               </section>
 
               <section>
                 <h3>SMTP Connection (Outbound Mail)</h3>
+                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>Required to send new emails and replies.</p>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
-                    <span>SMTP Host</span>
+                    <span>SMTP Host <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="smtp.company.com"
                       value={smtpHost}
-                      onChange={(e) => setSmtpHost(e.target.value)}
+                      data-email-field="smtpHost"
+                      aria-invalid={Boolean(accountFieldErrors.smtpHost)}
+                      style={accountFieldErrors.smtpHost ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setSmtpHost(e.target.value); setAccountFieldErrors((current) => ({ ...current, smtpHost: "" })); }}
                     />
+                    {accountFieldErrors.smtpHost && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpHost}</small>}
                   </label>
                   <label>
-                    <span>Port</span>
+                    <span>Port <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       type="number"
                       placeholder="465"
                       value={smtpPort}
+                      data-email-field="smtpPort"
+                      aria-invalid={Boolean(accountFieldErrors.smtpPort)}
+                      style={accountFieldErrors.smtpPort ? { borderColor: "#dc2626" } : undefined}
                       onChange={(e) => setSmtpPort(parseInt(e.target.value, 10))}
                     />
+                    {accountFieldErrors.smtpPort && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpPort}</small>}
                   </label>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
-                    <span>SMTP Username</span>
+                    <span>SMTP Username <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="support@company.com"
                       value={smtpUser}
-                      onChange={(e) => setSmtpUser(e.target.value)}
+                      data-email-field="smtpUser"
+                      aria-invalid={Boolean(accountFieldErrors.smtpUser)}
+                      style={accountFieldErrors.smtpUser ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setSmtpUser(e.target.value); setAccountFieldErrors((current) => ({ ...current, smtpUser: "" })); }}
                     />
+                    {accountFieldErrors.smtpUser && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpUser}</small>}
                   </label>
                   {mailAuthType === "password" && <label>
-                    <span>SMTP Password</span>
+                    <span>SMTP Password {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
                     <input
                       type="password"
                       placeholder="••••••••••••"
                       value={smtpPass}
-                      onChange={(e) => setSmtpPass(e.target.value)}
+                      data-email-field="smtpPass"
+                      aria-invalid={Boolean(accountFieldErrors.smtpPass)}
+                      style={accountFieldErrors.smtpPass ? { borderColor: "#dc2626" } : undefined}
+                      onChange={(e) => { setSmtpPass(e.target.value); setAccountFieldErrors((current) => ({ ...current, smtpPass: "" })); }}
                     />
+                    {editingId && <small style={{ color: "#64748b" }}>Leave blank to keep the saved password.</small>}
+                    {accountFieldErrors.smtpPass && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpPass}</small>}
                   </label>}
                 </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} />
+                  <span>Use secure SSL/TLS for SMTP (normally enabled for port 465)</span>
+                </label>
               </section>
 
               <section>

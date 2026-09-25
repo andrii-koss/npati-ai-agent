@@ -11,6 +11,10 @@ function attachmentCategory(contentType: string): FileCategory {
   return "file";
 }
 
+function isPersonalEmailScope(companyId: string): boolean {
+  return companyId.startsWith("personal:");
+}
+
 export class EmailAttachmentStorage {
   constructor(
     private readonly storage: ObjectStorage,
@@ -36,7 +40,7 @@ export class EmailAttachmentStorage {
         id,
         workspaceId: context.workspaceId,
         userId: context.userId,
-        companyId,
+        companyId: isPersonalEmailScope(companyId) ? undefined : companyId,
         bucket: NPATI_BUCKETS.chat,
         objectKey: key,
         originalFilename: attachment.filename,
@@ -76,7 +80,10 @@ export class EmailAttachmentStorage {
 
   async open(context: AuthContext, companyId: string, fileId: string): Promise<{ file: StoredFile; stream: NodeJS.ReadableStream } | null> {
     const file = await this.files.get(fileId);
-    if (!file || file.deletedAt || file.status !== "ready" || file.workspaceId !== context.workspaceId || file.companyId !== companyId || file.bucket !== NPATI_BUCKETS.chat) {
+    const correctScope = isPersonalEmailScope(companyId)
+      ? file?.userId === context.userId && !file.companyId
+      : file?.companyId === companyId;
+    if (!file || file.deletedAt || file.status !== "ready" || file.workspaceId !== context.workspaceId || !correctScope || file.bucket !== NPATI_BUCKETS.chat) {
       return null;
     }
     const stream = await this.storage.get(file.bucket, file.objectKey);
@@ -101,7 +108,10 @@ export class EmailAttachmentStorage {
     const match = attachment.url?.match(/\/email-inbox\/attachments\/([0-9a-f-]{36})$/i);
     if (!match) return false;
     const file = await this.files.get(match[1]!);
-    if (!file || file.workspaceId !== context.workspaceId || file.companyId !== companyId || file.bucket !== NPATI_BUCKETS.chat) return false;
+    const correctScope = isPersonalEmailScope(companyId)
+      ? file?.userId === context.userId && !file.companyId
+      : file?.companyId === companyId;
+    if (!file || file.workspaceId !== context.workspaceId || !correctScope || file.bucket !== NPATI_BUCKETS.chat) return false;
     if (!file.deletedAt) await this.files.markDeleted(context, file.id);
     await this.storage.remove(file.bucket, file.objectKey).catch(() => undefined);
     await this.files.markStorageDeleted(file.id);
