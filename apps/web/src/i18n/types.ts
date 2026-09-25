@@ -1713,4 +1713,483 @@ export interface TranslationSchema {
       notificationsHeading: string;
     };
   };
+  goalsPage: {
+    eyebrow: string;
+    backToSettings: string;
+    title: string;
+    heroCopy: string;
+    newGoal: string;
+    stats: {
+      totalGoals: string;
+      totalGoalsDesc: string;
+      activeOutcomes: string;
+      activeOutcomesDesc: string;
+      completedGoals: string;
+      completedGoalsDesc: string;
+      highPriority: string;
+      highPriorityDesc: string;
+    };
+    searchPlaceholder: string;
+    searchAria: string;
+    clearSearch: string;
+    tabs: {
+      all: string;
+      active: string;
+      paused: string;
+      completed: string;
+    };
+    filterByPriority: string;
+    priorities: {
+      all: string;
+      high: string;
+      normal: string;
+      low: string;
+    };
+    priorityBadges: {
+      high: string;
+      normal: string;
+      low: string;
+    };
+    showingGoals: string;
+    matchingQuery: string;
+    table: {
+      status: string;
+      goalAndOutcome: string;
+      progress: string;
+      priority: string;
+      dueDate: string;
+      actions: string;
+    };
+    statusTooltips: {
+      pause: string;
+      resume: string;
+      reactivate: string;
+    };
+    statuses: {
+      active: string;
+      paused: string;
+      completed: string;
+      cancelled: string;
+    };
+    editGoalTooltip: string;
+    qualitativeGoal: string;
+    overdue: string;
+    actions: {
+      done: string;
+      markCompleted: string;
+      reopen: string;
+      reopenTitle: string;
+      edit: string;
+      editTitle: string;
+      delete: string;
+      deleteTitle: string;
+    };
+    empty: {
+      noGoalsTitle: string;
+      noGoalsDesc: string;
+      createFirstGoal: string;
+      noMatchingTitle: string;
+      noMatchingDesc: string;
+      clearFilters: string;
+    };
+    drawer: {
+      kicker: string;
+      editGoal: string;
+      newGoal: string;
+      close: string;
+      objectiveSection: string;
+      titleLabel: string;
+      titlePlaceholder: string;
+      descLabel: string;
+      descPlaceholder: string;
+      priorityStatusSection: string;
+      priorityLabel: string;
+      statusLabel: string;
+      metricSection: string;
+      metricHint: string;
+      targetValueLabel: string;
+      targetValuePlaceholder: string;
+      currentValueLabel: string;
+      currentValuePlaceholder: string;
+      unitLabel: string;
+      unitPlaceholder: string;
+      dueDateSection: string;
+      deadlineLabel: string;
+      cancel: string;
+      saving: string;
+      saveChanges: string;
+      createGoal: string;
+    };
+    notices: {
+      failedToLoad: string;
+      titleRequired: string;
+      updatedSuccess: string;
+      createdSuccess: string;
+      failedToSave: string;
+      deletedSuccess: string;
+      failedToDelete: string;
+      statusUpdated: string;
+      statusUpdateError: string;
+    };
+    dialogs: {
+      deleteTitle: string;
+      deleteMessage: string;
+      deleteConfirm: string;
+      deleteCancel: string;
+    };
+  };
+  contentPage: {
+    eyebrow: string;
+    backToSettings: string;
+    title: string;
+    heroCopy: string;
+    newContentDraft: string;
+    newContentPrompt: string;
+    tabs: {
+      all: string;
+      articles: string;
+      seoBlueprints: string;
+      socialPosts: string;
+      briefsPlans: string;
+    };
+    searchPlaceholder: string;
+    searchAria: string;
+    clearSearch: string;
+    types: {
+      article: string;
+      seoBlueprint: string;
+      socialMedia: string;
+      briefPlan: string;
+    };
+    empty: {
+      readyTitle: string;
+      readyDesc: string;
+      generateFirstDraft: string;
+      chatPrompt: string;
+      restoreDeleted: string;
+      noMatchingTitle: string;
+      noMatchingDesc: string;
+      resetFilters: string;
+      selectDoc: string;
+    };
+    cards: {
+      listAria: string;
+      deleteDocumentTitle: string;
+      minRead: string;
+    };
+    viewer: {
+      expand: string;
+      collapse: string;
+      expandTitle: string;
+      collapseTitle: string;
+      editDocument: string;
+      views: {
+        preview: string;
+        previewTitle: string;
+        raw: string;
+        rawTitle: string;
+      };
+      actions: {
+        edit: string;
+        editTitle: string;
+        delete: string;
+        deleteTitle: string;
+        copy: string;
+        copied: string;
+        copyTitle: string;
+        download: string;
+        downloadTitle: string;
+        saveChanges: string;
+        saveChangesTitle: string;
+        cancel: string;
+        cancelTitle: string;
+      };
+      metrics: {
+        words: string;
+        characters: string;
+        readTime: string;
+        generatedDate: string;
+      };
+      editor: {
+        titleLabel: string;
+        titlePlaceholder: string;
+        typeLabel: string;
+        bodyLabel: string;
+        saveHint: string;
+        bodyPlaceholder: string;
+      };
+      overlay: {
+        expand: string;
+        collapse: string;
+      };
+    };
+    toast: {
+      saved: string;
+      saveError: string;
+      deleted: string;
+      deleteError: string;
+    };
+    dialogs: {
+      deleteTitle: string;
+      deleteMessage: string;
+      deleteConfirm: string;
+      deleteCancel: string;
+      thisDocumentFallback: string;
+    };
+  };
+  connectionsPage: {
+    eyebrow: string;
+    backToSettings: string;
+    title: string;
+    heroCopy: string;
+    refreshStatus: string;
+    checkingStatus: string;
+    refreshTitle: string;
+    searchPlaceholder: string;
+    searchAria: string;
+    clearSearch: string;
+    tabs: {
+      all: string;
+      internal: string;
+      storage: string;
+      provider: string;
+      operational: string;
+    };
+    categories: {
+      internal: string;
+      storage: string;
+      provider: string;
+    };
+    statuses: {
+      operational: string;
+      standby: string;
+      degraded: string;
+      down: string;
+    };
+    empty: {
+      title: string;
+      description: string;
+      resetFilters: string;
+    };
+    card: {
+      copy: string;
+      copied: string;
+      copyTitle: string;
+      verifiedFallback: string;
+      protocol: string;
+    };
+    services: {
+      omniroute: {
+        name: string;
+        desc: string;
+        details: string;
+        versionPrefix: string;
+      };
+      postgres: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+      redis: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+      minio: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+      crawler: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+      coreBackend: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+      cloudHub: {
+        name: string;
+        desc: string;
+        details: string;
+      };
+    };
+  };
+  memoryPage: {
+    eyebrow: string;
+    backToSettings: string;
+    title: string;
+    heroCopy: string;
+    addFactBtn: string;
+    addFactTitle: string;
+    searchPlaceholder: string;
+    searchAria: string;
+    clearSearch: string;
+    tabs: {
+      all: string;
+      facts: string;
+      audience: string;
+      brand: string;
+      decisions: string;
+      product: string;
+      other: string;
+    };
+    types: {
+      business_fact: string;
+      audience: string;
+      brand: string;
+      decision: string;
+      product: string;
+      channel: string;
+      preference: string;
+      experiment: string;
+      result: string;
+      other: string;
+    };
+    sources: {
+      manual: string;
+      chatConfirmed: string;
+      onboarding: string;
+      userVerified: string;
+      sourcePrefix: string;
+    };
+    empty: {
+      title: string;
+      description: string;
+      addFirstBtn: string;
+    };
+    emptyFiltered: {
+      title: string;
+      description: string;
+      resetFilters: string;
+    };
+    card: {
+      verified: string;
+      confidenceTooltip: string;
+      copy: string;
+      copied: string;
+      copyTitle: string;
+      edit: string;
+      editTitle: string;
+      delete: string;
+      deleteTitle: string;
+      deleteFactTitle: string;
+    };
+    drawer: {
+      eyebrow: string;
+      editTitle: string;
+      newTitle: string;
+      closeAria: string;
+      categorySection: string;
+      typeLabel: string;
+      types: {
+        businessFact: string;
+        audience: string;
+        brand: string;
+        decision: string;
+        product: string;
+        channel: string;
+        preference: string;
+        experiment: string;
+        result: string;
+        other: string;
+      };
+      detailsSection: string;
+      titleLabel: string;
+      titlePlaceholder: string;
+      contentLabel: string;
+      contentPlaceholder: string;
+      confidenceSection: string;
+      confidenceLabel: string;
+      confidenceOptions: {
+        high100: string;
+        med80: string;
+        low50: string;
+      };
+      cancel: string;
+      saving: string;
+      saveChanges: string;
+      saveFact: string;
+      errors: {
+        titleRequired: string;
+        contentRequired: string;
+        saveFailed: string;
+      };
+      defaultBusinessName: string;
+    };
+    toasts: {
+      copied: string;
+      updated: string;
+      saved: string;
+      deleted: string;
+      deleteError: string;
+    };
+    dialogs: {
+      deleteTitle: string;
+      deleteMessage: string;
+      deleteConfirm: string;
+      deleteCancel: string;
+    };
+  };
+  skillsPage: {
+    eyebrow: string;
+    backToSettings: string;
+    title: string;
+    heroCopy: string;
+    badgeBuiltin: string;
+    stats: {
+      availableSkills: string;
+      availableSkillsDesc: string;
+      capabilities: string;
+      capabilitiesDesc: string;
+      autoValue: string;
+      skillSelection: string;
+      skillSelectionDesc: string;
+    };
+    searchPlaceholder: string;
+    searchAria: string;
+    clearSearch: string;
+    statusShowing: {
+      showing: string;
+      of: string;
+      skills: string;
+    };
+    errorLoading: string;
+    empty: {
+      title: string;
+      description: string;
+      clearSearch: string;
+    };
+    card: {
+      available: string;
+      builtinType: string;
+    };
+    skills: {
+      competitorAnalysis: {
+        name: string;
+        desc: string;
+      };
+      webResearch: {
+        name: string;
+        desc: string;
+      };
+      businessStartup: {
+        name: string;
+        desc: string;
+      };
+      businessGrowth: {
+        name: string;
+        desc: string;
+      };
+      sellProduct: {
+        name: string;
+        desc: string;
+      };
+    };
+  };
 }
+
+
+

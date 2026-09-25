@@ -1,20 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { useTranslation } from "./i18n";
 
-interface ServiceStatus {
-  id: string;
-  name: string;
+type ServiceId = "omniroute" | "postgres" | "redis" | "minio" | "crawler" | "core-backend" | "cloud-hub";
+
+interface RawServiceStatus {
+  id: ServiceId;
   category: "internal" | "provider" | "storage";
   status: "ok" | "degraded" | "error" | "not_configured";
   endpoint: string;
-  description: string;
   icon: string;
-  details?: string;
+  customVersion?: string;
+}
+
+interface ServiceStatus extends RawServiceStatus {
+  name: string;
+  description: string;
+  details: string;
 }
 
 export function ConnectionsPage() {
-  const [services, setServices] = useState<ServiceStatus[]>([]);
+  const { t } = useTranslation();
+  const [rawServices, setRawServices] = useState<RawServiceStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [search, setSearch] = useState("");
@@ -31,80 +39,60 @@ export function ConnectionsPage() {
       const res = await fetch("/api/health", { headers });
       const data = res.ok ? await res.json() : null;
 
-      const items: ServiceStatus[] = [
+      const items: RawServiceStatus[] = [
         {
           id: "omniroute",
-          name: "NPATI AI Routing",
           icon: "⚡",
           category: "internal",
           status: data?.services?.omniroute === "ok" ? "ok" : "error",
           endpoint: "http://omniroute:20128",
-          description: "A2A orchestration, combo routing, fusion, pipeline & embedding engine (v3.8.50).",
-          details: data?.details?.omniroute?.version ? `Version: ${data.details.omniroute.version}` : "v3.8.50 Core",
+          customVersion: data?.details?.omniroute?.version,
         },
         {
           id: "postgres",
-          name: "PostgreSQL with pgvector",
           icon: "🐘",
           category: "storage",
           status: data?.services?.database === "ok" ? "ok" : "error",
           endpoint: "postgresql://postgres:5432/npati_agent",
-          description: "Single source of truth for workspaces, companies, knowledge chunks, and vector embeddings.",
-          details: "Vector extension active",
         },
         {
           id: "redis",
-          name: "Redis Cache & Streams",
           icon: "🧠",
           category: "internal",
           status: "ok",
           endpoint: "redis://redis:6379",
-          description: "Async task queues, leases, distributed locks, and conversation memory caching.",
-          details: "In-memory cache active",
         },
         {
           id: "minio",
-          name: "MinIO S3 Storage",
           icon: "🗄️",
           category: "storage",
           status: data?.services?.storage === "ok" ? "ok" : "error",
           endpoint: "http://minio:9000",
-          description: "Tenant-isolated document store for company knowledge attachments and binary assets.",
-          details: "S3 compatible API",
         },
         {
           id: "crawler",
-          name: "Crawl4AI Web Crawler",
           icon: "🕷️",
           category: "internal",
           status: data?.services?.crawler === "ok" ? "ok" : "degraded",
           endpoint: "http://crawler:11235",
-          description: "Deep web research crawler, markdown conversion, and SSR rendering engine.",
-          details: "Headless worker pool",
         },
         {
           id: "core-backend",
-          name: "NPATI Core Backend",
           icon: "⚙️",
           category: "internal",
           status: "ok",
           endpoint: "http://localhost:4000",
-          description: "Single source of truth for authentication, user accounts, and billing.",
-          details: "API Gateway active",
         },
         {
           id: "cloud-hub",
-          name: "NPATI Cloud Hub",
           icon: "☁️",
           category: "provider",
           status: data?.services?.hub === "ok" ? "ok" : "not_configured",
           endpoint: "https://hub.npati.io",
-          description: "Optional cloud catalog synchronization and shared model registry.",
-          details: "Optional for local deployment",
         },
       ];
 
-      setServices(items);
+      setRawServices(items);
     } catch {
       // Fallback handled gracefully
     } finally {
@@ -117,16 +105,70 @@ export function ConnectionsPage() {
     void checkConnections();
   }, []);
 
+  const services = useMemo<ServiceStatus[]>(() => {
+    return rawServices.map((s) => {
+      let name = "";
+      let description = "";
+      let details = "";
+
+      switch (s.id) {
+        case "omniroute":
+          name = t("connectionsPage.services.omniroute.name");
+          description = t("connectionsPage.services.omniroute.desc");
+          details = s.customVersion
+            ? `${t("connectionsPage.services.omniroute.versionPrefix")}: ${s.customVersion}`
+            : t("connectionsPage.services.omniroute.details");
+          break;
+        case "postgres":
+          name = t("connectionsPage.services.postgres.name");
+          description = t("connectionsPage.services.postgres.desc");
+          details = t("connectionsPage.services.postgres.details");
+          break;
+        case "redis":
+          name = t("connectionsPage.services.redis.name");
+          description = t("connectionsPage.services.redis.desc");
+          details = t("connectionsPage.services.redis.details");
+          break;
+        case "minio":
+          name = t("connectionsPage.services.minio.name");
+          description = t("connectionsPage.services.minio.desc");
+          details = t("connectionsPage.services.minio.details");
+          break;
+        case "crawler":
+          name = t("connectionsPage.services.crawler.name");
+          description = t("connectionsPage.services.crawler.desc");
+          details = t("connectionsPage.services.crawler.details");
+          break;
+        case "core-backend":
+          name = t("connectionsPage.services.coreBackend.name");
+          description = t("connectionsPage.services.coreBackend.desc");
+          details = t("connectionsPage.services.coreBackend.details");
+          break;
+        case "cloud-hub":
+          name = t("connectionsPage.services.cloudHub.name");
+          description = t("connectionsPage.services.cloudHub.desc");
+          details = t("connectionsPage.services.cloudHub.details");
+          break;
+      }
+
+      return {
+        ...s,
+        name,
+        description,
+        details,
+      };
+    });
+  }, [rawServices, t]);
 
   const tabs = useMemo(() => {
     return [
-      { label: "All", value: "all", count: services.length },
-      { label: "Internal", value: "internal", count: services.filter((s) => s.category === "internal").length },
-      { label: "Storage", value: "storage", count: services.filter((s) => s.category === "storage").length },
-      { label: "Provider", value: "provider", count: services.filter((s) => s.category === "provider").length },
-      { label: "Operational", value: "ok", count: services.filter((s) => s.status === "ok").length },
+      { label: t("connectionsPage.tabs.all"), value: "all", count: services.length },
+      { label: t("connectionsPage.tabs.internal"), value: "internal", count: services.filter((s) => s.category === "internal").length },
+      { label: t("connectionsPage.tabs.storage"), value: "storage", count: services.filter((s) => s.category === "storage").length },
+      { label: t("connectionsPage.tabs.provider"), value: "provider", count: services.filter((s) => s.category === "provider").length },
+      { label: t("connectionsPage.tabs.operational"), value: "ok", count: services.filter((s) => s.status === "ok").length },
     ];
-  }, [services]);
+  }, [services, t]);
 
   const filteredServices = useMemo(() => {
     return services.filter((s) => {
@@ -159,11 +201,11 @@ export function ConnectionsPage() {
   const getCategoryLabel = (cat: ServiceStatus["category"]) => {
     switch (cat) {
       case "internal":
-        return "Internal Engine";
+        return t("connectionsPage.categories.internal");
       case "storage":
-        return "Data Storage";
+        return t("connectionsPage.categories.storage");
       case "provider":
-        return "Cloud Provider";
+        return t("connectionsPage.categories.provider");
       default:
         return cat;
     }
@@ -174,25 +216,25 @@ export function ConnectionsPage() {
       case "ok":
         return (
           <span className="connection-status-pill status-ok">
-            <span className="status-indicator-dot ok" /> Operational
+            <span className="status-indicator-dot ok" /> {t("connectionsPage.statuses.operational")}
           </span>
         );
       case "not_configured":
         return (
           <span className="connection-status-pill status-standby">
-            <span className="status-indicator-dot standby" /> Standby
+            <span className="status-indicator-dot standby" /> {t("connectionsPage.statuses.standby")}
           </span>
         );
       case "degraded":
         return (
           <span className="connection-status-pill status-degraded">
-            <span className="status-indicator-dot degraded" /> Degraded
+            <span className="status-indicator-dot degraded" /> {t("connectionsPage.statuses.degraded")}
           </span>
         );
       case "error":
         return (
           <span className="connection-status-pill status-error">
-            <span className="status-indicator-dot error" /> Down
+            <span className="status-indicator-dot error" /> {t("connectionsPage.statuses.down")}
           </span>
         );
       default:
@@ -206,13 +248,13 @@ export function ConnectionsPage() {
       <header className="marketplace-hero inspector-header">
         <div className="automations-header-top">
           <div>
-            <p className="eyebrow">Infrastructure & Integrations</p>
+            <p className="eyebrow">{t("connectionsPage.eyebrow")}</p>
             <h1>
               <Link
                 to="/settings"
                 className="marketplace-back-button"
-                aria-label="Back to settings"
-                title="Back to settings"
+                aria-label={t("connectionsPage.backToSettings")}
+                title={t("connectionsPage.backToSettings")}
               >
                 <svg
                   width="20"
@@ -227,10 +269,10 @@ export function ConnectionsPage() {
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>Connected Services</span>
+              <span>{t("connectionsPage.title")}</span>
             </h1>
             <p className="hero-copy">
-              Monitor runtime health, endpoints, and status of all storage engines, internal AI adapters, and system microservices.
+              {t("connectionsPage.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
@@ -239,9 +281,9 @@ export function ConnectionsPage() {
               className="button-primary automations-action-primary"
               onClick={() => void checkConnections()}
               disabled={checking}
-              title="Probe service health endpoints"
+              title={t("connectionsPage.refreshTitle")}
             >
-              {checking ? "Checking Status..." : "Refresh Status"}
+              {checking ? t("connectionsPage.checkingStatus") : t("connectionsPage.refreshStatus")}
             </button>
           </div>
         </div>
@@ -254,19 +296,19 @@ export function ConnectionsPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Filter services by name, endpoint or category..."
+            placeholder={t("connectionsPage.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter connected services"
+            aria-label={t("connectionsPage.searchAria")}
           />
           {search && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearch("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("connectionsPage.clearSearch")}
+              title={t("connectionsPage.clearSearch")}
             >
               ×
             </button>
@@ -293,8 +335,8 @@ export function ConnectionsPage() {
       {!loading && filteredServices.length === 0 && (
         <div className="automations-empty-card" style={{ marginTop: "16px" }}>
           <div className="automations-empty-icon">🔍</div>
-          <h3>No matching services</h3>
-          <p>Try adjusting your search query or selecting a different category filter.</p>
+          <h3>{t("connectionsPage.empty.title")}</h3>
+          <p>{t("connectionsPage.empty.description")}</p>
           <button
             type="button"
             className="button-secondary"
@@ -303,7 +345,7 @@ export function ConnectionsPage() {
               setSelectedCategory("all");
             }}
           >
-            Reset Filters
+            {t("connectionsPage.empty.resetFilters")}
           </button>
         </div>
       )}
@@ -336,16 +378,16 @@ export function ConnectionsPage() {
                     type="button"
                     className={`endpoint-copy-btn ${copiedEndpoint === svc.endpoint ? "copied" : ""}`}
                     onClick={() => copyEndpoint(svc.endpoint)}
-                    title="Copy connection string"
+                    title={t("connectionsPage.card.copyTitle")}
                   >
-                    {copiedEndpoint === svc.endpoint ? "✓ Copied" : "Copy"}
+                    {copiedEndpoint === svc.endpoint ? t("connectionsPage.card.copied") : t("connectionsPage.card.copy")}
                   </button>
                 </div>
                 <div className="connection-meta-row">
                   <span className="connection-details-tag">
-                    {svc.details || "Verified in Docker Network"}
+                    {svc.details || t("connectionsPage.card.verifiedFallback")}
                   </span>
-                  <span className="connection-protocol-tag">HTTP / TCP</span>
+                  <span className="connection-protocol-tag">{t("connectionsPage.card.protocol")}</span>
                 </div>
               </div>
             </article>
@@ -355,3 +397,4 @@ export function ConnectionsPage() {
     </main>
   );
 }
+
