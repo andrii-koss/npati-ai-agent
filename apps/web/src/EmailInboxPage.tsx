@@ -295,8 +295,7 @@ export function EmailInboxPage() {
   const [imagePreview, setImagePreview] = useState<{ source: string; filename: string } | null>(null);
   const threadRequestIdRef = useRef(0);
   const deletedThreadIdsRef = useRef(new Set<string>());
-  const detailBodyRef = useRef<HTMLDivElement | null>(null);
-  const latestMessageRef = useRef<HTMLDivElement | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const latestInboundMessageRef = useRef<HTMLDivElement | null>(null);
 
   // Filters & Search
@@ -424,18 +423,21 @@ export function EmailInboxPage() {
   );
 
   useEffect(() => {
-    if (!selectedThreadId || historyMessages.length === 0) return;
-    const timer = window.setTimeout(() => {
-      const target = latestInboundMessageRef.current || latestMessageRef.current;
-      const container = detailBodyRef.current;
-      if (target) {
-        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      } else if (container) {
-        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    if (!latestInboundId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const container = messageScrollRef.current;
+      const latestInbound = latestInboundMessageRef.current;
+      if (container && latestInbound) {
+        const containerRect = container.getBoundingClientRect();
+        const messageRect = latestInbound.getBoundingClientRect();
+        container.scrollTo({
+          top: Math.max(0, container.scrollTop + messageRect.top - containerRect.top - 12),
+          behavior: "smooth",
+        });
       }
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [selectedThreadId, historyMessages.length, threadOpenVersion]);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedThreadId, latestInboundId, threadOpenVersion]);
 
   function openCompose() {
     setComposeAccountId(selectedAccountId !== "all" ? selectedAccountId : accounts[0]?.id || "");
@@ -677,7 +679,7 @@ export function EmailInboxPage() {
         setCustomerContext(res.customerContext || { previousThreads: [], tasks: [] });
         setAuditHistory(audit.logs);
 
-        const draft = [...res.messages].reverse().find((m) => m.isDraft);
+        const draft = res.messages.find((m) => m.isDraft);
         if (draft) {
           setDraftMessageId(draft.id);
           setDraftText(draft.bodyText);
@@ -790,9 +792,6 @@ export function EmailInboxPage() {
       setReplyFiles([]);
       setForwardTo("");
       setComposerMode("reply");
-      setDraftMessageId(null);
-      setDraftText("");
-      setDraftIsAiGenerated(false);
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
         method: "POST",
         body: JSON.stringify({ action: "release" }),
@@ -1438,7 +1437,7 @@ export function EmailInboxPage() {
               </div>
 
               {/* Scrollable middle body container */}
-              <div className="email-inbox-detail-body" ref={detailBodyRef}>
+              <div className="email-inbox-detail-body">
                 {/* Customer Context Card */}
                 <section className="email-customer-card">
                   <div
@@ -1568,7 +1567,7 @@ export function EmailInboxPage() {
                 )}
 
                 {/* Messages Scroll Timeline */}
-                <div className="email-inbox-messages-scroll">
+                <div className="email-inbox-messages-scroll" ref={messageScrollRef}>
                   {historyMessages.length === 0 ? (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                       <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
@@ -1576,17 +1575,13 @@ export function EmailInboxPage() {
                       <small>Write a reply below to start the conversation.</small>
                     </div>
                   ) : (
-                    historyMessages.map((m, index) => {
+                    historyMessages.map((m) => {
                       const isInbound = m.direction === "inbound";
                       const isLatestInbound = isInbound && m.id === latestInboundId;
-                      const isLatestMessage = index === historyMessages.length - 1;
                       return (
                         <div
                           key={m.id}
-                          ref={(el) => {
-                            if (isLatestInbound) latestInboundMessageRef.current = el;
-                            if (isLatestMessage) latestMessageRef.current = el;
-                          }}
+                          ref={isLatestInbound ? latestInboundMessageRef : undefined}
                           className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"}`}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
