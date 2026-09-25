@@ -318,6 +318,85 @@ export function registerEmailInboxRoutes(
   // 2. Email Inbox Threads & Messages (Items 6, 7, 8)
   // =========================================================================
 
+  app.post<{
+    Params: { companyId: string };
+    Body: {
+      accountId: string; toAddresses: string[]; ccAddresses?: string[]; bccAddresses?: string[];
+      subject: string; bodyText: string; isDraft?: boolean; attachments?: EmailAttachment[];
+    };
+  }>("/companies/:companyId/email-inbox/compose", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:send_messages");
+      await store.getCompany(c, r.params.companyId);
+      const accounts = await repo.listAccounts(c, r.params.companyId);
+      const account = accounts.find((item) => item.id === r.body?.accountId);
+      if (!account) throw Object.assign(new Error("Select a valid company email account."), { status: 400 });
+
+      const normalizeRecipients = (values: unknown) => Array.isArray(values)
+        ? [...new Set(values.map(String).map((value) => value.trim().toLowerCase()).filter(Boolean))]
+        : [];
+      const toAddresses = normalizeRecipients(r.body?.toAddresses);
+      const ccAddresses = normalizeRecipients(r.body?.ccAddresses);
+      const bccAddresses = normalizeRecipients(r.body?.bccAddresses);
+      const allRecipients = [...toAddresses, ...ccAddresses, ...bccAddresses];
+      const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!toAddresses.length) throw Object.assign(new Error("At least one To recipient is required."), { status: 400 });
+      if (allRecipients.some((address) => !validEmail.test(address))) {
+        throw Object.assign(new Error("One or more recipient email addresses are invalid."), { status: 400 });
+      }
+      const subject = String(r.body?.subject || "").trim();
+      const bodyText = String(r.body?.bodyText || "").trim();
+      if (!subject) throw Object.assign(new Error("Subject is required."), { status: 400 });
+      if (!bodyText) throw Object.assign(new Error("Message body is required."), { status: 400 });
+      const isDraft = r.body?.isDraft === true;
+
+      if (!isDraft) {
+        if (!account.testMode && account.status !== "connected") {
+          throw Object.assign(new Error(`Email account is not connected (${account.status}). Open Email Settings and run Test Connection first.`), { status: 409 });
+        }
+        const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!);
+        if (!quota.allowed) throw Object.assign(new Error(`Rate limit exceeded: ${quota.reason}`), { status: 429 });
+      }
+
+      const rawAttachments = Array.isArray(r.body?.attachments) ? r.body.attachments : [];
+      if (rawAttachments.length > 20 || rawAttachments.some((item) => Number(item.sizeBytes || 0) > 10 * 1024 * 1024)
+        || rawAttachments.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0) > 25 * 1024 * 1024) {
+        throw Object.assign(new Error("Attachments exceed the 20-file, 10 MB per file, or 25 MB total limit."), { status: 413 });
+      }
+      const thread = await repo.createThread(c, r.params.companyId, {
+        emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
+        status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
+        folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
+      });
+      const attachments = rawAttachments.length && attachmentStorage
+        ? await attachmentStorage.persist(c, r.params.companyId, thread.id, rawAttachments)
+        : rawAttachments;
+      const message = await repo.createMessage(c, r.params.companyId, {
+        threadId: thread.id, emailAccountId: account.id, direction: "outbound",
+        fromAddress: account.emailAddress, toAddresses, ccAddresses, bccAddresses, subject, bodyText,
+        attachments, isDraft, isAiGenerated: false, sentByUserId: c.userId,
+        deliveryStatus: isDraft ? "sending" : account.testMode ? "delivered" : "sending",
+      });
+
+      if (!isDraft && !account.testMode) {
+        await repo.enqueueJob(c, r.params.companyId, {
+          jobType: "send", emailAccountId: account.id, threadId: thread.id,
+          messageId: message.id, idempotencyKey: `send:${message.id}`,
+        });
+      }
+      if (auditRepo) {
+        await auditRepo.log(c, r.params.companyId, {
+          action: isDraft ? "email.draft_created" : "email.outbound_queued",
+          category: "general", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: message.id, accountId: account.id, toAddresses, ccAddresses, bccCount: bccAddresses.length, attachmentCount: attachments.length },
+        }).catch(() => undefined);
+      }
+      return reply.code(isDraft || account.testMode ? 201 : 202).send({
+        thread, message, status: isDraft ? "draft" : account.testMode ? "simulated_send" : "queued",
+      });
+    } catch (e) { return err(reply, e); }
+  });
+
   app.get<{
     Params: { companyId: string };
     Querystring: {
@@ -359,7 +438,6 @@ export function registerEmailInboxRoutes(
 
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
         if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
-
         const messages = await repo.listMessages(c, r.params.companyId, thread.id);
         const contact = await repo.getContact(c, r.params.companyId, thread.customerEmail);
         const previousThreads = (await repo.listThreads(c, r.params.companyId, { search: thread.customerEmail, limit: 50 }))
@@ -427,6 +505,7 @@ export function registerEmailInboxRoutes(
         await store.getCompany(c, r.params.companyId);
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
         if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
+        const threadMessages = attachmentStorage ? await repo.listMessages(c, r.params.companyId, thread.id) : [];
         if (auditRepo) {
           await auditRepo.log(c, r.params.companyId, {
             action: "email.deleted", category: "general", resourceType: "company_email_thread", resourceId: thread.id,
@@ -434,6 +513,11 @@ export function registerEmailInboxRoutes(
           }).catch(() => undefined);
         }
         await repo.deleteThread(c, r.params.companyId, r.params.threadId);
+        if (attachmentStorage) {
+          await Promise.all(threadMessages.flatMap((message) => message.attachments.map((attachment) =>
+            attachmentStorage.remove(c, r.params.companyId, attachment).catch(() => false)
+          )));
+        }
         return reply.code(200).send({ deleted: true });
       } catch (e) {
         return err(reply, e);
@@ -520,6 +604,7 @@ export function registerEmailInboxRoutes(
 
         await repo.updateThread(c, r.params.companyId, thread.id, {
           status: account?.testMode ? "answered" : "ai_processing",
+          ...(draft.isAiGenerated ? {} : { folder: "sent" as const }),
         });
 
         if (auditRepo) {
@@ -537,6 +622,9 @@ export function registerEmailInboxRoutes(
         return reply.code(account?.testMode ? 200 : 202).send({ message: updatedDraft, status: account?.testMode ? "sent" : "queued" });
       }
 
+      const messageAttachments = r.body.attachments?.length && attachmentStorage
+        ? await attachmentStorage.persist(c, r.params.companyId, thread.id, r.body.attachments)
+        : r.body.attachments;
       const msg = await repo.createMessage(c, r.params.companyId, {
         threadId: thread.id,
         emailAccountId: account?.id,
@@ -548,7 +636,7 @@ export function registerEmailInboxRoutes(
         subject: r.body.subject || `Re: ${thread.subject}`,
         bodyText: r.body.bodyText,
         bodyHtml: r.body.bodyHtml,
-        attachments: r.body.attachments,
+        attachments: messageAttachments,
         isDraft,
         sentByUserId: c.userId,
         deliveryStatus: isDraft ? "sending" : account?.testMode ? "delivered" : "sending",

@@ -7,6 +7,8 @@ import { EmailAgentTools } from "../apps/agent-api/src/email-agent-tools";
 import { EmailAttachmentStorage } from "../apps/agent-api/src/email-attachment-storage";
 import { InMemoryFileMetadataRepository } from "../apps/agent-api/src/file-metadata";
 import { InMemoryObjectStorage } from "../apps/agent-api/src/object-storage";
+import { registerEmailInboxRoutes } from "../apps/agent-api/src/email-routes";
+import Fastify from "fastify";
 import type { AuthContext } from "@npati/workspace";
 
 const mockAuth: AuthContext = {
@@ -609,9 +611,48 @@ describe("Email / AI Inbox Module", () => {
     const chunks: Buffer[] = [];
     for await (const chunk of opened!.stream as AsyncIterable<Buffer | Uint8Array | string>) chunks.push(Buffer.from(chunk));
     expect(Buffer.concat(chunks).toString()).toBe(payload.toString());
+    const [smtpAttachment] = await storage.materialize(mockAuth, "attachment-company", [attachment!]);
+    expect(Buffer.from(smtpAttachment!.contentBase64!, "base64").toString()).toBe(payload.toString());
     await expect(storage.open({ ...mockAuth, workspaceId: "another-workspace" }, "attachment-company", fileId)).resolves.toBeNull();
     await expect(files.listCompany(mockAuth, "attachment-company")).resolves.toEqual([
       expect.objectContaining({ id: fileId, status: "ready", companyId: "attachment-company" }),
     ]);
+    await expect(storage.remove(mockAuth, "attachment-company", attachment!)).resolves.toBe(true);
+    await expect(storage.open(mockAuth, "attachment-company", fileId)).resolves.toBeNull();
+  });
+
+  it("31. Composes a brand-new outbound email and queues it for SMTP", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    let account = await isolatedRepo.createAccount(mockAuth, "compose-company", {
+      emailAddress: "sales@company.com", mode: "manual", testMode: false,
+    });
+    account = await isolatedRepo.updateAccount(mockAuth, "compose-company", account.id, { status: "connected" });
+    const app = Fastify();
+    registerEmailInboxRoutes(app, {
+      auth: { authenticate: async () => mockAuth },
+      store: { getCompany: async () => ({ id: "compose-company", name: "Compose Company" }) } as any,
+      repo: isolatedRepo,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/companies/compose-company/email-inbox/compose",
+      payload: {
+        accountId: account.id,
+        toAddresses: ["customer@example.net"],
+        ccAddresses: ["manager@example.net"],
+        subject: "A new conversation",
+        bodyText: "Hello from the visible Compose Email flow.",
+      },
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      status: "queued",
+      thread: { customerEmail: "customer@example.net", folder: "sent" },
+      message: { fromAddress: "sales@company.com", isDraft: false, isAiGenerated: false, deliveryStatus: "sending" },
+    });
+    const jobs = await isolatedRepo.claimJobs("compose-test-worker", 10);
+    expect(jobs).toEqual([expect.objectContaining({ jobType: "send", emailAccountId: account.id })]);
+    await app.close();
   });
 });

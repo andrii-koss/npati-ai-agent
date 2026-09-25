@@ -704,7 +704,7 @@ export function buildApp(config: AppConfig = {}) {
         }) => emailAttachmentStorage.persist(ctx, companyId, thread.id, attachments)
       : undefined,
   };
-  const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks);
+  const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks, undefined, emailAttachmentStorage);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
   const contentLibrary = new ContentLibraryStore(workspaceStore);

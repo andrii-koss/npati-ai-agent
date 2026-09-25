@@ -878,7 +878,16 @@ export function EmailSettingsPage() {
               </select>
             )}
             <Link
-              to="/settings/email/inbox"
+              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
+              className="button-primary automations-action-primary"
+              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+              title={accounts.length ? "Write and send a new email" : "Add an email address, then compose a message"}
+              aria-disabled={accounts.length === 0}
+            >
+              + Compose Email
+            </Link>
+            <Link
+              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}`}
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -886,7 +895,7 @@ export function EmailSettingsPage() {
             </Link>
             <button
               type="button"
-              className="button-primary automations-action-primary"
+              className="button-secondary automations-action-primary"
               onClick={openCreateDrawer}
             >
               + Add Email Address
@@ -1153,6 +1162,13 @@ export function EmailSettingsPage() {
                         </td>
                         <td>
                           <div className="automation-actions-cell">
+                            <Link
+                              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1&account=${encodeURIComponent(acc.id)}`}
+                              className="automation-action-btn"
+                              title={`Compose from ${acc.emailAddress}`}
+                            >
+                              Compose
+                            </Link>
                             <button
                               type="button"
                               className="automation-action-btn"
