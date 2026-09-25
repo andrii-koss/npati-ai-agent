@@ -107,6 +107,24 @@ describe("P0.1 Production Security, Auth & Guardrails Suite", () => {
 
       expect(normalizeApiKeyScopes()).toEqual(["workspace:read"]);
       expect(() => normalizeApiKeyScopes(["workspace:read", "unknown:scope"])).toThrow("Unsupported API key scope");
+      expect(normalizeApiKeyScopes(["email:read_messages", "email:send_messages"])).toEqual([
+        "email:read_messages",
+        "email:send_messages",
+      ]);
+
+      const emailKey = await repo.createApiKey({
+        companyId: "company-bound",
+        tenantId: "tenant-bound",
+        name: "Email responder",
+        scopes: ["email:read_messages", "email:send_messages"],
+      });
+      const emailContext = await authProvider.authenticate(mockRequest(
+        { authorization: `Bearer ${emailKey.rawToken}` },
+        "10.0.0.11",
+        { companyId: "company-bound" },
+      ));
+      expect(emailContext.permissions).toEqual(["email:read_messages", "email:send_messages"]);
+      expect(emailContext.permissions).not.toContain("email:manage_accounts");
 
       const key = await repo.createApiKey({
         companyId: "company-bound",

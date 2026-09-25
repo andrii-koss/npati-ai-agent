@@ -51,6 +51,7 @@ interface EmailMessage {
   ccAddresses?: string[];
   subject: string;
   bodyText: string;
+  bodyHtml?: string | null;
   attachments?: Array<{ filename: string; contentType: string; sizeBytes: number; url?: string; contentBase64?: string }>;
   isDraft: boolean;
   isAiGenerated: boolean;
@@ -66,6 +67,65 @@ interface ContactDetails {
   isVip: boolean;
   isBlacklisted: boolean;
   notes?: string | null;
+  lastActivityAt?: string | null;
+  previousThreadsCount?: number;
+}
+
+function sanitizeEmailHtml(rawHtml: string): string {
+  const source = new DOMParser().parseFromString(rawHtml, "text/html");
+  const target = document.implementation.createHTMLDocument("");
+  const allowedTags = new Set([
+    "a", "b", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "i", "li", "ol", "p", "pre", "span", "strong", "sub", "sup", "table", "tbody", "td", "th", "thead", "tr", "u", "ul",
+  ]);
+  const blockedTags = new Set(["base", "embed", "form", "iframe", "input", "link", "math", "meta", "object", "script", "style", "svg", "textarea"]);
+
+  const copyNode = (node: Node): Node | null => {
+    if (node.nodeType === Node.TEXT_NODE) return target.createTextNode(node.textContent || "");
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+    if (blockedTags.has(tag)) return null;
+    const children = Array.from(element.childNodes).map(copyNode).filter((child): child is Node => child !== null);
+    if (!allowedTags.has(tag)) {
+      const fragment = target.createDocumentFragment();
+      children.forEach((child) => fragment.appendChild(child));
+      return fragment;
+    }
+    const clean = target.createElement(tag);
+    if (tag === "a") {
+      const href = element.getAttribute("href")?.trim();
+      if (href && /^https?:\/\//i.test(href)) {
+        clean.setAttribute("href", "#");
+        clean.setAttribute("data-email-url", href);
+        clean.setAttribute("rel", "noopener noreferrer nofollow");
+      }
+    }
+    if ((tag === "td" || tag === "th") && /^\d{1,2}$/.test(element.getAttribute("colspan") || "")) {
+      clean.setAttribute("colspan", element.getAttribute("colspan")!);
+    }
+    children.forEach((child) => clean.appendChild(child));
+    return clean;
+  };
+
+  Array.from(source.body.childNodes).map(copyNode).filter((node): node is Node => node !== null)
+    .forEach((node) => target.body.appendChild(node));
+  return target.body.innerHTML;
+}
+
+interface CustomerContext {
+  previousThreads: Array<{ id: string; subject: string; status: string; priority: string; lastMessageAt: string }>;
+  tasks: Array<{ id: string; task: string; status: string; createdAt: string }>;
+}
+
+interface EmailNotification {
+  id: string;
+  threadId?: string | null;
+  notificationType: string;
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
 }
 
 interface EmailAuditEntry {
@@ -101,6 +161,8 @@ export function EmailInboxPage() {
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [contact, setContact] = useState<ContactDetails | null>(null);
+  const [customerContext, setCustomerContext] = useState<CustomerContext>({ previousThreads: [], tasks: [] });
+  const [notifications, setNotifications] = useState<EmailNotification[]>([]);
   const [auditHistory, setAuditHistory] = useState<EmailAuditEntry[]>([]);
 
   // Filters & Search
@@ -118,6 +180,22 @@ export function EmailInboxPage() {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  async function openInspectedLink(url: string, senderEmail?: string) {
+    const inspected = await api<{ check: { requiresHumanApproval: boolean; warnings: string[] } }>(
+      `/companies/${selectedCompanyId}/email-inbox/inspect-link`,
+      { method: "POST", body: JSON.stringify({ url, senderEmail }) }
+    );
+    if (inspected.check.requiresHumanApproval) {
+      const approved = await confirmModal({
+        title: "Open external link?",
+        message: inspected.check.warnings.join(" ") || "This link requires human approval.",
+        isDanger: true,
+      });
+      if (!approved) return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   async function openAttachment(attachment: NonNullable<EmailMessage["attachments"]>[number]) {
     if (attachment.contentBase64) {
       const binary = atob(attachment.contentBase64);
@@ -129,19 +207,21 @@ export function EmailInboxPage() {
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } else if (attachment.url) {
-      const inspected = await api<{ check: { requiresHumanApproval: boolean; warnings: string[] } }>(
-        `/companies/${selectedCompanyId}/email-inbox/inspect-link`,
-        { method: "POST", body: JSON.stringify({ url: attachment.url, senderEmail: activeThread?.customerEmail }) }
-      );
-      if (inspected.check.requiresHumanApproval) {
-        const approved = await confirmModal({
-          title: "Open external attachment?",
-          message: inspected.check.warnings.join(" ") || "This external link requires human approval.",
-          isDanger: true,
-        });
-        if (!approved) return;
+      if (attachment.url.startsWith("/api/")) {
+        const headers = new Headers();
+        const token = getStoredAuthToken();
+        if (token) headers.set("authorization", `Bearer ${token}`);
+        const response = await fetch(attachment.url, { headers });
+        if (!response.ok) throw new Error(`Attachment download failed (${response.status}).`);
+        const objectUrl = URL.createObjectURL(await response.blob());
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = attachment.filename;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      } else {
+        await openInspectedLink(attachment.url, activeThread?.customerEmail);
       }
-      window.open(attachment.url, "_blank", "noopener,noreferrer");
     } else {
       setNotice("Attachment content is not available for download.");
     }
@@ -161,10 +241,24 @@ export function EmailInboxPage() {
   // Load accounts when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
-    api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`)
-      .then((res) => setAccounts(res.accounts))
+    Promise.all([
+      api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
+      api<{ notifications: EmailNotification[] }>(`/companies/${selectedCompanyId}/email-inbox/notifications`),
+    ])
+      .then(([accountResult, notificationResult]) => {
+        setAccounts(accountResult.accounts);
+        setNotifications(notificationResult.notifications);
+      })
       .catch(() => undefined);
   }, [selectedCompanyId]);
+
+  async function openNotification(notification: EmailNotification) {
+    if (notification.threadId) setSelectedThreadId(notification.threadId);
+    if (!notification.isRead) {
+      await api(`/companies/${selectedCompanyId}/email-inbox/notifications/${notification.id}/read`, { method: "PATCH" });
+      setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, isRead: true } : item));
+    }
+  }
 
   // Load threads
   async function loadThreads() {
@@ -199,12 +293,13 @@ export function EmailInboxPage() {
       setActiveThread(null);
       setMessages([]);
       setContact(null);
+      setCustomerContext({ previousThreads: [], tasks: [] });
       setAuditHistory([]);
       return;
     }
 
     Promise.all([
-      api<{ thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null }>(
+      api<{ thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null; customerContext: CustomerContext }>(
         `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
       ),
       api<{ logs: EmailAuditEntry[] }>(
@@ -215,6 +310,7 @@ export function EmailInboxPage() {
         setActiveThread(res.thread);
         setMessages(res.messages);
         setContact(res.contact);
+        setCustomerContext(res.customerContext || { previousThreads: [], tasks: [] });
         setAuditHistory(audit.logs);
 
         const draft = res.messages.find((m) => m.isDraft);
@@ -461,6 +557,19 @@ export function EmailInboxPage() {
         </div>
       )}
 
+      {notifications.some((item) => !item.isRead) && (
+        <section className="workspace-notice" style={{ marginBottom: 16 }} aria-label="Email notifications">
+          <strong>Email notifications</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            {notifications.filter((item) => !item.isRead).slice(0, 5).map((item) => (
+              <button key={item.id} type="button" className="automation-action-btn" onClick={() => void openNotification(item)} title={item.body}>
+                {item.title}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* 3-Column Unified Inbox Card */}
       <div className="email-inbox-card">
         {/* Left Column: Folders & Accounts */}
@@ -684,6 +793,32 @@ export function EmailInboxPage() {
                 </div>
               </div>
 
+              <section style={{ margin: "12px 22px 0", padding: 14, border: "1px solid #e2e8f0", borderRadius: 10, background: "#f8fafc" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                  <div>
+                    <strong style={{ display: "block", color: "#0f172a" }}>Customer Card</strong>
+                    <span style={{ fontSize: 12, color: "#475569" }}>{contact?.name || activeThread.customerName || "Unknown customer"} · {activeThread.customerEmail}</span>
+                    {contact?.companyName && <span style={{ display: "block", fontSize: 12, color: "#475569" }}>{contact.companyName}</span>}
+                    {contact?.phone && <span style={{ display: "block", fontSize: 12, color: "#475569" }}>{contact.phone}</span>}
+                    {contact?.notes && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#334155" }}>{contact.notes}</p>}
+                  </div>
+                  <div style={{ display: "flex", gap: 18, fontSize: 12, color: "#475569" }}>
+                    <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong><br />previous emails</span>
+                    <span><strong>{customerContext.tasks.length}</strong><br />related Tasks</span>
+                    <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "—"}</strong><br />last activity</span>
+                  </div>
+                </div>
+                {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
+                    <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
+                      {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
+                      {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
+                    </div>
+                  </details>
+                )}
+              </section>
+
               {/* Collision Protection Warning */}
               {activeThread.lockedByUserId && (
                 <div style={{ margin: "12px 22px 0", padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 12 }}>
@@ -770,9 +905,36 @@ export function EmailInboxPage() {
                         </small>
                       </div>
 
-                      <div style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                        {m.bodyText}
-                      </div>
+                      {m.bodyHtml ? (
+                        <div
+                          className="email-sanitized-html"
+                          style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55 }}
+                          onClick={(event) => {
+                            const anchor = (event.target as Element).closest("a[data-email-url]") as HTMLAnchorElement | null;
+                            if (!anchor) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const url = anchor.dataset.emailUrl;
+                            if (url) void openInspectedLink(url, m.fromAddress);
+                          }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(m.bodyHtml) }}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                          {m.bodyText.split(/(https?:\/\/[^\s<>"')]+)/gi).map((part, index) =>
+                            /^https?:\/\//i.test(part) ? (
+                              <button
+                                key={`${m.id}-link-${index}`}
+                                type="button"
+                                onClick={() => void openInspectedLink(part, m.fromAddress)}
+                                style={{ border: 0, padding: 0, background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+                              >
+                                {part}
+                              </button>
+                            ) : part
+                          )}
+                        </div>
+                      )}
 
                       {m.attachments && m.attachments.length > 0 && (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>

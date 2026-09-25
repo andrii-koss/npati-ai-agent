@@ -19,6 +19,7 @@ function workerContext(account: CompanyEmailAccount): AuthContext {
 export class EmailInboxWorker {
   private timer?: NodeJS.Timeout;
   private running = false;
+  private activeTick?: Promise<void>;
   private readonly workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   private readonly processor: EmailAIProcessor;
 
@@ -34,14 +35,22 @@ export class EmailInboxWorker {
 
   start(): void {
     if (this.timer) return;
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
+    this.scheduleTick();
+    this.timer = setInterval(() => this.scheduleTick(), this.pollIntervalMs);
     this.timer.unref();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    await this.activeTick;
+  }
+
+  private scheduleTick(): void {
+    if (this.activeTick) return;
+    this.activeTick = this.tick().catch(() => undefined).finally(() => {
+      this.activeTick = undefined;
+    });
   }
 
   async tick(): Promise<void> {
@@ -60,6 +69,7 @@ export class EmailInboxWorker {
     try {
       if (job.jobType === "send") await this.processSend(job);
       else if (job.jobType === "followup") await this.processFollowup(job);
+      else throw new Error(`Unsupported email job type: ${job.jobType}`);
       await this.repo.completeJob(job.id);
     } catch (error) {
       await this.repo.failJob(job, error);
@@ -70,6 +80,10 @@ export class EmailInboxWorker {
           await this.repo.updateMessage(ctx, job.companyId, job.messageId, {
             deliveryStatus: "failed",
             deliveryError: error instanceof Error ? error.message : String(error),
+          }).catch(() => undefined);
+          await this.repo.createNotification(ctx, job.companyId, {
+            threadId: job.threadId, notificationType: "delivery_failed", title: "Email delivery failed",
+            body: error instanceof Error ? error.message : String(error),
           }).catch(() => undefined);
         }
       }
@@ -98,13 +112,17 @@ export class EmailInboxWorker {
       }).catch(() => undefined);
     }
 
-    if (account.followupConfig.enabled && job.threadId) {
+    if (account.followupConfig.enabled && account.followupConfig.maxFollowups > 0 && job.threadId) {
+      const completedFollowupNumber = Number(job.payload.followupNumber || 0);
+      const nextFollowupNumber = completedFollowupNumber + 1;
+      if (nextFollowupNumber > account.followupConfig.maxFollowups) return;
+      const rootMessageId = String(job.payload.rootMessageId || message.id);
       const runAfter = new Date(Date.now() + Math.max(1, account.followupConfig.delayDays) * 86_400_000).toISOString();
       await this.repo.enqueueJob(ctx, job.companyId, {
         jobType: "followup", emailAccountId: account.id, threadId: job.threadId,
-        payload: { originalMessageId: message.id }, runAfter,
-        maxAttempts: Math.max(1, account.followupConfig.maxFollowups),
-        idempotencyKey: `followup:${message.id}:1`,
+        payload: { originalMessageId: message.id, rootMessageId, followupNumber: nextFollowupNumber }, runAfter,
+        maxAttempts: 3,
+        idempotencyKey: `followup:${rootMessageId}:${nextFollowupNumber}`,
       });
     }
   }
@@ -132,6 +150,16 @@ export class EmailInboxWorker {
       return;
     }
 
+    if (account.followupConfig.action === "notify_user") {
+      await this.repo.createNotification(ctx, job.companyId, {
+        userId: thread.assignedUserId, threadId: thread.id, notificationType: "followup_due",
+        title: `Follow-up due: ${thread.subject}`,
+        body: `${thread.customerEmail} has not replied within ${account.followupConfig.delayDays} day(s).`,
+      });
+      await this.repo.updateThread(ctx, job.companyId, thread.id, { status: "waiting_human" });
+      return;
+    }
+
     const isDraft = account.followupConfig.action !== "auto_send";
     const followup = await this.repo.createMessage(ctx, job.companyId, {
       threadId: thread.id, emailAccountId: account.id, direction: "outbound",
@@ -140,12 +168,17 @@ export class EmailInboxWorker {
       bodyText: `Hello,\n\nI am following up on our previous email. Please let us know if you need any additional information.\n\n${account.signatureConfig.signature || "Best regards"}`,
       isDraft, isAiGenerated: true, deliveryStatus: isDraft ? "sending" : "sending",
     });
-    await this.repo.updateThread(ctx, job.companyId, thread.id, { status: isDraft ? "draft_ready" : "waiting_customer" });
+    await this.repo.updateThread(ctx, job.companyId, thread.id, { status: isDraft ? "draft_ready" : "ai_processing" });
     if (!isDraft) {
       const quota = await this.repo.reserveSendQuota(job.companyId, account, thread.customerEmail);
       if (!quota.allowed) throw new Error(`Rate limit exceeded: ${quota.reason}`);
       await this.repo.enqueueJob(ctx, job.companyId, {
         jobType: "send", emailAccountId: account.id, threadId: thread.id, messageId: followup.id,
+        payload: {
+          isFollowup: true,
+          followupNumber: Number(job.payload.followupNumber || 1),
+          rootMessageId: String(job.payload.rootMessageId || original.id),
+        },
         idempotencyKey: `send:${followup.id}`,
       });
     }
@@ -161,6 +194,10 @@ export class EmailInboxWorker {
         const messages = await ImapEmailTransport.poll(account);
         let lastUid = account.imapConfig.lastUid || 0;
         for (const message of messages) {
+          if (await this.handleDeliveryNotification(ctx, account, message)) {
+            lastUid = Math.max(lastUid, message.uid);
+            continue;
+          }
           await this.processor.processInbound(ctx, account.companyId, {
             from: message.from, to: message.to, subject: message.subject, body: message.body,
             bodyHtml: message.bodyHtml, messageId: message.messageId || `imap:${account.id}:${message.uid}`,
@@ -179,6 +216,41 @@ export class EmailInboxWorker {
         }).catch(() => undefined);
       }
     }
+  }
+
+  private async handleDeliveryNotification(
+    ctx: AuthContext,
+    account: CompanyEmailAccount,
+    message: { uid: number; from: string; subject: string; body: string }
+  ): Promise<boolean> {
+    const text = `${message.subject}\n${message.body}`;
+    if (!/mailer-daemon|postmaster/i.test(message.from) || !/undeliver|delivery[ -](?:status|failure)|returned mail|bounce|rejected/i.test(text)) {
+      return false;
+    }
+    const idMatch = text.match(/(?:Original-Message-ID|X-Original-Message-ID|Message-ID):\s*<([^>]+)>/i);
+    if (!idMatch?.[1]) return false;
+    const fullId = idMatch[1].trim();
+    const localId = fullId.split("@", 1)[0] || fullId;
+    const outbound = await this.repo.findMessageByExternalId(ctx, account.companyId, fullId)
+      || await this.repo.findMessageByExternalId(ctx, account.companyId, localId);
+    if (!outbound || outbound.direction !== "outbound") return false;
+    const diagnostic = text.match(/Diagnostic-Code:\s*([^\r\n]+)/i)?.[1]
+      || text.match(/Status:\s*([^\r\n]+)/i)?.[1]
+      || message.subject;
+    const status = /5\.7\.|reject|policy/i.test(diagnostic) ? "rejected" as const : "bounced" as const;
+    await this.repo.updateMessage(ctx, account.companyId, outbound.id, { deliveryStatus: status, deliveryError: diagnostic });
+    await this.repo.updateThread(ctx, account.companyId, outbound.threadId, { status: "failed" });
+    await this.repo.createNotification(ctx, account.companyId, {
+      threadId: outbound.threadId, notificationType: "delivery_failed",
+      title: `Email ${status}: ${outbound.subject}`, body: diagnostic,
+    });
+    if (this.auditRepo) {
+      await this.auditRepo.log(ctx, account.companyId, {
+        action: `email.delivery_${status}`, category: "automation", resourceType: "company_email_thread",
+        resourceId: outbound.threadId, details: { messageId: outbound.id, diagnostic, source: "dsn" },
+      }).catch(() => undefined);
+    }
+    return true;
   }
 
   private async refreshOAuth(account: CompanyEmailAccount, ctx: AuthContext): Promise<CompanyEmailAccount> {

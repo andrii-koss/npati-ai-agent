@@ -134,6 +134,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         body: text(input.body ?? input.content ?? input.message, "Email body", 50_000),
         fromEmail: typeof input.fromEmail === "string" ? input.fromEmail : undefined,
         cc: Array.isArray(input.cc) ? input.cc.map(String) : undefined,
+        taskRunId: typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined,
       });
     }
     if (tool === "email.read" || tool === "communications.email_read") {

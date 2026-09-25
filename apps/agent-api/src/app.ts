@@ -54,6 +54,7 @@ import { EmailInboxRepository } from "./email-inbox-repository";
 import { registerEmailInboxRoutes } from "./email-routes";
 import { EmailInboxWorker } from "./email-worker";
 import { EmailAgentTools } from "./email-agent-tools";
+import { EmailAttachmentStorage } from "./email-attachment-storage";
 import { ApiKeysRepository } from "./api-keys-repository";
 import { registerApiKeyRoutes } from "./api-keys-routes";
 import { ScopedMemoryEngine } from "./scoped-memory";
@@ -620,6 +621,7 @@ export function buildApp(config: AppConfig = {}) {
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
   const emailAgentTools = new EmailAgentTools(emailInboxRepo);
+  const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
@@ -653,6 +655,54 @@ export function buildApp(config: AppConfig = {}) {
       }
       return created.run.id;
     },
+    continueTask: async ({ ctx, companyId, thread, inboundMessage, awaitingRunId }: {
+      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
+      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; awaitingRunId: string;
+    }) => {
+      const verification = emailAgentTools.extractVerification(inboundMessage.bodyText);
+      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
+        task: [
+          `Continue Agent Task ${awaitingRunId} after receiving its awaited email reply.`,
+          `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
+          verification.verificationCode ? `Verification code: ${verification.verificationCode}.` : "",
+          verification.token ? `Verification token: ${verification.token}.` : "",
+          verification.verificationLinks.length ? `Verification links: ${verification.verificationLinks.join(", ")}.` : "",
+          `Email body:\n${inboundMessage.bodyText}`,
+        ].filter(Boolean).join("\n"),
+        requestedMode: "auto" as const,
+      }, `email-continuation:${inboundMessage.id}:${awaitingRunId}`);
+      if (created.created && companyRunQueue) {
+        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
+      }
+      return created.run.id;
+    },
+    startWorkflow: async ({ ctx, companyId, thread, inboundMessage, workflowId }: {
+      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
+      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; workflowId: string;
+    }) => {
+      const workflow = await automationsRepo.get(ctx, companyId, workflowId);
+      if (workflow.status !== "active") throw new Error(`Email workflow ${workflowId} is not active`);
+      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
+        task: [
+          workflow.prompt,
+          "\nEmail trigger context:",
+          `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
+          `Message:\n${inboundMessage.bodyText}`,
+          workflow.agentId ? `Assigned workflow agent: ${workflow.agentId}.` : "",
+        ].filter(Boolean).join("\n"),
+        requestedMode: workflow.agentId ? "single" as const : "auto" as const,
+      }, `email-workflow:${workflow.id}:${inboundMessage.id}`);
+      if (created.created && companyRunQueue) {
+        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
+      }
+      return created.run.id;
+    },
+    persistAttachments: emailAttachmentStorage
+      ? async ({ ctx, companyId, thread, attachments }: {
+          ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
+          attachments: import("./email-inbox-types").EmailAttachment[];
+        }) => emailAttachmentStorage.persist(ctx, companyId, thread.id, attachments)
+      : undefined,
   };
   const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
@@ -1565,7 +1615,7 @@ ${localized.next}`;
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
-  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks });
+  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerMemoryDocumentRoutes(app,authProvider,memoryDocuments);
@@ -1574,7 +1624,7 @@ ${localized.next}`;
   registerBrowserAutomationRoutes(app, authProvider);
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { storageReconciler?.stop(); emailInboxWorker.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await emailInboxRepo.encryptLegacyAccountCredentials();

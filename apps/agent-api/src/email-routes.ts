@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { createHash, randomBytes } from "node:crypto";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AuthProvider } from "./auth";
@@ -8,6 +9,7 @@ import { EmailAIProcessor, type EmailAutomationHooks } from "./email-ai-processo
 import { EmailDnsVerifier } from "./email-dns-verifier";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailAgentTools } from "./email-agent-tools";
+import type { EmailAttachmentStorage } from "./email-attachment-storage";
 import type {
   CompanyEmailAccount,
   EmailAttachment,
@@ -64,9 +66,10 @@ export function registerEmailInboxRoutes(
     auditRepo?: AuditRepository;
     aiEngine?: AIEngine;
     automationHooks?: EmailAutomationHooks;
+    attachmentStorage?: EmailAttachmentStorage;
   }
 ) {
-  const { auth, store, repo, auditRepo, aiEngine, automationHooks } = options;
+  const { auth, store, repo, auditRepo, aiEngine, automationHooks, attachmentStorage } = options;
   const aiProcessor = new EmailAIProcessor(repo, auditRepo, aiEngine, automationHooks);
   const agentTools = new EmailAgentTools(repo);
 
@@ -172,6 +175,87 @@ export function registerEmailInboxRoutes(
     }
   );
 
+  app.post<{
+    Params: { companyId: string; accountId: string };
+    Body: { authorizationUrl: string; tokenUrl: string; clientId: string; clientSecret?: string; scopes?: string[]; redirectUri: string };
+  }>("/companies/:companyId/email-accounts/:accountId/oauth/authorize", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:manage_accounts");
+      await store.getCompany(c, r.params.companyId);
+      const account = await repo.getAccount(c, r.params.companyId, r.params.accountId);
+      if (!account) throw Object.assign(new Error("Email account not found"), { status: 404 });
+      const authorizationUrl = new URL(r.body.authorizationUrl);
+      const tokenUrl = new URL(r.body.tokenUrl);
+      const redirectUri = new URL(r.body.redirectUri);
+      const safeProtocol = (url: URL) => {
+        const host = url.hostname.toLowerCase();
+        const localDevelopment = process.env.NODE_ENV !== "production" && ["localhost", "127.0.0.1"].includes(host);
+        const privateHost = host === "0.0.0.0" || /^10\./.test(host) || /^192\.168\./.test(host)
+          || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === "::1";
+        return (!privateHost || localDevelopment) && (url.protocol === "https:" || (url.protocol === "http:" && localDevelopment));
+      };
+      if (!safeProtocol(authorizationUrl) || !safeProtocol(tokenUrl) || !safeProtocol(redirectUri)) {
+        throw new Error("OAuth endpoints and redirect URI must use HTTPS (localhost HTTP is allowed for development)");
+      }
+      if (!r.body.clientId?.trim()) throw new Error("OAuth clientId is required");
+      const state = randomBytes(32).toString("base64url");
+      const stateHash = createHash("sha256").update(state).digest("hex");
+      const verifier = randomBytes(48).toString("base64url");
+      const challenge = createHash("sha256").update(verifier).digest("base64url");
+      await repo.createOAuthState(c, r.params.companyId, account.id, {
+        stateHash, verifier, tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
+        clientSecret: r.body.clientSecret, redirectUri: redirectUri.toString(),
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      });
+      await repo.updateAccount(c, r.params.companyId, account.id, {
+        imapConfig: { authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
+          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {}) },
+        smtpConfig: { authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
+          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {}) },
+        status: "pending",
+      });
+      authorizationUrl.searchParams.set("response_type", "code");
+      authorizationUrl.searchParams.set("client_id", r.body.clientId.trim());
+      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("state", state);
+      authorizationUrl.searchParams.set("code_challenge", challenge);
+      authorizationUrl.searchParams.set("code_challenge_method", "S256");
+      if (r.body.scopes?.length) authorizationUrl.searchParams.set("scope", r.body.scopes.join(" "));
+      return reply.code(200).send({ authorizationUrl: authorizationUrl.toString(), expiresInSeconds: 600 });
+    } catch (e) { return err(reply, e); }
+  });
+
+  app.get<{ Querystring: { state?: string; code?: string; error?: string; error_description?: string } }>(
+    "/email/oauth/callback",
+    async (r, reply) => {
+      try {
+        if (!r.query.state) throw new Error("OAuth state is required");
+        const stateHash = createHash("sha256").update(r.query.state).digest("hex");
+        const state = await repo.consumeOAuthState(stateHash);
+        if (!state) throw Object.assign(new Error("OAuth state is invalid, expired, or already used"), { status: 400 });
+        if (r.query.error) throw new Error(`OAuth authorization failed: ${r.query.error_description || r.query.error}`);
+        if (!r.query.code) throw new Error("OAuth authorization code is required");
+        const body = new URLSearchParams({ grant_type: "authorization_code", code: r.query.code,
+          client_id: state.clientId, redirect_uri: state.redirectUri, code_verifier: state.verifier });
+        if (state.clientSecret) body.set("client_secret", state.clientSecret);
+        const tokenResponse = await fetch(state.tokenUrl, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+          body, redirect: "error", signal: AbortSignal.timeout(15_000) });
+        const token = await tokenResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
+        if (!tokenResponse.ok || !token.access_token) throw new Error(`OAuth token exchange failed: ${token.error || tokenResponse.status}`);
+        const internalCtx: AuthContext = { userId: state.userId, workspaceId: state.workspaceId, permissions: ["admin:all"] };
+        const account = await repo.getAccount(internalCtx, state.companyId, state.accountId);
+        if (!account) throw Object.assign(new Error("Email account no longer exists"), { status: 404 });
+        const credentials = { authType: "oauth2" as const, accessToken: token.access_token,
+          refreshToken: token.refresh_token || account.imapConfig.refreshToken || account.smtpConfig.refreshToken,
+          tokenExpiresAt: new Date(Date.now() + Math.max(60, token.expires_in || 3600) * 1000).toISOString() };
+        await repo.updateAccount(internalCtx, state.companyId, state.accountId, {
+          imapConfig: credentials, smtpConfig: credentials, status: "pending",
+        });
+        return reply.code(200).send({ connected: true, accountId: state.accountId, message: "OAuth authorization completed. Run Test Connection to verify IMAP and SMTP." });
+      } catch (e) { return err(reply, e); }
+    }
+  );
+
   // Connection Test
   app.post<{
     Params: { companyId: string; accountId: string };
@@ -189,7 +273,14 @@ export function registerEmailInboxRoutes(
       const result = await EmailConnectionTester.testAll(imap, smtp, account.testMode);
 
       // Update account status based on test result
-      const newStatus = result.success ? "connected" : !result.imapStatus?.ok ? "imap_error" : "smtp_error";
+      const authenticationFailed = /auth(?:entication)? failed|credentials|oauth/i.test(
+        [result.imapStatus?.message, result.smtpStatus?.message].filter(Boolean).join(" ")
+      );
+      const newStatus = result.success
+        ? "connected"
+        : authenticationFailed
+          ? "auth_error"
+          : !result.imapStatus?.ok ? "imap_error" : "smtp_error";
       await repo.updateAccount(c, r.params.companyId, account.id, {
         status: newStatus,
         imapConfig: { ...account.imapConfig, lastError: result.imapStatus?.ok ? null : result.imapStatus?.message },
@@ -271,8 +362,18 @@ export function registerEmailInboxRoutes(
 
         const messages = await repo.listMessages(c, r.params.companyId, thread.id);
         const contact = await repo.getContact(c, r.params.companyId, thread.customerEmail);
+        const previousThreads = (await repo.listThreads(c, r.params.companyId, { search: thread.customerEmail, limit: 50 }))
+          .filter((item) => item.id !== thread.id && item.customerEmail === thread.customerEmail)
+          .map((item) => ({ id: item.id, subject: item.subject, status: item.status, priority: item.priority, lastMessageAt: item.lastMessageAt }));
+        const relatedTasks = (await store.listCompanyAgentRuns(c, r.params.companyId, 100))
+          .filter((run) => run.task.includes(thread.customerEmail) || run.task.includes(thread.id))
+          .slice(0, 20)
+          .map((run) => ({ id: run.id, task: run.task, status: run.status, createdAt: run.createdAt }));
 
-        return reply.code(200).send({ thread, messages, contact });
+        return reply.code(200).send({
+          thread, messages, contact,
+          customerContext: { previousThreads, tasks: relatedTasks },
+        });
       } catch (e) {
         return err(reply, e);
       }
@@ -291,9 +392,27 @@ export function registerEmailInboxRoutes(
     };
   }>("/companies/:companyId/email-inbox/threads/:threadId", async (r, reply) => {
     try {
-      const c = await ctx(auth, r, "email:read_messages");
+      const changedKeys = Object.keys(r.body || {});
+      const requiredPermission: EmailPermission = r.body?.folder === "archived"
+        ? "email:delete_messages"
+        : changedKeys.every((key) => key === "unreadCount")
+          ? "email:read_messages"
+          : "email:send_messages";
+      const c = await ctx(auth, r, requiredPermission);
       await store.getCompany(c, r.params.companyId);
+      const before = await repo.getThread(c, r.params.companyId, r.params.threadId);
+      if (!before) throw Object.assign(new Error("Thread not found"), { status: 404 });
       const thread = await repo.updateThread(c, r.params.companyId, r.params.threadId, r.body || {});
+      if (auditRepo) {
+        const changed = Object.fromEntries(Object.keys(r.body || {}).map((key) => [key, {
+          from: (before as unknown as Record<string, unknown>)[key],
+          to: (thread as unknown as Record<string, unknown>)[key],
+        }]));
+        await auditRepo.log(c, r.params.companyId, {
+          action: r.body?.folder === "archived" ? "email.archived" : "email.thread_updated",
+          category: "general", resourceType: "company_email_thread", resourceId: thread.id, details: { changed },
+        }).catch(() => undefined);
+      }
       return reply.code(200).send({ thread });
     } catch (e) {
       return err(reply, e);
@@ -306,6 +425,14 @@ export function registerEmailInboxRoutes(
       try {
         const c = await ctx(auth, r, "email:delete_messages");
         await store.getCompany(c, r.params.companyId);
+        const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
+        if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
+        if (auditRepo) {
+          await auditRepo.log(c, r.params.companyId, {
+            action: "email.deleted", category: "general", resourceType: "company_email_thread", resourceId: thread.id,
+            details: { subject: thread.subject, customerEmail: thread.customerEmail },
+          }).catch(() => undefined);
+        }
         await repo.deleteThread(c, r.params.companyId, r.params.threadId);
         return reply.code(200).send({ deleted: true });
       } catch (e) {
@@ -372,6 +499,11 @@ export function registerEmailInboxRoutes(
 
       // If approving an existing draft message
       if (r.body.approvedDraftMessageId) {
+        const draft = (await repo.listMessages(c, r.params.companyId, thread.id))
+          .find((message) => message.id === r.body.approvedDraftMessageId);
+        if (!draft || !draft.isDraft || draft.direction !== "outbound") {
+          throw Object.assign(new Error("Approved draft was not found in this thread"), { status: 404 });
+        }
         const updatedDraft = await repo.updateMessage(c, r.params.companyId, r.body.approvedDraftMessageId, {
           isDraft: false,
           aiDraftApprovedBy: c.userId,
@@ -434,6 +566,14 @@ export function registerEmailInboxRoutes(
         });
       }
 
+      if (auditRepo) {
+        await auditRepo.log(c, r.params.companyId, {
+          action: isDraft ? "email.draft_saved" : account?.testMode ? "email.test_send_simulated" : "email.send_queued",
+          category: "general", resourceType: "company_email_thread", resourceId: thread.id,
+          details: { messageId: msg.id, toAddresses, attachmentCount: r.body.attachments?.length || 0 },
+        }).catch(() => undefined);
+      }
+
       return reply.code(!isDraft && account && !account.testMode ? 202 : 201).send({ message: msg });
     } catch (e) {
       return err(reply, e);
@@ -443,12 +583,28 @@ export function registerEmailInboxRoutes(
   // Edit draft message
   app.patch<{
     Params: { companyId: string; threadId: string; messageId: string };
-    Body: { bodyText?: string; bodyHtml?: string; isDraft?: boolean };
+    Body: { bodyText?: string; bodyHtml?: string };
   }>("/companies/:companyId/email-inbox/threads/:threadId/messages/:messageId", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "email:send_messages");
       await store.getCompany(c, r.params.companyId);
-      const msg = await repo.updateMessage(c, r.params.companyId, r.params.messageId, r.body || {});
+      const existing = (await repo.listMessages(c, r.params.companyId, r.params.threadId))
+        .find((message) => message.id === r.params.messageId);
+      if (!existing) throw Object.assign(new Error("Message not found"), { status: 404 });
+      if (!existing.isDraft || existing.direction !== "outbound") {
+        throw Object.assign(new Error("Only outbound drafts can be edited"), { status: 409 });
+      }
+      const patch: { bodyText?: string; bodyHtml?: string } = {};
+      if (r.body?.bodyText !== undefined) patch.bodyText = r.body.bodyText;
+      if (r.body?.bodyHtml !== undefined) patch.bodyHtml = r.body.bodyHtml;
+      const msg = await repo.updateMessage(c, r.params.companyId, r.params.messageId, patch);
+      if (auditRepo) {
+        await auditRepo.log(c, r.params.companyId, {
+          action: existing.isAiGenerated ? "email.ai_draft_edited" : "email.draft_edited",
+          category: "general", resourceType: "company_email_thread", resourceId: r.params.threadId,
+          details: { messageId: msg.id, editedFields: Object.keys(r.body || {}) },
+        }).catch(() => undefined);
+      }
       return reply.code(200).send({ message: msg });
     } catch (e) {
       return err(reply, e);
@@ -782,6 +938,50 @@ export function registerEmailInboxRoutes(
     }
   });
 
+  app.get<{ Params: { companyId: string }; Querystring: { limit?: string } }>(
+    "/companies/:companyId/email-inbox/notifications",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "email:read_messages");
+        await store.getCompany(c, r.params.companyId);
+        const notifications = await repo.listNotifications(c, r.params.companyId, Number(r.query.limit || 50));
+        return reply.code(200).send({ notifications });
+      } catch (e) { return err(reply, e); }
+    }
+  );
+
+  app.patch<{ Params: { companyId: string; notificationId: string } }>(
+    "/companies/:companyId/email-inbox/notifications/:notificationId/read",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "email:read_messages");
+        await store.getCompany(c, r.params.companyId);
+        await repo.markNotificationRead(c, r.params.companyId, r.params.notificationId);
+        return reply.code(200).send({ read: true });
+      } catch (e) { return err(reply, e); }
+    }
+  );
+
+  app.get<{ Params: { companyId: string; attachmentId: string } }>(
+    "/companies/:companyId/email-inbox/attachments/:attachmentId",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "email:read_messages");
+        await store.getCompany(c, r.params.companyId);
+        if (!attachmentStorage || !/^[0-9a-f-]{36}$/i.test(r.params.attachmentId)) return reply.code(404).send();
+        const opened = await attachmentStorage.open(c, r.params.companyId, r.params.attachmentId);
+        if (!opened) return reply.code(404).send();
+        const safeName = opened.file.originalFilename.replace(/[\r\n"\\]/g, "_").slice(0, 240) || "attachment";
+        return reply
+          .header("content-type", opened.file.mimeType || "application/octet-stream")
+          .header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`)
+          .header("cache-control", "private, no-store")
+          .header("x-content-type-options", "nosniff")
+          .send(opened.stream);
+      } catch (e) { return err(reply, e); }
+    }
+  );
+
   // =========================================================================
   // 8. Agent Email Tooling & Verification Link Security (Items 18 & 19)
   // =========================================================================
@@ -793,7 +993,15 @@ export function registerEmailInboxRoutes(
     try {
       const c = await ctx(auth, r, "email:read_messages");
       await store.getCompany(c, r.params.companyId);
-      const result = agentTools.inspectLinkSecurity(r.body.url, r.body.senderEmail);
+      const sender = r.body.senderEmail?.trim();
+      const contact = sender ? await repo.getContact(c, r.params.companyId, sender) : null;
+      const result = agentTools.inspectLinkSecurity(r.body.url, sender, contact?.isBlacklisted === true);
+      if (auditRepo) {
+        await auditRepo.log(c, r.params.companyId, {
+          action: "email.link_open_requested", category: "security", resourceType: "company_email_link",
+          details: { domain: result.domain, threatLevel: result.threatLevel, requiresHumanApproval: result.requiresHumanApproval },
+        }).catch(() => undefined);
+      }
       return reply.code(200).send({ check: result });
     } catch (e) {
       return err(reply, e);

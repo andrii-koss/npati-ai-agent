@@ -74,6 +74,37 @@ function encodedHeader(value: string): string {
 }
 
 export class SmtpEmailTransport {
+  static async verify(config: SmtpConfig, timeoutMs = 15_000): Promise<void> {
+    if (!config.host || !config.port || !config.username) throw new Error("SMTP host, port, and username are required");
+    if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
+      throw new Error(config.authType === "oauth2" ? "SMTP OAuth access token is required" : "SMTP password is required");
+    }
+    let socket: MailSocket = config.secure
+      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
+      : net.createConnection({ host: config.host, port: config.port });
+    await waitForSocket(socket, config.secure ? "secureConnect" : "connect", timeoutMs);
+    let session = new SmtpSession(socket, timeoutMs);
+    const greeting = await session.readReply();
+    if (greeting.code !== 220) throw new Error(`SMTP greeting rejected: ${greeting.text}`);
+    let hello = await session.command(`EHLO ${safeHeader(config.username.split("@")[1] || "localhost")}`);
+    if (!config.secure && /STARTTLS/i.test(hello.text)) {
+      await session.command("STARTTLS", [220]);
+      socket = tls.connect({ socket, servername: config.host, rejectUnauthorized: true });
+      await waitForSocket(socket, "secureConnect", timeoutMs);
+      session = new SmtpSession(socket, timeoutMs);
+      hello = await session.command(`EHLO ${safeHeader(config.username.split("@")[1] || "localhost")}`);
+    }
+    if (config.authType === "oauth2") {
+      const auth = Buffer.from(`user=${config.username}\u0001auth=Bearer ${config.accessToken}\u0001\u0001`).toString("base64");
+      await session.command(`AUTH XOAUTH2 ${auth}`, [235]);
+    } else {
+      const auth = Buffer.from(`\u0000${config.username}\u0000${config.password}`).toString("base64");
+      await session.command(`AUTH PLAIN ${auth}`, [235]);
+    }
+    await session.command("QUIT", [221]).catch(() => undefined);
+    socket.end();
+  }
+
   static async send(account: CompanyEmailAccount, message: CompanyEmailMessage, timeoutMs = 15_000): Promise<{ response: string }> {
     const config: SmtpConfig = account.smtpConfig;
     if (!config.host || !config.port) throw new Error("SMTP host and port are required");
@@ -258,6 +289,27 @@ function parseMimeContent(raw: string): { body: string; bodyHtml?: string; attac
 }
 
 export class ImapEmailTransport {
+  static async verify(config: ImapConfig, timeoutMs = 15_000): Promise<void> {
+    if (!config.host || !config.port || !config.username) throw new Error("IMAP host, port, and username are required");
+    if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
+      throw new Error(config.authType === "oauth2" ? "IMAP OAuth access token is required" : "IMAP password is required");
+    }
+    const socket: MailSocket = config.secure !== false
+      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
+      : net.createConnection({ host: config.host, port: config.port });
+    await waitForSocket(socket, config.secure !== false ? "secureConnect" : "connect", timeoutMs);
+    const session = new ImapSession(socket, timeoutMs);
+    await session.readUntil(/(?:^|\r\n)\* (?:OK|PREAUTH)[^\r\n]*\r\n/i);
+    if (config.authType === "oauth2") {
+      const auth = Buffer.from(`user=${config.username}\u0001auth=Bearer ${config.accessToken}\u0001\u0001`).toString("base64");
+      await session.command(`AUTHENTICATE XOAUTH2 ${auth}`);
+    } else {
+      await session.command(`LOGIN ${imapQuote(config.username)} ${imapQuote(config.password!)}`);
+    }
+    await session.command("LOGOUT").catch(() => undefined);
+    socket.end();
+  }
+
   static async poll(account: CompanyEmailAccount, timeoutMs = 20_000): Promise<PolledImapMessage[]> {
     const config: ImapConfig = account.imapConfig;
     if (!config.host || !config.port) throw new Error("IMAP host and port are required");
