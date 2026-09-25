@@ -204,6 +204,50 @@ export function EmailInboxPage() {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Layout & Resizing Controls
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [readingFocus, setReadingFocus] = useState(false);
+  const [threadsWidth, setThreadsWidth] = useState<number>(300);
+  const [isResizing, setIsResizing] = useState(false);
+  const [customerCardExpanded, setCustomerCardExpanded] = useState(false);
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const card = document.querySelector(".email-inbox-card");
+      if (!card) return;
+      const cardRect = card.getBoundingClientRect();
+      const sidebarWidth = sidebarCollapsed ? 58 : 190;
+      const newWidth = e.clientX - cardRect.left - sidebarWidth;
+      if (newWidth >= 220 && newWidth <= 520) {
+        setThreadsWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing, sidebarCollapsed]);
+
   // New outbound message composer
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeAccountId, setComposeAccountId] = useState("");
@@ -624,26 +668,6 @@ export function EmailInboxPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            <select
-              aria-label="Select mailbox owner"
-              value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="page-size-select"
-            >
-              <option value="personal">Personal / No Company</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>Company: {c.name}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="button-primary automations-action-primary"
-              onClick={openCompose}
-              disabled={accounts.length === 0}
-              title={accounts.length ? "Write and send a new email" : "Add an email account before composing"}
-            >
-              + Compose Email
-            </button>
             <Link
               to={`/settings/email?company=${encodeURIComponent(selectedCompanyId)}`}
               className="button-secondary automations-action-primary"
@@ -657,19 +681,91 @@ export function EmailInboxPage() {
               onClick={handleSimulateEmail}
               title="Process a simulated inbound client email without an external mailbox"
             >
-              Simulate inbound
+              Simulate Inbound
             </button>
           </div>
         </div>
       </header>
 
-      {notice && (
-        <div className="workspace-notice" style={{ marginBottom: 16 }}>
-          {notice}
+      {/* Mailbox Scope & Quick Actions Toolbar matching EmailSettingsPage */}
+      <div className="email-scope-toolbar">
+        <div className="email-scope-left">
+          <div className="email-scope-pill">
+            <span className="email-scope-badge">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                {selectedCompanyId === "personal" ? (
+                  <>
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </>
+                ) : (
+                  <>
+                    <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+                    <path d="M9 22v-4h6v4" />
+                    <path d="M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01" />
+                  </>
+                )}
+              </svg>
+              <span>Mailbox Scope:</span>
+            </span>
+
+            <div className="email-scope-select-wrap">
+              <select
+                aria-label="Select mailbox owner"
+                value={selectedCompanyId}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setSearchParams({ company: e.target.value }, { replace: true });
+                }}
+                className="email-scope-select"
+              >
+                <option value="personal">Personal / No Company</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    Company: {c.name}
+                  </option>
+                ))}
+              </select>
+              <svg className="email-scope-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          </div>
+          <span className="email-scope-context-hint">
+            {selectedCompanyId === "personal"
+              ? "Personal mailboxes & individual routing"
+              : `Company mailboxes for ${companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization"}`}
+          </span>
+        </div>
+
+        <div className="email-scope-right">
           <button
             type="button"
+            className="email-compose-btn"
+            onClick={openCompose}
+            disabled={accounts.length === 0}
+            title={accounts.length ? "Write and send a new email" : "Add an email account before composing"}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            <span>+ Compose Email</span>
+          </button>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="workspace-notice" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>ℹ️</span>
+            <span>{notice}</span>
+          </div>
+          <button
+            type="button"
+            className="workspace-notice-close"
             onClick={() => setNotice(null)}
-            style={{ float: "right", background: "none", border: "none", cursor: "pointer", fontWeight: "bold" }}
+            aria-label="Dismiss notice"
           >
             ✕
           </button>
@@ -689,28 +785,46 @@ export function EmailInboxPage() {
         </section>
       )}
 
-      {/* 3-Column Unified Inbox Card */}
-      <div className="email-inbox-card">
+      {/* 3-Column Unified Inbox Card with Resizing & Collapse */}
+      <div
+        className={`email-inbox-card ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${readingFocus ? "reading-focus" : ""}`}
+        style={{ "--inbox-threads-w": `${threadsWidth}px` } as React.CSSProperties}
+      >
         {/* Left Column: Folders & Accounts */}
-        <aside className="email-inbox-sidebar">
-          <div>
-            <span className="email-inbox-label">Account</span>
-            <select
-              value={selectedAccountId}
-              onChange={(e) => setSelectedAccountId(e.target.value)}
-              className="email-inbox-select"
+        <aside className={`email-inbox-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+          <div className="email-inbox-sidebar-header">
+            {!sidebarCollapsed && <span className="email-inbox-label">Account</span>}
+            <button
+              type="button"
+              className="email-sidebar-toggle-btn"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              title={sidebarCollapsed ? "Expand folders sidebar" : "Collapse folders sidebar"}
+              aria-label={sidebarCollapsed ? "Expand folders sidebar" : "Collapse folders sidebar"}
             >
-              <option value="all">All Accounts ({accounts.length})</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.displayName || a.emailAddress}
-                </option>
-              ))}
-            </select>
+              {sidebarCollapsed ? "▶" : "◀"}
+            </button>
           </div>
 
+          {!sidebarCollapsed && (
+            <div>
+              <select
+                value={selectedAccountId}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="email-inbox-select"
+                aria-label="Filter by email account"
+              >
+                <option value="all">All Accounts ({accounts.length})</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.displayName || a.emailAddress}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span className="email-inbox-label">Folders</span>
+            {!sidebarCollapsed && <span className="email-inbox-label">Folders</span>}
             {[
               { id: "inbox", label: "Inbox", icon: "📥" },
               { id: "sent", label: "Sent", icon: "📤" },
@@ -723,13 +837,14 @@ export function EmailInboxPage() {
                 type="button"
                 className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
                 onClick={() => setFolder(f.id as any)}
+                title={f.label}
               >
-                <span>
-                  <span style={{ marginRight: 8 }}>{f.icon}</span>
-                  <span>{f.label}</span>
+                <span className="email-folder-btn-content">
+                  <span className="email-folder-icon">{f.icon}</span>
+                  {!sidebarCollapsed && <span>{f.label}</span>}
                 </span>
-                {folder === f.id && threads.length > 0 && (
-                  <span style={{ fontSize: "11px", opacity: 0.8 }}>({threads.length})</span>
+                {!sidebarCollapsed && folder === f.id && threads.length > 0 && (
+                  <span className="email-folder-count">({threads.length})</span>
                 )}
               </button>
             ))}
@@ -737,7 +852,7 @@ export function EmailInboxPage() {
         </aside>
 
         {/* Middle Column: Threads List */}
-        <div className="email-inbox-threads-col">
+        <div className={`email-inbox-threads-col ${readingFocus ? "hidden" : ""}`}>
           {/* Search & Filter Bar */}
           <div className="email-inbox-threads-header">
             <div className="inspector-search-box" style={{ width: "100%" }}>
@@ -755,18 +870,19 @@ export function EmailInboxPage() {
                   type="button"
                   className="search-clear-btn"
                   onClick={() => setSearchQuery("")}
+                  aria-label="Clear search"
                 >
                   ×
                 </button>
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div className="email-threads-filters-row">
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="email-inbox-select"
-                style={{ height: 34, fontSize: 12 }}
+                className="email-inbox-select filter-select"
+                aria-label="Filter by status"
               >
                 <option value="all">All Statuses</option>
                 <option value="new">New</option>
@@ -777,8 +893,8 @@ export function EmailInboxPage() {
               <select
                 value={priorityFilter}
                 onChange={(e) => setPriorityFilter(e.target.value)}
-                className="email-inbox-select"
-                style={{ height: 34, fontSize: 12 }}
+                className="email-inbox-select filter-select"
+                aria-label="Filter by priority"
               >
                 <option value="all">All Priorities</option>
                 <option value="urgent">Urgent</option>
@@ -850,6 +966,20 @@ export function EmailInboxPage() {
           </div>
         </div>
 
+        {/* Draggable Divider (User can resize columns!) */}
+        {!readingFocus && (
+          <div
+            className={`email-inbox-resizer ${isResizing ? "resizing" : ""}`}
+            onMouseDown={startResizing}
+            onDoubleClick={() => setThreadsWidth(300)}
+            title="Drag to resize columns, double click to reset"
+            role="separator"
+            aria-orientation="vertical"
+          >
+            <div className="email-resizer-line" />
+          </div>
+        )}
+
         {/* Right Column: Active Thread Detail & Messages Timeline */}
         <div className="email-inbox-detail-col">
           {!activeThread ? (
@@ -866,81 +996,163 @@ export function EmailInboxPage() {
             <>
               {/* Thread Header */}
               <div className="email-inbox-detail-header">
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
-                      {activeThread.subject}
-                    </h2>
-                    {activeThread.isVip && (
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 999 }}>
-                        ★ VIP
+                <div className="email-detail-header-top">
+                  <div className="email-detail-title-area">
+                    <div className="email-detail-subject-row">
+                      <h2 className="email-detail-subject">
+                        {activeThread.subject}
+                      </h2>
+                      {activeThread.isVip && (
+                        <span className="email-vip-badge">
+                          ★ VIP
+                        </span>
+                      )}
+                      <span
+                        className={`automation-status-btn ${
+                          activeThread.status === "answered" ? "active" : activeThread.status === "draft_ready" ? "paused" : ""
+                        }`}
+                        style={{ fontSize: 11, cursor: "default" }}
+                      >
+                        <span className="automation-status-dot" />
+                        {activeThread.status === "draft_ready" ? "AI Draft Ready" : activeThread.status.replace("_", " ")}
                       </span>
-                    )}
+                    </div>
+                    <div className="email-detail-sender-row">
+                      <span>
+                        From: <strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
+                      </span>
+                      <span>
+                        {new Date(activeThread.lastMessageAt).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>
-                    From: <strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
+
+                  <div className="email-detail-top-controls">
+                    <button
+                      type="button"
+                      className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
+                      onClick={() => setReadingFocus(!readingFocus)}
+                      title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
+                    >
+                      {readingFocus ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
+                          <span>Split View</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 5v6m0 0h-6m6 0l-7-7"/></svg>
+                          <span>Expand View</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
-                  <select
-                    className="email-inbox-select"
-                    aria-label="Thread priority"
-                    value={activeThread.priority}
-                    onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
-                    style={{ width: 112 }}
-                  >
-                    <option value="low">Low</option><option value="normal">Normal</option>
-                    <option value="high">High</option><option value="urgent">Urgent</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="automation-action-btn"
-                    onClick={handleToggleTakeover}
-                    title="Toggle manual operator takeover vs autonomous AI handling"
-                  >
-                    {activeThread.isHumanTakeover ? "Return to AI" : "Take Over"}
-                  </button>
-                  <button
-                    type="button"
-                    className="automation-action-btn"
-                    onClick={handleToggleVip}
-                    title="Toggle client VIP status"
-                  >
-                    {activeThread.isVip ? "★ VIP Customer" : "☆ Make VIP"}
-                  </button>
-                  <button type="button" className="automation-action-btn" onClick={() => void updateActiveThread({ folder: "archived" })}>
-                    Archive
-                  </button>
-                  <button type="button" className="automation-action-btn danger" onClick={() => void deleteActiveThread()}>
-                    Delete
-                  </button>
+                {/* Actions Toolbar */}
+                <div className="email-detail-actions-bar">
+                  <div className="email-detail-actions-left">
+                    <div className="email-priority-selector">
+                      <span>Priority:</span>
+                      <select
+                        className="email-inbox-select priority-select"
+                        aria-label="Thread priority"
+                        value={activeThread.priority}
+                        onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
+                      >
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`automation-action-btn ${activeThread.isHumanTakeover ? "active" : ""}`}
+                      onClick={handleToggleTakeover}
+                      title="Toggle manual operator takeover vs autonomous AI handling"
+                    >
+                      {activeThread.isHumanTakeover ? "👤 Return to AI" : "🤖 Take Over"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`automation-action-btn ${activeThread.isVip ? "active" : ""}`}
+                      onClick={handleToggleVip}
+                      title="Toggle client VIP status"
+                    >
+                      {activeThread.isVip ? "★ VIP Customer" : "☆ Make VIP"}
+                    </button>
+                  </div>
+
+                  <div className="email-detail-actions-right">
+                    <button
+                      type="button"
+                      className="automation-action-btn"
+                      onClick={() => void updateActiveThread({ folder: activeThread.folder === "archived" ? "inbox" : "archived" })}
+                      title={activeThread.folder === "archived" ? "Move back to Inbox" : "Move to Archive"}
+                    >
+                      {activeThread.folder === "archived" ? "📥 Unarchive" : "📁 Archive"}
+                    </button>
+                    <button
+                      type="button"
+                      className="automation-action-btn"
+                      onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
+                      title={activeThread.folder === "spam" ? "Mark as Not Spam" : "Mark as Spam"}
+                    >
+                      {activeThread.folder === "spam" ? "✓ Not Spam" : "🚫 Spam"}
+                    </button>
+                    <button
+                      type="button"
+                      className="automation-action-btn danger"
+                      onClick={() => void deleteActiveThread()}
+                      title="Delete this conversation"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <section style={{ margin: "12px 22px 0", padding: 14, border: "1px solid #e2e8f0", borderRadius: 10, background: "#f8fafc" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                  <div>
-                    <strong style={{ display: "block", color: "#0f172a" }}>Customer Card</strong>
-                    <span style={{ fontSize: 12, color: "#475569" }}>{contact?.name || activeThread.customerName || "Unknown customer"} · {activeThread.customerEmail}</span>
-                    {contact?.companyName && <span style={{ display: "block", fontSize: 12, color: "#475569" }}>{contact.companyName}</span>}
-                    {contact?.phone && <span style={{ display: "block", fontSize: 12, color: "#475569" }}>{contact.phone}</span>}
-                    {contact?.notes && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#334155" }}>{contact.notes}</p>}
+              {/* Customer Context Card */}
+              <section className="email-customer-card">
+                <div
+                  className="email-customer-card-header"
+                  onClick={() => setCustomerCardExpanded(!customerCardExpanded)}
+                >
+                  <div className="email-customer-title-group">
+                    <span>👤</span>
+                    <span>Customer Profile: {contact?.name || activeThread.customerName || "Customer"} · {activeThread.customerEmail}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 18, fontSize: 12, color: "#475569" }}>
-                    <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong><br />previous emails</span>
-                    <span><strong>{customerContext.tasks.length}</strong><br />related Tasks</span>
-                    <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "—"}</strong><br />last activity</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div className="email-customer-stats-pills">
+                      <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong> previous</span>
+                      <span><strong>{customerContext.tasks.length}</strong> tasks</span>
+                      <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "Active"}</strong></span>
+                    </div>
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+                      {customerCardExpanded ? "▲ Hide" : "▼ Details"}
+                    </span>
                   </div>
                 </div>
-                {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
-                  <details style={{ marginTop: 8 }}>
-                    <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
-                    <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
-                      {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
-                      {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
-                    </div>
-                  </details>
+
+                {customerCardExpanded && (
+                  <div className="email-customer-card-body">
+                    {contact?.companyName && <span style={{ fontSize: 12, color: "#475569" }}>🏢 {contact.companyName}</span>}
+                    {contact?.phone && <span style={{ fontSize: 12, color: "#475569" }}>📞 {contact.phone}</span>}
+                    {contact?.notes && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#334155" }}>📝 {contact.notes}</p>}
+
+                    {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
+                      <details style={{ marginTop: 6 }}>
+                        <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
+                        <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
+                          {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
+                          {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
+                        </div>
+                      </details>
+                    )}
+                  </div>
                 )}
               </section>
 
@@ -1012,7 +1224,14 @@ export function EmailInboxPage() {
 
               {/* Messages Scroll Timeline */}
               <div className="email-inbox-messages-scroll">
-                {messages.map((m) => {
+                {messages.length === 0 ? (
+                  <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+                    <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
+                    <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
+                    <small>Write a reply below to start the conversation.</small>
+                  </div>
+                ) : (
+                  messages.map((m) => {
                   const isInbound = m.direction === "inbound";
                   return (
                     <div
@@ -1072,7 +1291,7 @@ export function EmailInboxPage() {
                       )}
                     </div>
                   );
-                })}
+                }))}
               </div>
 
               {auditHistory.length > 0 && (
