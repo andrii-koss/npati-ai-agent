@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 interface Company {
   id: string;
@@ -147,6 +148,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function EmailSettingsPage() {
+  const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -343,7 +345,7 @@ export function EmailSettingsPage() {
   async function createPermissionKey(event: FormEvent) {
     event.preventDefault();
     if (selectedCompanyId === "personal") {
-      setNotice("Scoped integration keys require a Company. Your signed-in user permissions protect the personal mailbox.");
+      setNotice(t("emailSettings.messages.personalKeysNotice"));
       return;
     }
     if (!selectedCompanyId || selectedEmailPermissions.length === 0) return;
@@ -365,7 +367,7 @@ export function EmailSettingsPage() {
   }
 
   async function revokePermissionKey(keyId: string) {
-    if (!selectedCompanyId || !await confirmModal({ title: "Revoke email access?", message: "This integration key will stop working immediately.", confirmText: "Revoke", isDanger: true })) return;
+    if (!selectedCompanyId || !await confirmModal({ title: t("emailSettings.dialogs.revokeKeyTitle"), message: t("emailSettings.dialogs.revokeKeyMsg"), confirmText: t("emailSettings.dialogs.revokeKeyConfirm"), isDanger: true })) return;
     await api(`/companies/${selectedCompanyId}/api-keys/${keyId}`, { method: "DELETE" });
     setPermissionKeys((current) => current.filter((key) => key.id !== keyId));
   }
@@ -459,23 +461,23 @@ export function EmailSettingsPage() {
     e.preventDefault();
     const errors: Record<string, string> = {};
     const normalizedEmail = emailAddress.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) errors.emailAddress = "Enter a valid email address.";
-    if (!imapHost.trim()) errors.imapHost = "IMAP host is required for receiving mail.";
-    if (!Number.isInteger(imapPort) || imapPort < 1 || imapPort > 65535) errors.imapPort = "Enter a valid IMAP port (1–65535).";
-    if (!imapUser.trim()) errors.imapUser = "IMAP username is required.";
-    if (!smtpHost.trim()) errors.smtpHost = "SMTP host is required for sending mail.";
-    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) errors.smtpPort = "Enter a valid SMTP port (1–65535).";
-    if (!smtpUser.trim()) errors.smtpUser = "SMTP username is required.";
-    if (mailAuthType === "password" && !editingId && !imapPass) errors.imapPass = "IMAP password is required.";
-    if (mailAuthType === "password" && !editingId && !smtpPass) errors.smtpPass = "SMTP password is required.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) errors.emailAddress = t("emailSettings.messages.emailInvalid");
+    if (!imapHost.trim()) errors.imapHost = t("emailSettings.messages.imapHostReq");
+    if (!Number.isInteger(imapPort) || imapPort < 1 || imapPort > 65535) errors.imapPort = t("emailSettings.messages.imapPortReq");
+    if (!imapUser.trim()) errors.imapUser = t("emailSettings.messages.imapUserReq");
+    if (!smtpHost.trim()) errors.smtpHost = t("emailSettings.messages.smtpHostReq");
+    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) errors.smtpPort = t("emailSettings.messages.smtpPortReq");
+    if (!smtpUser.trim()) errors.smtpUser = t("emailSettings.messages.smtpUserReq");
+    if (mailAuthType === "password" && !editingId && !imapPass) errors.imapPass = t("emailSettings.messages.imapPassReq");
+    if (mailAuthType === "password" && !editingId && !smtpPass) errors.smtpPass = t("emailSettings.messages.smtpPassReq");
     if (mailAuthType === "oauth2" && !editingId && !oauthAccessToken && (!oauthAuthorizationUrl || !oauthTokenUrl || !oauthClientId)) {
-      errors.oauth = "Provide an access token, or the authorization endpoint, token endpoint, and client ID.";
+      errors.oauth = t("emailSettings.messages.oauthReq");
     }
     const duplicate = accounts.find((account) => account.id !== editingId && account.emailAddress.trim().toLowerCase() === normalizedEmail);
-    if (duplicate) errors.emailAddress = "This email address is already connected. Edit the existing account instead.";
+    if (duplicate) errors.emailAddress = t("emailSettings.messages.duplicateEmail");
     if (Object.keys(errors).length) {
       setAccountFieldErrors(errors);
-      setAccountFormError("Please correct the highlighted required fields before saving.");
+      setAccountFormError(t("emailSettings.messages.correctFields"));
       const firstField = Object.keys(errors)[0];
       requestAnimationFrame(() => (document.querySelector(`[data-email-field="${firstField}"]`) as HTMLElement | null)?.focus());
       return;
@@ -547,8 +549,8 @@ export function EmailSettingsPage() {
 
   async function deleteAccount(id: string) {
     const ok = await confirmModal({
-      title: "Delete Email Account",
-      message: "Are you sure you want to delete this email account?",
+      title: t("emailSettings.dialogs.deleteAccountTitle"),
+      message: t("emailSettings.dialogs.deleteAccountMsg"),
       isDanger: true,
     });
     if (!ok) return;
@@ -563,7 +565,7 @@ export function EmailSettingsPage() {
 
   async function startOAuthAuthorization() {
     if (!editingId) {
-      setNotice("Save the email account first, then edit it to start OAuth authorization.");
+      setNotice(t("emailSettings.messages.oauthSaveNotice"));
       return;
     }
     try {
@@ -582,7 +584,7 @@ export function EmailSettingsPage() {
         }
       );
       window.open(response.authorizationUrl, "npati-email-oauth", "popup,width=640,height=760,noopener,noreferrer");
-      setNotice("OAuth authorization opened. After completing it, run Test Connection.");
+      setNotice(t("emailSettings.messages.oauthOpenedNotice"));
     } catch (error: any) {
       setNotice(error.message);
     }
@@ -600,8 +602,8 @@ export function EmailSettingsPage() {
         id: account.id,
         success: res.result.success,
         message: res.result.success
-          ? "IMAP & SMTP connections verified successfully!"
-          : res.result.error || "Connection failed. Check host credentials.",
+          ? t("emailSettings.messages.verifiedConnection")
+          : res.result.error || t("emailSettings.messages.failedConnection"),
       });
       const updated = await api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`);
       setAccounts(updated.accounts);
@@ -676,7 +678,7 @@ export function EmailSettingsPage() {
   async function handleSaveRule(e: FormEvent) {
     e.preventDefault();
     if (!ruleName.trim()) {
-      setNotice("Rule name is required.");
+      setNotice(t("emailSettings.messages.ruleNameReq"));
       return;
     }
     setSavingRule(true);
@@ -736,8 +738,8 @@ export function EmailSettingsPage() {
 
   async function handleDeleteRule(id: string) {
     const ok = await confirmModal({
-      title: "Delete Routing Rule",
-      message: "Are you sure you want to delete this email rule?",
+      title: t("emailSettings.dialogs.deleteRuleTitle"),
+      message: t("emailSettings.dialogs.deleteRuleMsg"),
       isDanger: true,
     });
     if (!ok) return;
@@ -759,19 +761,19 @@ export function EmailSettingsPage() {
     setTemplateDrawerOpen(true);
   }
 
-  function openEditTemplateDrawer(t: EmailTemplate) {
-    setEditingTemplateId(t.id);
-    setTemplateTitle(t.title);
-    setTemplateCategory(t.category);
-    setTemplateSubject(t.subjectTemplate || "");
-    setTemplateBody(t.bodyTemplate);
+  function openEditTemplateDrawer(tItem: EmailTemplate) {
+    setEditingTemplateId(tItem.id);
+    setTemplateTitle(tItem.title);
+    setTemplateCategory(tItem.category);
+    setTemplateSubject(tItem.subjectTemplate || "");
+    setTemplateBody(tItem.bodyTemplate);
     setTemplateDrawerOpen(true);
   }
 
   async function handleSaveTemplate(e: FormEvent) {
     e.preventDefault();
     if (!templateTitle.trim() || !templateBody.trim()) {
-      setNotice("Title and body template are required.");
+      setNotice(t("emailSettings.messages.templateFieldsReq"));
       return;
     }
     setSavingTemplate(true);
@@ -786,7 +788,7 @@ export function EmailSettingsPage() {
             bodyTemplate: templateBody,
           }),
         });
-        setTemplates((prev) => prev.map((t) => (t.id === editingTemplateId ? res.template : t)));
+        setTemplates((prev) => prev.map((item) => (item.id === editingTemplateId ? res.template : item)));
       } else {
         const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates`, {
           method: "POST",
@@ -809,14 +811,14 @@ export function EmailSettingsPage() {
 
   async function handleDeleteTemplate(id: string) {
     const ok = await confirmModal({
-      title: "Delete Response Template",
-      message: "Are you sure you want to delete this email template?",
+      title: t("emailSettings.dialogs.deleteTemplateTitle"),
+      message: t("emailSettings.dialogs.deleteTemplateMsg"),
       isDanger: true,
     });
     if (!ok) return;
     try {
       await api(`/companies/${selectedCompanyId}/email-inbox/templates/${id}`, { method: "DELETE" });
-      setTemplates((prev) => prev.filter((t) => t.id !== id));
+      setTemplates((prev) => prev.filter((item) => item.id !== id));
     } catch (err: any) {
       setNotice(err.message);
     }
@@ -850,7 +852,7 @@ export function EmailSettingsPage() {
   async function handleSaveContact(e: FormEvent) {
     e.preventDefault();
     if (!contactEmail.includes("@")) {
-      setNotice("A valid email address is required.");
+      setNotice(t("emailSettings.messages.validContactEmailReq"));
       return;
     }
     setSavingContact(true);
@@ -886,23 +888,38 @@ export function EmailSettingsPage() {
     });
   }, [accounts, searchQuery, agents]);
 
+  const getPermissionLabel = (scope: string) => {
+    switch (scope) {
+      case "email:view": return t("emailSettings.permissionsTab.permissions.view");
+      case "email:manage_accounts": return t("emailSettings.permissionsTab.permissions.manageAccounts");
+      case "email:read_messages": return t("emailSettings.permissionsTab.permissions.readMessages");
+      case "email:send_messages": return t("emailSettings.permissionsTab.permissions.sendMessages");
+      case "email:delete_messages": return t("emailSettings.permissionsTab.permissions.deleteMessages");
+      case "email:approve_drafts": return t("emailSettings.permissionsTab.permissions.approveDrafts");
+      case "email:configure_autopilot": return t("emailSettings.permissionsTab.permissions.configureAutopilot");
+      case "email:configure_agents": return t("emailSettings.permissionsTab.permissions.configureAgents");
+      case "email:view_analytics": return t("emailSettings.permissionsTab.permissions.viewAnalytics");
+      default: return scope;
+    }
+  };
+
   return (
     <main className="goals-container automations-container">
       {/* Hero Header matching /settings/automations and /settings/activity */}
       <header className="inspector-header automations-header">
         <div className="automations-header-top">
           <div>
-            <p className="eyebrow">Settings · Email & AI Inbox</p>
+            <p className="eyebrow">{t("emailSettings.eyebrow")}</p>
             <h1>
-              <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+              <Link to="/settings" className="marketplace-back-button" aria-label={t("emailSettings.backAria")} title={t("emailSettings.backAria")}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>Email Accounts & AI Automation</span>
+              <span>{t("emailSettings.title")}</span>
             </h1>
             <p className="hero-copy">
-              Connect corporate email addresses, verify DNS records (MX, SPF, DKIM, DMARC), and configure autonomous AI inbox agents.
+              {t("emailSettings.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
@@ -911,15 +928,15 @@ export function EmailSettingsPage() {
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
-              Open AI Inbox →
+              {t("emailSettings.openInbox")}
             </Link>
             <button
               type="button"
               className="button-primary automations-action-primary"
               onClick={openCreateDrawer}
-              title="Add an email address to the selected personal or Company scope"
+              title={t("emailSettings.addEmailTitle")}
             >
-              + Add Email Address
+              {t("emailSettings.addEmailBtn")}
             </button>
           </div>
         </div>
@@ -944,27 +961,27 @@ export function EmailSettingsPage() {
                   </>
                 )}
               </svg>
-              <span>Mailbox Scope:</span>
+              <span>{t("emailSettings.scope.mailboxScope")}</span>
             </span>
 
             <div className="email-scope-select-wrap">
               <select
-                aria-label="Select mailbox owner"
+                aria-label={t("emailSettings.scope.selectOwnerAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
                   setSelectedCompanyId(e.target.value);
-                setAgentId("");
-                setRuleAgentId("");
-                setRuleWorkflowId("");
-                setRuleCreateTask(false);
+                  setAgentId("");
+                  setRuleAgentId("");
+                  setRuleWorkflowId("");
+                  setRuleCreateTask(false);
                   setSearchParams({ company: e.target.value }, { replace: true });
                 }}
                 className="email-scope-select"
               >
-                <option value="personal">Personal / No Company</option>
+                <option value="personal">{t("emailSettings.scope.personalScope")}</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
-                    Company: {c.name}
+                    {t("emailSettings.scope.companyScopePrefix")}{c.name}
                   </option>
                 ))}
               </select>
@@ -975,8 +992,8 @@ export function EmailSettingsPage() {
           </div>
           <span className="email-scope-context-hint">
             {selectedCompanyId === "personal"
-              ? "Personal mailboxes & individual routing"
-              : `Company mailboxes for ${companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization"}`}
+              ? t("emailSettings.scope.personalContextHint")
+              : t("emailSettings.scope.companyContextHint").replace("{{company}}", companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization")}
           </span>
         </div>
 
@@ -984,14 +1001,14 @@ export function EmailSettingsPage() {
           <Link
             to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
             className="email-compose-btn"
-            title={accounts.length ? "Write and send a new email" : "Add an email address, then compose a message"}
+            title={accounts.length ? t("emailSettings.scope.composeTitle") : t("emailSettings.scope.composeDisabledTitle")}
             aria-disabled={accounts.length === 0}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-            <span>+ Compose Email</span>
+            <span>{t("emailSettings.scope.composeEmail")}</span>
           </Link>
         </div>
       </div>
@@ -1000,23 +1017,23 @@ export function EmailSettingsPage() {
       <section className="overview-grid inspector-stats-grid automations-stats-grid">
         <div>
           <strong>{analytics?.receivedEmails ?? 0}</strong>
-          <span>Total Received</span>
-          <small>Inbound emails processed</small>
+          <span>{t("emailSettings.stats.totalReceived")}</span>
+          <small>{t("emailSettings.stats.totalReceivedDesc")}</small>
         </div>
         <div>
           <strong>{analytics?.sentEmails ?? 0}</strong>
-          <span>Total Sent</span>
-          <small>Dispatched via SMTP & AI</small>
+          <span>{t("emailSettings.stats.totalSent")}</span>
+          <small>{t("emailSettings.stats.totalSentDesc")}</small>
         </div>
         <div>
           <strong>{Math.round(analytics?.automationRate ?? 0)}%</strong>
-          <span>AI Automation Rate</span>
-          <small>Autonomously handled</small>
+          <span>{t("emailSettings.stats.automationRate")}</span>
+          <small>{t("emailSettings.stats.automationRateDesc")}</small>
         </div>
         <div>
           <strong>{analytics?.draftedByAi ?? 0}</strong>
-          <span>Drafts Prepared</span>
-          <small>Awaiting human review</small>
+          <span>{t("emailSettings.stats.draftsPrepared")}</span>
+          <small>{t("emailSettings.stats.draftsPreparedDesc")}</small>
         </div>
       </section>
 
@@ -1031,8 +1048,8 @@ export function EmailSettingsPage() {
                 </svg>
               </div>
               <div>
-                <h3>AI Inbox Analytics & Delivery Performance</h3>
-                <p>Breakdown of automated vs. human responses, delivery health, response speed, and volume</p>
+                <h3>{t("emailSettings.analytics.dashboardTitle")}</h3>
+                <p>{t("emailSettings.analytics.dashboardSubtitle")}</p>
               </div>
             </div>
             <div className="email-analytics-header-right">
@@ -1044,12 +1061,12 @@ export function EmailSettingsPage() {
               >
                 {analyticsExpanded ? (
                   <>
-                    <span>Hide Details</span>
+                    <span>{t("emailSettings.analytics.hideDetails")}</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 15l-6-6-6 6" /></svg>
                   </>
                 ) : (
                   <>
-                    <span>Show Details</span>
+                    <span>{t("emailSettings.analytics.showDetails")}</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
                   </>
                 )}
@@ -1065,41 +1082,41 @@ export function EmailSettingsPage() {
                 <div className="email-metric-category-card">
                   <div className="email-metric-category-title">
                     <span className="email-cat-icon">🤖</span>
-                    <span>Handling & Resolution</span>
+                    <span>{t("emailSettings.analytics.handlingTitle")}</span>
                   </div>
                   <div className="email-metric-items-list">
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-blue" />
-                        <span className="email-metric-label">AI Answered</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.aiAnswered")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.aiAnswered}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-indigo" />
-                        <span className="email-metric-label">Human Answered</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.humanAnswered")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.humanAnswered}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-emerald" />
-                        <span className="email-metric-label">Approved by Human</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.approvedByHuman")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.approvedByHuman}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-amber" />
-                        <span className="email-metric-label">Escalated to Human</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.escalatedToHuman")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.escalatedToHuman}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-purple" />
-                        <span className="email-metric-label">Edited AI Responses</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.editedAiResponses")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.editedAiResponsesCount}</strong>
                     </div>
@@ -1110,27 +1127,27 @@ export function EmailSettingsPage() {
                 <div className="email-metric-category-card">
                   <div className="email-metric-category-title">
                     <span className="email-cat-icon">⚡</span>
-                    <span>Speed & Deliverability</span>
+                    <span>{t("emailSettings.analytics.speedTitle")}</span>
                   </div>
                   <div className="email-metric-items-list">
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-cyan" />
-                        <span className="email-metric-label">Avg. Response</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.avgResponse")}</span>
                       </div>
-                      <strong className="email-metric-val">{analytics.averageResponseTimeMinutes} min</strong>
+                      <strong className="email-metric-val">{analytics.averageResponseTimeMinutes} {t("emailSettings.analytics.minutesUnit")}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-teal" />
-                        <span className="email-metric-label">Avg. First Response</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.avgFirstResponse")}</span>
                       </div>
-                      <strong className="email-metric-val">{analytics.averageFirstResponseTimeMinutes} min</strong>
+                      <strong className="email-metric-val">{analytics.averageFirstResponseTimeMinutes} {t("emailSettings.analytics.minutesUnit")}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-rose" />
-                        <span className="email-metric-label">Failed Deliveries</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.failedDeliveries")}</span>
                       </div>
                       <strong className={`email-metric-val ${analytics.failedEmails > 0 ? "val-danger" : ""}`}>
                         {analytics.failedEmails}
@@ -1139,7 +1156,7 @@ export function EmailSettingsPage() {
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
                         <span className="email-metric-dot bg-orange" />
-                        <span className="email-metric-label">Bounced Emails</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.bouncedEmails")}</span>
                       </div>
                       <strong className={`email-metric-val ${analytics.bouncedEmails > 0 ? "val-danger" : ""}`}>
                         {analytics.bouncedEmails}
@@ -1152,27 +1169,27 @@ export function EmailSettingsPage() {
                 <div className="email-metric-category-card">
                   <div className="email-metric-category-title">
                     <span className="email-cat-icon">🎯</span>
-                    <span>AI Confidence Level</span>
+                    <span>{t("emailSettings.analytics.confidenceTitle")}</span>
                   </div>
                   <div className="email-metric-items-list">
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
-                        <span className="email-confidence-badge conf-high">High</span>
-                        <span className="email-metric-label">High Confidence</span>
+                        <span className="email-confidence-badge conf-high">{t("emailSettings.analytics.highBadge")}</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.highConfidence")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.confidenceDistribution.high}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
-                        <span className="email-confidence-badge conf-med">Med</span>
-                        <span className="email-metric-label">Medium Confidence</span>
+                        <span className="email-confidence-badge conf-med">{t("emailSettings.analytics.medBadge")}</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.medConfidence")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.confidenceDistribution.medium}</strong>
                     </div>
                     <div className="email-metric-item">
                       <div className="email-metric-label-group">
-                        <span className="email-confidence-badge conf-low">Low</span>
-                        <span className="email-metric-label">Low Confidence</span>
+                        <span className="email-confidence-badge conf-low">{t("emailSettings.analytics.lowBadge")}</span>
+                        <span className="email-metric-label">{t("emailSettings.analytics.lowConfidence")}</span>
                       </div>
                       <strong className="email-metric-val">{analytics.confidenceDistribution.low}</strong>
                     </div>
@@ -1187,22 +1204,22 @@ export function EmailSettingsPage() {
                   <div className="email-volume-card-header">
                     <div className="email-volume-card-title">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                      <h4>Email Volume by Day</h4>
+                      <h4>{t("emailSettings.analytics.volumeByDayTitle")}</h4>
                     </div>
-                    <span className="email-volume-count-badge">{analytics.volumeByDay.length} days</span>
+                    <span className="email-volume-count-badge">{t("emailSettings.analytics.daysCount").replace("{{count}}", String(analytics.volumeByDay.length))}</span>
                   </div>
                   {analytics.volumeByDay.length === 0 ? (
                     <div className="email-volume-empty">
-                      <p>No email traffic recorded for this period</p>
+                      <p>{t("emailSettings.analytics.noVolumeByDay")}</p>
                     </div>
                   ) : (
                     <div className="email-volume-table-wrap">
                       <table className="automations-table">
                         <thead>
                           <tr>
-                            <th>Date</th>
-                            <th style={{ textAlign: "right" }}>Received</th>
-                            <th style={{ textAlign: "right" }}>Sent</th>
+                            <th>{t("emailSettings.analytics.colDate")}</th>
+                            <th style={{ textAlign: "right" }}>{t("emailSettings.analytics.colReceived")}</th>
+                            <th style={{ textAlign: "right" }}>{t("emailSettings.analytics.colSent")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1224,21 +1241,21 @@ export function EmailSettingsPage() {
                   <div className="email-volume-card-header">
                     <div className="email-volume-card-title">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><line x1="8" y1="16" x2="8" y2="16" /><line x1="16" y1="16" x2="16" y2="16" /></svg>
-                      <h4>Volume by Agent</h4>
+                      <h4>{t("emailSettings.analytics.volumeByAgentTitle")}</h4>
                     </div>
-                    <span className="email-volume-count-badge">{analytics.volumeByAgent.length} agents</span>
+                    <span className="email-volume-count-badge">{t("emailSettings.analytics.agentsCount").replace("{{count}}", String(analytics.volumeByAgent.length))}</span>
                   </div>
                   {analytics.volumeByAgent.length === 0 ? (
                     <div className="email-volume-empty">
-                      <p>No agent responses recorded yet</p>
+                      <p>{t("emailSettings.analytics.noVolumeByAgent")}</p>
                     </div>
                   ) : (
                     <div className="email-volume-table-wrap">
                       <table className="automations-table">
                         <thead>
                           <tr>
-                            <th>Agent</th>
-                            <th style={{ textAlign: "right" }}>Messages</th>
+                            <th>{t("emailSettings.analytics.colAgent")}</th>
+                            <th style={{ textAlign: "right" }}>{t("emailSettings.analytics.colMessages")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1266,21 +1283,21 @@ export function EmailSettingsPage() {
                   <div className="email-volume-card-header">
                     <div className="email-volume-card-title">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
-                      <h4>Volume by Account</h4>
+                      <h4>{t("emailSettings.analytics.volumeByAccountTitle")}</h4>
                     </div>
-                    <span className="email-volume-count-badge">{analytics.volumeByAccount.length} accounts</span>
+                    <span className="email-volume-count-badge">{t("emailSettings.analytics.accountsCount").replace("{{count}}", String(analytics.volumeByAccount.length))}</span>
                   </div>
                   {analytics.volumeByAccount.length === 0 ? (
                     <div className="email-volume-empty">
-                      <p>No account activity recorded yet</p>
+                      <p>{t("emailSettings.analytics.noVolumeByAccount")}</p>
                     </div>
                   ) : (
                     <div className="email-volume-table-wrap">
                       <table className="automations-table">
                         <thead>
                           <tr>
-                            <th>Account</th>
-                            <th style={{ textAlign: "right" }}>Messages</th>
+                            <th>{t("emailSettings.analytics.colAccount")}</th>
+                            <th style={{ textAlign: "right" }}>{t("emailSettings.analytics.colMessages")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1315,19 +1332,19 @@ export function EmailSettingsPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Filter accounts by email address, display name, agent..."
+            placeholder={t("emailSettings.controls.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter email accounts"
+            aria-label={t("emailSettings.controls.searchAriaLabel")}
           />
           {searchQuery && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("emailSettings.controls.clearSearch")}
+              title={t("emailSettings.controls.clearSearch")}
             >
               ×
             </button>
@@ -1342,7 +1359,7 @@ export function EmailSettingsPage() {
             className={`inspector-tab ${activeTab === "accounts" ? "active" : ""}`}
             onClick={() => setActiveTab("accounts")}
           >
-            <span>Email Accounts</span>
+            <span>{t("emailSettings.controls.tabAccounts")}</span>
             <small className="tab-count">{accounts.length}</small>
           </button>
           <button
@@ -1352,7 +1369,7 @@ export function EmailSettingsPage() {
             className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
             onClick={() => setActiveTab("rules")}
           >
-            <span>Routing Rules</span>
+            <span>{t("emailSettings.controls.tabRules")}</span>
             <small className="tab-count">{rules.length}</small>
           </button>
           <button
@@ -1362,7 +1379,7 @@ export function EmailSettingsPage() {
             className={`inspector-tab ${activeTab === "templates" ? "active" : ""}`}
             onClick={() => setActiveTab("templates")}
           >
-            <span>Response Templates</span>
+            <span>{t("emailSettings.controls.tabTemplates")}</span>
             <small className="tab-count">{templates.length}</small>
           </button>
           <button
@@ -1372,7 +1389,7 @@ export function EmailSettingsPage() {
             className={`inspector-tab ${activeTab === "contacts" ? "active" : ""}`}
             onClick={() => setActiveTab("contacts")}
           >
-            <span>Contacts & VIP</span>
+            <span>{t("emailSettings.controls.tabContacts")}</span>
             <small className="tab-count">{contacts.length}</small>
           </button>
           <button
@@ -1382,7 +1399,7 @@ export function EmailSettingsPage() {
             className={`inspector-tab ${activeTab === "permissions" ? "active" : ""}`}
             onClick={() => setActiveTab("permissions")}
           >
-            <span>Permissions</span>
+            <span>{t("emailSettings.controls.tabPermissions")}</span>
             <small className="tab-count">{permissionKeys.length}</small>
           </button>
         </div>
@@ -1407,7 +1424,9 @@ export function EmailSettingsPage() {
           <div className="inspector-table-status">
             <div className="status-left">
               <span>
-                Showing <strong>{filteredAccounts.length}</strong> of <strong>{accounts.length}</strong> email accounts
+                {t("emailSettings.accountsTab.showingAccounts")
+                  .replace("{{count}}", String(filteredAccounts.length))
+                  .replace("{{total}}", String(accounts.length))}
               </span>
             </div>
           </div>
@@ -1415,14 +1434,14 @@ export function EmailSettingsPage() {
           {filteredAccounts.length === 0 && !loading ? (
             <div className="automations-empty-card">
               <div className="automations-empty-icon">✉️</div>
-              <h3>No email addresses connected yet</h3>
-              <p>Connect your domain email address (e.g. support@company.com) to allow AI agents to handle corporate email.</p>
+              <h3>{t("emailSettings.accountsTab.emptyTitle")}</h3>
+              <p>{t("emailSettings.accountsTab.emptyDesc")}</p>
               <button
                 type="button"
                 className="button-primary automations-action-primary"
                 onClick={openCreateDrawer}
               >
-                + Add Email Address
+                {t("emailSettings.addEmailBtn")}
               </button>
             </div>
           ) : (
@@ -1430,11 +1449,11 @@ export function EmailSettingsPage() {
               <table className="automations-table">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: "220px" }}>Email Account</th>
-                    <th style={{ minWidth: "160px" }}>Assigned Agent</th>
-                    <th style={{ minWidth: "150px" }}>Operational Mode</th>
-                    <th style={{ minWidth: "180px" }}>Connection & DNS</th>
-                    <th style={{ width: "240px", textAlign: "right" }}>Actions</th>
+                    <th style={{ minWidth: "220px" }}>{t("emailSettings.accountsTab.colAccount")}</th>
+                    <th style={{ minWidth: "160px" }}>{t("emailSettings.accountsTab.colAssignedAgent")}</th>
+                    <th style={{ minWidth: "150px" }}>{t("emailSettings.accountsTab.colMode")}</th>
+                    <th style={{ minWidth: "180px" }}>{t("emailSettings.accountsTab.colConnectionDns")}</th>
+                    <th style={{ width: "240px", textAlign: "right" }}>{t("emailSettings.accountsTab.colActions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1451,7 +1470,7 @@ export function EmailSettingsPage() {
                             <p>{acc.emailAddress}</p>
                             {acc.testMode && (
                               <span className="automation-cron-pill" style={{ background: "#fef3c7", color: "#b45309", borderColor: "#fde68a" }}>
-                                Sandbox / Test Mode Active
+                                {t("emailSettings.accountsTab.sandboxBadge")}
                               </span>
                             )}
                           </div>
@@ -1459,7 +1478,7 @@ export function EmailSettingsPage() {
                         <td>
                           <span className="automation-agent-badge">
                             <span>🤖</span>
-                            <span>{assigned ? assigned.name : "Unassigned"}</span>
+                            <span>{assigned ? assigned.name : t("emailSettings.accountsTab.unassigned")}</span>
                           </span>
                         </td>
                         <td>
@@ -1471,10 +1490,10 @@ export function EmailSettingsPage() {
                               style={{ width: "fit-content", textTransform: "capitalize", cursor: "default" }}
                             >
                               <span className="automation-status-dot" />
-                              {acc.mode} Mode
+                              {acc.mode} {t("emailSettings.accountsTab.modeSuffix")}
                             </span>
                             <span className="automation-next-run">
-                              Threshold: {Math.round(acc.confidenceThreshold * 100)}%
+                              {t("emailSettings.accountsTab.thresholdLabel").replace("{{percent}}", String(Math.round(acc.confidenceThreshold * 100)))}
                             </span>
                           </div>
                         </td>
@@ -1485,7 +1504,7 @@ export function EmailSettingsPage() {
                               style={{ width: "fit-content", cursor: "default" }}
                             >
                               <span className="automation-status-dot" />
-                              {acc.status === "connected" ? "Connected" : acc.status.replace("_", " ")}
+                              {acc.status === "connected" ? t("emailSettings.accountsTab.connected") : acc.status.replace("_", " ")}
                             </span>
                             {testFeedback && (
                               <small style={{ fontSize: "11px", color: testFeedback.success ? "#15803d" : "#dc2626" }}>
@@ -1499,42 +1518,42 @@ export function EmailSettingsPage() {
                             <Link
                               to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1&account=${encodeURIComponent(acc.id)}`}
                               className="automation-action-btn"
-                              title={`Compose from ${acc.emailAddress}`}
+                              title={t("emailSettings.accountsTab.actionComposeTitle").replace("{{email}}", acc.emailAddress)}
                             >
-                              Compose
+                              {t("emailSettings.accountsTab.actionCompose")}
                             </Link>
                             <button
                               type="button"
                               className="automation-action-btn"
                               disabled={isTesting}
                               onClick={() => runConnectionTest(acc)}
-                              title="Test IMAP & SMTP socket connection"
+                              title={t("emailSettings.accountsTab.actionTestTitle")}
                             >
-                              {isTesting ? "Testing..." : "Test Connection"}
+                              {isTesting ? t("emailSettings.accountsTab.actionTesting") : t("emailSettings.accountsTab.actionTest")}
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn"
                               onClick={() => openDnsCheck(acc)}
-                              title="Inspect MX, SPF, DKIM, and DMARC records"
+                              title={t("emailSettings.accountsTab.actionDnsTitle")}
                             >
-                              Check DNS
+                              {t("emailSettings.accountsTab.actionDns")}
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn"
                               onClick={() => openEditDrawer(acc)}
-                              title="Edit account credentials and mode"
+                              title={t("emailSettings.accountsTab.actionEditTitle")}
                             >
-                              Edit
+                              {t("emailSettings.accountsTab.actionEdit")}
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn danger"
                               onClick={() => deleteAccount(acc.id)}
-                              title="Remove email account"
+                              title={t("emailSettings.accountsTab.actionDeleteTitle")}
                             >
-                              Delete
+                              {t("emailSettings.accountsTab.actionDelete")}
                             </button>
                           </div>
                         </td>
@@ -1553,31 +1572,31 @@ export function EmailSettingsPage() {
         <div className="automations-table-container">
           <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Email Routing Rules</h3>
-              <small style={{ color: "#64748b" }}>Configure automated routing, priority overrides, and VIP filtering rules.</small>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>{t("emailSettings.rulesTab.heading")}</h3>
+              <small style={{ color: "#64748b" }}>{t("emailSettings.rulesTab.subtitle")}</small>
             </div>
             <button
               type="button"
               className="button-primary automations-action-primary"
               onClick={openCreateRuleDrawer}
             >
-              + Add Rule
+              {t("emailSettings.rulesTab.addRuleBtn")}
             </button>
           </div>
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ width: "220px" }}>Rule Name</th>
-                <th>Conditions</th>
-                <th>Actions</th>
-                <th style={{ width: "100px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "220px" }}>{t("emailSettings.rulesTab.colName")}</th>
+                <th>{t("emailSettings.rulesTab.colConditions")}</th>
+                <th>{t("emailSettings.rulesTab.colActions")}</th>
+                <th style={{ width: "100px", textAlign: "right" }}>{t("emailSettings.rulesTab.colTableActions")}</th>
               </tr>
             </thead>
             <tbody>
               {rules.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                    No custom rules configured yet. Default company routing rules apply.
+                    {t("emailSettings.rulesTab.empty")}
                   </td>
                 </tr>
               ) : (
@@ -1593,7 +1612,7 @@ export function EmailSettingsPage() {
                           <strong>{rule.name}</strong>
                           <span className="automation-status-btn active" style={{ cursor: "default", fontSize: 10, padding: "2px 8px" }}>
                             <span className="automation-status-dot" />
-                            Active
+                            {t("emailSettings.rulesTab.activeBadge")}
                           </span>
                         </div>
                       </td>
@@ -1601,21 +1620,21 @@ export function EmailSettingsPage() {
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                           {kw.length > 0 && (
                             <span className="automation-cron-pill">
-                              Keywords: {kw.join(", ")}
+                              {t("emailSettings.rulesTab.keywordsLabel").replace("{{keywords}}", kw.join(", "))}
                             </span>
                           )}
                           {senders.length > 0 && (
                             <span className="automation-cron-pill">
-                              Senders: {senders.join(", ")}
+                              {t("emailSettings.rulesTab.sendersLabel").replace("{{senders}}", senders.join(", "))}
                             </span>
                           )}
                           {isVip && (
                             <span className="automation-cron-pill" style={{ color: "#b45309", background: "#fef3c7" }}>
-                              ★ VIP Only
+                              {t("emailSettings.rulesTab.vipOnlyBadge")}
                             </span>
                           )}
                           {!kw.length && !senders.length && !isVip && (
-                            <span style={{ color: "#64748b", fontSize: 12 }}>All inbound messages</span>
+                            <span style={{ color: "#64748b", fontSize: 12 }}>{t("emailSettings.rulesTab.allInbound")}</span>
                           )}
                         </div>
                       </td>
@@ -1623,12 +1642,12 @@ export function EmailSettingsPage() {
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                           {rule.actions?.setPriority && (
                             <span className="automation-agent-badge" style={{ textTransform: "capitalize" }}>
-                              Priority: {rule.actions.setPriority}
+                              {t("emailSettings.rulesTab.priorityPrefix").replace("{{priority}}", rule.actions.setPriority)}
                             </span>
                           )}
                           {rule.actions?.setMode && (
                             <span className="automation-agent-badge" style={{ textTransform: "capitalize" }}>
-                              Mode: {rule.actions.setMode}
+                              {t("emailSettings.rulesTab.modePrefix").replace("{{mode}}", rule.actions.setMode)}
                             </span>
                           )}
                           {rule.actions?.setAgentId && (
@@ -1644,17 +1663,17 @@ export function EmailSettingsPage() {
                             type="button"
                             className="automation-action-btn"
                             onClick={() => openEditRuleDrawer(rule)}
-                            title="Edit rule"
+                            title={t("emailSettings.rulesTab.actionEditTitle")}
                           >
-                            Edit
+                            {t("emailSettings.rulesTab.actionEdit")}
                           </button>
                           <button
                             type="button"
                             className="automation-action-btn danger"
                             onClick={() => handleDeleteRule(rule.id)}
-                            title="Delete rule"
+                            title={t("emailSettings.rulesTab.actionDeleteTitle")}
                           >
-                            Delete
+                            {t("emailSettings.rulesTab.actionDelete")}
                           </button>
                         </div>
                       </td>
@@ -1672,50 +1691,50 @@ export function EmailSettingsPage() {
         <div className="automations-table-container">
           <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Response Templates & Canned Replies</h3>
-              <small style={{ color: "#64748b" }}>Standard corporate templates with placeholder support ({`{{customer_name}}`}, {`{{company_name}}`}).</small>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>{t("emailSettings.templatesTab.heading")}</h3>
+              <small style={{ color: "#64748b" }}>{t("emailSettings.templatesTab.subtitle")}</small>
             </div>
             <button
               type="button"
               className="button-primary automations-action-primary"
               onClick={openCreateTemplateDrawer}
             >
-              + Add Template
+              {t("emailSettings.templatesTab.addTemplateBtn")}
             </button>
           </div>
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ width: "240px" }}>Title</th>
-                <th style={{ width: "160px" }}>Category</th>
-                <th>Body Preview</th>
-                <th style={{ width: "140px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "240px" }}>{t("emailSettings.templatesTab.colTitle")}</th>
+                <th style={{ width: "160px" }}>{t("emailSettings.templatesTab.colCategory")}</th>
+                <th>{t("emailSettings.templatesTab.colBody")}</th>
+                <th style={{ width: "140px", textAlign: "right" }}>{t("emailSettings.templatesTab.colActions")}</th>
               </tr>
             </thead>
             <tbody>
               {templates.length === 0 ? (
                 <tr>
                   <td colSpan={4} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                    No response templates saved yet.
+                    {t("emailSettings.templatesTab.empty")}
                   </td>
                 </tr>
               ) : (
-                templates.map((t) => (
-                  <tr key={t.id}>
+                templates.map((tmpl) => (
+                  <tr key={tmpl.id}>
                     <td>
                       <div className="automation-title-cell">
-                        <strong>{t.title}</strong>
-                        {t.subjectTemplate && (
-                          <small style={{ color: "#64748b", fontSize: 11 }}>Re: {t.subjectTemplate}</small>
+                        <strong>{tmpl.title}</strong>
+                        {tmpl.subjectTemplate && (
+                          <small style={{ color: "#64748b", fontSize: 11 }}>Re: {tmpl.subjectTemplate}</small>
                         )}
                       </div>
                     </td>
                     <td>
-                      <span className="automation-cron-pill" style={{ textTransform: "capitalize" }}>{t.category}</span>
+                      <span className="automation-cron-pill" style={{ textTransform: "capitalize" }}>{tmpl.category}</span>
                     </td>
                     <td>
                       <div className="automation-prompt-preview" style={{ maxWidth: "480px" }}>
-                        {t.bodyTemplate}
+                        {tmpl.bodyTemplate}
                       </div>
                     </td>
                     <td>
@@ -1723,18 +1742,18 @@ export function EmailSettingsPage() {
                         <button
                           type="button"
                           className="automation-action-btn"
-                          onClick={() => openEditTemplateDrawer(t)}
-                          title="Edit template"
+                          onClick={() => openEditTemplateDrawer(tmpl)}
+                          title={t("emailSettings.templatesTab.actionEditTitle")}
                         >
-                          Edit
+                          {t("emailSettings.templatesTab.actionEdit")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn danger"
-                          onClick={() => handleDeleteTemplate(t.id)}
-                          title="Delete template"
+                          onClick={() => handleDeleteTemplate(tmpl.id)}
+                          title={t("emailSettings.templatesTab.actionDeleteTitle")}
                         >
-                          Delete
+                          {t("emailSettings.templatesTab.actionDelete")}
                         </button>
                       </div>
                     </td>
@@ -1751,32 +1770,32 @@ export function EmailSettingsPage() {
         <div className="automations-table-container">
           <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>Client Contacts & VIP Directory</h3>
-              <small style={{ color: "#64748b" }}>Manage VIP prioritization, delivery bounce tracking, and blacklisted senders.</small>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700 }}>{t("emailSettings.contactsTab.heading")}</h3>
+              <small style={{ color: "#64748b" }}>{t("emailSettings.contactsTab.subtitle")}</small>
             </div>
             <button
               type="button"
               className="button-primary automations-action-primary"
               onClick={() => openCreateContactDrawer(true)}
             >
-              + Add Contact
+              {t("emailSettings.contactsTab.addContactBtn")}
             </button>
           </div>
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ minWidth: "220px" }}>Contact</th>
-                <th style={{ minWidth: "140px" }}>VIP Status</th>
-                <th style={{ minWidth: "140px" }}>Blacklisted</th>
-                <th>Notes</th>
-                <th style={{ width: "160px", textAlign: "right" }}>Actions</th>
+                <th style={{ minWidth: "220px" }}>{t("emailSettings.contactsTab.colContact")}</th>
+                <th style={{ minWidth: "140px" }}>{t("emailSettings.contactsTab.colVip")}</th>
+                <th style={{ minWidth: "140px" }}>{t("emailSettings.contactsTab.colBlacklisted")}</th>
+                <th>{t("emailSettings.contactsTab.colNotes")}</th>
+                <th style={{ width: "160px", textAlign: "right" }}>{t("emailSettings.contactsTab.colActions")}</th>
               </tr>
             </thead>
             <tbody>
               {contacts.length === 0 ? (
                 <tr>
                   <td colSpan={5} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                    No contacts recorded yet. Contacts will be populated automatically as inbound emails arrive.
+                    {t("emailSettings.contactsTab.empty")}
                   </td>
                 </tr>
               ) : (
@@ -1794,13 +1813,13 @@ export function EmailSettingsPage() {
                     <td>
                       <span className={`automation-status-btn ${contact.isVip ? "active" : "paused"}`} style={{ cursor: "default" }}>
                         <span className="automation-status-dot" />
-                        {contact.isVip ? "★ VIP Sender" : "Standard"}
+                        {contact.isVip ? t("emailSettings.contactsTab.vipSender") : t("emailSettings.contactsTab.standardSender")}
                       </span>
                     </td>
                     <td>
                       <span className={`automation-status-btn ${contact.isBlacklisted ? "active" : "paused"}`} style={{ cursor: "default" }}>
                         <span className="automation-status-dot" />
-                        {contact.isBlacklisted ? "Blacklisted" : "Allowed"}
+                        {contact.isBlacklisted ? t("emailSettings.contactsTab.blacklisted") : t("emailSettings.contactsTab.allowed")}
                       </span>
                     </td>
                     <td>
@@ -1812,9 +1831,9 @@ export function EmailSettingsPage() {
                           type="button"
                           className="automation-action-btn"
                           onClick={() => openEditContactDrawer(contact)}
-                          title="Edit contact"
+                          title={t("emailSettings.contactsTab.actionEditTitle")}
                         >
-                          Edit
+                          {t("emailSettings.contactsTab.actionEdit")}
                         </button>
                         <button
                           type="button"
@@ -1827,7 +1846,7 @@ export function EmailSettingsPage() {
                             setContacts((prev) => prev.map((c) => (c.id === contact.id ? updated.contact : c)));
                           }}
                         >
-                          {contact.isVip ? "Un-VIP" : "Make VIP"}
+                          {contact.isVip ? t("emailSettings.contactsTab.actionUnVip") : t("emailSettings.contactsTab.actionMakeVip")}
                         </button>
                       </div>
                     </td>
@@ -1844,23 +1863,23 @@ export function EmailSettingsPage() {
         selectedCompanyId === "personal" ? (
           <div className="automations-empty-card">
             <div className="automations-empty-icon">🔒</div>
-            <h3>Personal mailbox access</h3>
-            <p>Your personal mailbox is protected by your signed-in user permissions. Scoped integration keys are available only when a Company mailbox owner is selected.</p>
+            <h3>{t("emailSettings.permissionsTab.personalEmptyTitle")}</h3>
+            <p>{t("emailSettings.permissionsTab.personalEmptyDesc")}</p>
           </div>
         ) : (
         <div className="automations-table-container">
           <div style={{ padding: "20px", borderBottom: "1px solid #f1f5f9" }}>
-            <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>Scoped Email Access</h3>
+            <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>{t("emailSettings.permissionsTab.scopedAccessTitle")}</h3>
             <p style={{ margin: "0 0 18px", color: "#64748b", fontSize: 12 }}>
-              Create a restricted integration identity using the existing company permission system. Company admins retain full access; each key receives only the selected email permissions.
+              {t("emailSettings.permissionsTab.scopedAccessDesc")}
             </p>
             <form onSubmit={createPermissionKey} style={{ display: "grid", gap: 14 }}>
               <label style={{ display: "grid", gap: 6, maxWidth: 460 }}>
-                <span style={{ fontSize: 12, fontWeight: 700 }}>Access profile name</span>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>{t("emailSettings.permissionsTab.profileNameLabel")}</span>
                 <input value={permissionKeyName} onChange={(event) => setPermissionKeyName(event.target.value)} required maxLength={120} />
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 8 }}>
-                {EMAIL_PERMISSION_OPTIONS.map(([scope, label]) => (
+                {EMAIL_PERMISSION_OPTIONS.map(([scope]) => (
                   <label key={scope} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                     <input
                       type="checkbox"
@@ -1869,33 +1888,40 @@ export function EmailSettingsPage() {
                         ? [...current, scope]
                         : current.filter((permission) => permission !== scope))}
                     />
-                    <span>{label} <code style={{ color: "#64748b" }}>{scope}</code></span>
+                    <span>{getPermissionLabel(scope)} <code style={{ color: "#64748b" }}>{scope}</code></span>
                   </label>
                 ))}
               </div>
               <div>
                 <button className="button-primary" disabled={savingPermissionKey || selectedEmailPermissions.length === 0}>
-                  {savingPermissionKey ? "Creating…" : "Create scoped access key"}
+                  {savingPermissionKey ? t("emailSettings.permissionsTab.creatingKeyBtn") : t("emailSettings.permissionsTab.createKeyBtn")}
                 </button>
               </div>
             </form>
             {createdPermissionToken && (
               <div className="workspace-notice" style={{ marginTop: 16 }}>
-                Copy this token now; it will not be shown again: <code style={{ wordBreak: "break-all" }}>{createdPermissionToken}</code>
+                {t("emailSettings.permissionsTab.tokenNotice")} <code style={{ wordBreak: "break-all" }}>{createdPermissionToken}</code>
               </div>
             )}
           </div>
           <table className="automations-table">
-            <thead><tr><th>Name</th><th>Granted email permissions</th><th>Last used</th><th style={{ textAlign: "right" }}>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>{t("emailSettings.permissionsTab.colName")}</th>
+                <th>{t("emailSettings.permissionsTab.colGranted")}</th>
+                <th>{t("emailSettings.permissionsTab.colLastUsed")}</th>
+                <th style={{ textAlign: "right" }}>{t("emailSettings.permissionsTab.colActions")}</th>
+              </tr>
+            </thead>
             <tbody>
               {permissionKeys.length === 0 ? (
-                <tr><td colSpan={4} style={{ textAlign: "center", padding: 36, color: "#64748b" }}>No scoped email access profiles yet.</td></tr>
+                <tr><td colSpan={4} style={{ textAlign: "center", padding: 36, color: "#64748b" }}>{t("emailSettings.permissionsTab.empty")}</td></tr>
               ) : permissionKeys.map((key) => (
                 <tr key={key.id}>
                   <td><strong>{key.name}</strong><div><code>{key.keyPrefix}…</code></div></td>
                   <td>{key.scopes.map((scope) => <span key={scope} className="record-status" style={{ margin: "2px 4px 2px 0" }}>{scope.replace("email:", "")}</span>)}</td>
-                  <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never"}</td>
-                  <td style={{ textAlign: "right" }}><button type="button" className="automation-action-btn" onClick={() => void revokePermissionKey(key.id)}>Revoke</button></td>
+                  <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString(language === "uk" ? "uk-UA" : language) : t("emailSettings.permissionsTab.neverUsed")}</td>
+                  <td style={{ textAlign: "right" }}><button type="button" className="automation-action-btn" onClick={() => void revokePermissionKey(key.id)}>{t("emailSettings.permissionsTab.actionRevoke")}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1910,13 +1936,13 @@ export function EmailSettingsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Email Accounts</span>
-                <h2>{editingId ? "Edit Email Account" : "Add Email Account"}</h2>
+                <span>{t("emailSettings.accountDrawer.kicker")}</span>
+                <h2>{editingId ? t("emailSettings.accountDrawer.editTitle") : t("emailSettings.accountDrawer.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="company-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1929,27 +1955,27 @@ export function EmailSettingsPage() {
             <form onSubmit={saveAccount} noValidate>
               {accountFormError && (
                 <div className="workspace-notice" role="alert" style={{ margin: "0 20px 12px", borderColor: "#dc2626", color: "#991b1b" }}>
-                  <strong>Account was not saved.</strong> {accountFormError}
+                  <strong>{t("emailSettings.accountDrawer.alertNotSaved")}</strong> {accountFormError}
                 </div>
               )}
               <section>
-                <h3>Account & Agent Assignment</h3>
+                <h3>{t("emailSettings.accountDrawer.sectionAssignment")}</h3>
                 <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>
-                  Fields marked <strong style={{ color: "#dc2626" }}>*</strong> are required. Company and AI agent assignment are optional.
+                  {t("emailSettings.accountDrawer.requiredNotice")}
                 </p>
                 <label>
-                  <span>Mailbox Owner <strong style={{ color: "#dc2626" }}>*</strong></span>
+                  <span>{t("emailSettings.accountDrawer.mailboxOwnerLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                   <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setAgentId(""); setRuleAgentId(""); setRuleWorkflowId(""); setRuleCreateTask(false); }}>
-                    <option value="personal">Personal / No Company</option>
-                    {companies.map((company) => <option key={company.id} value={company.id}>Company: {company.name}</option>)}
+                    <option value="personal">{t("emailSettings.scope.personalScope")}</option>
+                    {companies.map((company) => <option key={company.id} value={company.id}>{t("emailSettings.scope.companyScopePrefix")}{company.name}</option>)}
                   </select>
-                  <small style={{ color: "#64748b" }}>Choose Personal to use email without creating or assigning a Company.</small>
+                  <small style={{ color: "#64748b" }}>{t("emailSettings.accountDrawer.mailboxOwnerHint")}</small>
                 </label>
                 <label>
-                  <span>Email Address <strong style={{ color: "#dc2626" }}>*</strong></span>
+                  <span>{t("emailSettings.accountDrawer.emailAddressLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                   <input
                     type="email"
-                    placeholder="support@company.com"
+                    placeholder={t("emailSettings.accountDrawer.emailAddressPlaceholder")}
                     value={emailAddress}
                     data-email-field="emailAddress"
                     aria-invalid={Boolean(accountFieldErrors.emailAddress)}
@@ -1959,39 +1985,39 @@ export function EmailSettingsPage() {
                   {accountFieldErrors.emailAddress && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.emailAddress}</small>}
                 </label>
                 <label>
-                  <span>Display Name / Sender Label <small>(optional)</small></span>
+                  <span>{t("emailSettings.accountDrawer.displayNameLabel")} <small>{t("emailSettings.accountDrawer.optionalSuffix")}</small></span>
                   <input
-                    placeholder="Customer Support Team"
+                    placeholder={t("emailSettings.accountDrawer.displayNamePlaceholder")}
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Assigned Company Agent <small>(optional)</small></span>
+                  <span>{t("emailSettings.accountDrawer.assignedAgentLabel")} <small>{t("emailSettings.accountDrawer.optionalSuffix")}</small></span>
                   <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={selectedCompanyId === "personal"}>
-                    <option value="">Unassigned / No Company Agent</option>
+                    <option value="">{t("emailSettings.accountDrawer.unassignedOption")}</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name} ({a.role})
                       </option>
                     ))}
                   </select>
-                  <small style={{ color: "#64748b" }}>{selectedCompanyId === "personal" ? "Personal mailboxes are not assigned to a Company agent." : "Leave unassigned to route and answer messages manually."}</small>
+                  <small style={{ color: "#64748b" }}>{selectedCompanyId === "personal" ? t("emailSettings.accountDrawer.agentPersonalHint") : t("emailSettings.accountDrawer.agentCompanyHint")}</small>
                 </label>
               </section>
 
               <section>
-                <h3>AI Operational Mode</h3>
+                <h3>{t("emailSettings.accountDrawer.sectionMode")}</h3>
                 <label>
-                  <span>Automation Level</span>
+                  <span>{t("emailSettings.accountDrawer.autoLevelLabel")}</span>
                   <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
-                    <option value="approval">Approval Mode — AI drafts responses for human review</option>
-                    <option value="autopilot">Autopilot Mode — AI sends responses autonomously when confident</option>
-                    <option value="manual">Manual Mode — AI does not generate responses</option>
+                    <option value="approval">{t("emailSettings.accountDrawer.modeApproval")}</option>
+                    <option value="autopilot">{t("emailSettings.accountDrawer.modeAutopilot")}</option>
+                    <option value="manual">{t("emailSettings.accountDrawer.modeManual")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Confidence Threshold ({Math.round(confidenceThreshold * 100)}%)</span>
+                  <span>{t("emailSettings.accountDrawer.thresholdLabel").replace("{{percent}}", String(Math.round(confidenceThreshold * 100)))}</span>
                   <input
                     type="range"
                     min="0.5"
@@ -2001,7 +2027,7 @@ export function EmailSettingsPage() {
                     onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
                   />
                   <small style={{ color: "#64748b", fontSize: "11.5px" }}>
-                    In Autopilot mode, responses with confidence below this threshold fall back to Approval mode.
+                    {t("emailSettings.accountDrawer.thresholdHint")}
                   </small>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 8 }}>
@@ -2010,41 +2036,41 @@ export function EmailSettingsPage() {
                     checked={testMode}
                     onChange={(e) => setTestMode(e.target.checked)}
                   />
-                  <span>Enable Sandbox Test Mode (captures emails without live SMTP dispatch)</span>
+                  <span>{t("emailSettings.accountDrawer.testModeLabel")}</span>
                 </label>
               </section>
 
               <section>
-                <h3>IMAP Connection (Inbound Mail)</h3>
-                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>Required to receive and synchronize incoming messages.</p>
+                <h3>{t("emailSettings.accountDrawer.sectionImap")}</h3>
+                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>{t("emailSettings.accountDrawer.imapDesc")}</p>
                 <label>
-                  <span>Authentication <strong style={{ color: "#dc2626" }}>*</strong></span>
+                  <span>{t("emailSettings.accountDrawer.authLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                   <select value={mailAuthType} onChange={(e) => setMailAuthType(e.target.value as "password" | "oauth2")}>
-                    <option value="password">Username and password</option>
-                    <option value="oauth2">OAuth 2.0 / XOAUTH2 access token</option>
+                    <option value="password">{t("emailSettings.accountDrawer.authPassword")}</option>
+                    <option value="oauth2">{t("emailSettings.accountDrawer.authOAuth")}</option>
                   </select>
                 </label>
                 {mailAuthType === "oauth2" && (
                   <>
                     {accountFieldErrors.oauth && <small role="alert" data-email-field="oauth" tabIndex={-1} style={{ color: "#dc2626" }}>{accountFieldErrors.oauth}</small>}
-                    <label><span>OAuth Access Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Paste provider access token"} value={oauthAccessToken} onChange={(e) => setOauthAccessToken(e.target.value)} /></label>
-                    <label><span>OAuth Refresh Token</span><input type="password" placeholder={editingId ? "Leave blank to keep the current token" : "Provider refresh token"} value={oauthRefreshToken} onChange={(e) => setOauthRefreshToken(e.target.value)} /></label>
-                    <label><span>OAuth Token Endpoint</span><input placeholder="https://oauth2.googleapis.com/token" value={oauthTokenUrl} onChange={(e) => setOauthTokenUrl(e.target.value)} /></label>
-                    <label><span>OAuth Authorization Endpoint</span><input placeholder="https://accounts.google.com/o/oauth2/v2/auth" value={oauthAuthorizationUrl} onChange={(e) => setOauthAuthorizationUrl(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthAccessTokenLabel")}</span><input type="password" placeholder={editingId ? t("emailSettings.accountDrawer.oauthAccessTokenPlaceholderKeep") : t("emailSettings.accountDrawer.oauthAccessTokenPlaceholderNew")} value={oauthAccessToken} onChange={(e) => setOauthAccessToken(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthRefreshTokenLabel")}</span><input type="password" placeholder={editingId ? t("emailSettings.accountDrawer.oauthRefreshTokenPlaceholderKeep") : t("emailSettings.accountDrawer.oauthRefreshTokenPlaceholderNew")} value={oauthRefreshToken} onChange={(e) => setOauthRefreshToken(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthTokenEndpointLabel")}</span><input placeholder="https://oauth2.googleapis.com/token" value={oauthTokenUrl} onChange={(e) => setOauthTokenUrl(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthAuthEndpointLabel")}</span><input placeholder="https://accounts.google.com/o/oauth2/v2/auth" value={oauthAuthorizationUrl} onChange={(e) => setOauthAuthorizationUrl(e.target.value)} /></label>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <label><span>OAuth Client ID</span><input value={oauthClientId} onChange={(e) => setOauthClientId(e.target.value)} /></label>
-                      <label><span>OAuth Client Secret</span><input type="password" placeholder={editingId ? "Leave blank to keep it" : "Optional for PKCE/public clients"} value={oauthClientSecret} onChange={(e) => setOauthClientSecret(e.target.value)} /></label>
+                      <label><span>{t("emailSettings.accountDrawer.oauthClientIdLabel")}</span><input value={oauthClientId} onChange={(e) => setOauthClientId(e.target.value)} /></label>
+                      <label><span>{t("emailSettings.accountDrawer.oauthClientSecretLabel")}</span><input type="password" placeholder={editingId ? t("emailSettings.accountDrawer.oauthClientSecretPlaceholderKeep") : t("emailSettings.accountDrawer.oauthClientSecretPlaceholderNew")} value={oauthClientSecret} onChange={(e) => setOauthClientSecret(e.target.value)} /></label>
                     </div>
-                    <label><span>OAuth Scopes</span><input placeholder="openid email https://mail.google.com/" value={oauthScopes} onChange={(e) => setOauthScopes(e.target.value)} /></label>
-                    <label><span>OAuth Redirect URI</span><input value={oauthRedirectUri} onChange={(e) => setOauthRedirectUri(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthScopesLabel")}</span><input placeholder="openid email https://mail.google.com/" value={oauthScopes} onChange={(e) => setOauthScopes(e.target.value)} /></label>
+                    <label><span>{t("emailSettings.accountDrawer.oauthRedirectUriLabel")}</span><input value={oauthRedirectUri} onChange={(e) => setOauthRedirectUri(e.target.value)} /></label>
                     <button type="button" className="button-secondary" disabled={!editingId || !oauthAuthorizationUrl || !oauthTokenUrl || !oauthClientId} onClick={() => void startOAuthAuthorization()}>
-                      Connect with OAuth (PKCE)
+                      {t("emailSettings.accountDrawer.connectOAuthBtn")}
                     </button>
                   </>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
-                    <span>IMAP Host <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.hostLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="imap.company.com"
                       value={imapHost}
@@ -2056,7 +2082,7 @@ export function EmailSettingsPage() {
                     {accountFieldErrors.imapHost && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapHost}</small>}
                   </label>
                   <label>
-                    <span>Port <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.portLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       type="number"
                       placeholder="993"
@@ -2071,7 +2097,7 @@ export function EmailSettingsPage() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
-                    <span>IMAP Username <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.usernameLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="support@company.com"
                       value={imapUser}
@@ -2083,7 +2109,7 @@ export function EmailSettingsPage() {
                     {accountFieldErrors.imapUser && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapUser}</small>}
                   </label>
                   {mailAuthType === "password" && <label>
-                    <span>IMAP Password {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
+                    <span>{t("emailSettings.accountDrawer.passwordLabel")} {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
                     <input
                       type="password"
                       placeholder="••••••••••••"
@@ -2093,22 +2119,22 @@ export function EmailSettingsPage() {
                       style={accountFieldErrors.imapPass ? { borderColor: "#dc2626" } : undefined}
                       onChange={(e) => { setImapPass(e.target.value); setAccountFieldErrors((current) => ({ ...current, imapPass: "" })); }}
                     />
-                    {editingId && <small style={{ color: "#64748b" }}>Leave blank to keep the saved password.</small>}
+                    {editingId && <small style={{ color: "#64748b" }}>{t("emailSettings.accountDrawer.passwordKeepHint")}</small>}
                     {accountFieldErrors.imapPass && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.imapPass}</small>}
                   </label>}
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={imapSecure} onChange={(e) => setImapSecure(e.target.checked)} />
-                  <span>Use secure SSL/TLS for IMAP (normally enabled for port 993)</span>
+                  <span>{t("emailSettings.accountDrawer.secureLabel")}</span>
                 </label>
               </section>
 
               <section>
-                <h3>SMTP Connection (Outbound Mail)</h3>
-                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>Required to send new emails and replies.</p>
+                <h3>{t("emailSettings.accountDrawer.sectionSmtp")}</h3>
+                <p style={{ margin: "-4px 0 12px", color: "#64748b", fontSize: 12 }}>{t("emailSettings.accountDrawer.smtpDesc")}</p>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                   <label>
-                    <span>SMTP Host <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.smtpHostLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="smtp.company.com"
                       value={smtpHost}
@@ -2120,7 +2146,7 @@ export function EmailSettingsPage() {
                     {accountFieldErrors.smtpHost && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpHost}</small>}
                   </label>
                   <label>
-                    <span>Port <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.smtpPortLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       type="number"
                       placeholder="465"
@@ -2135,7 +2161,7 @@ export function EmailSettingsPage() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
-                    <span>SMTP Username <strong style={{ color: "#dc2626" }}>*</strong></span>
+                    <span>{t("emailSettings.accountDrawer.smtpUserLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
                     <input
                       placeholder="support@company.com"
                       value={smtpUser}
@@ -2147,7 +2173,7 @@ export function EmailSettingsPage() {
                     {accountFieldErrors.smtpUser && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpUser}</small>}
                   </label>
                   {mailAuthType === "password" && <label>
-                    <span>SMTP Password {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
+                    <span>{t("emailSettings.accountDrawer.smtpPassLabel")} {!editingId && <strong style={{ color: "#dc2626" }}>*</strong>}</span>
                     <input
                       type="password"
                       placeholder="••••••••••••"
@@ -2157,53 +2183,53 @@ export function EmailSettingsPage() {
                       style={accountFieldErrors.smtpPass ? { borderColor: "#dc2626" } : undefined}
                       onChange={(e) => { setSmtpPass(e.target.value); setAccountFieldErrors((current) => ({ ...current, smtpPass: "" })); }}
                     />
-                    {editingId && <small style={{ color: "#64748b" }}>Leave blank to keep the saved password.</small>}
+                    {editingId && <small style={{ color: "#64748b" }}>{t("emailSettings.accountDrawer.passwordKeepHint")}</small>}
                     {accountFieldErrors.smtpPass && <small role="alert" style={{ color: "#dc2626" }}>{accountFieldErrors.smtpPass}</small>}
                   </label>}
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} />
-                  <span>Use secure SSL/TLS for SMTP (normally enabled for port 465)</span>
+                  <span>{t("emailSettings.accountDrawer.smtpSecureLabel")}</span>
                 </label>
               </section>
 
               <section>
-                <h3>Safety Limits & Follow-up</h3>
+                <h3>{t("emailSettings.accountDrawer.sectionSafety")}</h3>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                  <label><span>Emails / hour</span><input type="number" min="1" value={maxPerHour} onChange={(e) => setMaxPerHour(Number(e.target.value))} /></label>
-                  <label><span>Emails / day</span><input type="number" min="1" value={maxPerDay} onChange={(e) => setMaxPerDay(Number(e.target.value))} /></label>
-                  <label><span>Per recipient / day</span><input type="number" min="1" value={maxPerRecipientDaily} onChange={(e) => setMaxPerRecipientDaily(Number(e.target.value))} /></label>
+                  <label><span>{t("emailSettings.accountDrawer.emailsPerHour")}</span><input type="number" min="1" value={maxPerHour} onChange={(e) => setMaxPerHour(Number(e.target.value))} /></label>
+                  <label><span>{t("emailSettings.accountDrawer.emailsPerDay")}</span><input type="number" min="1" value={maxPerDay} onChange={(e) => setMaxPerDay(Number(e.target.value))} /></label>
+                  <label><span>{t("emailSettings.accountDrawer.perRecipientDaily")}</span><input type="number" min="1" value={maxPerRecipientDaily} onChange={(e) => setMaxPerRecipientDaily(Number(e.target.value))} /></label>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label><span>{selectedCompanyId === "personal" ? "Personal mailbox / hour" : "Company emails / hour"}</span><input type="number" min="1" value={maxCompanyPerHour} onChange={(e) => setMaxCompanyPerHour(Number(e.target.value))} /></label>
-                  <label><span>{selectedCompanyId === "personal" ? "Personal mailbox / day" : "Company emails / day"}</span><input type="number" min="1" value={maxCompanyPerDay} onChange={(e) => setMaxCompanyPerDay(Number(e.target.value))} /></label>
+                  <label><span>{selectedCompanyId === "personal" ? t("emailSettings.accountDrawer.personalPerHour") : t("emailSettings.accountDrawer.companyPerHour")}</span><input type="number" min="1" value={maxCompanyPerHour} onChange={(e) => setMaxCompanyPerHour(Number(e.target.value))} /></label>
+                  <label><span>{selectedCompanyId === "personal" ? t("emailSettings.accountDrawer.personalPerDay") : t("emailSettings.accountDrawer.companyPerDay")}</span><input type="number" min="1" value={maxCompanyPerDay} onChange={(e) => setMaxCompanyPerDay(Number(e.target.value))} /></label>
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={followupEnabled} onChange={(e) => setFollowupEnabled(e.target.checked)} />
-                  <span>Enable automatic follow-up</span>
+                  <span>{t("emailSettings.accountDrawer.enableFollowup")}</span>
                 </label>
                 {followupEnabled && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <label><span>Delay, days</span><input type="number" min="1" value={followupDelayDays} onChange={(e) => setFollowupDelayDays(Number(e.target.value))} /></label>
-                  <label><span>Maximum</span><input type="number" min="1" value={followupMax} onChange={(e) => setFollowupMax(Number(e.target.value))} /></label>
-                  <label><span>Action</span><select value={followupAction} onChange={(e) => setFollowupAction(e.target.value as any)}><option value="draft">Create draft</option><option value="auto_send">Send automatically</option><option value="create_task">Create Agent Task</option><option value="notify_user">Notify responsible user</option></select></label>
+                  <label><span>{t("emailSettings.accountDrawer.delayDays")}</span><input type="number" min="1" value={followupDelayDays} onChange={(e) => setFollowupDelayDays(Number(e.target.value))} /></label>
+                  <label><span>{t("emailSettings.accountDrawer.maximum")}</span><input type="number" min="1" value={followupMax} onChange={(e) => setFollowupMax(Number(e.target.value))} /></label>
+                  <label><span>{t("emailSettings.accountDrawer.action")}</span><select value={followupAction} onChange={(e) => setFollowupAction(e.target.value as any)}><option value="draft">{t("emailSettings.accountDrawer.actionDraft")}</option><option value="auto_send">{t("emailSettings.accountDrawer.actionAutoSend")}</option><option value="create_task">{t("emailSettings.accountDrawer.actionCreateTask")}</option><option value="notify_user">{t("emailSettings.accountDrawer.actionNotifyUser")}</option></select></label>
                 </div>}
               </section>
 
               <section>
-                <h3>Signatures & Greeting</h3>
+                <h3>{t("emailSettings.accountDrawer.sectionSignatures")}</h3>
                 <label>
-                  <span>Default Greeting</span>
+                  <span>{t("emailSettings.accountDrawer.greetingLabel")}</span>
                   <input
-                    placeholder="Hello,"
+                    placeholder={t("emailSettings.accountDrawer.greetingPlaceholder")}
                     value={greeting}
                     onChange={(e) => setGreeting(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Closing Signature</span>
+                  <span>{t("emailSettings.accountDrawer.signatureLabel")}</span>
                   <textarea
                     rows={3}
-                    placeholder="Best regards,&#10;Support Team"
+                    placeholder={t("emailSettings.accountDrawer.signaturePlaceholder")}
                     value={signature}
                     onChange={(e) => setSignature(e.target.value)}
                   />
@@ -2216,14 +2242,14 @@ export function EmailSettingsPage() {
                   className="button-secondary"
                   onClick={() => setDrawerOpen(false)}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary"
                   disabled={saving}
                 >
-                  {saving ? "Saving..." : editingId ? "Save Changes" : "Connect Account"}
+                  {saving ? t("emailSettings.accountDrawer.saving") : editingId ? t("emailSettings.accountDrawer.saveChanges") : t("emailSettings.accountDrawer.connectAccount")}
                 </button>
               </footer>
             </form>
@@ -2237,13 +2263,13 @@ export function EmailSettingsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Email Routing</span>
-                <h2>{editingRuleId ? "Edit Routing Rule" : "Add Routing Rule"}</h2>
+                <span>{t("emailSettings.ruleDrawer.kicker")}</span>
+                <h2>{editingRuleId ? t("emailSettings.ruleDrawer.editTitle") : t("emailSettings.ruleDrawer.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="company-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setRuleDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2255,12 +2281,12 @@ export function EmailSettingsPage() {
 
             <form onSubmit={handleSaveRule}>
               <section>
-                <h3>Rule Parameters</h3>
+                <h3>{t("emailSettings.ruleDrawer.ruleParams")}</h3>
                 <label>
-                  <span>Rule Name</span>
+                  <span>{t("emailSettings.ruleDrawer.ruleNameLabel")}</span>
                   <input
                     required
-                    placeholder="e.g. Invoices to Billing Agent"
+                    placeholder={t("emailSettings.ruleDrawer.ruleNamePlaceholder")}
                     value={ruleName}
                     onChange={(e) => setRuleName(e.target.value)}
                   />
@@ -2268,53 +2294,53 @@ export function EmailSettingsPage() {
               </section>
 
               <section>
-                <h3>Trigger Conditions</h3>
+                <h3>{t("emailSettings.ruleDrawer.triggerConditions")}</h3>
                 <label>
-                  <span>Subject Keywords (comma-separated)</span>
+                  <span>{t("emailSettings.ruleDrawer.subjectKeywordsLabel")}</span>
                   <input
-                    placeholder="invoice, payment, bill, receipt"
+                    placeholder={t("emailSettings.ruleDrawer.subjectKeywordsPlaceholder")}
                     value={ruleSubjectKeywords}
                     onChange={(e) => setRuleSubjectKeywords(e.target.value)}
                   />
-                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>Triggers when subject contains any of these words.</small>
+                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>{t("emailSettings.ruleDrawer.subjectKeywordsHint")}</small>
                 </label>
                 <label>
-                  <span>Sender Email or Domain Patterns (comma-separated)</span>
+                  <span>{t("emailSettings.ruleDrawer.senderPatternsLabel")}</span>
                   <input
-                    placeholder="billing@, *@partner.com"
+                    placeholder={t("emailSettings.ruleDrawer.senderPatternsPlaceholder")}
                     value={ruleSenders}
                     onChange={(e) => setRuleSenders(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Sender Domains (comma-separated)</span>
-                  <input placeholder="partner.com, *.trusted.org" value={ruleDomains} onChange={(e) => setRuleDomains(e.target.value)} />
+                  <span>{t("emailSettings.ruleDrawer.senderDomainsLabel")}</span>
+                  <input placeholder={t("emailSettings.ruleDrawer.senderDomainsPlaceholder")} value={ruleDomains} onChange={(e) => setRuleDomains(e.target.value)} />
                 </label>
                 <label>
-                  <span>Body Keywords (comma-separated)</span>
-                  <input placeholder="refund, contract, verification" value={ruleBodyKeywords} onChange={(e) => setRuleBodyKeywords(e.target.value)} />
+                  <span>{t("emailSettings.ruleDrawer.bodyKeywordsLabel")}</span>
+                  <input placeholder={t("emailSettings.ruleDrawer.bodyKeywordsPlaceholder")} value={ruleBodyKeywords} onChange={(e) => setRuleBodyKeywords(e.target.value)} />
                 </label>
                 <label>
-                  <span>Detected Intent</span>
+                  <span>{t("emailSettings.ruleDrawer.detectedIntentLabel")}</span>
                   <select value={ruleDetectedIntent} onChange={(e) => setRuleDetectedIntent(e.target.value)}>
-                    <option value="">Any intent</option>
-                    <option value="support">Support / technical issue</option>
-                    <option value="billing">Billing / payment</option>
-                    <option value="refund">Refund</option>
-                    <option value="cancellation">Cancellation</option>
-                    <option value="sales">Sales / quote</option>
-                    <option value="marketing">Marketing / unsubscribe</option>
-                    <option value="general">General</option>
+                    <option value="">{t("emailSettings.ruleDrawer.intents.any")}</option>
+                    <option value="support">{t("emailSettings.ruleDrawer.intents.support")}</option>
+                    <option value="billing">{t("emailSettings.ruleDrawer.intents.billing")}</option>
+                    <option value="refund">{t("emailSettings.ruleDrawer.intents.refund")}</option>
+                    <option value="cancellation">{t("emailSettings.ruleDrawer.intents.cancellation")}</option>
+                    <option value="sales">{t("emailSettings.ruleDrawer.intents.sales")}</option>
+                    <option value="marketing">{t("emailSettings.ruleDrawer.intents.marketing")}</option>
+                    <option value="general">{t("emailSettings.ruleDrawer.intents.general")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Attachment Types (comma-separated)</span>
+                  <span>{t("emailSettings.ruleDrawer.attachmentTypesLabel")}</span>
                   <input
-                    placeholder="application/pdf, image/*, .xlsx"
+                    placeholder={t("emailSettings.ruleDrawer.attachmentTypesPlaceholder")}
                     value={ruleAttachmentTypes}
                     onChange={(e) => setRuleAttachmentTypes(e.target.value)}
                   />
-                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>Supports MIME wildcards and filename extensions.</small>
+                  <small style={{ color: "#64748b", fontSize: "11.5px" }}>{t("emailSettings.ruleDrawer.attachmentTypesHint")}</small>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
                   <input
@@ -2322,35 +2348,35 @@ export function EmailSettingsPage() {
                     checked={ruleIsVip}
                     onChange={(e) => setRuleIsVip(e.target.checked)}
                   />
-                  <span>Apply only to VIP senders</span>
+                  <span>{t("emailSettings.ruleDrawer.vipOnlyLabel")}</span>
                 </label>
               </section>
 
               <section>
-                <h3>Automated Actions</h3>
+                <h3>{t("emailSettings.ruleDrawer.automatedActions")}</h3>
                 <label>
-                  <span>Set Priority</span>
+                  <span>{t("emailSettings.ruleDrawer.priorityLabel")}</span>
                   <select value={rulePriority} onChange={(e) => setRulePriority(e.target.value)}>
-                    <option value="">Don't change priority</option>
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="normal">Normal</option>
-                    <option value="low">Low</option>
+                    <option value="">{t("emailSettings.ruleDrawer.priorities.noChange")}</option>
+                    <option value="urgent">{t("emailSettings.ruleDrawer.priorities.urgent")}</option>
+                    <option value="high">{t("emailSettings.ruleDrawer.priorities.high")}</option>
+                    <option value="normal">{t("emailSettings.ruleDrawer.priorities.normal")}</option>
+                    <option value="low">{t("emailSettings.ruleDrawer.priorities.low")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Set AI Operational Mode</span>
+                  <span>{t("emailSettings.ruleDrawer.modeLabel")}</span>
                   <select value={ruleMode} onChange={(e) => setRuleMode(e.target.value)}>
-                    <option value="">Don't change mode</option>
-                    <option value="autopilot">Autopilot Mode (Auto-reply)</option>
-                    <option value="approval">Approval Mode (Draft for human)</option>
-                    <option value="manual">Manual Mode</option>
+                    <option value="">{t("emailSettings.ruleDrawer.modes.noChange")}</option>
+                    <option value="autopilot">{t("emailSettings.ruleDrawer.modes.autopilot")}</option>
+                    <option value="approval">{t("emailSettings.ruleDrawer.modes.approval")}</option>
+                    <option value="manual">{t("emailSettings.ruleDrawer.modes.manual")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Assign to Agent</span>
+                  <span>{t("emailSettings.ruleDrawer.assignAgentLabel")}</span>
                   <select value={ruleAgentId} onChange={(e) => setRuleAgentId(e.target.value)} disabled={selectedCompanyId === "personal"}>
-                    <option value="">Don't reassign agent</option>
+                    <option value="">{t("emailSettings.ruleDrawer.assignAgentNoChange")}</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name} ({a.role})
@@ -2359,18 +2385,18 @@ export function EmailSettingsPage() {
                   </select>
                 </label>
                 <label>
-                  <span>Automatic Response Template</span>
+                  <span>{t("emailSettings.ruleDrawer.templateLabel")}</span>
                   <select value={ruleTemplateId} onChange={(e) => setRuleTemplateId(e.target.value)}>
-                    <option value="">Generate a response with AI</option>
+                    <option value="">{t("emailSettings.ruleDrawer.templateGenerateAi")}</option>
                     {templates.map((template) => (
                       <option key={template.id} value={template.id}>{template.title}</option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  <span>Start Existing Workflow</span>
+                  <span>{t("emailSettings.ruleDrawer.workflowLabel")}</span>
                   <select value={ruleWorkflowId} onChange={(e) => setRuleWorkflowId(e.target.value)} disabled={selectedCompanyId === "personal"}>
-                    <option value="">Do not start a workflow</option>
+                    <option value="">{t("emailSettings.ruleDrawer.workflowNoChange")}</option>
                     {workflows.map((workflow) => (
                       <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
                     ))}
@@ -2378,15 +2404,15 @@ export function EmailSettingsPage() {
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleRequireApproval} onChange={(e) => setRuleRequireApproval(e.target.checked)} />
-                  <span>Always require human approval</span>
+                  <span>{t("emailSettings.ruleDrawer.requireApprovalLabel")}</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleCreateTask} disabled={selectedCompanyId === "personal"} onChange={(e) => setRuleCreateTask(e.target.checked)} />
-                  <span>{selectedCompanyId === "personal" ? "Agent Tasks require a Company mailbox" : "Create an Agent Task when this rule matches"}</span>
+                  <span>{selectedCompanyId === "personal" ? t("emailSettings.ruleDrawer.createTaskPersonal") : t("emailSettings.ruleDrawer.createTaskCompany")}</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={ruleAutoTagSpam} onChange={(e) => setRuleAutoTagSpam(e.target.checked)} />
-                  <span>Move matching sender or domain to Spam without starting AI</span>
+                  <span>{t("emailSettings.ruleDrawer.autoTagSpamLabel")}</span>
                 </label>
               </section>
 
@@ -2396,14 +2422,14 @@ export function EmailSettingsPage() {
                   className="button-secondary"
                   onClick={() => setRuleDrawerOpen(false)}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary"
                   disabled={savingRule}
                 >
-                  {savingRule ? "Saving..." : editingRuleId ? "Save Rule" : "Create Rule"}
+                  {savingRule ? t("emailSettings.ruleDrawer.savingRule") : editingRuleId ? t("emailSettings.ruleDrawer.saveRule") : t("emailSettings.ruleDrawer.createRule")}
                 </button>
               </footer>
             </form>
@@ -2417,13 +2443,13 @@ export function EmailSettingsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Response Templates</span>
-                <h2>{editingTemplateId ? "Edit Response Template" : "Add Response Template"}</h2>
+                <span>{t("emailSettings.templateDrawer.kicker")}</span>
+                <h2>{editingTemplateId ? t("emailSettings.templateDrawer.editTitle") : t("emailSettings.templateDrawer.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="company-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setTemplateDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2435,30 +2461,30 @@ export function EmailSettingsPage() {
 
             <form onSubmit={handleSaveTemplate}>
               <section>
-                <h3>Template Details</h3>
+                <h3>{t("emailSettings.templateDrawer.templateDetails")}</h3>
                 <label>
-                  <span>Template Title</span>
+                  <span>{t("emailSettings.templateDrawer.titleLabel")}</span>
                   <input
                     required
-                    placeholder="e.g. Greeting & Ticket Acknowledgment"
+                    placeholder={t("emailSettings.templateDrawer.titlePlaceholder")}
                     value={templateTitle}
                     onChange={(e) => setTemplateTitle(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Category</span>
+                  <span>{t("emailSettings.templateDrawer.categoryLabel")}</span>
                   <select value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)}>
-                    <option value="general">General</option>
-                    <option value="support">Customer Support</option>
-                    <option value="billing">Billing & Invoices</option>
-                    <option value="sales">Sales & Partnerships</option>
-                    <option value="information">Information & Onboarding</option>
+                    <option value="general">{t("emailSettings.templateDrawer.categories.general")}</option>
+                    <option value="support">{t("emailSettings.templateDrawer.categories.support")}</option>
+                    <option value="billing">{t("emailSettings.templateDrawer.categories.billing")}</option>
+                    <option value="sales">{t("emailSettings.templateDrawer.categories.sales")}</option>
+                    <option value="information">{t("emailSettings.templateDrawer.categories.information")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Subject Line Template (Optional)</span>
+                  <span>{t("emailSettings.templateDrawer.subjectLabel")}</span>
                   <input
-                    placeholder="e.g. Re: {{customer_name}} - Ticket Confirmation"
+                    placeholder={t("emailSettings.templateDrawer.subjectPlaceholder")}
                     value={templateSubject}
                     onChange={(e) => setTemplateSubject(e.target.value)}
                   />
@@ -2466,9 +2492,9 @@ export function EmailSettingsPage() {
               </section>
 
               <section>
-                <h3>Body Content & Placeholders</h3>
+                <h3>{t("emailSettings.templateDrawer.bodyDetails")}</h3>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                  <span style={{ fontSize: 11, color: "#64748b", alignSelf: "center", marginRight: 4 }}>Insert variable:</span>
+                  <span style={{ fontSize: 11, color: "#64748b", alignSelf: "center", marginRight: 4 }}>{t("emailSettings.templateDrawer.insertVariable")}</span>
                   {["{{customer_name}}", "{{company_name}}", "{{agent_name}}", "{{date}}"].map((v) => (
                     <button
                       key={v}
@@ -2482,11 +2508,11 @@ export function EmailSettingsPage() {
                   ))}
                 </div>
                 <label>
-                  <span>Body Template Text</span>
+                  <span>{t("emailSettings.templateDrawer.bodyLabel")}</span>
                   <textarea
                     required
                     rows={6}
-                    placeholder="Hello {{customer_name}},&#10;&#10;Thank you for contacting {{company_name}}..."
+                    placeholder={t("emailSettings.templateDrawer.bodyPlaceholder")}
                     value={templateBody}
                     onChange={(e) => setTemplateBody(e.target.value)}
                   />
@@ -2499,14 +2525,14 @@ export function EmailSettingsPage() {
                   className="button-secondary"
                   onClick={() => setTemplateDrawerOpen(false)}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary"
                   disabled={savingTemplate}
                 >
-                  {savingTemplate ? "Saving..." : editingTemplateId ? "Save Template" : "Create Template"}
+                  {savingTemplate ? t("emailSettings.templateDrawer.savingTemplate") : editingTemplateId ? t("emailSettings.templateDrawer.saveTemplate") : t("emailSettings.templateDrawer.createTemplate")}
                 </button>
               </footer>
             </form>
@@ -2520,13 +2546,13 @@ export function EmailSettingsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Client Contacts</span>
-                <h2>{editingContactEmail ? "Edit Client Contact" : "Add Client Contact"}</h2>
+                <span>{t("emailSettings.contactDrawer.kicker")}</span>
+                <h2>{editingContactEmail ? t("emailSettings.contactDrawer.editTitle") : t("emailSettings.contactDrawer.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="company-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setContactDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2538,38 +2564,38 @@ export function EmailSettingsPage() {
 
             <form onSubmit={handleSaveContact}>
               <section>
-                <h3>Contact Information</h3>
+                <h3>{t("emailSettings.contactDrawer.infoHeading")}</h3>
                 <label>
-                  <span>Email Address</span>
+                  <span>{t("emailSettings.contactDrawer.emailLabel")}</span>
                   <input
                     type="email"
                     required
                     disabled={!!editingContactEmail}
-                    placeholder="client@company.com"
+                    placeholder={t("emailSettings.contactDrawer.emailPlaceholder")}
                     value={contactEmail}
                     onChange={(e) => setContactEmail(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Full Name</span>
+                  <span>{t("emailSettings.contactDrawer.nameLabel")}</span>
                   <input
-                    placeholder="John Doe"
+                    placeholder={t("emailSettings.contactDrawer.namePlaceholder")}
                     value={contactName}
                     onChange={(e) => setContactName(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Company Name</span>
+                  <span>{t("emailSettings.contactDrawer.companyLabel")}</span>
                   <input
-                    placeholder="Acme Corp"
+                    placeholder={t("emailSettings.contactDrawer.companyPlaceholder")}
                     value={contactCompanyName}
                     onChange={(e) => setContactCompanyName(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Phone Number</span>
+                  <span>{t("emailSettings.contactDrawer.phoneLabel")}</span>
                   <input
-                    placeholder="+1 555 019 2834"
+                    placeholder={t("emailSettings.contactDrawer.phonePlaceholder")}
                     value={contactPhone}
                     onChange={(e) => setContactPhone(e.target.value)}
                   />
@@ -2577,14 +2603,14 @@ export function EmailSettingsPage() {
               </section>
 
               <section>
-                <h3>Status & Priority Flags</h3>
+                <h3>{t("emailSettings.contactDrawer.flagsHeading")}</h3>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input
                     type="checkbox"
                     checked={contactIsVip}
                     onChange={(e) => setContactIsVip(e.target.checked)}
                   />
-                  <span>★ Mark as VIP Client (prioritizes emails automatically)</span>
+                  <span>{t("emailSettings.contactDrawer.markVipLabel")}</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 6 }}>
                   <input
@@ -2592,13 +2618,13 @@ export function EmailSettingsPage() {
                     checked={contactIsBlacklisted}
                     onChange={(e) => setContactIsBlacklisted(e.target.checked)}
                   />
-                  <span>🚫 Blacklist Sender (route incoming messages to spam)</span>
+                  <span>{t("emailSettings.contactDrawer.blacklistLabel")}</span>
                 </label>
                 <label style={{ marginTop: 10 }}>
-                  <span>Notes & Internal Comments</span>
+                  <span>{t("emailSettings.contactDrawer.notesLabel")}</span>
                   <textarea
                     rows={3}
-                    placeholder="Key account details, preference notes..."
+                    placeholder={t("emailSettings.contactDrawer.notesPlaceholder")}
                     value={contactNotes}
                     onChange={(e) => setContactNotes(e.target.value)}
                   />
@@ -2611,14 +2637,14 @@ export function EmailSettingsPage() {
                   className="button-secondary"
                   onClick={() => setContactDrawerOpen(false)}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="button-primary automations-action-primary"
                   disabled={savingContact}
                 >
-                  {savingContact ? "Saving..." : editingContactEmail ? "Save Contact" : "Add Contact"}
+                  {savingContact ? t("emailSettings.contactDrawer.savingContact") : editingContactEmail ? t("emailSettings.contactDrawer.saveContact") : t("emailSettings.contactDrawer.addContact")}
                 </button>
               </footer>
             </form>
@@ -2632,13 +2658,13 @@ export function EmailSettingsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>DNS Verification</span>
-                <h2>{dnsAccount?.emailAddress.split("@")[1] || "Domain"} Audit</h2>
+                <span>{t("emailSettings.dnsDrawer.kicker")}</span>
+                <h2>{t("emailSettings.dnsDrawer.titleAudit").replace("{{domain}}", dnsAccount?.emailAddress.split("@")[1] || "Domain")}</h2>
               </div>
               <button
                 type="button"
                 className="company-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setDnsDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2651,22 +2677,22 @@ export function EmailSettingsPage() {
             <div style={{ padding: "20px 24px" }}>
               {dnsChecking ? (
                 <div style={{ textAlign: "center", padding: "40px" }}>
-                  <p>Querying DNS resolvers for MX, SPF, DKIM, and DMARC records...</p>
+                  <p>{t("emailSettings.dnsDrawer.queryingDns")}</p>
                 </div>
               ) : dnsResult ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div
                     style={{
-                      padding: "14px 16px",
-                      borderRadius: "10px",
-                      background: dnsResult.verified ? "#ecfdf5" : "#fffbeb",
-                      border: `1px solid ${dnsResult.verified ? "#a7f3d0" : "#fde68a"}`,
-                      color: dnsResult.verified ? "#065f46" : "#92400e",
-                      fontSize: "13px",
-                      lineHeight: 1.5,
-                    }}
+                    padding: "14px 16px",
+                    borderRadius: "10px",
+                    background: dnsResult.verified ? "#ecfdf5" : "#fffbeb",
+                    border: `1px solid ${dnsResult.verified ? "#a7f3d0" : "#fde68a"}`,
+                    color: dnsResult.verified ? "#065f46" : "#92400e",
+                    fontSize: "13px",
+                    lineHeight: 1.5,
+                  }}
                   >
-                    <strong>{dnsResult.verified ? "Domain Fully Verified ✓" : "Configuration Action Recommended ⚠️"}</strong>
+                    <strong>{dnsResult.verified ? t("emailSettings.dnsDrawer.domainVerified") : t("emailSettings.dnsDrawer.actionRecommended")}</strong>
                     <div>{dnsResult.summary}</div>
                   </div>
 
@@ -2682,25 +2708,25 @@ export function EmailSettingsPage() {
                         }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                          <span style={{ fontWeight: 700, fontSize: "14px" }}>{rec.recordType} Record ({rec.name})</span>
+                          <span style={{ fontWeight: 700, fontSize: "14px" }}>{t("emailSettings.dnsDrawer.recordHeading").replace("{{recordType}}", rec.recordType).replace("{{name}}", rec.name)}</span>
                           <span
                             className={`automation-status-btn ${rec.valid ? "active" : "paused"}`}
                             style={{ cursor: "default" }}
                           >
                             <span className="automation-status-dot" />
-                            {rec.valid ? "Valid" : rec.found ? "Invalid Syntax" : "Missing"}
+                            {rec.valid ? t("emailSettings.dnsDrawer.statusValid") : rec.found ? t("emailSettings.dnsDrawer.statusInvalid") : t("emailSettings.dnsDrawer.statusMissing")}
                           </span>
                         </div>
 
                         {rec.currentValue && (
                           <div style={{ fontSize: "12px", color: "#475569", marginBottom: 4, fontFamily: "monospace" }}>
-                            Current: {rec.currentValue}
+                            {t("emailSettings.dnsDrawer.currentValue").replace("{{value}}", rec.currentValue)}
                           </div>
                         )}
 
                         {rec.recommendation && (
                           <div style={{ fontSize: "12px", color: "#b45309", background: "#fef3c7", padding: "6px 10px", borderRadius: "6px", marginTop: 6 }}>
-                            💡 <strong>Recommendation:</strong> {rec.recommendation}
+                            💡 <strong>{t("emailSettings.dnsDrawer.recommendation")}</strong> {rec.recommendation}
                           </div>
                         )}
                       </div>
@@ -2708,7 +2734,7 @@ export function EmailSettingsPage() {
                   </div>
                 </div>
               ) : (
-                <p>No DNS audit result available.</p>
+                <p>{t("emailSettings.dnsDrawer.noResult")}</p>
               )}
             </div>
 
@@ -2718,7 +2744,7 @@ export function EmailSettingsPage() {
                 className="button-primary automations-action-primary"
                 onClick={() => setDnsDrawerOpen(false)}
               >
-                Close Audit
+                {t("emailSettings.dnsDrawer.closeAudit")}
               </button>
             </footer>
           </aside>

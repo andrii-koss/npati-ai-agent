@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 interface Company {
   id: string;
@@ -44,13 +45,13 @@ interface CompanyAutomationRun {
   completedAt?: string | null;
 }
 
-const PRESETS = [
-  { label: "Daily at 09:00", cron: "0 9 * * *" },
-  { label: "Daily at 18:00", cron: "0 18 * * *" },
-  { label: "Mondays at 09:00", cron: "0 9 * * 1" },
-  { label: "Fridays at 17:00", cron: "0 17 * * 5" },
-  { label: "Hourly", cron: "0 * * * *" },
-];
+const PRESET_CRONS = [
+  { key: "daily9", cron: "0 9 * * *" },
+  { key: "daily18", cron: "0 18 * * *" },
+  { key: "mondays9", cron: "0 9 * * 1" },
+  { key: "fridays17", cron: "0 17 * * 5" },
+  { key: "hourly", cron: "0 * * * *" },
+] as const;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -64,6 +65,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function AutomationsPage() {
+  const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
@@ -159,11 +161,22 @@ export function AutomationsPage() {
     return { total, active, paused, agentsCount };
   }, [automations]);
 
+  const presets = useMemo(
+    () => [
+      { label: t("automations.presets.daily9"), cron: "0 9 * * *" },
+      { label: t("automations.presets.daily18"), cron: "0 18 * * *" },
+      { label: t("automations.presets.mondays9"), cron: "0 9 * * 1" },
+      { label: t("automations.presets.fridays17"), cron: "0 17 * * 5" },
+      { label: t("automations.presets.hourly"), cron: "0 * * * *" },
+    ],
+    [t]
+  );
+
   const getCronDescription = (cron: string) => {
-    const matched = PRESETS.find((p) => p.cron === cron);
-    if (matched) return matched.label;
-    if (cron === "0 0 * * *") return "Daily at 00:00";
-    if (cron === "0 * * * *") return "Hourly";
+    const matched = PRESET_CRONS.find((p) => p.cron === cron);
+    if (matched) return t(`automations.presets.${matched.key}`);
+    if (cron === "0 0 * * *") return t("automations.presets.daily0");
+    if (cron === "0 * * * *") return t("automations.presets.hourly");
     return cron;
   };
 
@@ -251,10 +264,10 @@ export function AutomationsPage() {
 
   const deleteAutomation = async (id: string) => {
     const confirmed = await confirmModal({
-      title: "Delete automation?",
-      message: "Are you sure you want to delete this automation?",
-      confirmText: "Delete",
-      cancelText: "Cancel",
+      title: t("automations.dialogs.deleteTitle"),
+      message: t("automations.dialogs.deleteMessage"),
+      confirmText: t("automations.dialogs.deleteConfirm"),
+      cancelText: t("automations.dialogs.deleteCancel"),
       isDanger: true,
     });
     if (!confirmed) return;
@@ -275,9 +288,13 @@ export function AutomationsPage() {
         `/companies/${selectedCompanyId}/automations/${auto.id}/run`,
         { method: "POST" }
       );
-      setNotice(`Run initiated for "${auto.name}". ${res.result ? "Result received!" : ""}`);
+      setNotice(
+        `${t("automations.notifications.runInitiated", { name: auto.name })}${
+          res.result ? ` ${t("automations.notifications.resultReceived")}` : ""
+        }`
+      );
     } catch (err: any) {
-      setNotice(`Run error: ${err.message}`);
+      setNotice(t("automations.notifications.runError", { error: err.message }));
     } finally {
       setRunningNowId(null);
     }
@@ -305,23 +322,23 @@ export function AutomationsPage() {
       <header className="inspector-header automations-header">
         <div className="automations-header-top">
           <div>
-            <p className="eyebrow">Settings · Automations</p>
+            <p className="eyebrow">{t("automations.eyebrow")}</p>
             <h1>
-              <Link to="/settings" className="marketplace-back-button" aria-label="Back to settings" title="Back to settings">
+              <Link to="/settings" className="marketplace-back-button" aria-label={t("automations.backAria")} title={t("automations.backAria")}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>Automations & Scheduled Tasks</span>
+              <span>{t("automations.title")}</span>
             </h1>
             <p className="hero-copy">
-              Configure periodic background triggers, recurring cron jobs, and autonomous agent tasks for your company.
+              {t("automations.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
             {companies.length > 1 && (
               <select
-                aria-label="Select company"
+                aria-label={t("automations.selectCompanyAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
                   setSelectedCompanyId(e.target.value);
@@ -337,7 +354,7 @@ export function AutomationsPage() {
               </select>
             )}
             <button type="button" className="button-primary automations-action-primary" onClick={openCreateDrawer}>
-              + New Automation
+              {t("automations.newAutomationBtn")}
             </button>
           </div>
         </div>
@@ -347,23 +364,23 @@ export function AutomationsPage() {
       <section className="overview-grid inspector-stats-grid automations-stats-grid">
         <div>
           <strong>{stats.total}</strong>
-          <span>total automations</span>
-          <small>Scheduled AI background jobs</small>
+          <span>{t("automations.stats.total")}</span>
+          <small>{t("automations.stats.totalDesc")}</small>
         </div>
         <div>
           <strong>{stats.active}</strong>
-          <span>active triggers</span>
-          <small>Live cron schedules running</small>
+          <span>{t("automations.stats.active")}</span>
+          <small>{t("automations.stats.activeDesc")}</small>
         </div>
         <div>
           <strong>{stats.paused}</strong>
-          <span>paused schedules</span>
-          <small>Standby / inactive triggers</small>
+          <span>{t("automations.stats.paused")}</span>
+          <small>{t("automations.stats.pausedDesc")}</small>
         </div>
         <div>
           <strong>{stats.agentsCount}</strong>
-          <span>assigned agents</span>
-          <small>Configured agent runners</small>
+          <span>{t("automations.stats.assignedAgents")}</span>
+          <small>{t("automations.stats.assignedAgentsDesc")}</small>
         </div>
       </section>
 
@@ -374,19 +391,19 @@ export function AutomationsPage() {
           <input
             type="text"
             role="searchbox"
-            placeholder="Filter automations by name, description, prompt, cron..."
+            placeholder={t("automations.controls.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="inspector-search-input"
-            aria-label="Filter automations"
+            aria-label={t("automations.controls.searchAriaLabel")}
           />
           {searchQuery && (
             <button
               type="button"
               className="search-clear-btn"
               onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("automations.controls.clearSearch")}
+              title={t("automations.controls.clearSearch")}
             >
               ×
             </button>
@@ -401,7 +418,7 @@ export function AutomationsPage() {
             className={`inspector-tab ${statusFilter === "all" ? "active" : ""}`}
             onClick={() => setStatusFilter("all")}
           >
-            <span>All</span>
+            <span>{t("automations.controls.tabAll")}</span>
             <small className="tab-count">{automations.length}</small>
           </button>
           <button
@@ -411,7 +428,7 @@ export function AutomationsPage() {
             className={`inspector-tab ${statusFilter === "active" ? "active" : ""}`}
             onClick={() => setStatusFilter("active")}
           >
-            <span>Active</span>
+            <span>{t("automations.controls.tabActive")}</span>
             <small className="tab-count">{stats.active}</small>
           </button>
           <button
@@ -421,7 +438,7 @@ export function AutomationsPage() {
             className={`inspector-tab ${statusFilter === "paused" ? "active" : ""}`}
             onClick={() => setStatusFilter("paused")}
           >
-            <span>Paused</span>
+            <span>{t("automations.controls.tabPaused")}</span>
             <small className="tab-count">{stats.paused}</small>
           </button>
         </div>
@@ -437,8 +454,8 @@ export function AutomationsPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            Showing <strong>{filteredAutomations.length}</strong> of <strong>{automations.length}</strong> automations
-            {searchQuery ? ` matching "${searchQuery}"` : ""}
+            {t("automations.showingStatus", { count: filteredAutomations.length, total: automations.length })}
+            {searchQuery ? ` ${t("automations.matchingQuery", { query: searchQuery })}` : ""}
           </span>
         </div>
       </div>
@@ -446,23 +463,23 @@ export function AutomationsPage() {
       {loading ? null : automations.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⏱️</div>
-          <h3>No Automations Configured</h3>
-          <p>Schedule autonomous cron background tasks, periodic market audits, or daily agent workflows for this company.</p>
+          <h3>{t("automations.empty.noAutomationsTitle")}</h3>
+          <p>{t("automations.empty.noAutomationsDesc")}</p>
           <button type="button" className="button-primary automations-action-primary" onClick={openCreateDrawer}>
-            + Create First Automation
+            {t("automations.empty.createFirstBtn")}
           </button>
         </div>
       ) : filteredAutomations.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🔍</div>
-          <h3>No matching automations</h3>
-          <p>Try adjusting your search query or filter status to find what you're looking for.</p>
+          <h3>{t("automations.empty.noMatchingTitle")}</h3>
+          <p>{t("automations.empty.noMatchingDesc")}</p>
           <button
             type="button"
             className="button-secondary"
             onClick={() => { setSearchQuery(""); setStatusFilter("all"); }}
           >
-            Clear Filters
+            {t("automations.empty.clearFiltersBtn")}
           </button>
         </div>
       ) : (
@@ -470,11 +487,11 @@ export function AutomationsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ width: "110px" }}>Status</th>
-                <th style={{ minWidth: "260px" }}>Task & Instructions</th>
-                <th style={{ minWidth: "180px" }}>Schedule (Cron)</th>
-                <th style={{ minWidth: "160px" }}>Assigned Agent</th>
-                <th style={{ width: "220px", textAlign: "right" }}>Actions</th>
+                <th style={{ width: "110px" }}>{t("automations.table.colStatus")}</th>
+                <th style={{ minWidth: "260px" }}>{t("automations.table.colTask")}</th>
+                <th style={{ minWidth: "180px" }}>{t("automations.table.colSchedule")}</th>
+                <th style={{ minWidth: "160px" }}>{t("automations.table.colAssignedAgent")}</th>
+                <th style={{ width: "220px", textAlign: "right" }}>{t("automations.table.colActions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -490,17 +507,17 @@ export function AutomationsPage() {
                         type="button"
                         className={`automation-status-btn ${auto.status}`}
                         onClick={() => toggleStatus(auto)}
-                        title={auto.status === "active" ? "Click to Pause" : "Click to Activate"}
+                        title={auto.status === "active" ? t("automations.table.clickToPause") : t("automations.table.clickToActivate")}
                       >
                         <span className="automation-status-dot" />
-                        {auto.status.toUpperCase()}
+                        {auto.status === "active" ? t("automations.table.statusActive") : t("automations.table.statusPaused")}
                       </button>
                     </td>
                     <td className="automation-title-cell">
                       <strong>{auto.name}</strong>
                       {auto.description && <p>{auto.description}</p>}
                       <div className="automation-prompt-preview" title={auto.prompt}>
-                        Prompt: {auto.prompt}
+                        {t("automations.table.promptPrefix")} {auto.prompt}
                       </div>
                     </td>
                     <td>
@@ -512,14 +529,20 @@ export function AutomationsPage() {
                       </span>
                       {nextDate && (
                         <span className="automation-next-run">
-                          Next: {nextDate.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {t("automations.table.nextRunPrefix")}{" "}
+                          {nextDate.toLocaleString(language === "uk" ? "uk-UA" : language, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </span>
                       )}
                     </td>
                     <td>
                       <span className="automation-agent-badge">
                         <span>🤖</span>
-                        <span>{assignedAgent ? assignedAgent.name : "Main Agent"}</span>
+                        <span>{assignedAgent ? assignedAgent.name : t("automations.table.mainAgent")}</span>
                       </span>
                     </td>
                     <td>
@@ -529,33 +552,33 @@ export function AutomationsPage() {
                           className="automation-action-btn run-btn"
                           disabled={isRunningNow}
                           onClick={() => triggerRunNow(auto)}
-                          title="Run this automation immediately"
+                          title={t("automations.table.runNowTitle")}
                         >
-                          {isRunningNow ? "Running..." : "▶ Run Now"}
+                          {isRunningNow ? t("automations.table.running") : t("automations.table.runNow")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn"
                           onClick={() => openHistory(auto)}
-                          title="View run execution history"
+                          title={t("automations.table.historyTitle")}
                         >
-                          History
+                          {t("automations.table.history")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn"
                           onClick={() => openEditDrawer(auto)}
-                          title="Edit automation settings"
+                          title={t("automations.table.editTitle")}
                         >
-                          Edit
+                          {t("automations.table.edit")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn danger"
                           onClick={() => deleteAutomation(auto.id)}
-                          title="Delete automation"
+                          title={t("automations.table.deleteTitle")}
                         >
-                          Delete
+                          {t("automations.table.delete")}
                         </button>
                       </div>
                     </td>
@@ -573,13 +596,13 @@ export function AutomationsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()}>
             <header>
               <div>
-                <span>Automations</span>
-                <h2>{editingId ? "Edit Automation" : "New Automation"}</h2>
+                <span>{t("automations.editor.kicker")}</span>
+                <h2>{editingId ? t("automations.editor.editTitle") : t("automations.editor.newTitle")}</h2>
               </div>
               <button
                 type="button"
                 className="automations-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -590,28 +613,28 @@ export function AutomationsPage() {
             </header>
             <form onSubmit={saveAutomation}>
               <section>
-                <h3>Task Parameters</h3>
+                <h3>{t("automations.editor.taskParamsHeading")}</h3>
                 <label>
-                  <span>Task Name</span>
+                  <span>{t("automations.editor.taskNameLabel")}</span>
                   <input
                     required
-                    placeholder="e.g., Daily competitor analysis"
+                    placeholder={t("automations.editor.taskNamePlaceholder")}
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Description</span>
+                  <span>{t("automations.editor.descLabel")}</span>
                   <input
-                    placeholder="What this automation accomplishes"
+                    placeholder={t("automations.editor.descPlaceholder")}
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Assigned Agent</span>
+                  <span>{t("automations.editor.assignedAgentLabel")}</span>
                   <select value={formAgentId} onChange={(e) => setFormAgentId(e.target.value)}>
-                    <option value="">Main Agent (Default)</option>
+                    <option value="">{t("automations.editor.mainAgentDefault")}</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name} ({a.role})
@@ -621,9 +644,9 @@ export function AutomationsPage() {
                 </label>
 
                 <label>
-                  <span>Schedule Presets</span>
+                  <span>{t("automations.editor.schedulePresetsLabel")}</span>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                    {PRESETS.map((p) => (
+                    {presets.map((p) => (
                       <button
                         type="button"
                         key={p.cron}
@@ -637,7 +660,7 @@ export function AutomationsPage() {
                 </label>
 
                 <label>
-                  <span>Cron Expression (5 fields: min hour day month weekday)</span>
+                  <span>{t("automations.editor.cronExpressionLabel")}</span>
                   <input
                     required
                     placeholder="0 9 * * *"
@@ -648,11 +671,11 @@ export function AutomationsPage() {
                 </label>
 
                 <label>
-                  <span>Agent Prompt</span>
+                  <span>{t("automations.editor.agentPromptLabel")}</span>
                   <textarea
                     required
                     rows={5}
-                    placeholder="Describe the exact objective and steps the agent should execute..."
+                    placeholder={t("automations.editor.agentPromptPlaceholder")}
                     value={formPrompt}
                     onChange={(e) => setFormPrompt(e.target.value)}
                   />
@@ -662,15 +685,15 @@ export function AutomationsPage() {
               <footer>
                 {editingId && (
                   <button type="button" className="danger-button" onClick={() => deleteAutomation(editingId)}>
-                    Delete
+                    {t("automations.editor.deleteBtn")}
                   </button>
                 )}
                 <span />
                 <button type="button" className="button-secondary" onClick={() => setDrawerOpen(false)}>
-                  Cancel
+                  {t("automations.editor.cancelBtn")}
                 </button>
                 <button className="button-primary automations-action-primary" disabled={saving}>
-                  {saving ? "Saving..." : "Save Automation"}
+                  {saving ? t("automations.editor.savingBtn") : t("automations.editor.saveBtn")}
                 </button>
               </footer>
             </form>
@@ -684,13 +707,13 @@ export function AutomationsPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
             <header>
               <div>
-                <span>Run History</span>
+                <span>{t("automations.history.kicker")}</span>
                 <h2>{historyAutomation.name}</h2>
               </div>
               <button
                 type="button"
                 className="automations-drawer-close"
-                aria-label="Close"
+                aria-label={t("common.close")}
                 onClick={() => setHistoryDrawerOpen(false)}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -701,10 +724,10 @@ export function AutomationsPage() {
             </header>
             <section style={{ padding: "20px 26px" }}>
               {historyLoading ? (
-                <div className="workspace-notice">Loading run history...</div>
+                <div className="workspace-notice">{t("automations.history.loading")}</div>
               ) : runs.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "var(--npati-gray-500)" }}>
-                  No runs recorded yet.
+                  {t("automations.history.noRuns")}
                 </div>
               ) : (
                 <div className="history-runs-list">
@@ -712,21 +735,23 @@ export function AutomationsPage() {
                     <div key={r.id} className="history-run-item">
                       <div className="history-run-header">
                         <span className={`status-pill ${r.status}`}>{r.status.toUpperCase()}</span>
-                        <small style={{ color: "var(--npati-gray-500)" }}>{new Date(r.startedAt).toLocaleString()}</small>
+                        <small style={{ color: "var(--npati-gray-500)" }}>
+                          {new Date(r.startedAt).toLocaleString(language === "uk" ? "uk-UA" : language)}
+                        </small>
                       </div>
                       <div className="history-run-meta">
-                        <span>Duration: <strong>{r.durationMs}ms</strong></span>
+                        <span>{t("automations.history.duration")} <strong>{r.durationMs}ms</strong></span>
                         <code style={{ fontSize: "11px", color: "var(--npati-gray-500)" }}>#{r.id.slice(0, 8)}</code>
                       </div>
                       {r.result && (
                         <div className="history-run-result">
-                          <strong style={{ display: "block", marginBottom: 4, color: "#15803d" }}>✓ Final Result:</strong>
+                          <strong style={{ display: "block", marginBottom: 4, color: "#15803d" }}>{t("automations.history.finalResult")}</strong>
                           <p style={{ margin: 0 }}>{r.result}</p>
                         </div>
                       )}
                       {r.errorMessage && (
                         <div className="history-run-error">
-                          <strong>Error:</strong> {r.errorMessage}
+                          <strong>{t("automations.history.error")}</strong> {r.errorMessage}
                         </div>
                       )}
                     </div>
