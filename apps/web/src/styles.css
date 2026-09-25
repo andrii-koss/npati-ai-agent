@@ -14831,6 +14831,20 @@ body:has(.npati-dialog-backdrop) .sidebar {
   border-color: #bfdbfe;
 }
 
+.email-thread-unread-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+.email-thread-message-count {
+  color: #64748b;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
 .email-sanitized-html {
   max-width: 100%;
   overflow-x: auto;

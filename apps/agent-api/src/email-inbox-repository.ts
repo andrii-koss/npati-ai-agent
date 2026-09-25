@@ -600,7 +600,14 @@ export class EmailInboxRepository {
 
       params.push(limit);
       const query = `
-        SELECT ${threadCols} FROM company_email_threads
+        SELECT ${threadCols},
+          (SELECT COUNT(*)::int
+             FROM company_email_messages count_message
+            WHERE count_message.workspace_id = company_email_threads.workspace_id
+              AND count_message.company_id = company_email_threads.company_id
+              AND count_message.thread_id = company_email_threads.id
+              AND count_message.is_draft = false) AS "messagesCount"
+        FROM company_email_threads
         WHERE ${conditions.join(" AND ")}
         ORDER BY last_message_at DESC
         LIMIT $${params.length}
@@ -638,7 +645,16 @@ export class EmailInboxRepository {
       );
     }
 
-    return items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
+    return items
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+      .slice(0, limit)
+      .map((thread) => ({
+        ...thread,
+        messagesCount: Array.from(this.memoryMessages.values()).filter((message) =>
+          message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+          message.threadId === thread.id && !message.isDraft
+        ).length,
+      }));
   }
 
   async getFolderCounts(
