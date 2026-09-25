@@ -211,6 +211,42 @@ export function EmailInboxPage() {
   const [isResizing, setIsResizing] = useState(false);
   const [customerCardExpanded, setCustomerCardExpanded] = useState(false);
 
+  // Thread History vertical resizing
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyHeight, setHistoryHeight] = useState(140);
+  const [isResizingHistory, setIsResizingHistory] = useState(false);
+
+  const startHistoryResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingHistory(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingHistory) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const composerEl = document.querySelector(".email-inbox-composer");
+      if (!composerEl) return;
+      const composerRect = composerEl.getBoundingClientRect();
+      const newHeight = composerRect.top - e.clientY;
+      if (newHeight >= 60 && newHeight <= 450) {
+        setHistoryHeight(newHeight);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizingHistory(false);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizingHistory]);
+
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -1073,7 +1109,7 @@ export function EmailInboxPage() {
                       onClick={handleToggleTakeover}
                       title="Toggle manual operator takeover vs autonomous AI handling"
                     >
-                      {activeThread.isHumanTakeover ? "👤 Return to AI" : "🤖 Take Over"}
+                      {activeThread.isHumanTakeover ? "Return to AI" : "Take Over"}
                     </button>
 
                     <button
@@ -1082,7 +1118,7 @@ export function EmailInboxPage() {
                       onClick={handleToggleVip}
                       title="Toggle client VIP status"
                     >
-                      {activeThread.isVip ? "★ VIP Customer" : "☆ Make VIP"}
+                      {activeThread.isVip ? "VIP Customer" : "Make VIP"}
                     </button>
                   </div>
 
@@ -1093,7 +1129,7 @@ export function EmailInboxPage() {
                       onClick={() => void updateActiveThread({ folder: activeThread.folder === "archived" ? "inbox" : "archived" })}
                       title={activeThread.folder === "archived" ? "Move back to Inbox" : "Move to Archive"}
                     >
-                      {activeThread.folder === "archived" ? "📥 Unarchive" : "📁 Archive"}
+                      {activeThread.folder === "archived" ? "Unarchive" : "Archive"}
                     </button>
                     <button
                       type="button"
@@ -1101,7 +1137,7 @@ export function EmailInboxPage() {
                       onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
                       title={activeThread.folder === "spam" ? "Mark as Not Spam" : "Mark as Spam"}
                     >
-                      {activeThread.folder === "spam" ? "✓ Not Spam" : "🚫 Spam"}
+                      {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
                     </button>
                     <button
                       type="button"
@@ -1109,7 +1145,7 @@ export function EmailInboxPage() {
                       onClick={() => void deleteActiveThread()}
                       title="Delete this conversation"
                     >
-                      🗑️ Delete
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -1166,37 +1202,37 @@ export function EmailInboxPage() {
               {/* Draft review box */}
               {draftMessageId && (
                 <div className="email-inbox-draft-box">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>{draftIsAiGenerated ? "🤖 AI Response Draft" : "Saved Email Draft"}</span>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>{draftIsAiGenerated ? "AI Response Draft" : "Saved Email Draft"}</span>
                       {draftIsAiGenerated && activeThread.aiConfidenceScore != null && (
-                        <span style={{ fontSize: 11, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "2px 6px", borderRadius: 4 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "1px 6px", borderRadius: 4 }}>
                           {Math.round(activeThread.aiConfidenceScore * 100)}% Confidence
                         </span>
                       )}
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         type="button"
                         className="button-primary automations-action-primary"
-                        style={{ fontSize: 12, padding: "5px 12px" }}
+                        style={{ fontSize: 11.5, padding: "4px 10px", lineHeight: 1.2 }}
                         disabled={sending}
                         onClick={handleApproveDraft}
                       >
-                        {sending ? "Sending..." : draftIsAiGenerated ? "✓ Send AI Draft" : "Send Draft"}
+                        {sending ? "Sending..." : draftIsAiGenerated ? "Send AI Draft" : "Send Draft"}
                       </button>
                       <button
                         type="button"
                         className="button-secondary"
-                        style={{ fontSize: 12, padding: "5px 10px" }}
+                        style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
                         onClick={() => setDraftEditing(!draftEditing)}
                       >
-                        {draftEditing ? "Done" : "✏️ Edit"}
+                        {draftEditing ? "Done" : "Edit"}
                       </button>
                       <button
                         type="button"
                         className="button-secondary"
-                        style={{ fontSize: 12, padding: "5px 10px" }}
+                        style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
                         onClick={() => {
                           setDraftMessageId(null);
                           setDraftEditing(false);
@@ -1295,19 +1331,60 @@ export function EmailInboxPage() {
               </div>
 
               {auditHistory.length > 0 && (
-                <details style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
-                  <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#334155" }}>
-                    Thread history ({auditHistory.length})
-                  </summary>
-                  <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                    {auditHistory.map((entry) => (
-                      <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
-                        <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
-                        <time>{new Date(entry.createdAt).toLocaleString()}</time>
-                      </div>
-                    ))}
+                <div className="email-thread-history-section">
+                  {historyOpen && (
+                    <div
+                      className={`email-history-resizer ${isResizingHistory ? "resizing" : ""}`}
+                      onMouseDown={startHistoryResizing}
+                      title="Drag up or down to resize history panel"
+                    >
+                      <div className="email-history-resizer-line" />
+                    </div>
+                  )}
+                  <div
+                    className="email-history-header"
+                    onClick={() => setHistoryOpen(!historyOpen)}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 14px",
+                      background: "#f8fafc",
+                      borderTop: "1px solid #e2e8f0",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                      Thread history ({auditHistory.length})
+                    </span>
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                      {historyOpen ? "▲ Hide" : "▼ Show"}
+                    </span>
                   </div>
-                </details>
+                  {historyOpen && (
+                    <div
+                      className="email-history-scroll"
+                      style={{
+                        height: `${historyHeight}px`,
+                        overflowY: "auto",
+                        padding: "8px 14px",
+                        background: "#ffffff",
+                        borderTop: "1px solid #f1f5f9",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      {auditHistory.map((entry) => (
+                        <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
+                          <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
+                          <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Composer */}

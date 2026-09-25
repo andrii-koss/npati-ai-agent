@@ -14632,6 +14632,42 @@ body:has(.npati-dialog-backdrop) .sidebar {
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.08);
 }
 
+/* Thread History Section with Resizer */
+.email-thread-history-section {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.email-history-resizer {
+  height: 7px;
+  cursor: row-resize;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 140ms ease;
+}
+
+.email-history-resizer:hover,
+.email-history-resizer.resizing {
+  background: #ffe4e6;
+}
+
+.email-history-resizer-line {
+  width: 36px;
+  height: 2px;
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.email-history-resizer:hover .email-history-resizer-line,
+.email-history-resizer.resizing .email-history-resizer-line {
+  background: var(--npati-red);
+}
+
 .email-inbox-empty-detail {
   height: 100%;
   display: flex;
