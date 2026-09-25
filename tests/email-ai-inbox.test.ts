@@ -665,8 +665,16 @@ describe("Email / AI Inbox Module", () => {
       inReplyTo: `<${composed.message.messageId}@company.com>`,
     });
     expect(inbound.thread.id).toBe(composed.thread.id);
+    await new EmailAIProcessor(isolatedRepo).processInbound(mockAuth, "compose-company", {
+      from: "customer@example.net",
+      to: "sales@company.com",
+      subject: "Re: A new conversation",
+      body: "A second new reply.\n\nOn Fri, Sep 25, 2026 customer wrote:\n> Earlier text",
+      messageId: "<recipient-reply-2@example.net>",
+      inReplyTo: "<recipient-reply@example.net>",
+    });
     const history = await isolatedRepo.listMessages(mockAuth, "compose-company", composed.thread.id);
-    expect(history.map((message) => message.direction)).toEqual(["outbound", "inbound"]);
+    expect(history.map((message) => message.direction)).toEqual(["outbound", "inbound", "inbound"]);
     await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "inbox" })).resolves.toEqual([
       expect.objectContaining({ id: composed.thread.id }),
     ]);
@@ -674,19 +682,21 @@ describe("Email / AI Inbox Module", () => {
       expect.objectContaining({ id: composed.thread.id }),
     ]);
     await expect(isolatedRepo.getFolderCounts(mockAuth, "compose-company")).resolves.toMatchObject({
-      inbox: 1, sent: 1, drafts: 0, archived: 0, spam: 0,
+      inbox: 2, sent: 1, drafts: 0, archived: 0, spam: 0,
     });
 
     const countsResponse = await app.inject({
       method: "GET", url: "/companies/compose-company/email-inbox/folder-counts",
     });
     expect(countsResponse.statusCode).toBe(200);
-    expect(countsResponse.json().counts).toMatchObject({ inbox: 1, sent: 1 });
+    expect(countsResponse.json().counts).toMatchObject({ inbox: 2, sent: 1 });
 
     const deleted = await app.inject({
       method: "DELETE", url: `/companies/compose-company/email-inbox/threads/${composed.thread.id}`,
     });
     expect(deleted.statusCode).toBe(200);
+    await expect(isolatedRepo.isExternalMessageDeleted(mockAuth, "compose-company", "<recipient-reply@example.net>")).resolves.toBe(true);
+    await expect(isolatedRepo.isExternalMessageDeleted(mockAuth, "compose-company", "<recipient-reply-2@example.net>")).resolves.toBe(true);
     await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "inbox" })).resolves.toEqual([]);
     await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "sent" })).resolves.toEqual([]);
     const jobs = await isolatedRepo.claimJobs("compose-test-worker", 10);
