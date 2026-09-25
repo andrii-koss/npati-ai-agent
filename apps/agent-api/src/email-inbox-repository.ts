@@ -64,18 +64,6 @@ export function normalizeEmailSubject(subject?: string | null): string {
   return clean.replace(/\s+/g, " ").trim();
 }
 
-export function subjectCompareKey(subject?: string | null): string {
-  const norm = normalizeEmailSubject(subject);
-  return norm.toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
-}
-
-export function cleanEmailSnippet(text?: string | null): string {
-  if (!text) return "";
-  const clean = text
-    .split(/\r?\nOn .+?wrote:|\r?\n--- Original Message ---|\r?\n_{3,}|\r?\nFrom:/i)[0] || text;
-  return clean.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 180);
-}
-
 export function extractCandidateMessageIds(headerValue?: string | null): string[] {
   if (!headerValue || typeof headerValue !== "string") return [];
   const candidates = new Set<string>();
@@ -144,12 +132,16 @@ export class EmailInboxRepository {
     };
     return {
       ...account,
-      imapConfig: { ...account.imapConfig, password: encrypt(account.imapConfig.password),
+      imapConfig: {
+        ...account.imapConfig, password: encrypt(account.imapConfig.password),
         accessToken: encrypt(account.imapConfig.accessToken), refreshToken: encrypt(account.imapConfig.refreshToken),
-        clientSecret: encrypt(account.imapConfig.clientSecret) },
-      smtpConfig: { ...account.smtpConfig, password: encrypt(account.smtpConfig.password),
+        clientSecret: encrypt(account.imapConfig.clientSecret)
+      },
+      smtpConfig: {
+        ...account.smtpConfig, password: encrypt(account.smtpConfig.password),
         accessToken: encrypt(account.smtpConfig.accessToken), refreshToken: encrypt(account.smtpConfig.refreshToken),
-        clientSecret: encrypt(account.smtpConfig.clientSecret) },
+        clientSecret: encrypt(account.smtpConfig.clientSecret)
+      },
     };
   }
 
@@ -160,12 +152,16 @@ export class EmailInboxRepository {
     };
     return {
       ...account,
-      imapConfig: { ...account.imapConfig, password: decrypt(account.imapConfig.password),
+      imapConfig: {
+        ...account.imapConfig, password: decrypt(account.imapConfig.password),
         accessToken: decrypt(account.imapConfig.accessToken), refreshToken: decrypt(account.imapConfig.refreshToken),
-        clientSecret: decrypt(account.imapConfig.clientSecret) },
-      smtpConfig: { ...account.smtpConfig, password: decrypt(account.smtpConfig.password),
+        clientSecret: decrypt(account.imapConfig.clientSecret)
+      },
+      smtpConfig: {
+        ...account.smtpConfig, password: decrypt(account.smtpConfig.password),
         accessToken: decrypt(account.smtpConfig.accessToken), refreshToken: decrypt(account.smtpConfig.refreshToken),
-        clientSecret: decrypt(account.smtpConfig.clientSecret) },
+        clientSecret: decrypt(account.smtpConfig.clientSecret)
+      },
     };
   }
 
@@ -250,14 +246,16 @@ export class EmailInboxRepository {
            client_id, encrypted_client_secret, redirect_uri, expires_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [input.stateHash, ctx.workspaceId, companyId, accountId, ctx.userId, this.vault.encrypt(input.verifier),
-          input.tokenUrl, input.clientId, input.clientSecret ? this.vault.encrypt(input.clientSecret) : null,
-          input.redirectUri, input.expiresAt]
+        input.tokenUrl, input.clientId, input.clientSecret ? this.vault.encrypt(input.clientSecret) : null,
+        input.redirectUri, input.expiresAt]
       );
       return;
     }
-    this.memoryOAuthStates.set(input.stateHash, { workspaceId: ctx.workspaceId, companyId, accountId, userId: ctx.userId,
+    this.memoryOAuthStates.set(input.stateHash, {
+      workspaceId: ctx.workspaceId, companyId, accountId, userId: ctx.userId,
       verifier: input.verifier, tokenUrl: input.tokenUrl, clientId: input.clientId, clientSecret: input.clientSecret,
-      redirectUri: input.redirectUri, expiresAt: input.expiresAt });
+      redirectUri: input.redirectUri, expiresAt: input.expiresAt
+    });
   }
 
   async consumeOAuthState(stateHash: string): Promise<{
@@ -274,8 +272,10 @@ export class EmailInboxRepository {
       );
       const row = result.rows[0];
       if (!row) return null;
-      return { ...row, verifier: this.vault.decrypt(row.encryptedVerifier),
-        clientSecret: row.encryptedClientSecret ? this.vault.decrypt(row.encryptedClientSecret) : undefined };
+      return {
+        ...row, verifier: this.vault.decrypt(row.encryptedVerifier),
+        clientSecret: row.encryptedClientSecret ? this.vault.decrypt(row.encryptedClientSecret) : undefined
+      };
     }
     const item = this.memoryOAuthStates.get(stateHash);
     this.memoryOAuthStates.delete(stateHash);
@@ -396,9 +396,9 @@ export class EmailInboxRepository {
       imapConfig: input.imapConfig || {},
       smtpConfig: input.smtpConfig || {},
       rateLimits: input.rateLimits || {
-        maxPerHour: 100,
-        maxPerDay: 1000,
-        maxPerRecipientDaily: 100,
+        maxPerHour: 50,
+        maxPerDay: 500,
+        maxPerRecipientDaily: 5,
         maxFollowups: 3,
         maxCompanyPerHour: 500,
         maxCompanyPerDay: 5000,
@@ -546,31 +546,14 @@ export class EmailInboxRepository {
     } = {}
   ): Promise<CompanyEmailThread[]> {
     const limit = Math.min(100, Math.max(1, filter.limit || 50));
-    await this.consolidateCustomerDuplicates(ctx, companyId).catch(() => undefined);
 
     if (this.pool) {
       const conditions: string[] = ["workspace_id = $1", "company_id = $2"];
       const params: any[] = [ctx.workspaceId, companyId];
 
       if (filter.folder) {
-        if (filter.folder === "sent") {
-          conditions.push(`(folder = 'sent' OR EXISTS (
-            SELECT 1 FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'outbound'
-              AND m.is_draft = false
-          )) AND folder != 'spam'`);
-        } else if (filter.folder === "drafts") {
-          conditions.push(`(folder = 'drafts' OR EXISTS (
-            SELECT 1 FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'outbound'
-              AND m.is_draft = true
-          )) AND folder != 'spam'`);
-        } else {
-          params.push(filter.folder);
-          conditions.push(`folder = $${params.length}`);
-        }
+        params.push(filter.folder);
+        conditions.push(`folder = $${params.length}`);
       }
       if (filter.status) {
         params.push(filter.status);
@@ -597,73 +580,20 @@ export class EmailInboxRepository {
 
       params.push(limit);
       const query = `
-        SELECT
-          ${threadCols},
-          (
-            SELECT m.body_text
-            FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ) AS "rawLatestSnippet",
-          (
-            SELECT m.body_text
-            FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'inbound'
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ) AS "rawInboundSnippet",
-          (
-            SELECT m.body_text
-            FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'outbound'
-              AND m.is_draft = false
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ) AS "rawOutboundSnippet"
-        FROM company_email_threads
+        SELECT ${threadCols} FROM company_email_threads
         WHERE ${conditions.join(" AND ")}
         ORDER BY last_message_at DESC
         LIMIT $${params.length}
       `;
       const result = await this.pool.query<CompanyEmailThread>(query, params);
-      return result.rows.map((row) => {
-        const t = { ...row };
-        t.latestMessageSnippet = cleanEmailSnippet((row as any).rawLatestSnippet);
-        t.latestInboundSnippet = cleanEmailSnippet((row as any).rawInboundSnippet);
-        t.latestOutboundSnippet = cleanEmailSnippet((row as any).rawOutboundSnippet);
-        delete (t as any).rawLatestSnippet;
-        delete (t as any).rawInboundSnippet;
-        delete (t as any).rawOutboundSnippet;
-        return t;
-      });
+      return result.rows;
     }
 
     let items = Array.from(this.memoryThreads.values()).filter(
       (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId
     );
 
-    if (filter.folder) {
-      if (filter.folder === "sent") {
-        items = items.filter((t) => {
-          if (t.folder === "spam") return false;
-          if (t.folder === "sent") return true;
-          const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
-          return msgs.some((m) => m.direction === "outbound" && !m.isDraft);
-        });
-      } else if (filter.folder === "drafts") {
-        items = items.filter((t) => {
-          if (t.folder === "spam") return false;
-          if (t.folder === "drafts") return true;
-          const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
-          return msgs.some((m) => m.direction === "outbound" && m.isDraft);
-        });
-      } else {
-        items = items.filter((t) => t.folder === filter.folder);
-      }
-    }
+    if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
     if (filter.status) items = items.filter((t) => t.status === filter.status);
     if (filter.priority) items = items.filter((t) => t.priority === filter.priority);
     if (filter.accountId) items = items.filter((t) => t.emailAccountId === filter.accountId);
@@ -678,85 +608,7 @@ export class EmailInboxRepository {
       );
     }
 
-    const sorted = items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
-    return sorted.map((item) => {
-      const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === item.id);
-      const sortedMsgs = [...msgs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      const latest = sortedMsgs[0];
-      const latestInbound = sortedMsgs.find((m) => m.direction === "inbound");
-      const latestOutbound = sortedMsgs.find((m) => m.direction === "outbound" && !m.isDraft);
-      return {
-        ...item,
-        latestMessageSnippet: cleanEmailSnippet(latest?.bodyText),
-        latestInboundSnippet: cleanEmailSnippet(latestInbound?.bodyText),
-        latestOutboundSnippet: cleanEmailSnippet(latestOutbound?.bodyText),
-      };
-    });
-  }
-
-  async getFolderCounts(
-    ctx: AuthContext,
-    companyId: string,
-    accountId?: string
-  ): Promise<{ inbox: number; sent: number; drafts: number; archived: number; spam: number }> {
-    if (this.pool) {
-      const params: any[] = [ctx.workspaceId, companyId];
-      let accountCond = "";
-      if (accountId && accountId !== "all") {
-        params.push(accountId);
-        accountCond = `AND email_account_id = $${params.length}`;
-      }
-      const query = `
-        SELECT
-          COUNT(*) FILTER (WHERE folder = 'inbox')::int AS inbox,
-          COUNT(*) FILTER (WHERE (folder = 'sent' OR EXISTS (
-            SELECT 1 FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'outbound'
-              AND m.is_draft = false
-          )) AND folder != 'spam')::int AS sent,
-          COUNT(*) FILTER (WHERE (folder = 'drafts' OR EXISTS (
-            SELECT 1 FROM company_email_messages m
-            WHERE m.thread_id = company_email_threads.id
-              AND m.direction = 'outbound'
-              AND m.is_draft = true
-          )) AND folder != 'spam')::int AS drafts,
-          COUNT(*) FILTER (WHERE folder = 'archived')::int AS archived,
-          COUNT(*) FILTER (WHERE folder = 'spam')::int AS spam
-        FROM company_email_threads
-        WHERE workspace_id = $1 AND company_id = $2 ${accountCond}
-      `;
-      const res = await this.pool.query(query, params);
-      const row = res.rows[0] || {};
-      return {
-        inbox: Number(row.inbox || 0),
-        sent: Number(row.sent || 0),
-        drafts: Number(row.drafts || 0),
-        archived: Number(row.archived || 0),
-        spam: Number(row.spam || 0),
-      };
-    }
-
-    const items = Array.from(this.memoryThreads.values()).filter(
-      (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId && (!accountId || accountId === "all" || t.emailAccountId === accountId)
-    );
-    return {
-      inbox: items.filter((t) => t.folder === "inbox").length,
-      sent: items.filter((t) => {
-        if (t.folder === "spam") return false;
-        if (t.folder === "sent") return true;
-        const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
-        return msgs.some((m) => m.direction === "outbound" && !m.isDraft);
-      }).length,
-      drafts: items.filter((t) => {
-        if (t.folder === "spam") return false;
-        if (t.folder === "drafts") return true;
-        const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
-        return msgs.some((m) => m.direction === "outbound" && m.isDraft);
-      }).length,
-      archived: items.filter((t) => t.folder === "archived").length,
-      spam: items.filter((t) => t.folder === "spam").length,
-    };
+    return items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
   }
 
   async getThread(ctx: AuthContext, companyId: string, threadId: string): Promise<CompanyEmailThread | null> {
@@ -796,60 +648,6 @@ export class EmailInboxRepository {
     return null;
   }
 
-  async mergeThreads(
-    ctx: AuthContext,
-    companyId: string,
-    targetThreadId: string,
-    sourceThreadId: string
-  ): Promise<void> {
-    if (!targetThreadId || !sourceThreadId || targetThreadId === sourceThreadId) return;
-    if (this.pool) {
-      await this.pool.query(
-        `UPDATE company_email_messages SET thread_id = $1 WHERE workspace_id = $2 AND thread_id = $3`,
-        [targetThreadId, ctx.workspaceId, sourceThreadId]
-      );
-      await this.pool.query(
-        `DELETE FROM company_email_threads WHERE workspace_id = $1 AND id = $2`,
-        [ctx.workspaceId, sourceThreadId]
-      );
-      return;
-    }
-    for (const m of this.memoryMessages.values()) {
-      if (m.threadId === sourceThreadId) {
-        m.threadId = targetThreadId;
-      }
-    }
-    this.memoryThreads.delete(sourceThreadId);
-  }
-
-  async consolidateCustomerDuplicates(ctx: AuthContext, companyId: string): Promise<void> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailThread>(
-        `SELECT ${threadCols} FROM company_email_threads
-         WHERE workspace_id = $1
-         ORDER BY last_message_at DESC
-         LIMIT 100`,
-        [ctx.workspaceId]
-      );
-      const threads = result.rows;
-      const seen = new Map<string, CompanyEmailThread>();
-      for (const t of threads) {
-        const compare = subjectCompareKey(t.subject);
-        if (!compare) continue;
-        const key = `${t.customerEmail.toLowerCase()}:${compare}`;
-        const existing = seen.get(key);
-        if (existing) {
-          const target = existing.folder === "inbox" ? existing : t;
-          const source = target === existing ? t : existing;
-          await this.mergeThreads(ctx, companyId, target.id, source.id);
-          seen.set(key, target);
-        } else {
-          seen.set(key, t);
-        }
-      }
-    }
-  }
-
   async findMessageByReferenceIds(
     ctx: AuthContext,
     companyId: string,
@@ -867,17 +665,17 @@ export class EmailInboxRepository {
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailMessage>(
         `SELECT ${messageCols} FROM company_email_messages
-         WHERE workspace_id = $1
-           AND (message_id = ANY($2::text[]) OR id::text = ANY($2::text[]))
+         WHERE workspace_id = $1 AND company_id = $2
+           AND (message_id = ANY($3::text[]) OR id::text = ANY($3::text[]))
          ORDER BY created_at DESC
          LIMIT 1`,
-        [ctx.workspaceId, idList]
+        [ctx.workspaceId, companyId, idList]
       );
       return result.rows[0] ?? null;
     }
 
     for (const m of this.memoryMessages.values()) {
-      if (m.workspaceId === ctx.workspaceId) {
+      if (m.workspaceId === ctx.workspaceId && m.companyId === companyId) {
         if ((m.messageId && idList.includes(m.messageId)) || idList.includes(m.id)) {
           return m;
         }
@@ -890,22 +688,22 @@ export class EmailInboxRepository {
     ctx: AuthContext,
     companyId: string,
     customerEmail: string,
-    limit = 25
+    limit = 15
   ): Promise<CompanyEmailThread[]> {
     const cleanEmail = customerEmail.trim().toLowerCase();
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailThread>(
         `SELECT ${threadCols} FROM company_email_threads
-         WHERE workspace_id = $1
-           AND LOWER(customer_email) = $2
+         WHERE workspace_id = $1 AND company_id = $2
+           AND LOWER(customer_email) = $3
          ORDER BY last_message_at DESC
-         LIMIT $3`,
-        [ctx.workspaceId, cleanEmail, limit]
+         LIMIT $4`,
+        [ctx.workspaceId, companyId, cleanEmail, limit]
       );
       return result.rows;
     }
     return Array.from(this.memoryThreads.values())
-      .filter((t) => t.workspaceId === ctx.workspaceId && t.customerEmail.toLowerCase() === cleanEmail)
+      .filter((t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId && t.customerEmail.toLowerCase() === cleanEmail)
       .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
       .slice(0, limit);
   }
@@ -921,44 +719,25 @@ export class EmailInboxRepository {
       threadKey?: string | null;
     }
   ): Promise<CompanyEmailThread | null> {
-    // 1. Try In-Reply-To and References header lookup (Message-ID linkage across workspace)
+    // 1. Try In-Reply-To and References header lookup (Message-ID linkage)
     if (params.inReplyTo || params.references) {
       const parentMsg = await this.findMessageByReferenceIds(ctx, companyId, [params.inReplyTo, params.references]);
       if (parentMsg?.threadId) {
-        const thread = (await this.getThread(ctx, parentMsg.companyId, parentMsg.threadId))
-          || (await this.getThread(ctx, companyId, parentMsg.threadId));
+        const thread = await this.getThread(ctx, companyId, parentMsg.threadId);
         if (thread) return thread;
       }
     }
 
-    const cleanEmail = params.customerEmail.trim().toLowerCase();
-    const targetCompare = subjectCompareKey(params.subject);
-    const recentThreads = await this.listRecentThreadsForCustomer(ctx, companyId, cleanEmail, 25);
-
-    // 2. Search recent threads for this customer email by normalized subject words
-    if (targetCompare) {
-      for (const candidate of recentThreads) {
-        const candidateCompare = subjectCompareKey(candidate.subject);
-        if (candidateCompare && candidateCompare === targetCompare) {
-          // Auto-merge any duplicate threads with this customer that share the topic
-          for (const other of recentThreads) {
-            if (other.id !== candidate.id && subjectCompareKey(other.subject) === targetCompare) {
-              await this.mergeThreads(ctx, companyId, candidate.id, other.id);
-            }
-          }
-          return candidate;
-        }
-      }
-    }
-
-    // 3. Try explicit threadKey if provided
+    // 2. Try explicit threadKey if provided
     if (params.threadKey) {
       const thread = await this.findThreadByKey(ctx.workspaceId, companyId, params.threadKey);
       if (thread) return thread;
     }
 
-    // 4. Try normalized threadKey and legacy key formats
+    const cleanEmail = params.customerEmail.trim().toLowerCase();
     const cleanSubject = normalizeEmailSubject(params.subject);
+
+    // 3. Try normalized threadKey and legacy key formats
     if (cleanSubject) {
       const normalizedKey = `th_${cleanEmail.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent(cleanSubject.slice(0, 50).toLowerCase())}`;
       const thread = await this.findThreadByKey(ctx.workspaceId, companyId, normalizedKey);
@@ -979,13 +758,12 @@ export class EmailInboxRepository {
       if (legacyThreadRaw2) return legacyThreadRaw2;
     }
 
-    // 5. If this is a reply (subject starts with Re:, Fwd:, etc.) and there is an active ongoing thread
-    // with this customer, match the active thread!
-    const isReply = /^(re|fwd|fw|aw|antw|wg|odp)\s*[:\-]/i.test(params.subject.trim());
-    if (isReply) {
-      const activeRecent = recentThreads.find((t) => t.status !== "closed" && t.folder !== "spam");
-      if (activeRecent) {
-        return activeRecent;
+    // 4. Fallback: Search recent threads for this customer email with matching normalized subject
+    const recentThreads = await this.listRecentThreadsForCustomer(ctx, companyId, cleanEmail, 15);
+    for (const candidate of recentThreads) {
+      const candidateNorm = normalizeEmailSubject(candidate.subject).toLowerCase();
+      if (candidateNorm && cleanSubject.toLowerCase() === candidateNorm) {
+        return candidate;
       }
     }
 
@@ -1826,13 +1604,9 @@ export class EmailInboxRepository {
   async checkRateLimit(
     companyId: string,
     account: CompanyEmailAccount,
-    recipientEmail: string,
-    options?: { isHuman?: boolean; skipRecipientLimit?: boolean }
+    recipientEmail: string
   ): Promise<{ allowed: boolean; reason?: string }> {
     const normalizedRecipient = recipientEmail.trim().toLowerCase();
-    const skipRecipientCheck = Boolean(options?.isHuman || options?.skipRecipientLimit);
-    const maxRecipientDaily = Math.max(account.rateLimits?.maxPerRecipientDaily || 0, 100);
-
     if (this.pool) {
       const result = await this.pool.query<{ hour_count: string; day_count: string; recipient_count: string; company_hour_count: string; company_day_count: string }>(
         `SELECT
@@ -1850,22 +1624,22 @@ export class EmailInboxRepository {
       const sentToRecipient = Number(result.rows[0]?.recipient_count || 0);
       const companyLastHour = Number(result.rows[0]?.company_hour_count || 0);
       const companyLastDay = Number(result.rows[0]?.company_day_count || 0);
-      if (companyLastHour >= (account.rateLimits?.maxCompanyPerHour || 500)) {
-        return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits?.maxCompanyPerHour || 500} emails).` };
+      if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
+        return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
       }
-      if (companyLastDay >= (account.rateLimits?.maxCompanyPerDay || 5000)) {
-        return { allowed: false, reason: `Company daily limit reached (${companyLastDay}/${account.rateLimits?.maxCompanyPerDay || 5000} emails).` };
+      if (companyLastDay >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+        return { allowed: false, reason: `Company daily limit reached (${companyLastDay}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
       }
-      if (sentLastHour >= (account.rateLimits?.maxPerHour || 50)) {
-        return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits?.maxPerHour || 50} emails).` };
+      if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
+        return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
       }
-      if (sentLastDay >= (account.rateLimits?.maxPerDay || 500)) {
-        return { allowed: false, reason: `Daily limit reached (${sentLastDay}/${account.rateLimits?.maxPerDay || 500} emails).` };
+      if (sentLastDay >= (account.rateLimits.maxPerDay || 500)) {
+        return { allowed: false, reason: `Daily limit reached (${sentLastDay}/${account.rateLimits.maxPerDay} emails).` };
       }
-      if (!skipRecipientCheck && sentToRecipient >= maxRecipientDaily) {
+      if (sentToRecipient >= (account.rateLimits.maxPerRecipientDaily || 5)) {
         return {
           allowed: false,
-          reason: `Daily limit for recipient ${recipientEmail} reached (${sentToRecipient}/${maxRecipientDaily}).`,
+          reason: `Daily limit for recipient ${recipientEmail} reached (${sentToRecipient}/${account.rateLimits.maxPerRecipientDaily}).`,
         };
       }
       return { allowed: true };
@@ -1881,32 +1655,32 @@ export class EmailInboxRepository {
     const companySent = (this.sentTimestamps.get(companyKey) || []).filter((t) => t > oneDayAgo);
     this.sentTimestamps.set(companyKey, companySent);
     const companyLastHour = companySent.filter((t) => t > oneHourAgo).length;
-    if (companyLastHour >= (account.rateLimits?.maxCompanyPerHour || 500)) {
-      return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits?.maxCompanyPerHour || 500} emails).` };
+    if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
+      return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
     }
-    if (companySent.length >= (account.rateLimits?.maxCompanyPerDay || 5000)) {
-      return { allowed: false, reason: `Company daily limit reached (${companySent.length}/${account.rateLimits?.maxCompanyPerDay || 5000} emails).` };
+    if (companySent.length >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+      return { allowed: false, reason: `Company daily limit reached (${companySent.length}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
     }
 
     const accountSent = (this.sentTimestamps.get(accountKey) || []).filter((t) => t > oneDayAgo);
     this.sentTimestamps.set(accountKey, accountSent);
 
     const sentLastHour = accountSent.filter((t) => t > oneHourAgo).length;
-    if (sentLastHour >= (account.rateLimits?.maxPerHour || 50)) {
-      return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits?.maxPerHour || 50} emails).` };
+    if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
+      return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
     }
 
-    if (accountSent.length >= (account.rateLimits?.maxPerDay || 500)) {
-      return { allowed: false, reason: `Daily limit reached (${accountSent.length}/${account.rateLimits?.maxPerDay || 500} emails).` };
+    if (accountSent.length >= (account.rateLimits.maxPerDay || 500)) {
+      return { allowed: false, reason: `Daily limit reached (${accountSent.length}/${account.rateLimits.maxPerDay} emails).` };
     }
 
     const recipientSent = (this.sentTimestamps.get(recipientKey) || []).filter((t) => t > oneDayAgo);
     this.sentTimestamps.set(recipientKey, recipientSent);
 
-    if (!skipRecipientCheck && recipientSent.length >= maxRecipientDaily) {
+    if (recipientSent.length >= (account.rateLimits.maxPerRecipientDaily || 5)) {
       return {
         allowed: false,
-        reason: `Daily limit for recipient ${recipientEmail} reached (${recipientSent.length}/${maxRecipientDaily}).`,
+        reason: `Daily limit for recipient ${recipientEmail} reached (${recipientSent.length}/${account.rateLimits.maxPerRecipientDaily}).`,
       };
     }
 
@@ -1948,19 +1722,16 @@ export class EmailInboxRepository {
   async reserveSendQuota(
     companyId: string,
     account: CompanyEmailAccount,
-    recipientEmail: string,
-    options?: { isHuman?: boolean; skipRecipientLimit?: boolean }
+    recipientEmail: string
   ): Promise<{ allowed: boolean; reason?: string }> {
     if (!this.pool) {
-      const result = await this.checkRateLimit(companyId, account, recipientEmail, options);
+      const result = await this.checkRateLimit(companyId, account, recipientEmail);
       if (result.allowed) await this.recordSentEmail(companyId, account.id, recipientEmail);
       return result;
     }
 
     const client = await this.pool.connect();
     const recipient = recipientEmail.trim().toLowerCase();
-    const skipRecipientCheck = Boolean(options?.isHuman || options?.skipRecipientLimit);
-    const maxRecipientDaily = Math.max(account.rateLimits?.maxPerRecipientDaily || 0, 100);
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
@@ -1983,16 +1754,16 @@ export class EmailInboxRepository {
       const companyHourCount = Number(counts.rows[0]?.company_hour_count || 0);
       const companyDayCount = Number(counts.rows[0]?.company_day_count || 0);
       let deniedReason: string | undefined;
-      if (companyHourCount >= (account.rateLimits?.maxCompanyPerHour || 500)) {
-        deniedReason = `Company hourly limit reached (${companyHourCount}/${account.rateLimits?.maxCompanyPerHour || 500} emails).`;
-      } else if (companyDayCount >= (account.rateLimits?.maxCompanyPerDay || 5000)) {
-        deniedReason = `Company daily limit reached (${companyDayCount}/${account.rateLimits?.maxCompanyPerDay || 5000} emails).`;
-      } else if (hourCount >= (account.rateLimits?.maxPerHour || 50)) {
-        deniedReason = `Hourly limit reached (${hourCount}/${account.rateLimits?.maxPerHour || 50} emails).`;
-      } else if (dayCount >= (account.rateLimits?.maxPerDay || 500)) {
-        deniedReason = `Daily limit reached (${dayCount}/${account.rateLimits?.maxPerDay || 500} emails).`;
-      } else if (!skipRecipientCheck && recipientCount >= maxRecipientDaily) {
-        deniedReason = `Daily limit for recipient ${recipientEmail} reached (${recipientCount}/${maxRecipientDaily}).`;
+      if (companyHourCount >= (account.rateLimits.maxCompanyPerHour || 500)) {
+        deniedReason = `Company hourly limit reached (${companyHourCount}/${account.rateLimits.maxCompanyPerHour || 500} emails).`;
+      } else if (companyDayCount >= (account.rateLimits.maxCompanyPerDay || 5000)) {
+        deniedReason = `Company daily limit reached (${companyDayCount}/${account.rateLimits.maxCompanyPerDay || 5000} emails).`;
+      } else if (hourCount >= (account.rateLimits.maxPerHour || 50)) {
+        deniedReason = `Hourly limit reached (${hourCount}/${account.rateLimits.maxPerHour} emails).`;
+      } else if (dayCount >= (account.rateLimits.maxPerDay || 500)) {
+        deniedReason = `Daily limit reached (${dayCount}/${account.rateLimits.maxPerDay} emails).`;
+      } else if (recipientCount >= (account.rateLimits.maxPerRecipientDaily || 5)) {
+        deniedReason = `Daily limit for recipient ${recipientEmail} reached (${recipientCount}/${account.rateLimits.maxPerRecipientDaily}).`;
       }
       if (deniedReason) {
         await client.query("COMMIT");
@@ -2054,8 +1825,8 @@ export class EmailInboxRepository {
            locked_by AS "lockedBy", last_error AS "lastError", idempotency_key AS "idempotencyKey",
            created_at AS "createdAt", updated_at AS "updatedAt"`,
         [job.id, job.workspaceId, job.companyId, job.emailAccountId, job.threadId, job.messageId,
-          job.jobType, JSON.stringify(job.payload), job.maxAttempts, job.runAfter,
-          job.idempotencyKey, now]
+        job.jobType, JSON.stringify(job.payload), job.maxAttempts, job.runAfter,
+        job.idempotencyKey, now]
       );
       return result.rows[0]!;
     }
@@ -2097,8 +1868,10 @@ export class EmailInboxRepository {
       .sort((a, b) => new Date(a.runAfter).getTime() - new Date(b.runAfter).getTime())
       .slice(0, limit);
     return jobs.map((job) => {
-      const claimed = { ...job, status: "processing" as const, lockedAt: new Date().toISOString(), lockedBy: workerId,
-        attemptCount: job.attemptCount + 1, updatedAt: new Date().toISOString() };
+      const claimed = {
+        ...job, status: "processing" as const, lockedAt: new Date().toISOString(), lockedBy: workerId,
+        attemptCount: job.attemptCount + 1, updatedAt: new Date().toISOString()
+      };
       this.memoryJobs.set(job.id, claimed);
       return claimed;
     });
@@ -2126,9 +1899,11 @@ export class EmailInboxRepository {
       );
       return;
     }
-    this.memoryJobs.set(job.id, { ...job, status: terminal ? "failed" : "queued",
+    this.memoryJobs.set(job.id, {
+      ...job, status: terminal ? "failed" : "queued",
       lastError: message.slice(0, 2000), lockedAt: null, lockedBy: null,
-      runAfter: new Date(Date.now() + delaySeconds * 1000).toISOString(), updatedAt: new Date().toISOString() });
+      runAfter: new Date(Date.now() + delaySeconds * 1000).toISOString(), updatedAt: new Date().toISOString()
+    });
   }
 
   async cancelPendingFollowups(threadId: string): Promise<void> {
@@ -2165,7 +1940,7 @@ export class EmailInboxRepository {
            thread_id AS "threadId", notification_type AS "notificationType", title, body,
            is_read AS "isRead", created_at AS "createdAt"`,
         [notification.id, notification.workspaceId, companyId, notification.userId, notification.threadId,
-          notification.notificationType, notification.title, notification.body]
+        notification.notificationType, notification.title, notification.body]
       );
       return result.rows[0]!;
     }
@@ -2214,13 +1989,13 @@ export class EmailInboxRepository {
     const accounts = await this.listAccounts(ctx, companyId);
     const messages: CompanyEmailMessage[] = this.pool
       ? (await this.pool.query<CompanyEmailMessage>(
-          `SELECT ${messageCols} FROM company_email_messages
+        `SELECT ${messageCols} FROM company_email_messages
            WHERE workspace_id = $1 AND company_id = $2 ORDER BY created_at ASC`,
-          [ctx.workspaceId, companyId]
-        )).rows
+        [ctx.workspaceId, companyId]
+      )).rows
       : Array.from(this.memoryMessages.values())
-          .filter((message) => message.workspaceId === ctx.workspaceId && message.companyId === companyId)
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        .filter((message) => message.workspaceId === ctx.workspaceId && message.companyId === companyId)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
     const receivedEmails = messages.filter((message) => message.direction === "inbound").length;
     const completedOutbound = messages.filter((message) =>
@@ -2237,10 +2012,10 @@ export class EmailInboxRepository {
     const escalatedToHuman = threads.filter((thread) => thread.status === "waiting_human" || thread.isHumanTakeover).length;
     const editedAiResponsesCount = this.pool
       ? Number((await this.pool.query<{ count: string }>(
-          `SELECT COUNT(*)::text AS count FROM company_audit_logs
+        `SELECT COUNT(*)::text AS count FROM company_audit_logs
            WHERE workspace_id = $1 AND company_id = $2 AND action = 'email.ai_draft_edited'`,
-          [ctx.workspaceId, companyId]
-        )).rows[0]?.count || 0)
+        [ctx.workspaceId, companyId]
+      )).rows[0]?.count || 0)
       : 0;
     let highConf = 0;
     let medConf = 0;

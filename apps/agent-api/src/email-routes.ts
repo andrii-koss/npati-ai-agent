@@ -46,14 +46,14 @@ async function ctx(auth: AuthProvider, r: FastifyRequest, permission: EmailPermi
   const hasAccess = scope.permissions.includes(permission) ||
     (permission === "workspace:read" || emailReadPermission
       ? scope.permissions.includes("workspace:read") ||
-        scope.permissions.includes("workspace:write") ||
-        scope.permissions.includes("business:manage") ||
-        scope.permissions.includes("admin:all") ||
-        scope.permissions.includes("*")
+      scope.permissions.includes("workspace:write") ||
+      scope.permissions.includes("business:manage") ||
+      scope.permissions.includes("admin:all") ||
+      scope.permissions.includes("*")
       : scope.permissions.includes("business:manage") ||
-        scope.permissions.includes("workspace:write") ||
-        scope.permissions.includes("admin:all") ||
-        scope.permissions.includes("*"));
+      scope.permissions.includes("workspace:write") ||
+      scope.permissions.includes("admin:all") ||
+      scope.permissions.includes("*"));
 
   if (!hasAccess) {
     throw Object.assign(new Error(`Missing required permission: ${permission}`), { status: 403 });
@@ -233,10 +233,14 @@ export function registerEmailInboxRoutes(
         expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       });
       await repo.updateAccount(c, r.params.companyId, account.id, {
-        imapConfig: { authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
-          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {}) },
-        smtpConfig: { authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
-          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {}) },
+        imapConfig: {
+          authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
+          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {})
+        },
+        smtpConfig: {
+          authType: "oauth2", tokenUrl: tokenUrl.toString(), clientId: r.body.clientId.trim(),
+          ...(r.body.clientSecret ? { clientSecret: r.body.clientSecret } : {})
+        },
         status: "pending",
       });
       authorizationUrl.searchParams.set("response_type", "code");
@@ -260,19 +264,25 @@ export function registerEmailInboxRoutes(
         if (!state) throw Object.assign(new Error("OAuth state is invalid, expired, or already used"), { status: 400 });
         if (r.query.error) throw new Error(`OAuth authorization failed: ${r.query.error_description || r.query.error}`);
         if (!r.query.code) throw new Error("OAuth authorization code is required");
-        const body = new URLSearchParams({ grant_type: "authorization_code", code: r.query.code,
-          client_id: state.clientId, redirect_uri: state.redirectUri, code_verifier: state.verifier });
+        const body = new URLSearchParams({
+          grant_type: "authorization_code", code: r.query.code,
+          client_id: state.clientId, redirect_uri: state.redirectUri, code_verifier: state.verifier
+        });
         if (state.clientSecret) body.set("client_secret", state.clientSecret);
-        const tokenResponse = await fetch(state.tokenUrl, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-          body, redirect: "error", signal: AbortSignal.timeout(15_000) });
+        const tokenResponse = await fetch(state.tokenUrl, {
+          method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+          body, redirect: "error", signal: AbortSignal.timeout(15_000)
+        });
         const token = await tokenResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
         if (!tokenResponse.ok || !token.access_token) throw new Error(`OAuth token exchange failed: ${token.error || tokenResponse.status}`);
         const internalCtx: AuthContext = { userId: state.userId, workspaceId: state.workspaceId, permissions: ["admin:all"] };
         const account = await repo.getAccount(internalCtx, state.companyId, state.accountId);
         if (!account) throw Object.assign(new Error("Email account no longer exists"), { status: 404 });
-        const credentials = { authType: "oauth2" as const, accessToken: token.access_token,
+        const credentials = {
+          authType: "oauth2" as const, accessToken: token.access_token,
           refreshToken: token.refresh_token || account.imapConfig.refreshToken || account.smtpConfig.refreshToken,
-          tokenExpiresAt: new Date(Date.now() + Math.max(60, token.expires_in || 3600) * 1000).toISOString() };
+          tokenExpiresAt: new Date(Date.now() + Math.max(60, token.expires_in || 3600) * 1000).toISOString()
+        };
         await repo.updateAccount(internalCtx, state.companyId, state.accountId, {
           imapConfig: credentials, smtpConfig: credentials, status: "pending",
         });
@@ -379,10 +389,7 @@ export function registerEmailInboxRoutes(
         if (!account.testMode && account.status !== "connected") {
           throw Object.assign(new Error(`Email account is not connected (${account.status}). Open Email Settings and run Test Connection first.`), { status: 409 });
         }
-        const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!, {
-          isHuman: true,
-          skipRecipientLimit: true,
-        });
+        const quota = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0]!);
         if (!quota.allowed) throw Object.assign(new Error(`Rate limit exceeded: ${quota.reason}`), { status: 429 });
       }
 
@@ -391,22 +398,11 @@ export function registerEmailInboxRoutes(
         || rawAttachments.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0) > 25 * 1024 * 1024) {
         throw Object.assign(new Error("Attachments exceed the 20-file, 10 MB per file, or 25 MB total limit."), { status: 413 });
       }
-      let thread = await repo.findMatchingThread(c, r.params.companyId, {
-        customerEmail: toAddresses[0]!,
-        subject,
+      const thread = await repo.createThread(c, r.params.companyId, {
+        emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
+        status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
+        folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
       });
-      if (!thread) {
-        thread = await repo.createThread(c, r.params.companyId, {
-          emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
-          status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
-          folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
-        });
-      } else {
-        thread = await repo.updateThread(c, r.params.companyId, thread.id, {
-          lastMessageAt: new Date().toISOString(),
-          folder: isDraft ? "drafts" : "sent",
-        });
-      }
       const attachments = rawAttachments.length && attachmentStorage
         ? await attachmentStorage.persist(c, r.params.companyId, thread.id, rawAttachments)
         : rawAttachments;
@@ -452,34 +448,17 @@ export function registerEmailInboxRoutes(
       const c = await ctx(auth, r, "email:read_messages");
       r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
-      const [threads, folderCounts] = await Promise.all([
-        repo.listThreads(c, r.params.companyId, {
-          folder: r.query.folder,
-          status: r.query.status,
-          priority: r.query.priority,
-          search: r.query.search,
-          accountId: r.query.accountId,
-          isVip: r.query.isVip ? r.query.isVip === "true" : undefined,
-          limit: r.query.limit ? Number(r.query.limit) : 50,
-        }),
-        repo.getFolderCounts(c, r.params.companyId, r.query.accountId),
-      ]);
+      const threads = await repo.listThreads(c, r.params.companyId, {
+        folder: r.query.folder,
+        status: r.query.status,
+        priority: r.query.priority,
+        search: r.query.search,
+        accountId: r.query.accountId,
+        isVip: r.query.isVip ? r.query.isVip === "true" : undefined,
+        limit: r.query.limit ? Number(r.query.limit) : 50,
+      });
 
-      return reply.code(200).send({ threads, folderCounts });
-    } catch (e) {
-      return err(reply, e);
-    }
-  });
-
-  app.get<{
-    Params: { companyId: string };
-    Querystring: { accountId?: string };
-  }>("/companies/:companyId/email-inbox/folder-counts", async (r, reply) => {
-    try {
-      const c = await ctx(auth, r, "email:read_messages");
-      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
-      const folderCounts = await repo.getFolderCounts(c, r.params.companyId, r.query.accountId);
-      return reply.code(200).send({ folderCounts });
+      return reply.code(200).send({ threads });
     } catch (e) {
       return err(reply, e);
     }
@@ -634,13 +613,7 @@ export function registerEmailInboxRoutes(
 
       // Rate limit check if sending live
       if (!isDraft && account) {
-        const isHuman = Boolean(c.userId);
-        const rateLimit = await repo.reserveSendQuota(
-          r.params.companyId,
-          account,
-          toAddresses[0] || thread.customerEmail,
-          { isHuman, skipRecipientLimit: isHuman }
-        );
+        const rateLimit = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0] || thread.customerEmail);
         if (!rateLimit.allowed) {
           throw new Error(`Rate limit exceeded: ${rateLimit.reason}`);
         }

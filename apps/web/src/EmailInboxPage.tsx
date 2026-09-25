@@ -40,9 +40,6 @@ interface EmailThread {
   aiConfidenceScore?: number | null;
   aiClassificationSummary?: string | null;
   detectedLanguage?: string | null;
-  latestMessageSnippet?: string;
-  latestInboundSnippet?: string;
-  latestOutboundSnippet?: string;
 }
 
 interface EmailMessage {
@@ -206,13 +203,6 @@ export function EmailInboxPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
   const [folder, setFolder] = useState<"inbox" | "sent" | "drafts" | "archived" | "spam">("inbox");
-  const [folderCounts, setFolderCounts] = useState<Record<string, number>>({
-    inbox: 0,
-    sent: 0,
-    drafts: 0,
-    archived: 0,
-    spam: 0,
-  });
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
@@ -492,13 +482,10 @@ export function EmailInboxPage() {
       if (priorityFilter !== "all") q.set("priority", priorityFilter);
       if (searchQuery.trim()) q.set("search", searchQuery.trim());
 
-      const res = await api<{ threads: EmailThread[]; folderCounts?: Record<string, number> }>(
+      const res = await api<{ threads: EmailThread[] }>(
         `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
       );
       setThreads(res.threads);
-      if (res.folderCounts) {
-        setFolderCounts(res.folderCounts);
-      }
       if (res.threads.length === 0) {
         setSelectedThreadId(null);
         setActiveThread(null);
@@ -518,15 +505,6 @@ export function EmailInboxPage() {
 
   useEffect(() => {
     loadThreads();
-  }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
-
-  // Polling for new incoming messages and folder count updates
-  useEffect(() => {
-    if (!selectedCompanyId) return;
-    const interval = window.setInterval(() => {
-      void loadThreads();
-    }, 4000);
-    return () => window.clearInterval(interval);
   }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
 
   // Load thread detail
@@ -638,7 +616,7 @@ export function EmailInboxPage() {
       const ownAddresses = new Set(accounts.map((account) => account.emailAddress.toLowerCase()));
       const replyAllCc = composerMode === "reply_all"
         ? [...(latestInbound?.toAddresses || []), ...(latestInbound?.ccAddresses || [])]
-            .filter((address, index, all) => !ownAddresses.has(address.toLowerCase()) && all.indexOf(address) === index)
+          .filter((address, index, all) => !ownAddresses.has(address.toLowerCase()) && all.indexOf(address) === index)
         : [];
       const toAddresses = composerMode === "forward"
         ? forwardTo.split(",").map((value) => value.trim()).filter(Boolean)
@@ -947,26 +925,23 @@ export function EmailInboxPage() {
               { id: "drafts", label: "Drafts", icon: "📝" },
               { id: "archived", label: "Archived", icon: "📁" },
               { id: "spam", label: "Spam", icon: "🚫" },
-            ].map((f) => {
-              const count = folderCounts[f.id] ?? (folder === f.id ? threads.length : 0);
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
-                  onClick={() => setFolder(f.id as any)}
-                  title={f.label}
-                >
-                  <span className="email-folder-btn-content">
-                    <span className="email-folder-icon">{f.icon}</span>
-                    {!sidebarCollapsed && <span>{f.label}</span>}
-                  </span>
-                  {!sidebarCollapsed && typeof count === "number" && count > 0 && (
-                    <span className="email-folder-count">({count})</span>
-                  )}
-                </button>
-              );
-            })}
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
+                onClick={() => setFolder(f.id as any)}
+                title={f.label}
+              >
+                <span className="email-folder-btn-content">
+                  <span className="email-folder-icon">{f.icon}</span>
+                  {!sidebarCollapsed && <span>{f.label}</span>}
+                </span>
+                {!sidebarCollapsed && folder === f.id && threads.length > 0 && (
+                  <span className="email-folder-count">({threads.length})</span>
+                )}
+              </button>
+            ))}
           </nav>
         </aside>
 
@@ -1050,21 +1025,9 @@ export function EmailInboxPage() {
                       </small>
                     </div>
 
-                    <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+                    <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {t.subject}
                     </div>
-
-                    {(() => {
-                      const snippet = folder === "sent"
-                        ? (t.latestOutboundSnippet || t.latestMessageSnippet)
-                        : (t.latestInboundSnippet || t.latestMessageSnippet);
-                      if (!snippet) return null;
-                      return (
-                        <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
-                          {snippet}
-                        </div>
-                      );
-                    })()}
 
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
                       <span className={`email-status-pill status-${t.status}`}>
@@ -1178,9 +1141,9 @@ export function EmailInboxPage() {
                         aria-label={readingFocus ? "Restore split view" : "Expand reading view"}
                       >
                         {readingFocus ? (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7" /></svg>
                         ) : (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7"/></svg>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7" /></svg>
                         )}
                       </button>
                     </div>
@@ -1231,12 +1194,12 @@ export function EmailInboxPage() {
                         >
                           {readingFocus ? (
                             <>
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7" /></svg>
                               <span>Split View</span>
                             </>
                           ) : (
                             <>
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7"/></svg>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7" /></svg>
                               <span>Expand View</span>
                             </>
                           )}
@@ -1456,9 +1419,8 @@ export function EmailInboxPage() {
                       return (
                         <div
                           key={m.id}
-                          className={`email-inbox-message-bubble ${
-                            isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
-                          }`}
+                          className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
+                            }`}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
