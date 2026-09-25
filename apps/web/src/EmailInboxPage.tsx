@@ -37,6 +37,7 @@ interface EmailThread {
   lockedAt?: string | null;
   lastMessageAt: string;
   unreadCount: number;
+  messagesCount?: number;
   aiConfidenceScore?: number | null;
   aiClassificationSummary?: string | null;
   detectedLanguage?: string | null;
@@ -343,9 +344,10 @@ export function EmailInboxPage() {
   const [composeBody, setComposeBody] = useState("");
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const [composeSending, setComposeSending] = useState(false);
+  const historyMessages = useMemo(() => messages.filter((message) => !message.isDraft), [messages]);
   const latestInboundId = useMemo(
-    () => [...messages].reverse().find((message) => message.direction === "inbound")?.id,
-    [messages]
+    () => [...historyMessages].reverse().find((message) => message.direction === "inbound")?.id,
+    [historyMessages]
   );
 
   useEffect(() => {
@@ -485,6 +487,23 @@ export function EmailInboxPage() {
       await api(`/companies/${selectedCompanyId}/email-inbox/notifications/${notification.id}/read`, { method: "PATCH" });
       setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, isRead: true } : item));
     }
+  }
+
+  function openThread(thread: EmailThread) {
+    setSelectedThreadId(thread.id);
+    if (thread.unreadCount <= 0) return;
+    const unreadCount = thread.unreadCount;
+    setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, unreadCount: 0 } : item));
+    setFolderCounts((current) => ({ ...current, inbox: Math.max(0, current.inbox - unreadCount) }));
+    void api<{ thread: EmailThread }>(
+      `/companies/${selectedCompanyId}/email-inbox/threads/${thread.id}`,
+      { method: "PATCH", body: JSON.stringify({ unreadCount: 0 }) }
+    ).then(({ thread: updated }) => {
+      setActiveThread((current) => current?.id === updated.id ? { ...current, unreadCount: 0 } : current);
+    }).catch((error) => {
+      setNotice(error instanceof Error ? error.message : String(error));
+      void loadThreads();
+    });
   }
 
   // Reset thread selection when mailbox scope / company changes
@@ -1072,17 +1091,21 @@ export function EmailInboxPage() {
                 return (
                   <div
                     key={t.id}
-                    onClick={() => setSelectedThreadId(t.id)}
+                    onClick={() => openThread(t)}
                     className={`email-inbox-thread-card ${isSelected ? "active" : ""} ${t.unreadCount > 0 ? "unread" : ""}`}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: 13, fontWeight: t.unreadCount > 0 ? 700 : 600, color: "#0f172a" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontSize: 13, fontWeight: t.unreadCount > 0 ? 700 : 600, color: "#0f172a" }}>
+                        {t.unreadCount > 0 && <span className="email-thread-unread-dot" aria-label="Unread messages" />}
                         {t.isVip && <span style={{ color: "#eab308", marginRight: 4 }}>★</span>}
                         {t.customerName || t.customerEmail}
                       </span>
-                      <small style={{ fontSize: 11, color: "#64748b" }}>
-                        {new Date(t.lastMessageAt).toLocaleDateString()}
-                      </small>
+                      <span style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                        <small className="email-thread-message-count" title="Messages in this conversation">✉ {t.messagesCount ?? 0}</small>
+                        <small style={{ fontSize: 11, color: "#64748b" }}>
+                          {new Date(t.lastMessageAt).toLocaleDateString()}
+                        </small>
+                      </span>
                     </div>
 
                     <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1467,14 +1490,14 @@ export function EmailInboxPage() {
 
                 {/* Messages Scroll Timeline */}
                 <div className="email-inbox-messages-scroll" ref={messageScrollRef}>
-                  {messages.length === 0 ? (
+                  {historyMessages.length === 0 ? (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                       <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
                       <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
                       <small>Write a reply below to start the conversation.</small>
                     </div>
                   ) : (
-                    messages.map((m) => {
+                    historyMessages.map((m) => {
                       const isInbound = m.direction === "inbound";
                       const isLatestInbound = isInbound && m.id === latestInboundId;
                       return (

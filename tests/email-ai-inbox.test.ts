@@ -680,7 +680,7 @@ describe("Email / AI Inbox Module", () => {
     const history = await isolatedRepo.listMessages(mockAuth, "compose-company", composed.thread.id);
     expect(history.map((message) => message.direction)).toEqual(["outbound", "inbound", "inbound"]);
     await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "inbox" })).resolves.toEqual([
-      expect.objectContaining({ id: composed.thread.id }),
+      expect.objectContaining({ id: composed.thread.id, messagesCount: 3, unreadCount: 2 }),
     ]);
     await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "sent" })).resolves.toEqual([
       expect.objectContaining({ id: composed.thread.id }),
