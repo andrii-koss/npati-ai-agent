@@ -210,6 +210,8 @@ export function EmailInboxPage() {
   const [threadsWidth, setThreadsWidth] = useState<number>(300);
   const [isResizing, setIsResizing] = useState(false);
   const [customerCardExpanded, setCustomerCardExpanded] = useState(false);
+  const [threadHeaderExpanded, setThreadHeaderExpanded] = useState(false);
+  const [draftExpanded, setDraftExpanded] = useState(true);
 
   // Thread History vertical resizing
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1030,366 +1032,497 @@ export function EmailInboxPage() {
             </div>
           ) : (
             <>
-              {/* Thread Header */}
-              <div className="email-inbox-detail-header">
-                <div className="email-detail-header-top">
-                  <div className="email-detail-title-area">
-                    <div className="email-detail-subject-row">
-                      <h2 className="email-detail-subject">
+              {/* Thread Header: Compact by default, expandable on click */}
+              <div className={`email-inbox-detail-header ${threadHeaderExpanded ? "expanded" : "compact"}`}>
+                {!threadHeaderExpanded ? (
+                  /* Compact Header Bar */
+                  <div className="email-header-compact-row">
+                    <div className="email-header-compact-left">
+                      <button
+                        type="button"
+                        className="email-header-toggle-btn"
+                        onClick={() => setThreadHeaderExpanded(true)}
+                        title="Expand full thread details and actions"
+                      >
+                        Details ▼
+                      </button>
+
+                      <strong
+                        className="email-header-compact-subject"
+                        title={activeThread.subject}
+                      >
                         {activeThread.subject}
-                      </h2>
-                      {activeThread.isVip && (
-                        <span className="email-vip-badge">
-                          ★ VIP
-                        </span>
-                      )}
+                      </strong>
+
                       <span
                         className={`automation-status-btn ${
                           activeThread.status === "answered" ? "active" : activeThread.status === "draft_ready" ? "paused" : ""
                         }`}
-                        style={{ fontSize: 11, cursor: "default" }}
+                        style={{ fontSize: 10, padding: "2px 6px", cursor: "default", flexShrink: 0 }}
                       >
                         <span className="automation-status-dot" />
                         {activeThread.status === "draft_ready" ? "AI Draft Ready" : activeThread.status.replace("_", " ")}
                       </span>
-                    </div>
-                    <div className="email-detail-sender-row">
-                      <span>
-                        From: <strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
-                      </span>
-                      <span>
-                        {new Date(activeThread.lastMessageAt).toLocaleString()}
+
+                      <span className="email-header-compact-sender">
+                        From: {activeThread.customerName || activeThread.customerEmail}
                       </span>
                     </div>
-                  </div>
 
-                  <div className="email-detail-top-controls">
-                    <button
-                      type="button"
-                      className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
-                      onClick={() => setReadingFocus(!readingFocus)}
-                      title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
-                    >
-                      {readingFocus ? (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
-                          <span>Split View</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 5v6m0 0h-6m6 0l-7-7"/></svg>
-                          <span>Expand View</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Actions Toolbar */}
-                <div className="email-detail-actions-bar">
-                  <div className="email-detail-actions-left">
-                    <div className="email-priority-selector">
-                      <span>Priority:</span>
-                      <select
-                        className="email-inbox-select priority-select"
-                        aria-label="Thread priority"
-                        value={activeThread.priority}
-                        onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
+                    <div className="email-header-compact-actions">
+                      <button
+                        type="button"
+                        className="automation-action-btn"
+                        onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
+                        style={{ fontSize: 11.5, padding: "3px 8px" }}
+                        title="Spam"
                       >
-                        <option value="low">Low</option>
-                        <option value="normal">Normal</option>
-                        <option value="high">High</option>
-                        <option value="urgent">Urgent</option>
-                      </select>
+                        {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
+                      </button>
+                      <button
+                        type="button"
+                        className="automation-action-btn danger"
+                        onClick={() => void deleteActiveThread()}
+                        style={{ fontSize: 11.5, padding: "3px 8px" }}
+                        title="Delete"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
+                        onClick={() => setReadingFocus(!readingFocus)}
+                        style={{ fontSize: 11.5, padding: "3px 8px" }}
+                        title={readingFocus ? "Restore split view" : "Expand reading view"}
+                      >
+                        {readingFocus ? "Split" : "Expand"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Expanded Header */
+                  <>
+                    <div className="email-detail-header-top">
+                      <div className="email-detail-title-area">
+                        <div className="email-detail-subject-row">
+                          <button
+                            type="button"
+                            className="email-header-toggle-btn"
+                            onClick={() => setThreadHeaderExpanded(false)}
+                            title="Collapse to compact header"
+                          >
+                            Compact ▲
+                          </button>
+                          <h2 className="email-detail-subject">
+                            {activeThread.subject}
+                          </h2>
+                          {activeThread.isVip && (
+                            <span className="email-vip-badge">
+                              VIP
+                            </span>
+                          )}
+                          <span
+                            className={`automation-status-btn ${
+                              activeThread.status === "answered" ? "active" : activeThread.status === "draft_ready" ? "paused" : ""
+                            }`}
+                            style={{ fontSize: 11, cursor: "default" }}
+                          >
+                            <span className="automation-status-dot" />
+                            {activeThread.status === "draft_ready" ? "AI Draft Ready" : activeThread.status.replace("_", " ")}
+                          </span>
+                        </div>
+                        <div className="email-detail-sender-row">
+                          <span>
+                            From: <strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
+                          </span>
+                          <span>
+                            {new Date(activeThread.lastMessageAt).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="email-detail-top-controls">
+                        <button
+                          type="button"
+                          className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
+                          onClick={() => setReadingFocus(!readingFocus)}
+                          title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
+                        >
+                          {readingFocus ? "Split View" : "Expand View"}
+                        </button>
+                      </div>
                     </div>
 
-                    <button
-                      type="button"
-                      className={`automation-action-btn ${activeThread.isHumanTakeover ? "active" : ""}`}
-                      onClick={handleToggleTakeover}
-                      title="Toggle manual operator takeover vs autonomous AI handling"
-                    >
-                      {activeThread.isHumanTakeover ? "Return to AI" : "Take Over"}
-                    </button>
+                    {/* Actions Toolbar */}
+                    <div className="email-detail-actions-bar">
+                      <div className="email-detail-actions-left">
+                        <div className="email-priority-selector">
+                          <span>Priority:</span>
+                          <select
+                            className="email-inbox-select priority-select"
+                            aria-label="Thread priority"
+                            value={activeThread.priority}
+                            onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
+                          >
+                            <option value="low">Low</option>
+                            <option value="normal">Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                          </select>
+                        </div>
 
-                    <button
-                      type="button"
-                      className={`automation-action-btn ${activeThread.isVip ? "active" : ""}`}
-                      onClick={handleToggleVip}
-                      title="Toggle client VIP status"
-                    >
-                      {activeThread.isVip ? "VIP Customer" : "Make VIP"}
-                    </button>
-                  </div>
+                        <button
+                          type="button"
+                          className={`automation-action-btn ${activeThread.isHumanTakeover ? "active" : ""}`}
+                          onClick={handleToggleTakeover}
+                          title="Toggle manual operator takeover vs autonomous AI handling"
+                        >
+                          {activeThread.isHumanTakeover ? "Return to AI" : "Take Over"}
+                        </button>
 
-                  <div className="email-detail-actions-right">
-                    <button
-                      type="button"
-                      className="automation-action-btn"
-                      onClick={() => void updateActiveThread({ folder: activeThread.folder === "archived" ? "inbox" : "archived" })}
-                      title={activeThread.folder === "archived" ? "Move back to Inbox" : "Move to Archive"}
-                    >
-                      {activeThread.folder === "archived" ? "Unarchive" : "Archive"}
-                    </button>
-                    <button
-                      type="button"
-                      className="automation-action-btn"
-                      onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
-                      title={activeThread.folder === "spam" ? "Mark as Not Spam" : "Mark as Spam"}
-                    >
-                      {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
-                    </button>
-                    <button
-                      type="button"
-                      className="automation-action-btn danger"
-                      onClick={() => void deleteActiveThread()}
-                      title="Delete this conversation"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+                        <button
+                          type="button"
+                          className={`automation-action-btn ${activeThread.isVip ? "active" : ""}`}
+                          onClick={handleToggleVip}
+                          title="Toggle client VIP status"
+                        >
+                          {activeThread.isVip ? "VIP Customer" : "Make VIP"}
+                        </button>
+                      </div>
+
+                      <div className="email-detail-actions-right">
+                        <button
+                          type="button"
+                          className="automation-action-btn"
+                          onClick={() => void updateActiveThread({ folder: activeThread.folder === "archived" ? "inbox" : "archived" })}
+                          title={activeThread.folder === "archived" ? "Move back to Inbox" : "Move to Archive"}
+                        >
+                          {activeThread.folder === "archived" ? "Unarchive" : "Archive"}
+                        </button>
+                        <button
+                          type="button"
+                          className="automation-action-btn"
+                          onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
+                          title={activeThread.folder === "spam" ? "Mark as Not Spam" : "Mark as Spam"}
+                        >
+                          {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
+                        </button>
+                        <button
+                          type="button"
+                          className="automation-action-btn danger"
+                          onClick={() => void deleteActiveThread()}
+                          title="Delete this conversation"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Customer Context Card */}
-              <section className="email-customer-card">
-                <div
-                  className="email-customer-card-header"
-                  onClick={() => setCustomerCardExpanded(!customerCardExpanded)}
-                >
-                  <div className="email-customer-title-group">
-                    <span>👤</span>
-                    <span>Customer Profile: {contact?.name || activeThread.customerName || "Customer"} · {activeThread.customerEmail}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div className="email-customer-stats-pills">
-                      <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong> previous</span>
-                      <span><strong>{customerContext.tasks.length}</strong> tasks</span>
-                      <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "Active"}</strong></span>
+              {/* Scrollable middle body container */}
+              <div className="email-inbox-detail-body">
+                {/* Customer Context Card */}
+                <section className="email-customer-card">
+                  <div
+                    className="email-customer-card-header"
+                    onClick={() => setCustomerCardExpanded(!customerCardExpanded)}
+                  >
+                    <div className="email-customer-title-group">
+                      <span>Customer Profile: {contact?.name || activeThread.customerName || "Customer"} · {activeThread.customerEmail}</span>
                     </div>
-                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
-                      {customerCardExpanded ? "▲ Hide" : "▼ Details"}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div className="email-customer-stats-pills">
+                        <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong> previous</span>
+                        <span><strong>{customerContext.tasks.length}</strong> tasks</span>
+                        <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "Active"}</strong></span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+                        {customerCardExpanded ? "▲ Hide" : "▼ Details"}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                {customerCardExpanded && (
-                  <div className="email-customer-card-body">
-                    {contact?.companyName && <span style={{ fontSize: 12, color: "#475569" }}>🏢 {contact.companyName}</span>}
-                    {contact?.phone && <span style={{ fontSize: 12, color: "#475569" }}>📞 {contact.phone}</span>}
-                    {contact?.notes && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#334155" }}>📝 {contact.notes}</p>}
+                  {customerCardExpanded && (
+                    <div className="email-customer-card-body">
+                      {contact?.companyName && <span style={{ fontSize: 12, color: "#475569" }}>Company: {contact.companyName}</span>}
+                      {contact?.phone && <span style={{ fontSize: 12, color: "#475569" }}>Phone: {contact.phone}</span>}
+                      {contact?.notes && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#334155" }}>Notes: {contact.notes}</p>}
 
-                    {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
-                      <details style={{ marginTop: 6 }}>
-                        <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
-                        <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
-                          {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
-                          {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
+                      {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
+                          <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
+                            {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
+                            {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                {/* Collision Protection Warning */}
+                {activeThread.lockedByUserId && (
+                  <div style={{ padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 12 }}>
+                    ⚠️ Another operator is currently replying to this thread. Take care to avoid collisions.
+                  </div>
+                )}
+
+                {/* Draft review box */}
+                {draftMessageId && (
+                  <div className={`email-inbox-draft-box ${!draftExpanded ? "collapsed" : ""}`}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
+                        onClick={() => setDraftExpanded(!draftExpanded)}
+                        title={draftExpanded ? "Collapse draft preview" : "Expand draft preview"}
+                      >
+                        <button
+                          type="button"
+                          className="email-draft-toggle-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDraftExpanded(!draftExpanded);
+                          }}
+                          aria-label={draftExpanded ? "Collapse draft" : "Expand draft"}
+                        >
+                          {draftExpanded ? "▲" : "▼"}
+                        </button>
+                        <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>
+                          {draftIsAiGenerated ? "AI Response Draft" : "Saved Email Draft"}
+                        </span>
+                        {draftIsAiGenerated && activeThread.aiConfidenceScore != null && (
+                          <span style={{ fontSize: 10.5, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "1px 6px", borderRadius: 4 }}>
+                            {Math.round(activeThread.aiConfidenceScore * 100)}% Confidence
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="button-primary automations-action-primary"
+                          style={{ fontSize: 11.5, padding: "4px 10px", lineHeight: 1.2 }}
+                          disabled={sending}
+                          onClick={handleApproveDraft}
+                        >
+                          {sending ? "Sending..." : draftIsAiGenerated ? "Send AI Draft" : "Send Draft"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
+                          onClick={() => {
+                            setDraftExpanded(true);
+                            setDraftEditing(!draftEditing);
+                          }}
+                        >
+                          {draftEditing ? "Done" : "Edit"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
+                          onClick={() => {
+                            setDraftMessageId(null);
+                            setDraftEditing(false);
+                          }}
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    </div>
+
+                    {draftExpanded && (
+                      draftEditing ? (
+                        <textarea
+                          rows={4}
+                          value={draftText}
+                          onChange={(e) => setDraftText(e.target.value)}
+                          style={{ width: "100%", borderRadius: 6, border: "1px solid #cbd5e1", padding: 8, fontFamily: "inherit", fontSize: 13 }}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 13, color: "#451a03", whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: "200px", overflowY: "auto" }}>
+                          {draftText}
                         </div>
-                      </details>
+                      )
                     )}
                   </div>
                 )}
-              </section>
 
-              {/* Collision Protection Warning */}
-              {activeThread.lockedByUserId && (
-                <div style={{ margin: "12px 22px 0", padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 12 }}>
-                  ⚠️ Another operator is currently replying to this thread. Take care to avoid collisions.
-                </div>
-              )}
-
-              {/* Draft review box */}
-              {draftMessageId && (
-                <div className="email-inbox-draft-box">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>{draftIsAiGenerated ? "AI Response Draft" : "Saved Email Draft"}</span>
-                      {draftIsAiGenerated && activeThread.aiConfidenceScore != null && (
-                        <span style={{ fontSize: 10.5, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "1px 6px", borderRadius: 4 }}>
-                          {Math.round(activeThread.aiConfidenceScore * 100)}% Confidence
-                        </span>
-                      )}
+                {/* Messages Scroll Timeline */}
+                <div className="email-inbox-messages-scroll">
+                  {messages.length === 0 ? (
+                    <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
+                      <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
+                      <small>Write a reply below to start the conversation.</small>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        className="button-primary automations-action-primary"
-                        style={{ fontSize: 11.5, padding: "4px 10px", lineHeight: 1.2 }}
-                        disabled={sending}
-                        onClick={handleApproveDraft}
-                      >
-                        {sending ? "Sending..." : draftIsAiGenerated ? "Send AI Draft" : "Send Draft"}
-                      </button>
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
-                        onClick={() => setDraftEditing(!draftEditing)}
-                      >
-                        {draftEditing ? "Done" : "Edit"}
-                      </button>
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        style={{ fontSize: 11.5, padding: "4px 8px", lineHeight: 1.2 }}
-                        onClick={() => {
-                          setDraftMessageId(null);
-                          setDraftEditing(false);
-                        }}
-                      >
-                        Discard
-                      </button>
-                    </div>
-                  </div>
-
-                  {draftEditing ? (
-                    <textarea
-                      rows={4}
-                      value={draftText}
-                      onChange={(e) => setDraftText(e.target.value)}
-                      style={{ width: "100%", borderRadius: 6, border: "1px solid #cbd5e1", padding: 8, fontFamily: "inherit", fontSize: 13 }}
-                    />
                   ) : (
-                    <div style={{ fontSize: 13, color: "#451a03", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-                      {draftText}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Messages Scroll Timeline */}
-              <div className="email-inbox-messages-scroll">
-                {messages.length === 0 ? (
-                  <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
-                    <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
-                    <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
-                    <small>Write a reply below to start the conversation.</small>
-                  </div>
-                ) : (
-                  messages.map((m) => {
-                  const isInbound = m.direction === "inbound";
-                  return (
-                    <div
-                      key={m.id}
-                      className={`email-inbox-message-bubble ${
-                        isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
-                      }`}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
-                          {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? "🤖 AI Assistant" : "👤 Support Agent"}
-                        </div>
-                        <small style={{ fontSize: 11, color: "#64748b" }}>
-                          {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </small>
-                      </div>
-
-                      {m.bodyHtml ? (
+                    messages.map((m) => {
+                      const isInbound = m.direction === "inbound";
+                      return (
                         <div
-                          className="email-sanitized-html"
-                          style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55 }}
-                          onClick={(event) => {
-                            const anchor = (event.target as Element).closest("a[data-email-url]") as HTMLAnchorElement | null;
-                            if (!anchor) return;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const url = anchor.dataset.emailUrl;
-                            if (url) void openInspectedLink(url, m.fromAddress);
-                          }}
-                          dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(m.bodyHtml) }}
-                        />
-                      ) : (
-                        <div style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                          {m.bodyText.split(/(https?:\/\/[^\s<>"')]+)/gi).map((part, index) =>
-                            /^https?:\/\//i.test(part) ? (
-                              <button
-                                key={`${m.id}-link-${index}`}
-                                type="button"
-                                onClick={() => void openInspectedLink(part, m.fromAddress)}
-                                style={{ border: 0, padding: 0, background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
-                              >
-                                {part}
-                              </button>
-                            ) : part
+                          key={m.id}
+                          className={`email-inbox-message-bubble ${
+                            isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
+                          }`}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
+                              {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? "AI Assistant" : "Support Agent"}
+                            </div>
+                            <small style={{ fontSize: 11, color: "#64748b" }}>
+                              {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </small>
+                          </div>
+
+                          {m.bodyHtml ? (
+                            <div
+                              className="email-sanitized-html"
+                              style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55 }}
+                              onClick={(event) => {
+                                const anchor = (event.target as Element).closest("a[data-email-url]") as HTMLAnchorElement | null;
+                                if (!anchor) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const url = anchor.dataset.emailUrl;
+                                if (url) void openInspectedLink(url, m.fromAddress);
+                              }}
+                              dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(m.bodyHtml) }}
+                            />
+                          ) : (
+                            <div style={{ fontSize: 13.5, color: "#1e293b", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                              {m.bodyText.split(/(https?:\/\/[^\s<>"')]+)/gi).map((part, index) =>
+                                /^https?:\/\//i.test(part) ? (
+                                  <button
+                                    key={`${m.id}-link-${index}`}
+                                    type="button"
+                                    onClick={() => void openInspectedLink(part, m.fromAddress)}
+                                    style={{ border: 0, padding: 0, background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+                                  >
+                                    {part}
+                                  </button>
+                                ) : part
+                              )}
+                            </div>
+                          )}
+
+                          {m.attachments && m.attachments.length > 0 && (
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                              {m.attachments.map((att, i) => (
+                                <button key={i} type="button" className="automation-cron-pill" style={{ fontSize: 11, cursor: "pointer" }} onClick={() => openAttachment(att)}>
+                                  📎 {att.filename} ({Math.round(att.sizeBytes / 1024)} KB)
+                                </button>
+                              ))}
+                            </div>
                           )}
                         </div>
-                      )}
-
-                      {m.attachments && m.attachments.length > 0 && (
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-                          {m.attachments.map((att, i) => (
-                            <button key={i} type="button" className="automation-cron-pill" style={{ fontSize: 11, cursor: "pointer" }} onClick={() => openAttachment(att)}>
-                              📎 {att.filename} ({Math.round(att.sizeBytes / 1024)} KB)
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }))}
-              </div>
-
-              {auditHistory.length > 0 && (
-                <div className="email-thread-history-section">
-                  {historyOpen && (
-                    <div
-                      className={`email-history-resizer ${isResizingHistory ? "resizing" : ""}`}
-                      onMouseDown={startHistoryResizing}
-                      title="Drag up or down to resize history panel"
-                    >
-                      <div className="email-history-resizer-line" />
-                    </div>
-                  )}
-                  <div
-                    className="email-history-header"
-                    onClick={() => setHistoryOpen(!historyOpen)}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "8px 14px",
-                      background: "#f8fafc",
-                      borderTop: "1px solid #e2e8f0",
-                      cursor: "pointer",
-                      userSelect: "none",
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
-                      Thread history ({auditHistory.length})
-                    </span>
-                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-                      {historyOpen ? "▲ Hide" : "▼ Show"}
-                    </span>
-                  </div>
-                  {historyOpen && (
-                    <div
-                      className="email-history-scroll"
-                      style={{
-                        height: `${historyHeight}px`,
-                        overflowY: "auto",
-                        padding: "8px 14px",
-                        background: "#ffffff",
-                        borderTop: "1px solid #f1f5f9",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      {auditHistory.map((entry) => (
-                        <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
-                          <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
-                          <time>{new Date(entry.createdAt).toLocaleString()}</time>
-                        </div>
-                      ))}
-                    </div>
+                      );
+                    })
                   )}
                 </div>
-              )}
 
-              {/* Composer */}
+                {/* Thread History Section with presets and resizing */}
+                {auditHistory.length > 0 && (
+                  <div className="email-thread-history-section">
+                    <div
+                      className="email-history-header"
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 14px",
+                        background: "#f8fafc",
+                        borderTop: "1px solid #e2e8f0",
+                        borderBottom: historyOpen ? "1px solid #e2e8f0" : "none",
+                        userSelect: "none",
+                      }}
+                    >
+                      <div
+                        onClick={() => setHistoryOpen(!historyOpen)}
+                        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}
+                      >
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                          Thread history ({auditHistory.length})
+                        </span>
+                        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                          {historyOpen ? "▲ Hide" : "▼ Show"}
+                        </span>
+                      </div>
+
+                      {historyOpen && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>Size:</span>
+                          <button
+                            type="button"
+                            className={`history-size-btn ${historyHeight === 90 ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryHeight(90);
+                            }}
+                            title="Compact (90px)"
+                          >
+                            S
+                          </button>
+                          <button
+                            type="button"
+                            className={`history-size-btn ${historyHeight === 160 ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryHeight(160);
+                            }}
+                            title="Medium (160px)"
+                          >
+                            M
+                          </button>
+                          <button
+                            type="button"
+                            className={`history-size-btn ${historyHeight === 260 ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryHeight(260);
+                            }}
+                            title="Large (260px)"
+                          >
+                            L
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {historyOpen && (
+                      <div
+                        className="email-history-scroll"
+                        style={{
+                          height: `${historyHeight}px`,
+                          minHeight: "70px",
+                          maxHeight: "360px",
+                          resize: "vertical",
+                          overflowY: "auto",
+                          padding: "8px 14px",
+                          background: "#ffffff",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        {auditHistory.map((entry) => (
+                          <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
+                            <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
+                            <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Composer: Always pinned at bottom */}
               <form onSubmit={handleSendReply} className="email-inbox-composer">
-                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                   {(["reply", "reply_all", "forward"] as const).map((modeOption) => (
                     <button key={modeOption} type="button" className={`automation-action-btn ${composerMode === modeOption ? "active" : ""}`} onClick={() => setComposerMode(modeOption)}>
                       {modeOption === "reply" ? "Reply" : modeOption === "reply_all" ? "Reply All" : "Forward"}
@@ -1402,7 +1535,7 @@ export function EmailInboxPage() {
                     placeholder="Forward to (comma-separated email addresses)"
                     value={forwardTo}
                     onChange={(e) => setForwardTo(e.target.value)}
-                    style={{ width: "100%", marginBottom: 8, border: "1px solid #cbd5e1", borderRadius: 6, padding: "8px 10px" }}
+                    style={{ width: "100%", marginBottom: 6, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                   />
                 )}
                 <textarea
@@ -1410,33 +1543,31 @@ export function EmailInboxPage() {
                   value={replyText}
                   onFocus={onReplyFocus}
                   onChange={(e) => setReplyText(e.target.value)}
+                  style={{ minHeight: "65px", maxHeight: "150px", resize: "vertical" }}
                 />
-                <label style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0", fontSize: 12, color: "#475569" }}>
-                  <span>Attach files</span>
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(event) => {
-                      const files = Array.from(event.target.files || []);
-                      if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
-                        setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
-                        event.target.value = "";
-                        return;
-                      }
-                      setReplyFiles(files);
-                    }}
-                  />
-                  {replyFiles.length > 0 && <span>{replyFiles.length} selected</span>}
-                </label>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <small style={{ color: "#64748b", fontSize: 11.5 }}>
-                    Typing will temporarily lock this thread to prevent collisions.
-                  </small>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#475569", cursor: "pointer", margin: 0 }}>
+                    <span style={{ fontWeight: 600 }}>Attach files</span>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+                          setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
+                          event.target.value = "";
+                          return;
+                        }
+                        setReplyFiles(files);
+                      }}
+                    />
+                    {replyFiles.length > 0 && <span>{replyFiles.length} selected</span>}
+                  </label>
                   <button
                     type="submit"
                     className="button-primary automations-action-primary"
                     disabled={sending || !replyText.trim()}
-                    style={{ fontSize: 13, padding: "7px 18px" }}
+                    style={{ fontSize: 13, padding: "7px 20px", fontWeight: 700 }}
                   >
                     {sending ? "Sending..." : "Send Reply"}
                   </button>
