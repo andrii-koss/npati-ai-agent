@@ -149,14 +149,21 @@ export class SmtpEmailTransport {
     const mimeHeaders = attachmentParts.length
       ? [`Content-Type: multipart/mixed; boundary="${boundary}"`]
       : ["Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: 8bit"];
+    const domain = safeHeader(account.emailAddress.split("@")[1] || "localhost");
+    const rawMsgId = (message.messageId || message.id).replace(/[<>]/g, "").trim();
+    const formattedMsgId = rawMsgId.includes("@") ? `<${rawMsgId}>` : `<${rawMsgId}@${domain}>`;
+    const formattedInReplyTo = message.inReplyTo
+      ? (message.inReplyTo.trim().startsWith("<") ? message.inReplyTo.trim() : `<${message.inReplyTo.trim()}>`)
+      : "";
     const headers = [
       `From: ${encodedHeader(config.fromName || account.displayName || account.emailAddress)} <${envelopeFrom}>`,
       `To: ${message.toAddresses.map(safeHeader).join(", ")}`,
       message.ccAddresses?.length ? `Cc: ${message.ccAddresses.map(safeHeader).join(", ")}` : "",
       `Subject: ${encodedHeader(message.subject)}`,
       `Date: ${new Date().toUTCString()}`,
-      `Message-ID: <${safeHeader(message.messageId || message.id)}@${safeHeader(account.emailAddress.split("@")[1] || "localhost")}>`,
-      message.inReplyTo ? `In-Reply-To: ${safeHeader(message.inReplyTo)}` : "",
+      `Message-ID: ${formattedMsgId}`,
+      formattedInReplyTo ? `In-Reply-To: ${safeHeader(formattedInReplyTo)}` : "",
+      formattedInReplyTo ? `References: ${safeHeader(formattedInReplyTo)}` : "",
       "MIME-Version: 1.0",
       ...mimeHeaders,
     ].filter(Boolean).join("\r\n");
@@ -235,6 +242,7 @@ export interface PolledImapMessage {
   bodyHtml?: string;
   messageId?: string;
   inReplyTo?: string;
+  references?: string;
   attachments: EmailAttachment[];
 }
 
@@ -355,6 +363,7 @@ export class ImapEmailTransport {
         bodyHtml: mime.bodyHtml,
         messageId: headerValue(headers, "Message-ID") || undefined,
         inReplyTo: headerValue(headers, "In-Reply-To") || undefined,
+        references: headerValue(headers, "References") || undefined,
         attachments: mime.attachments,
       });
     }

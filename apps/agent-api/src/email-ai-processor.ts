@@ -5,7 +5,7 @@ import { CredentialMasker, PromptInjectionGuard } from "./security-guardrails";
 import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { extractDocumentText } from "./document-extractor";
 import type { AuditRepository } from "./audit-repository";
-import type { EmailInboxRepository } from "./email-inbox-repository";
+import { normalizeEmailSubject, type EmailInboxRepository } from "./email-inbox-repository";
 import type {
   CompanyEmailAccount,
   CompanyEmailMessage,
@@ -57,6 +57,7 @@ export interface InboundEmailPayload {
   threadKey?: string;
   messageId?: string;
   inReplyTo?: string;
+  references?: string;
 }
 
 export interface InboundProcessingResult {
@@ -271,15 +272,20 @@ export class EmailAIProcessor {
     if (!isVip && priority === "normal" && hasRecentEscalation) priority = "high";
 
     // 8. Find or create Thread (Item 6)
-    const threadKey =
-      payload.threadKey ||
-      `th_${parsed.from.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent(parsed.subject.slice(0, 30))}`;
+    let thread = await this.repo.findMatchingThread(ctx, companyId, {
+      inReplyTo: payload.inReplyTo,
+      references: payload.references,
+      customerEmail: parsed.from,
+      subject: parsed.subject,
+      threadKey: payload.threadKey,
+    });
 
-    let thread = await this.repo.findThreadByKey(ctx.workspaceId, companyId, threadKey);
     if (!thread) {
+      const cleanSubject = normalizeEmailSubject(parsed.subject);
+      const normalizedKey = `th_${parsed.from.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent((cleanSubject || parsed.subject).slice(0, 50).toLowerCase())}`;
       thread = await this.repo.createThread(ctx, companyId, {
         emailAccountId: effectiveAccount.id,
-        threadKey,
+        threadKey: payload.threadKey || normalizedKey,
         subject: parsed.subject,
         customerEmail: parsed.from,
         customerName: contact.name,
@@ -299,6 +305,8 @@ export class EmailAIProcessor {
         unreadCount: (thread.unreadCount || 0) + 1,
         priority: priority === "urgent" ? "urgent" : thread.priority,
         isVip: isVip || thread.isVip,
+        status: "new",
+        folder: "inbox",
       });
     }
 
@@ -652,6 +660,7 @@ export class EmailAIProcessor {
           bodyText: responseContent,
           isDraft: true,
           isAiGenerated: true,
+          inReplyTo: externalMessageId || inboundMessage.messageId,
           deliveryStatus: "sending",
         });
 
@@ -699,6 +708,7 @@ export class EmailAIProcessor {
           bodyText: responseContent,
           isDraft: true,
           isAiGenerated: true,
+          inReplyTo: externalMessageId || inboundMessage.messageId,
           deliveryStatus: "delivered",
         });
 
@@ -723,6 +733,7 @@ export class EmailAIProcessor {
           bodyText: responseContent,
           isDraft: false,
           isAiGenerated: true,
+          inReplyTo: externalMessageId || inboundMessage.messageId,
           deliveryStatus: "sending",
         });
 
@@ -756,6 +767,7 @@ export class EmailAIProcessor {
         bodyText: responseContent,
         isDraft: true,
         isAiGenerated: true,
+        inReplyTo: externalMessageId || inboundMessage.messageId,
         deliveryStatus: "sending",
       });
 

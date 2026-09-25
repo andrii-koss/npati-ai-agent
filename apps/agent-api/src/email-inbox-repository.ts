@@ -51,6 +51,51 @@ const messageCols = `
   sent_by_agent_id AS "sentByAgentId", created_at AS "createdAt"
 `;
 
+export function normalizeEmailSubject(subject?: string | null): string {
+  if (!subject) return "";
+  let clean = subject.trim();
+  const prefixRegex = /^(?:\[[a-z0-9_\-\s.]+\]\s*)*(?:(?:re|fwd|fw|aw|antw|wg|odp|vs|回复|回覆|sv)\s*(?:\[\d+\]|\(\d+\))?\s*[:\-]\s*)+/i;
+  let prev = "";
+  while (clean !== prev) {
+    prev = clean;
+    clean = clean.replace(prefixRegex, "").trim();
+  }
+  clean = clean.replace(/^\[[^\]]+\]\s*/, "").trim();
+  return clean.replace(/\s+/g, " ").trim();
+}
+
+export function extractCandidateMessageIds(headerValue?: string | null): string[] {
+  if (!headerValue || typeof headerValue !== "string") return [];
+  const candidates = new Set<string>();
+  const trimmed = headerValue.trim();
+  if (!trimmed) return [];
+
+  const bracketMatches = trimmed.match(/<([^>]+)>/g);
+  if (bracketMatches) {
+    for (const match of bracketMatches) {
+      candidates.add(match);
+      const inside = match.replace(/[<>]/g, "").trim();
+      if (inside) {
+        candidates.add(inside);
+        const localPart = inside.split("@")[0]?.trim();
+        if (localPart) candidates.add(localPart);
+      }
+    }
+  }
+
+  for (const part of trimmed.split(/[\s,]+/)) {
+    const clean = part.replace(/[<>]/g, "").trim();
+    if (clean) {
+      candidates.add(clean);
+      candidates.add(`<${clean}>`);
+      const localPart = clean.split("@")[0]?.trim();
+      if (localPart) candidates.add(localPart);
+    }
+  }
+
+  return Array.from(candidates);
+}
+
 export class EmailInboxRepository {
   private pool?: Pool;
   private readonly vault: CryptoVault;
@@ -591,6 +636,128 @@ export class EmailInboxRepository {
     return null;
   }
 
+  async findMessageByReferenceIds(
+    ctx: AuthContext,
+    companyId: string,
+    referenceHeaders: (string | undefined | null)[]
+  ): Promise<CompanyEmailMessage | null> {
+    const allCandidates = new Set<string>();
+    for (const header of referenceHeaders) {
+      for (const id of extractCandidateMessageIds(header)) {
+        allCandidates.add(id);
+      }
+    }
+    const idList = Array.from(allCandidates);
+    if (!idList.length) return null;
+
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailMessage>(
+        `SELECT ${messageCols} FROM company_email_messages
+         WHERE workspace_id = $1 AND company_id = $2
+           AND (message_id = ANY($3::text[]) OR id::text = ANY($3::text[]))
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [ctx.workspaceId, companyId, idList]
+      );
+      return result.rows[0] ?? null;
+    }
+
+    for (const m of this.memoryMessages.values()) {
+      if (m.workspaceId === ctx.workspaceId && m.companyId === companyId) {
+        if ((m.messageId && idList.includes(m.messageId)) || idList.includes(m.id)) {
+          return m;
+        }
+      }
+    }
+    return null;
+  }
+
+  async listRecentThreadsForCustomer(
+    ctx: AuthContext,
+    companyId: string,
+    customerEmail: string,
+    limit = 15
+  ): Promise<CompanyEmailThread[]> {
+    const cleanEmail = customerEmail.trim().toLowerCase();
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailThread>(
+        `SELECT ${threadCols} FROM company_email_threads
+         WHERE workspace_id = $1 AND company_id = $2
+           AND LOWER(customer_email) = $3
+         ORDER BY last_message_at DESC
+         LIMIT $4`,
+        [ctx.workspaceId, companyId, cleanEmail, limit]
+      );
+      return result.rows;
+    }
+    return Array.from(this.memoryThreads.values())
+      .filter((t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId && t.customerEmail.toLowerCase() === cleanEmail)
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+      .slice(0, limit);
+  }
+
+  async findMatchingThread(
+    ctx: AuthContext,
+    companyId: string,
+    params: {
+      inReplyTo?: string | null;
+      references?: string | null;
+      customerEmail: string;
+      subject: string;
+      threadKey?: string | null;
+    }
+  ): Promise<CompanyEmailThread | null> {
+    // 1. Try In-Reply-To and References header lookup (Message-ID linkage)
+    if (params.inReplyTo || params.references) {
+      const parentMsg = await this.findMessageByReferenceIds(ctx, companyId, [params.inReplyTo, params.references]);
+      if (parentMsg?.threadId) {
+        const thread = await this.getThread(ctx, companyId, parentMsg.threadId);
+        if (thread) return thread;
+      }
+    }
+
+    // 2. Try explicit threadKey if provided
+    if (params.threadKey) {
+      const thread = await this.findThreadByKey(ctx.workspaceId, companyId, params.threadKey);
+      if (thread) return thread;
+    }
+
+    const cleanEmail = params.customerEmail.trim().toLowerCase();
+    const cleanSubject = normalizeEmailSubject(params.subject);
+
+    // 3. Try normalized threadKey and legacy key formats
+    if (cleanSubject) {
+      const normalizedKey = `th_${cleanEmail.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent(cleanSubject.slice(0, 50).toLowerCase())}`;
+      const thread = await this.findThreadByKey(ctx.workspaceId, companyId, normalizedKey);
+      if (thread) return thread;
+
+      // Legacy key with clean subject
+      const legacyKeyClean = `thread_${cleanEmail}_${encodeURIComponent(cleanSubject.slice(0, 30))}`;
+      const legacyThreadClean = await this.findThreadByKey(ctx.workspaceId, companyId, legacyKeyClean);
+      if (legacyThreadClean) return legacyThreadClean;
+
+      // Legacy key with raw subject
+      const legacyKeyRaw1 = `th_${cleanEmail.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent(params.subject.slice(0, 30))}`;
+      const legacyThreadRaw1 = await this.findThreadByKey(ctx.workspaceId, companyId, legacyKeyRaw1);
+      if (legacyThreadRaw1) return legacyThreadRaw1;
+
+      const legacyKeyRaw2 = `thread_${cleanEmail}_${encodeURIComponent(params.subject.slice(0, 30))}`;
+      const legacyThreadRaw2 = await this.findThreadByKey(ctx.workspaceId, companyId, legacyKeyRaw2);
+      if (legacyThreadRaw2) return legacyThreadRaw2;
+    }
+
+    // 4. Fallback: Search recent threads for this customer email with matching normalized subject
+    const recentThreads = await this.listRecentThreadsForCustomer(ctx, companyId, cleanEmail, 15);
+    for (const candidate of recentThreads) {
+      const candidateNorm = normalizeEmailSubject(candidate.subject).toLowerCase();
+      if (candidateNorm && cleanSubject.toLowerCase() === candidateNorm) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
   async createThread(
     ctx: AuthContext,
     companyId: string,
@@ -599,7 +766,8 @@ export class EmailInboxRepository {
     const id = input.id || randomUUID();
     const now = new Date().toISOString();
     const cleanCustomerEmail = input.customerEmail.trim().toLowerCase();
-    const threadKey = input.threadKey || `thread_${cleanCustomerEmail}_${encodeURIComponent(input.subject.slice(0, 30))}`;
+    const cleanSubject = normalizeEmailSubject(input.subject);
+    const threadKey = input.threadKey || `th_${cleanCustomerEmail.replace(/[^a-z0-9]/g, "_")}_${encodeURIComponent((cleanSubject || input.subject).slice(0, 50).toLowerCase())}`;
 
     const thread: CompanyEmailThread = {
       id,

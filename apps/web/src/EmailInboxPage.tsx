@@ -1604,6 +1604,28 @@ export function EmailInboxPage() {
                   onChange={(e) => setReplyText(e.target.value)}
                   style={{ minHeight: "65px", maxHeight: "150px", resize: "vertical" }}
                 />
+                {replyFiles.length > 0 && (
+                  <div className="email-attached-files-list">
+                    {replyFiles.map((file, idx) => (
+                      <div key={`${file.name}-${idx}-${file.size}`} className="email-attached-file-chip">
+                        <span className="attachment-chip-icon">{file.type.startsWith("image/") ? "🖼️" : "📎"}</span>
+                        <span className="attachment-chip-name" title={file.name}>{file.name}</span>
+                        <span className="attachment-chip-size">({(file.size / 1024).toFixed(0)} KB)</span>
+                        <button
+                          type="button"
+                          className="attachment-chip-remove"
+                          title="Remove file"
+                          aria-label={`Remove ${file.name}`}
+                          onClick={() => {
+                            setReplyFiles((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="email-composer-footer-row" style={{ marginTop: 4 }}>
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#475569", cursor: "pointer", margin: 0 }}>
                     <span style={{ fontWeight: 600 }}>Attach files</span>
@@ -1612,15 +1634,22 @@ export function EmailInboxPage() {
                       multiple
                       onChange={(event) => {
                         const files = Array.from(event.target.files || []);
-                        if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
-                          setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
+                        if (files.some((file) => file.size > 10 * 1024 * 1024)) {
+                          setNotice("Each attachment must be at most 10 MB.");
                           event.target.value = "";
                           return;
                         }
-                        setReplyFiles(files);
+                        const combined = [...replyFiles, ...files];
+                        if (combined.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+                          setNotice("Total attachments must be at most 25 MB.");
+                          event.target.value = "";
+                          return;
+                        }
+                        setReplyFiles(combined);
+                        event.target.value = "";
                       }}
                     />
-                    {replyFiles.length > 0 && <span>{replyFiles.length} selected</span>}
+                    {replyFiles.length > 0 && <span>{replyFiles.length} attached</span>}
                   </label>
                   <button
                     type="submit"
@@ -1673,16 +1702,44 @@ export function EmailInboxPage() {
                     multiple
                     onChange={(event) => {
                       const files = Array.from(event.target.files || []);
-                      if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
-                        setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
+                      if (files.some((file) => file.size > 10 * 1024 * 1024)) {
+                        setNotice("Each attachment must be at most 10 MB.");
                         event.target.value = "";
                         return;
                       }
-                      setComposeFiles(files);
+                      const combined = [...composeFiles, ...files];
+                      if (combined.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+                        setNotice("Total attachments must be at most 25 MB.");
+                        event.target.value = "";
+                        return;
+                      }
+                      setComposeFiles(combined);
+                      event.target.value = "";
                     }}
                   />
                 </label>
-                {composeFiles.length > 0 && <small>{composeFiles.map((file) => file.name).join(", ")}</small>}
+                {composeFiles.length > 0 && (
+                  <div className="email-attached-files-list">
+                    {composeFiles.map((file, idx) => (
+                      <div key={`${file.name}-${idx}-${file.size}`} className="email-attached-file-chip">
+                        <span className="attachment-chip-icon">{file.type.startsWith("image/") ? "🖼️" : "📎"}</span>
+                        <span className="attachment-chip-name" title={file.name}>{file.name}</span>
+                        <span className="attachment-chip-size">({(file.size / 1024).toFixed(0)} KB)</span>
+                        <button
+                          type="button"
+                          className="attachment-chip-remove"
+                          title="Remove file"
+                          aria-label={`Remove ${file.name}`}
+                          onClick={() => {
+                            setComposeFiles((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {accounts.find((account) => account.id === composeAccountId)?.testMode && (
                   <div className="workspace-notice">Test Mode is enabled for this account. Send will run the full flow without external SMTP delivery.</div>
                 )}
