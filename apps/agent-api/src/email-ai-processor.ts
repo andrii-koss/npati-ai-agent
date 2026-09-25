@@ -107,7 +107,7 @@ export class EmailAIProcessor {
     private readonly auditRepo?: AuditRepository,
     private readonly aiEngine?: AIEngine,
     private readonly hooks: EmailAutomationHooks = {}
-  ) {}
+  ) { }
 
   /**
    * Process inbound email through AI Inbox pipeline
@@ -174,7 +174,7 @@ export class EmailAIProcessor {
       fallbackLanguage: "en",
       imapConfig: {},
       smtpConfig: {},
-      rateLimits: { maxPerHour: 100, maxPerDay: 1000, maxPerRecipientDaily: 100, maxFollowups: 3 },
+      rateLimits: { maxPerHour: 50, maxPerDay: 500, maxPerRecipientDaily: 5, maxFollowups: 3 },
       signatureConfig: {},
       followupConfig: { enabled: false, delayDays: 2, maxFollowups: 2, action: "draft" },
       createdAt: new Date().toISOString(),
@@ -333,8 +333,10 @@ export class EmailAIProcessor {
     if (this.auditRepo) {
       await this.auditRepo.log(ctx, companyId, {
         action: "email.received", category: "automation", resourceType: "company_email_thread", resourceId: thread.id,
-        details: { messageId: inboundMessage.id, providerMessageId: externalMessageId, from: parsed.from,
-          subject: parsed.subject, priority, attachments: payload.attachments?.length || 0 },
+        details: {
+          messageId: inboundMessage.id, providerMessageId: externalMessageId, from: parsed.from,
+          subject: parsed.subject, priority, attachments: payload.attachments?.length || 0
+        },
       }).catch(() => undefined);
     }
 
