@@ -11,7 +11,7 @@
 5. ✅ **Manual / Approval / Autopilot.** Реалізовані draft approval, SMTP queue, створення Task і запуск наявної Automation за правилом.
 6. ✅ **Inbox.** Inbox/Sent/Drafts/Archived/Spam, threads, фільтри, пошук, статуси, priority, вкладення й повний thread реалізовані.
 7. ✅ **Статуси листів.** New, AI Processing, Draft Ready, Waiting Approval/Customer/Human, Answered, Closed і Failed підтримуються.
-8. ✅ **Дії користувача.** Read/Reply/Reply All/Forward/edit/approve/send/archive/delete/attachments/history реалізовані. HTML body рендериться через строгий allowlist без scripts/forms/remote images, а HTTP(S)-посилання проходять security inspection і human confirmation.
+8. ✅ **Дії користувача.** Compose нового листа (From/To/CC/BCC/Subject/body/attachments, Save Draft, Send), Read/Reply/Reply All/Forward/edit/approve/archive/delete/history реалізовані. Кнопка Compose Email видима і в Email Settings, і в AI Inbox. HTML body рендериться через строгий allowlist без scripts/forms/remote images, а HTTP(S)-посилання проходять security inspection і human confirmation.
 9. ✅ **AI Priority.** Враховуються content, intent, keywords, VIP, urgency і попередні escalation; є ручна зміна priority.
 10. ✅ **Customer Card.** Показуються ім’я, email, company, phone, notes, last activity, попередні email і пов’язані Company Tasks. Orders показуються лише якщо в проєкті з’явиться відповідне джерело даних — окремої order-моделі зараз немає.
 11. ✅ **Collision Protection.** Composer lock/human takeover та process-level і PostgreSQL advisory locks реалізовані.

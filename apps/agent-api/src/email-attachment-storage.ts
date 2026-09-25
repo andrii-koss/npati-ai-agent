@@ -25,6 +25,7 @@ export class EmailAttachmentStorage {
         continue;
       }
       const data = Buffer.from(attachment.contentBase64, "base64");
+      if (data.length > 10 * 1024 * 1024) throw Object.assign(new Error(`Email attachment exceeds 10 MB: ${attachment.filename}`), { status: 413 });
       const checksum = createHash("sha256").update(data).digest("hex");
       const id = randomUUID();
       const key = objectKey([
@@ -81,5 +82,30 @@ export class EmailAttachmentStorage {
     const stream = await this.storage.get(file.bucket, file.objectKey);
     await this.files.audit(context, file.id, "download", "succeeded", { companyId, source: "email" }).catch(() => undefined);
     return { file, stream };
+  }
+
+  async materialize(context: AuthContext, companyId: string, attachments: EmailAttachment[]): Promise<EmailAttachment[]> {
+    return Promise.all(attachments.map(async (attachment) => {
+      if (attachment.contentBase64 || !attachment.url) return attachment;
+      const match = attachment.url.match(/\/email-inbox\/attachments\/([0-9a-f-]{36})$/i);
+      if (!match) return attachment;
+      const opened = await this.open(context, companyId, match[1]!);
+      if (!opened) throw new Error(`Stored email attachment is unavailable: ${attachment.filename}`);
+      const chunks: Buffer[] = [];
+      for await (const chunk of opened.stream as AsyncIterable<Buffer | Uint8Array | string>) chunks.push(Buffer.from(chunk));
+      return { ...attachment, contentBase64: Buffer.concat(chunks).toString("base64") };
+    }));
+  }
+
+  async remove(context: AuthContext, companyId: string, attachment: EmailAttachment): Promise<boolean> {
+    const match = attachment.url?.match(/\/email-inbox\/attachments\/([0-9a-f-]{36})$/i);
+    if (!match) return false;
+    const file = await this.files.get(match[1]!);
+    if (!file || file.workspaceId !== context.workspaceId || file.companyId !== companyId || file.bucket !== NPATI_BUCKETS.chat) return false;
+    if (!file.deletedAt) await this.files.markDeleted(context, file.id);
+    await this.storage.remove(file.bucket, file.objectKey).catch(() => undefined);
+    await this.files.markStorageDeleted(file.id);
+    await this.files.audit(context, file.id, "delete", "succeeded", { companyId, source: "email" }).catch(() => undefined);
+    return true;
   }
 }

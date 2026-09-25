@@ -7,6 +7,7 @@ import { EmailAIProcessor, type EmailAutomationHooks } from "./email-ai-processo
 import type { EmailInboxRepository } from "./email-inbox-repository";
 import type { CompanyEmailAccount, CompanyEmailJob } from "./email-inbox-types";
 import { ImapEmailTransport, SmtpEmailTransport } from "./email-transport";
+import type { EmailAttachmentStorage } from "./email-attachment-storage";
 
 function workerContext(account: CompanyEmailAccount): AuthContext {
   return {
@@ -28,7 +29,8 @@ export class EmailInboxWorker {
     aiEngine?: AIEngine,
     private readonly auditRepo?: AuditRepository,
     private readonly automationHooks: EmailAutomationHooks = {},
-    private readonly pollIntervalMs = Math.max(10_000, Number(process.env.EMAIL_POLL_INTERVAL_MS || 30_000))
+    private readonly pollIntervalMs = Math.max(10_000, Number(process.env.EMAIL_POLL_INTERVAL_MS || 30_000)),
+    private readonly attachmentStorage?: EmailAttachmentStorage,
   ) {
     this.processor = new EmailAIProcessor(repo, auditRepo, aiEngine, automationHooks);
   }
@@ -102,7 +104,10 @@ export class EmailInboxWorker {
       await this.repo.updateMessage(ctx, job.companyId, message.id, { deliveryStatus: "delivered", deliveryError: null });
       return;
     }
-    await SmtpEmailTransport.send(account, message);
+    const transportMessage = this.attachmentStorage && message.attachments.some((attachment) => attachment.url && !attachment.contentBase64)
+      ? { ...message, attachments: await this.attachmentStorage.materialize(ctx, job.companyId, message.attachments) }
+      : message;
+    await SmtpEmailTransport.send(account, transportMessage);
     await this.repo.updateMessage(ctx, job.companyId, message.id, { deliveryStatus: "sent", deliveryError: null });
     if (job.threadId) await this.repo.updateThread(ctx, job.companyId, job.threadId, { status: "waiting_customer" });
     if (this.auditRepo && job.threadId) {

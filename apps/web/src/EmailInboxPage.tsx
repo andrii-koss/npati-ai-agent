@@ -15,6 +15,7 @@ interface EmailAccount {
   displayName?: string | null;
   agentId?: string | null;
   mode: "manual" | "approval" | "autopilot";
+  status?: "connected" | "pending" | "auth_error" | "imap_error" | "smtp_error" | "dns_error" | "disabled";
   testMode: boolean;
 }
 
@@ -147,6 +148,21 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+async function fileToEmailAttachment(file: File) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+  return {
+    filename: file.name,
+    contentType: file.type || "application/octet-stream",
+    sizeBytes: file.size,
+    contentBase64: dataUrl.slice(dataUrl.indexOf(",") + 1),
+  };
+}
+
 export function EmailInboxPage() {
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -172,13 +188,64 @@ export function EmailInboxPage() {
 
   // Composer State
   const [replyText, setReplyText] = useState("");
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [composerMode, setComposerMode] = useState<"reply" | "reply_all" | "forward">("reply");
   const [forwardTo, setForwardTo] = useState("");
   const [draftEditing, setDraftEditing] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
+  const [draftIsAiGenerated, setDraftIsAiGenerated] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // New outbound message composer
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeAccountId, setComposeAccountId] = useState("");
+  const [composeTo, setComposeTo] = useState("");
+  const [composeCc, setComposeCc] = useState("");
+  const [composeBcc, setComposeBcc] = useState("");
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeFiles, setComposeFiles] = useState<File[]>([]);
+  const [composeSending, setComposeSending] = useState(false);
+
+  function openCompose() {
+    setComposeAccountId(selectedAccountId !== "all" ? selectedAccountId : accounts[0]?.id || "");
+    setComposeTo(""); setComposeCc(""); setComposeBcc(""); setComposeSubject(""); setComposeBody(""); setComposeFiles([]);
+    setComposeOpen(true);
+  }
+
+  async function submitCompose(isDraft: boolean) {
+    if (!selectedCompanyId || !composeAccountId) {
+      setNotice("Connect or select a company email account first.");
+      return;
+    }
+    const splitAddresses = (value: string) => value.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+    setComposeSending(true);
+    try {
+      const attachments = await Promise.all(composeFiles.map(fileToEmailAttachment));
+      const result = await api<{ thread: EmailThread; status: "draft" | "queued" | "simulated_send" }>(
+        `/companies/${selectedCompanyId}/email-inbox/compose`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            accountId: composeAccountId,
+            toAddresses: splitAddresses(composeTo), ccAddresses: splitAddresses(composeCc), bccAddresses: splitAddresses(composeBcc),
+            subject: composeSubject, bodyText: composeBody, isDraft, attachments,
+          }),
+        }
+      );
+      setComposeOpen(false);
+      setFolder(isDraft ? "drafts" : "sent");
+      setSelectedAccountId(composeAccountId);
+      setSelectedThreadId(result.thread.id);
+      setNotice(isDraft ? "Draft saved." : result.status === "simulated_send" ? "Test Mode: email was simulated and not sent externally." : "Email queued for SMTP delivery.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setComposeSending(false);
+    }
+  }
 
   async function openInspectedLink(url: string, senderEmail?: string) {
     const inspected = await api<{ check: { requiresHumanApproval: boolean; warnings: string[] } }>(
@@ -232,7 +299,8 @@ export function EmailInboxPage() {
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
         setCompanies(res.companies);
-        const sel = res.companies[0]?.id ?? "";
+        const requested = searchParams.get("company");
+        const sel = requested && res.companies.some((company) => company.id === requested) ? requested : res.companies[0]?.id ?? "";
         setSelectedCompanyId(sel);
       })
       .catch((e) => setNotice(e.message));
@@ -248,6 +316,15 @@ export function EmailInboxPage() {
       .then(([accountResult, notificationResult]) => {
         setAccounts(accountResult.accounts);
         setNotifications(notificationResult.notifications);
+        const requestedAccount = searchParams.get("account");
+        const initialAccount = requestedAccount && accountResult.accounts.some((account) => account.id === requestedAccount)
+          ? requestedAccount
+          : accountResult.accounts[0]?.id;
+        if (initialAccount) setComposeAccountId(initialAccount);
+        if (searchParams.get("compose") === "1") {
+          setComposeOpen(true);
+          setSearchParams({ company: selectedCompanyId }, { replace: true });
+        }
       })
       .catch(() => undefined);
   }, [selectedCompanyId]);
@@ -317,9 +394,11 @@ export function EmailInboxPage() {
         if (draft) {
           setDraftMessageId(draft.id);
           setDraftText(draft.bodyText);
+          setDraftIsAiGenerated(draft.isAiGenerated);
         } else {
           setDraftMessageId(null);
           setDraftText("");
+          setDraftIsAiGenerated(false);
         }
       })
       .catch((e) => setNotice(e.message));
@@ -341,10 +420,35 @@ export function EmailInboxPage() {
         `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`,
         { method: "PATCH", body: JSON.stringify(patch) }
       );
-      setActiveThread(response.thread);
-      setThreads((current) => current.map((thread) => thread.id === response.thread.id ? response.thread : thread));
+      if (patch.folder && patch.folder !== folder) {
+        setThreads((current) => current.filter((thread) => thread.id !== response.thread.id));
+        setSelectedThreadId(null);
+        setActiveThread(null);
+        setMessages([]);
+      } else {
+        setActiveThread(response.thread);
+        setThreads((current) => current.map((thread) => thread.id === response.thread.id ? response.thread : thread));
+      }
     } catch (error: any) {
       setNotice(error.message);
+    }
+  }
+
+  async function deleteActiveThread() {
+    if (!selectedCompanyId || !selectedThreadId) return;
+    const approved = await confirmModal({
+      title: "Delete email thread?",
+      message: "This permanently deletes the thread and all of its messages.",
+      confirmText: "Delete",
+      isDanger: true,
+    });
+    if (!approved) return;
+    try {
+      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`, { method: "DELETE" });
+      setSelectedThreadId(null); setActiveThread(null); setMessages([]);
+      await loadThreads();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -366,6 +470,7 @@ export function EmailInboxPage() {
         ? forwardTo.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined;
       if (composerMode === "forward" && !toAddresses?.length) throw new Error("Enter at least one forwarding recipient.");
+      const attachments = await Promise.all(replyFiles.map(fileToEmailAttachment));
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
         method: "POST",
         body: JSON.stringify({
@@ -375,9 +480,11 @@ export function EmailInboxPage() {
           ccAddresses: replyAllCc,
           subject: composerMode === "forward" ? `Fwd: ${activeThread?.subject || ""}` : undefined,
           fromAddress: selectedAccount?.emailAddress,
+          attachments,
         }),
       });
       setReplyText("");
+      setReplyFiles([]);
       setForwardTo("");
       setComposerMode("reply");
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
@@ -527,19 +634,28 @@ export function EmailInboxPage() {
             )}
             <button
               type="button"
-              className="button-secondary automations-action-primary"
-              onClick={handleSimulateEmail}
-              title="Simulate incoming client email"
+              className="button-primary automations-action-primary"
+              onClick={openCompose}
+              disabled={accounts.length === 0}
+              title={accounts.length ? "Write and send a new email" : "Add an email account before composing"}
             >
-              ⚡ Simulate Inbound Email
+              + Compose Email
             </button>
             <Link
               to="/settings/email"
-              className="button-primary automations-action-primary"
+              className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
               ⚙️ Email Settings
             </Link>
+            <button
+              type="button"
+              className="automation-action-btn"
+              onClick={handleSimulateEmail}
+              title="Process a simulated inbound client email without an external mailbox"
+            >
+              Simulate inbound
+            </button>
           </div>
         </div>
       </header>
@@ -790,6 +906,12 @@ export function EmailInboxPage() {
                   >
                     {activeThread.isVip ? "★ VIP Customer" : "☆ Make VIP"}
                   </button>
+                  <button type="button" className="automation-action-btn" onClick={() => void updateActiveThread({ folder: "archived" })}>
+                    Archive
+                  </button>
+                  <button type="button" className="automation-action-btn danger" onClick={() => void deleteActiveThread()}>
+                    Delete
+                  </button>
                 </div>
               </div>
 
@@ -826,13 +948,13 @@ export function EmailInboxPage() {
                 </div>
               )}
 
-              {/* AI Draft Box (if draft is ready) */}
+              {/* Draft review box */}
               {draftMessageId && (
                 <div className="email-inbox-draft-box">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>🤖 AI Response Draft</span>
-                      {activeThread.aiConfidenceScore != null && (
+                      <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>{draftIsAiGenerated ? "🤖 AI Response Draft" : "Saved Email Draft"}</span>
+                      {draftIsAiGenerated && activeThread.aiConfidenceScore != null && (
                         <span style={{ fontSize: 11, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "2px 6px", borderRadius: 4 }}>
                           {Math.round(activeThread.aiConfidenceScore * 100)}% Confidence
                         </span>
@@ -846,7 +968,7 @@ export function EmailInboxPage() {
                         disabled={sending}
                         onClick={handleApproveDraft}
                       >
-                        {sending ? "Sending..." : "✓ Send AI Draft"}
+                        {sending ? "Sending..." : draftIsAiGenerated ? "✓ Send AI Draft" : "Send Draft"}
                       </button>
                       <button
                         type="button"
@@ -990,6 +1112,23 @@ export function EmailInboxPage() {
                   onFocus={onReplyFocus}
                   onChange={(e) => setReplyText(e.target.value)}
                 />
+                <label style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0", fontSize: 12, color: "#475569" }}>
+                  <span>Attach files</span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files || []);
+                      if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+                        setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
+                        event.target.value = "";
+                        return;
+                      }
+                      setReplyFiles(files);
+                    }}
+                  />
+                  {replyFiles.length > 0 && <span>{replyFiles.length} selected</span>}
+                </label>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <small style={{ color: "#64748b", fontSize: 11.5 }}>
                     Typing will temporarily lock this thread to prevent collisions.
@@ -1008,6 +1147,69 @@ export function EmailInboxPage() {
           )}
         </div>
       </div>
+
+      {composeOpen && (
+        <div className="company-drawer-backdrop" onMouseDown={() => !composeSending && setComposeOpen(false)}>
+          <aside className="company-drawer automations-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Compose email">
+            <header>
+              <div><span>Email / AI Inbox</span><h2>Compose Email</h2></div>
+              <button type="button" className="company-drawer-close" aria-label="Close composer" onClick={() => setComposeOpen(false)} disabled={composeSending}>×</button>
+            </header>
+            <form onSubmit={(event) => { event.preventDefault(); void submitCompose(false); }}>
+              <section>
+                <h3>Sender and recipients</h3>
+                <label>
+                  <span>From</span>
+                  <select value={composeAccountId} onChange={(event) => setComposeAccountId(event.target.value)} required>
+                    <option value="">Select an email account</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.displayName ? `${account.displayName} — ` : ""}{account.emailAddress}{account.testMode ? " (Test Mode)" : account.status && account.status !== "connected" ? ` (${account.status.replaceAll("_", " ")})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label><span>To</span><input type="text" value={composeTo} onChange={(event) => setComposeTo(event.target.value)} placeholder="client@example.com, second@example.com" required /></label>
+                <label><span>CC</span><input type="text" value={composeCc} onChange={(event) => setComposeCc(event.target.value)} placeholder="Optional, comma-separated" /></label>
+                <label><span>BCC</span><input type="text" value={composeBcc} onChange={(event) => setComposeBcc(event.target.value)} placeholder="Optional, comma-separated" /></label>
+              </section>
+              <section>
+                <h3>Message</h3>
+                <label><span>Subject</span><input value={composeSubject} onChange={(event) => setComposeSubject(event.target.value)} maxLength={998} required /></label>
+                <label><span>Body</span><textarea value={composeBody} onChange={(event) => setComposeBody(event.target.value)} rows={12} placeholder="Write your email…" required /></label>
+                <label>
+                  <span>Attachments</span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files || []);
+                      if (files.some((file) => file.size > 10 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+                        setNotice("Each attachment must be at most 10 MB and the total at most 25 MB.");
+                        event.target.value = "";
+                        return;
+                      }
+                      setComposeFiles(files);
+                    }}
+                  />
+                </label>
+                {composeFiles.length > 0 && <small>{composeFiles.map((file) => file.name).join(", ")}</small>}
+                {accounts.find((account) => account.id === composeAccountId)?.testMode && (
+                  <div className="workspace-notice">Test Mode is enabled for this account. Send will run the full flow without external SMTP delivery.</div>
+                )}
+              </section>
+              <footer>
+                <button type="button" className="button-secondary" disabled={composeSending || !composeAccountId || !composeTo.trim() || !composeSubject.trim() || !composeBody.trim()} onClick={() => void submitCompose(true)}>
+                  Save Draft
+                </button>
+                <button type="submit" className="button-primary" disabled={composeSending || !composeAccountId || !composeTo.trim() || !composeSubject.trim() || !composeBody.trim()}>
+                  {composeSending ? "Sending…" : "Send Email"}
+                </button>
+              </footer>
+            </form>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
