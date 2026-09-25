@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
+import { useTranslation } from "./i18n";
 
 interface Company {
   id: string;
@@ -81,26 +82,26 @@ interface ContactDetails {
   previousThreadsCount?: number;
 }
 
-function getStatusLabel(status: EmailThread["status"]): string {
+function getStatusLabel(status: EmailThread["status"], t: (key: string) => string): string {
   switch (status) {
     case "draft_ready":
-      return "AI Draft Ready";
+      return t("emailInbox.statuses.draft_ready");
     case "waiting_approval":
-      return "waiting approval";
+      return t("emailInbox.statuses.waiting_approval");
     case "waiting_customer":
-      return "waiting customer";
+      return t("emailInbox.statuses.waiting_customer");
     case "waiting_human":
-      return "waiting human";
+      return t("emailInbox.statuses.waiting_human");
     case "ai_processing":
-      return "AI processing";
+      return t("emailInbox.statuses.ai_processing");
     case "answered":
-      return "answered";
+      return t("emailInbox.statuses.answered");
     case "closed":
-      return "closed";
+      return t("emailInbox.statuses.closed");
     case "failed":
-      return "failed";
+      return t("emailInbox.statuses.failed");
     case "new":
-      return "new";
+      return t("emailInbox.statuses.new");
     default:
       return (status as string).replace("_", " ");
   }
@@ -217,6 +218,7 @@ function EmailImageAttachment({
   onPreview: (source: string, filename: string) => void;
   onFallbackOpen: () => void;
 }) {
+  const { t } = useTranslation();
   const [source, setSource] = useState<string | null>(
     attachment.contentBase64 ? `data:${attachment.contentType};base64,${attachment.contentBase64}` : null
   );
@@ -262,15 +264,16 @@ function EmailImageAttachment({
       className="email-image-attachment"
       onClick={() => source && onPreview(source, attachment.filename)}
       disabled={!source}
-      title={source ? `Open ${attachment.filename}` : `Loading ${attachment.filename}`}
+      title={source ? `${t("emailInbox.messagesTimeline.openImagePrefix")}${attachment.filename}` : t("emailInbox.messagesTimeline.loadingImage")}
     >
-      {source ? <img src={source} alt={attachment.filename} /> : <span>Loading image…</span>}
+      {source ? <img src={source} alt={attachment.filename} /> : <span>{t("emailInbox.messagesTimeline.loadingImage")}</span>}
       <small>{attachment.filename}</small>
     </button>
   );
 }
 
 export function EmailInboxPage() {
+  const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -447,7 +450,7 @@ export function EmailInboxPage() {
 
   async function submitCompose(isDraft: boolean) {
     if (!selectedCompanyId || !composeAccountId) {
-      setNotice("Connect or select a company email account first.");
+      setNotice(t("emailInbox.notices.connectAccountFirst"));
       return;
     }
     const splitAddresses = (value: string) => value.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
@@ -469,7 +472,7 @@ export function EmailInboxPage() {
       setFolder(isDraft ? "drafts" : "sent");
       setSelectedAccountId(composeAccountId);
       setSelectedThreadId(result.thread.id);
-      setNotice(isDraft ? "Draft saved." : result.status === "simulated_send" ? "Test Mode: email was simulated and not sent externally." : "Email queued for SMTP delivery.");
+      setNotice(isDraft ? t("emailInbox.notices.draftSaved") : result.status === "simulated_send" ? t("emailInbox.notices.testModeSent") : t("emailInbox.notices.queuedDelivery"));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -484,8 +487,8 @@ export function EmailInboxPage() {
     );
     if (inspected.check.requiresHumanApproval) {
       const approved = await confirmModal({
-        title: "Open external link?",
-        message: inspected.check.warnings.join(" ") || "This link requires human approval.",
+        title: t("emailInbox.dialogs.openLinkTitle"),
+        message: inspected.check.warnings.join(" ") || t("emailInbox.dialogs.openLinkMsgFallback"),
         isDanger: true,
       });
       if (!approved) return;
@@ -520,7 +523,7 @@ export function EmailInboxPage() {
         await openInspectedLink(attachment.url, activeThread?.customerEmail);
       }
     } else {
-      setNotice("Attachment content is not available for download.");
+      setNotice(t("emailInbox.notices.attachmentNotAvailable"));
     }
   }
 
@@ -736,9 +739,9 @@ export function EmailInboxPage() {
   async function deleteActiveThread() {
     if (!selectedCompanyId || !selectedThreadId) return;
     const approved = await confirmModal({
-      title: "Delete email thread?",
-      message: "This permanently deletes the thread and all of its messages.",
-      confirmText: "Delete",
+      title: t("emailInbox.dialogs.deleteThreadTitle"),
+      message: t("emailInbox.dialogs.deleteThreadMsg"),
+      confirmText: t("emailInbox.dialogs.deleteConfirm"),
       isDanger: true,
     });
     if (!approved) return;
@@ -774,7 +777,7 @@ export function EmailInboxPage() {
       const toAddresses = composerMode === "forward"
         ? forwardTo.split(",").map((value) => value.trim()).filter(Boolean)
         : undefined;
-      if (composerMode === "forward" && !toAddresses?.length) throw new Error("Enter at least one forwarding recipient.");
+      if (composerMode === "forward" && !toAddresses?.length) throw new Error(t("emailInbox.notices.enterForwardRecipient"));
       const attachments = await Promise.all(replyFiles.map(fileToEmailAttachment));
       await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
         method: "POST",
@@ -881,7 +884,7 @@ export function EmailInboxPage() {
         `/companies/${selectedCompanyId}/email-inbox/simulate`,
         { method: "POST", body: JSON.stringify({}) }
       );
-      setNotice("Simulated inbound email processed successfully!");
+      setNotice(t("emailInbox.notices.simulatedSuccess"));
       loadThreads();
       if (res.thread) setSelectedThreadId(res.thread.id);
     } catch (err: any) {
@@ -895,13 +898,13 @@ export function EmailInboxPage() {
       <header className="inspector-header automations-header">
         <div className="automations-header-top">
           <div>
-            <p className="eyebrow">Settings · Email & AI Inbox</p>
+            <p className="eyebrow">{t("emailInbox.header.eyebrow")}</p>
             <h1>
               <Link
                 to="/settings/email"
                 className="marketplace-back-button"
-                aria-label="Back to Email Settings"
-                title="Back to Email Settings"
+                aria-label={t("emailInbox.header.backAria")}
+                title={t("emailInbox.header.backTitle")}
               >
                 <svg
                   width="20"
@@ -916,10 +919,10 @@ export function EmailInboxPage() {
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>AI Inbox & Email Threads</span>
+              <span>{t("emailInbox.header.title")}</span>
             </h1>
             <p className="hero-copy">
-              Unified corporate email inbox, autonomous AI draft reviews, multi-account routing, and collision-protected operator takeover.
+              {t("emailInbox.header.heroCopy")}
             </p>
           </div>
           <div className="automations-header-actions">
@@ -928,7 +931,7 @@ export function EmailInboxPage() {
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
-              ⚙️ Email Settings
+              {t("emailInbox.header.emailSettingsBtn")}
             </Link>
           </div>
         </div>
@@ -953,12 +956,12 @@ export function EmailInboxPage() {
                   </>
                 )}
               </svg>
-              <span>Mailbox Scope:</span>
+              <span>{t("emailInbox.scope.scopeLabel")}</span>
             </span>
 
             <div className="email-scope-select-wrap">
               <select
-                aria-label="Select mailbox owner"
+                aria-label={t("emailInbox.scope.selectOwnerAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
                   setSelectedCompanyId(e.target.value);
@@ -966,10 +969,10 @@ export function EmailInboxPage() {
                 }}
                 className="email-scope-select"
               >
-                <option value="personal">Personal / No Company</option>
+                <option value="personal">{t("emailInbox.scope.personalOption")}</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
-                    Company: {c.name}
+                    {t("emailInbox.scope.companyOptionPrefix")}{c.name}
                   </option>
                 ))}
               </select>
@@ -980,8 +983,8 @@ export function EmailInboxPage() {
           </div>
           <span className="email-scope-context-hint">
             {selectedCompanyId === "personal"
-              ? "Personal mailboxes & individual routing"
-              : `Company mailboxes for ${companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization"}`}
+              ? t("emailInbox.scope.personalHint")
+              : `${t("emailInbox.scope.companyHintPrefix")}${companies.find((c) => c.id === selectedCompanyId)?.name || t("emailInbox.scope.selectedOrgFallback")}`}
           </span>
         </div>
 
@@ -991,13 +994,13 @@ export function EmailInboxPage() {
             className="email-compose-btn"
             onClick={openCompose}
             disabled={accounts.length === 0}
-            title={accounts.length ? "Write and send a new email" : "Add an email account before composing"}
+            title={accounts.length ? t("emailInbox.scope.composeTitleCan") : t("emailInbox.scope.composeTitleCant")}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-            <span>+ Compose Email</span>
+            <span>{t("emailInbox.scope.composeBtn")}</span>
           </button>
         </div>
       </div>
@@ -1012,7 +1015,7 @@ export function EmailInboxPage() {
             type="button"
             className="workspace-notice-close"
             onClick={() => setNotice(null)}
-            aria-label="Dismiss notice"
+            aria-label={t("emailInbox.notices.dismissNotice")}
           >
             ✕
           </button>
@@ -1020,8 +1023,8 @@ export function EmailInboxPage() {
       )}
 
       {notifications.some((item) => !item.isRead) && (
-        <section className="workspace-notice" style={{ marginBottom: 16 }} aria-label="Email notifications">
-          <strong>Email notifications</strong>
+        <section className="workspace-notice" style={{ marginBottom: 16 }} aria-label={t("emailInbox.notices.notificationsHeading")}>
+          <strong>{t("emailInbox.notices.notificationsHeading")}</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
             {notifications.filter((item) => !item.isRead).slice(0, 5).map((item) => (
               <button key={item.id} type="button" className="automation-action-btn" onClick={() => void openNotification(item)} title={item.body}>
@@ -1040,13 +1043,13 @@ export function EmailInboxPage() {
         {/* Left Column: Folders & Accounts */}
         <aside className={`email-inbox-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
           <div className="email-inbox-sidebar-header">
-            {!sidebarCollapsed && <span className="email-inbox-label">Account</span>}
+            {!sidebarCollapsed && <span className="email-inbox-label">{t("emailInbox.sidebar.accountLabel")}</span>}
             <button
               type="button"
               className="email-sidebar-toggle-btn"
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              title={sidebarCollapsed ? "Expand folders sidebar" : "Collapse folders sidebar"}
-              aria-label={sidebarCollapsed ? "Expand folders sidebar" : "Collapse folders sidebar"}
+              title={sidebarCollapsed ? t("emailInbox.sidebar.expandSidebar") : t("emailInbox.sidebar.collapseSidebar")}
+              aria-label={sidebarCollapsed ? t("emailInbox.sidebar.expandSidebar") : t("emailInbox.sidebar.collapseSidebar")}
             >
               {sidebarCollapsed ? "▶" : "◀"}
             </button>
@@ -1058,9 +1061,9 @@ export function EmailInboxPage() {
                 value={selectedAccountId}
                 onChange={(e) => setSelectedAccountId(e.target.value)}
                 className="email-inbox-select"
-                aria-label="Filter by email account"
+                aria-label={t("emailInbox.sidebar.filterAccountAria")}
               >
-                <option value="all">All Accounts ({accounts.length})</option>
+                <option value="all">{t("emailInbox.sidebar.allAccounts").replace("{count}", String(accounts.length))}</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.displayName || a.emailAddress}
@@ -1071,13 +1074,13 @@ export function EmailInboxPage() {
           )}
 
           <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {!sidebarCollapsed && <span className="email-inbox-label">Folders</span>}
+            {!sidebarCollapsed && <span className="email-inbox-label">{t("emailInbox.sidebar.foldersLabel")}</span>}
             {[
-              { id: "inbox", label: "Inbox", icon: "📥" },
-              { id: "sent", label: "Sent", icon: "📤" },
-              { id: "drafts", label: "Drafts", icon: "📝" },
-              { id: "archived", label: "Archived", icon: "📁" },
-              { id: "spam", label: "Spam", icon: "🚫" },
+              { id: "inbox", label: t("emailInbox.sidebar.folders.inbox"), icon: "📥" },
+              { id: "sent", label: t("emailInbox.sidebar.folders.sent"), icon: "📤" },
+              { id: "drafts", label: t("emailInbox.sidebar.folders.drafts"), icon: "📝" },
+              { id: "archived", label: t("emailInbox.sidebar.folders.archived"), icon: "📁" },
+              { id: "spam", label: t("emailInbox.sidebar.folders.spam"), icon: "🚫" },
             ].map((f) => (
               <button
                 key={f.id}
@@ -1106,18 +1109,18 @@ export function EmailInboxPage() {
               <span className="search-icon" aria-hidden="true">⌕</span>
               <input
                 type="text"
-                placeholder="Search email threads..."
+                placeholder={t("emailInbox.threadsList.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="inspector-search-input"
-                aria-label="Search email threads"
+                aria-label={t("emailInbox.threadsList.searchAria")}
               />
               {searchQuery && (
                 <button
                   type="button"
                   className="search-clear-btn"
                   onClick={() => setSearchQuery("")}
-                  aria-label="Clear search"
+                  aria-label={t("emailInbox.threadsList.clearSearch")}
                 >
                   ×
                 </button>
@@ -1129,24 +1132,24 @@ export function EmailInboxPage() {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 className="email-inbox-select filter-select"
-                aria-label="Filter by status"
+                aria-label={t("emailInbox.threadsList.filterStatusAria")}
               >
-                <option value="all">All Statuses</option>
-                <option value="new">New</option>
-                <option value="draft_ready">Draft Ready</option>
-                <option value="waiting_approval">Needs Approval</option>
-                <option value="answered">Answered</option>
+                <option value="all">{t("emailInbox.statusFilters.all")}</option>
+                <option value="new">{t("emailInbox.statusFilters.new")}</option>
+                <option value="draft_ready">{t("emailInbox.statusFilters.draftReady")}</option>
+                <option value="waiting_approval">{t("emailInbox.statusFilters.waitingApproval")}</option>
+                <option value="answered">{t("emailInbox.statusFilters.answered")}</option>
               </select>
               <select
                 value={priorityFilter}
                 onChange={(e) => setPriorityFilter(e.target.value)}
                 className="email-inbox-select filter-select"
-                aria-label="Filter by priority"
+                aria-label={t("emailInbox.threadsList.filterPriorityAria")}
               >
-                <option value="all">All Priorities</option>
-                <option value="urgent">Urgent</option>
-                <option value="high">High</option>
-                <option value="normal">Normal</option>
+                <option value="all">{t("emailInbox.priorities.all")}</option>
+                <option value="urgent">{t("emailInbox.priorities.urgent")}</option>
+                <option value="high">{t("emailInbox.priorities.high")}</option>
+                <option value="normal">{t("emailInbox.priorities.normal")}</option>
               </select>
             </div>
           </div>
@@ -1156,56 +1159,52 @@ export function EmailInboxPage() {
             {threads.length === 0 ? (
               <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-                <strong style={{ display: "block", marginBottom: 4 }}>No emails in {folder}</strong>
-                <small>{({
-                  inbox: "Incoming messages will appear here automatically.",
-                  sent: "Emails you send will appear here.",
-                  drafts: "Saved drafts will appear here.",
-                  archived: "Archived conversations will appear here.",
-                  spam: "Messages marked as spam will appear here.",
-                } as const)[folder]}</small>
+                <strong style={{ display: "block", marginBottom: 4 }}>
+                  {t("emailInbox.threadsList.emptyFolderTitlePrefix")} {t(`emailInbox.sidebar.folders.${folder}` as any)}
+                </strong>
+                <small>{t(`emailInbox.threadsList.emptyFolderHints.${folder}` as any)}</small>
               </div>
             ) : (
-              threads.map((t) => {
-                const isSelected = t.id === selectedThreadId;
+              threads.map((tItem) => {
+                const isSelected = tItem.id === selectedThreadId;
                 return (
                   <div
-                    key={t.id}
-                    onClick={() => openThread(t)}
-                    className={`email-inbox-thread-card ${isSelected ? "active" : ""} ${t.unreadCount > 0 ? "unread" : ""}`}
+                    key={tItem.id}
+                    onClick={() => openThread(tItem)}
+                    className={`email-inbox-thread-card ${isSelected ? "active" : ""} ${tItem.unreadCount > 0 ? "unread" : ""}`}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontSize: 13, fontWeight: t.unreadCount > 0 ? 700 : 600, color: "#0f172a" }}>
-                        {t.unreadCount > 0 && <span className="email-thread-unread-dot" aria-label="Unread messages" />}
-                        {t.isVip && <span style={{ color: "#eab308", marginRight: 4 }}>★</span>}
-                        {t.customerName || t.customerEmail}
+                      <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, fontSize: 13, fontWeight: tItem.unreadCount > 0 ? 700 : 600, color: "#0f172a" }}>
+                        {tItem.unreadCount > 0 && <span className="email-thread-unread-dot" aria-label={t("emailInbox.threadsList.unreadAria")} />}
+                        {tItem.isVip && <span style={{ color: "#eab308", marginRight: 4 }}>★</span>}
+                        {tItem.customerName || tItem.customerEmail}
                       </span>
                       <small style={{ fontSize: 11, color: "#64748b", flexShrink: 0 }}>
-                        {new Date(t.lastMessageAt).toLocaleDateString()}
+                        {new Date(tItem.lastMessageAt).toLocaleDateString(language)}
                       </small>
                     </div>
 
                     <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {t.subject}
+                      {tItem.subject}
                     </div>
 
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                      <span className={`email-status-pill status-${t.status}`}>
+                      <span className={`email-status-pill status-${tItem.status}`}>
                         <span className="email-status-dot" />
-                        {getStatusLabel(t.status)}
+                        {getStatusLabel(tItem.status, t)}
                       </span>
 
-                      {t.priority === "urgent" && (
+                      {tItem.priority === "urgent" && (
                         <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", background: "#fef2f2", padding: "2px 6px", borderRadius: 4 }}>
-                          Urgent
+                          {t("emailInbox.priorities.urgent")}
                         </span>
                       )}
-                      {t.priority === "high" && (
+                      {tItem.priority === "high" && (
                         <span style={{ fontSize: 10, fontWeight: 600, color: "#d97706", background: "#fffbeb", padding: "2px 6px", borderRadius: 4 }}>
-                          High
+                          {t("emailInbox.priorities.high")}
                         </span>
                       )}
-                      <small className="email-thread-message-count" title="Messages in this conversation">✉ {t.messagesCount ?? 0}</small>
+                      <small className="email-thread-message-count" title={t("emailInbox.threadsList.messagesCountTooltip")}>✉ {tItem.messagesCount ?? 0}</small>
                     </div>
                   </div>
                 );
@@ -1220,7 +1219,7 @@ export function EmailInboxPage() {
             className={`email-inbox-resizer ${isResizing ? "resizing" : ""}`}
             onMouseDown={startResizing}
             onDoubleClick={() => setThreadsWidth(300)}
-            title="Drag to resize columns, double click to reset"
+            title={t("emailInbox.threadsList.resizerTitle")}
             role="separator"
             aria-orientation="vertical"
           >
@@ -1234,10 +1233,10 @@ export function EmailInboxPage() {
             <div className="email-inbox-empty-detail">
               <div style={{ fontSize: 44, marginBottom: 12 }}>✉️</div>
               <h3 style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 700, color: "#0f172a" }}>
-                Select an email thread
+                {t("emailInbox.threadDetail.emptySelectTitle")}
               </h3>
               <p style={{ margin: 0, fontSize: 13, maxWidth: 360, lineHeight: 1.5 }}>
-                Choose a conversation from the list to view history, review AI-generated drafts, or send a reply.
+                {t("emailInbox.threadDetail.emptySelectDesc")}
               </p>
             </div>
           ) : (
@@ -1252,9 +1251,9 @@ export function EmailInboxPage() {
                         type="button"
                         className="email-header-toggle-btn"
                         onClick={() => setThreadHeaderExpanded(true)}
-                        title="Expand full thread details and actions"
+                        title={t("emailInbox.threadDetail.detailsToggleTitle")}
                       >
-                        Details ▼
+                        {t("emailInbox.threadDetail.detailsToggle")}
                       </button>
 
                       <strong
@@ -1266,11 +1265,11 @@ export function EmailInboxPage() {
 
                       <span className={`email-status-pill status-${activeThread.status}`} style={{ flexShrink: 0 }}>
                         <span className="email-status-dot" />
-                        {getStatusLabel(activeThread.status)}
+                        {getStatusLabel(activeThread.status, t)}
                       </span>
 
                       <span className="email-header-compact-sender">
-                        From: {activeThread.customerName || activeThread.customerEmail}
+                        {t("emailInbox.threadDetail.fromPrefix")}{activeThread.customerName || activeThread.customerEmail}
                       </span>
                     </div>
 
@@ -1280,26 +1279,26 @@ export function EmailInboxPage() {
                         className="automation-action-btn"
                         onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
                         style={{ fontSize: 11.5, padding: "3px 8px" }}
-                        title="Spam"
+                        title={activeThread.folder === "spam" ? t("emailInbox.threadDetail.notSpamTitle") : t("emailInbox.threadDetail.spamTitle")}
                       >
-                        {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
+                        {activeThread.folder === "spam" ? t("emailInbox.threadDetail.notSpamBtn") : t("emailInbox.threadDetail.spamBtn")}
                       </button>
                       <button
                         type="button"
                         className="automation-action-btn danger"
                         onClick={() => void deleteActiveThread()}
                         style={{ fontSize: 11.5, padding: "3px 8px" }}
-                        title="Delete"
+                        title={t("emailInbox.threadDetail.deleteThreadTitle")}
                       >
-                        Delete
+                        {t("emailInbox.threadDetail.deleteBtn")}
                       </button>
                       <button
                         type="button"
                         className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
                         onClick={() => setReadingFocus(!readingFocus)}
                         style={{ fontSize: 11.5, padding: "3px 8px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                        title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
-                        aria-label={readingFocus ? "Restore split view" : "Expand reading view"}
+                        title={readingFocus ? t("emailInbox.threadDetail.restoreSplitView") : t("emailInbox.threadDetail.expandReadingView")}
+                        aria-label={readingFocus ? t("emailInbox.threadDetail.restoreSplitView") : t("emailInbox.threadDetail.expandReadingView")}
                       >
                         {readingFocus ? (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7" /></svg>
@@ -1319,9 +1318,9 @@ export function EmailInboxPage() {
                             type="button"
                             className="email-header-toggle-btn"
                             onClick={() => setThreadHeaderExpanded(false)}
-                            title="Collapse to compact header"
+                            title={t("emailInbox.threadDetail.compactToggleTitle")}
                           >
-                            Compact ▲
+                            {t("emailInbox.threadDetail.compactToggle")}
                           </button>
                           <h2 className="email-detail-subject">
                             {activeThread.subject}
@@ -1333,15 +1332,15 @@ export function EmailInboxPage() {
                           )}
                           <span className={`email-status-pill status-${activeThread.status}`}>
                             <span className="email-status-dot" />
-                            {getStatusLabel(activeThread.status)}
+                            {getStatusLabel(activeThread.status, t)}
                           </span>
                         </div>
                         <div className="email-detail-sender-row">
                           <span>
-                            From: <strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
+                            {t("emailInbox.threadDetail.fromPrefix")}<strong>{activeThread.customerName || activeThread.customerEmail}</strong> &lt;{activeThread.customerEmail}&gt;
                           </span>
                           <span>
-                            {new Date(activeThread.lastMessageAt).toLocaleString()}
+                            {new Date(activeThread.lastMessageAt).toLocaleString(language)}
                           </span>
                         </div>
                       </div>
@@ -1351,17 +1350,17 @@ export function EmailInboxPage() {
                           type="button"
                           className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
                           onClick={() => setReadingFocus(!readingFocus)}
-                          title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
+                          title={readingFocus ? t("emailInbox.threadDetail.restoreSplitView") : t("emailInbox.threadDetail.expandReadingView")}
                         >
                           {readingFocus ? (
                             <>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7" /></svg>
-                              <span>Split View</span>
+                              <span>{t("emailInbox.threadDetail.splitView")}</span>
                             </>
                           ) : (
                             <>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7" /></svg>
-                              <span>Expand View</span>
+                              <span>{t("emailInbox.threadDetail.expandView")}</span>
                             </>
                           )}
                         </button>
@@ -1372,17 +1371,17 @@ export function EmailInboxPage() {
                     <div className="email-detail-actions-bar">
                       <div className="email-detail-actions-left">
                         <div className="email-priority-selector">
-                          <span>Priority:</span>
+                          <span>{t("emailInbox.threadDetail.priorityLabel")}</span>
                           <select
                             className="email-inbox-select priority-select"
-                            aria-label="Thread priority"
+                            aria-label={t("emailInbox.threadDetail.priorityAria")}
                             value={activeThread.priority}
                             onChange={(e) => void updateActiveThread({ priority: e.target.value as EmailThread["priority"] })}
                           >
-                            <option value="low">Low</option>
-                            <option value="normal">Normal</option>
-                            <option value="high">High</option>
-                            <option value="urgent">Urgent</option>
+                            <option value="low">{t("emailInbox.priorities.low")}</option>
+                            <option value="normal">{t("emailInbox.priorities.normal")}</option>
+                            <option value="high">{t("emailInbox.priorities.high")}</option>
+                            <option value="urgent">{t("emailInbox.priorities.urgent")}</option>
                           </select>
                         </div>
 
@@ -1390,18 +1389,18 @@ export function EmailInboxPage() {
                           type="button"
                           className={`automation-action-btn ${activeThread.isHumanTakeover ? "active" : ""}`}
                           onClick={handleToggleTakeover}
-                          title="Toggle manual operator takeover vs autonomous AI handling"
+                          title={t("emailInbox.threadDetail.takeOverTitle")}
                         >
-                          {activeThread.isHumanTakeover ? "Return to AI" : "Take Over"}
+                          {activeThread.isHumanTakeover ? t("emailInbox.threadDetail.returnToAi") : t("emailInbox.threadDetail.takeOver")}
                         </button>
 
                         <button
                           type="button"
                           className={`automation-action-btn ${activeThread.isVip ? "active" : ""}`}
                           onClick={handleToggleVip}
-                          title="Toggle client VIP status"
+                          title={t("emailInbox.threadDetail.vipTitle")}
                         >
-                          {activeThread.isVip ? "VIP Customer" : "Make VIP"}
+                          {activeThread.isVip ? t("emailInbox.threadDetail.vipCustomer") : t("emailInbox.threadDetail.makeVip")}
                         </button>
                       </div>
 
@@ -1410,25 +1409,25 @@ export function EmailInboxPage() {
                           type="button"
                           className="automation-action-btn"
                           onClick={() => void updateActiveThread({ folder: activeThread.folder === "archived" ? "inbox" : "archived" })}
-                          title={activeThread.folder === "archived" ? "Move back to Inbox" : "Move to Archive"}
+                          title={activeThread.folder === "archived" ? t("emailInbox.threadDetail.unarchiveTitle") : t("emailInbox.threadDetail.archiveTitle")}
                         >
-                          {activeThread.folder === "archived" ? "Unarchive" : "Archive"}
+                          {activeThread.folder === "archived" ? t("emailInbox.threadDetail.unarchive") : t("emailInbox.threadDetail.archive")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn"
                           onClick={() => void updateActiveThread({ folder: activeThread.folder === "spam" ? "inbox" : "spam" })}
-                          title={activeThread.folder === "spam" ? "Mark as Not Spam" : "Mark as Spam"}
+                          title={activeThread.folder === "spam" ? t("emailInbox.threadDetail.notSpamTitle") : t("emailInbox.threadDetail.spamTitle")}
                         >
-                          {activeThread.folder === "spam" ? "Not Spam" : "Spam"}
+                          {activeThread.folder === "spam" ? t("emailInbox.threadDetail.notSpamBtn") : t("emailInbox.threadDetail.spamBtn")}
                         </button>
                         <button
                           type="button"
                           className="automation-action-btn danger"
                           onClick={() => void deleteActiveThread()}
-                          title="Delete this conversation"
+                          title={t("emailInbox.threadDetail.deleteThreadTitle")}
                         >
-                          Delete
+                          {t("emailInbox.threadDetail.deleteBtn")}
                         </button>
                       </div>
                     </div>
@@ -1445,32 +1444,32 @@ export function EmailInboxPage() {
                     onClick={() => setCustomerCardExpanded(!customerCardExpanded)}
                   >
                     <div className="email-customer-title-group">
-                      <span>Customer Profile: {contact?.name || activeThread.customerName || "Customer"} · {activeThread.customerEmail}</span>
+                      <span>{t("emailInbox.customerProfile.profileHeading").replace("{name}", contact?.name || activeThread.customerName || t("emailInbox.customerProfile.customerDefault")).replace("{email}", activeThread.customerEmail)}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <div className="email-customer-stats-pills">
-                        <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong> previous</span>
-                        <span><strong>{customerContext.tasks.length}</strong> tasks</span>
-                        <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString() : "Active"}</strong></span>
+                        <span><strong>{contact?.previousThreadsCount ?? customerContext.previousThreads.length}</strong> {t("emailInbox.customerProfile.previousThreadsCount")}</span>
+                        <span><strong>{customerContext.tasks.length}</strong> {t("emailInbox.customerProfile.tasksCount")}</span>
+                        <span><strong>{contact?.lastActivityAt ? new Date(contact.lastActivityAt).toLocaleDateString(language) : t("emailInbox.customerProfile.active")}</strong></span>
                       </div>
                       <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
-                        {customerCardExpanded ? "▲ Hide" : "▼ Details"}
+                        {customerCardExpanded ? t("emailInbox.customerProfile.hide") : t("emailInbox.customerProfile.details")}
                       </span>
                     </div>
                   </div>
 
                   {customerCardExpanded && (
                     <div className="email-customer-card-body">
-                      {contact?.companyName && <span style={{ fontSize: 12, color: "#475569" }}>Company: {contact.companyName}</span>}
-                      {contact?.phone && <span style={{ fontSize: 12, color: "#475569" }}>Phone: {contact.phone}</span>}
-                      {contact?.notes && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#334155" }}>Notes: {contact.notes}</p>}
+                      {contact?.companyName && <span style={{ fontSize: 12, color: "#475569" }}>{t("emailInbox.customerProfile.companyPrefix")}{contact.companyName}</span>}
+                      {contact?.phone && <span style={{ fontSize: 12, color: "#475569" }}>{t("emailInbox.customerProfile.phonePrefix")}{contact.phone}</span>}
+                      {contact?.notes && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#334155" }}>{t("emailInbox.customerProfile.notesPrefix")}{contact.notes}</p>}
 
                       {(customerContext.previousThreads.length > 0 || customerContext.tasks.length > 0) && (
                         <details style={{ marginTop: 6 }}>
-                          <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Previous interactions and Tasks</summary>
+                          <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700 }}>{t("emailInbox.customerProfile.interactionsSummary")}</summary>
                           <div style={{ display: "grid", gap: 5, marginTop: 7, fontSize: 11.5, color: "#475569" }}>
-                            {customerContext.previousThreads.map((item) => <span key={item.id}>Email · {item.subject} · {item.status} · {item.priority}</span>)}
-                            {customerContext.tasks.map((item) => <span key={item.id}>Task · {item.task.slice(0, 120)} · {item.status}</span>)}
+                            {customerContext.previousThreads.map((item) => <span key={item.id}>{t("emailInbox.customerProfile.emailPrefix")} · {item.subject} · {item.status} · {item.priority}</span>)}
+                            {customerContext.tasks.map((item) => <span key={item.id}>{t("emailInbox.customerProfile.taskPrefix")} · {item.task.slice(0, 120)} · {item.status}</span>)}
                           </div>
                         </details>
                       )}
@@ -1481,7 +1480,7 @@ export function EmailInboxPage() {
                 {/* Collision Protection Warning */}
                 {activeThread.lockedByUserId && (
                   <div style={{ padding: "10px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 12 }}>
-                    ⚠️ Another operator is currently replying to this thread. Take care to avoid collisions.
+                    {t("emailInbox.threadDetail.collisionWarning")}
                   </div>
                 )}
 
@@ -1492,7 +1491,7 @@ export function EmailInboxPage() {
                       <div
                         style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
                         onClick={() => setDraftExpanded(!draftExpanded)}
-                        title={draftExpanded ? "Collapse draft preview" : "Expand draft preview"}
+                        title={draftExpanded ? t("emailInbox.draftReview.collapseDraft") : t("emailInbox.draftReview.expandDraft")}
                       >
                         <button
                           type="button"
@@ -1501,16 +1500,16 @@ export function EmailInboxPage() {
                             e.stopPropagation();
                             setDraftExpanded(!draftExpanded);
                           }}
-                          aria-label={draftExpanded ? "Collapse draft" : "Expand draft"}
+                          aria-label={draftExpanded ? t("emailInbox.draftReview.collapseDraft") : t("emailInbox.draftReview.expandDraft")}
                         >
                           {draftExpanded ? "▲" : "▼"}
                         </button>
                         <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>
-                          {draftIsAiGenerated ? "AI Response Draft" : "Saved Email Draft"}
+                          {draftIsAiGenerated ? t("emailInbox.draftReview.aiDraftHeading") : t("emailInbox.draftReview.savedDraftHeading")}
                         </span>
                         {draftIsAiGenerated && activeThread.aiConfidenceScore != null && (
                           <span style={{ fontSize: 10.5, fontWeight: 600, background: "#fde68a", color: "#78350f", padding: "1px 6px", borderRadius: 4 }}>
-                            {Math.round(activeThread.aiConfidenceScore * 100)}% Confidence
+                            {Math.round(activeThread.aiConfidenceScore * 100)}% {t("emailInbox.draftReview.confidenceBadge")}
                           </span>
                         )}
                       </div>
@@ -1522,7 +1521,7 @@ export function EmailInboxPage() {
                           disabled={sending}
                           onClick={handleApproveDraft}
                         >
-                          {sending ? "Sending..." : draftIsAiGenerated ? "Send AI Draft" : "Send Draft"}
+                          {sending ? t("emailInbox.draftReview.sending") : draftIsAiGenerated ? t("emailInbox.draftReview.sendAiDraft") : t("emailInbox.draftReview.sendDraft")}
                         </button>
                         <button
                           type="button"
@@ -1533,7 +1532,7 @@ export function EmailInboxPage() {
                             setDraftEditing(!draftEditing);
                           }}
                         >
-                          {draftEditing ? "Done" : "Edit"}
+                          {draftEditing ? t("emailInbox.draftReview.done") : t("emailInbox.draftReview.edit")}
                         </button>
                         <button
                           type="button"
@@ -1544,7 +1543,7 @@ export function EmailInboxPage() {
                             setDraftEditing(false);
                           }}
                         >
-                          Discard
+                          {t("emailInbox.draftReview.discard")}
                         </button>
                       </div>
                     </div>
@@ -1571,8 +1570,8 @@ export function EmailInboxPage() {
                   {historyMessages.length === 0 ? (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
                       <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
-                      <strong style={{ display: "block", marginBottom: 4 }}>No messages in this thread yet</strong>
-                      <small>Write a reply below to start the conversation.</small>
+                      <strong style={{ display: "block", marginBottom: 4 }}>{t("emailInbox.messagesTimeline.noMessagesTitle")}</strong>
+                      <small>{t("emailInbox.messagesTimeline.noMessagesDesc")}</small>
                     </div>
                   ) : (
                     historyMessages.map((m) => {
@@ -1586,10 +1585,10 @@ export function EmailInboxPage() {
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
-                              {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? "AI Assistant" : "Support Agent"}
+                              {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? t("emailInbox.messagesTimeline.aiAssistant") : t("emailInbox.messagesTimeline.supportAgent")}
                             </div>
                             <small style={{ fontSize: 11, color: "#64748b" }}>
-                              {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              {new Date(m.createdAt).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })}
                             </small>
                           </div>
 
@@ -1667,16 +1666,16 @@ export function EmailInboxPage() {
                         style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}
                       >
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
-                          Thread history ({auditHistory.length})
+                          {t("emailInbox.auditHistory.heading")} ({auditHistory.length})
                         </span>
                         <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-                          {historyOpen ? "▲ Hide" : "▼ Show"}
+                          {historyOpen ? t("emailInbox.auditHistory.hide") : t("emailInbox.auditHistory.show")}
                         </span>
                       </div>
 
                       {historyOpen && (
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>Size:</span>
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{t("emailInbox.auditHistory.sizeLabel")}</span>
                           <button
                             type="button"
                             className={`history-size-btn ${historyHeight === 90 ? "active" : ""}`}
@@ -1684,7 +1683,7 @@ export function EmailInboxPage() {
                               e.stopPropagation();
                               setHistoryHeight(90);
                             }}
-                            title="Compact (90px)"
+                            title={t("emailInbox.auditHistory.sizeCompact")}
                           >
                             S
                           </button>
@@ -1695,7 +1694,7 @@ export function EmailInboxPage() {
                               e.stopPropagation();
                               setHistoryHeight(160);
                             }}
-                            title="Medium (160px)"
+                            title={t("emailInbox.auditHistory.sizeMedium")}
                           >
                             M
                           </button>
@@ -1706,7 +1705,7 @@ export function EmailInboxPage() {
                               e.stopPropagation();
                               setHistoryHeight(260);
                             }}
-                            title="Large (260px)"
+                            title={t("emailInbox.auditHistory.sizeLarge")}
                           >
                             L
                           </button>
@@ -1733,7 +1732,7 @@ export function EmailInboxPage() {
                         {auditHistory.map((entry) => (
                           <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "#475569" }}>
                             <span><strong>{entry.action.replace(/^email\./, "").replaceAll("_", " ")}</strong> · {entry.userId}</span>
-                            <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                            <time>{new Date(entry.createdAt).toLocaleString(language)}</time>
                           </div>
                         ))}
                       </div>
@@ -1752,21 +1751,21 @@ export function EmailInboxPage() {
                       className={`email-composer-mode-btn ${composerMode === modeOption ? "active" : ""}`}
                       onClick={() => setComposerMode(modeOption)}
                     >
-                      {modeOption === "reply" ? "Reply" : modeOption === "reply_all" ? "Reply All" : "Forward"}
+                      {modeOption === "reply" ? t("emailInbox.composer.reply") : modeOption === "reply_all" ? t("emailInbox.composer.replyAll") : t("emailInbox.composer.forward")}
                     </button>
                   ))}
                 </div>
                 {composerMode === "forward" && (
                   <input
                     type="text"
-                    placeholder="Forward to (comma-separated email addresses)"
+                    placeholder={t("emailInbox.composer.forwardPlaceholder")}
                     value={forwardTo}
                     onChange={(e) => setForwardTo(e.target.value)}
                     style={{ width: "100%", marginBottom: 6, border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                   />
                 )}
                 <textarea
-                  placeholder={`Write a reply to ${activeThread.customerName || activeThread.customerEmail}...`}
+                  placeholder={t("emailInbox.composer.replyPlaceholder").replace("{name}", activeThread.customerName || activeThread.customerEmail)}
                   value={replyText}
                   onFocus={onReplyFocus}
                   onChange={(e) => setReplyText(e.target.value)}
@@ -1782,8 +1781,8 @@ export function EmailInboxPage() {
                         <button
                           type="button"
                           className="attachment-chip-remove"
-                          title="Remove file"
-                          aria-label={`Remove ${file.name}`}
+                          title={t("emailInbox.composer.removeFileTitle")}
+                          aria-label={t("emailInbox.composer.removeFileAria").replace("{filename}", file.name)}
                           onClick={() => {
                             setReplyFiles((prev) => prev.filter((_, i) => i !== idx));
                           }}
@@ -1796,20 +1795,20 @@ export function EmailInboxPage() {
                 )}
                 <div className="email-composer-footer-row" style={{ marginTop: 4 }}>
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#475569", cursor: "pointer", margin: 0 }}>
-                    <span style={{ fontWeight: 600 }}>Attach files</span>
+                    <span style={{ fontWeight: 600 }}>{t("emailInbox.composer.attachFiles")}</span>
                     <input
                       type="file"
                       multiple
                       onChange={(event) => {
                         const files = Array.from(event.target.files || []);
                         if (files.some((file) => file.size > 10 * 1024 * 1024)) {
-                          setNotice("Each attachment must be at most 10 MB.");
+                          setNotice(t("emailInbox.notices.fileTooLarge"));
                           event.target.value = "";
                           return;
                         }
                         const combined = [...replyFiles, ...files];
                         if (combined.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
-                          setNotice("Total attachments must be at most 25 MB.");
+                          setNotice(t("emailInbox.notices.totalTooLarge"));
                           event.target.value = "";
                           return;
                         }
@@ -1817,7 +1816,7 @@ export function EmailInboxPage() {
                         event.target.value = "";
                       }}
                     />
-                    {replyFiles.length > 0 && <span>{replyFiles.length} attached</span>}
+                    {replyFiles.length > 0 && <span>{replyFiles.length} {t("emailInbox.composer.attachedCount")}</span>}
                   </label>
                   <button
                     type="submit"
@@ -1825,7 +1824,7 @@ export function EmailInboxPage() {
                     disabled={sending || !replyText.trim()}
                     style={{ fontSize: 13, padding: "7px 20px", fontWeight: 700, marginLeft: "auto" }}
                   >
-                    {sending ? "Sending..." : "Send Reply"}
+                    {sending ? t("emailInbox.composer.sending") : t("emailInbox.composer.sendReply")}
                   </button>
                 </div>
               </form>
@@ -1836,48 +1835,48 @@ export function EmailInboxPage() {
 
       {composeOpen && (
         <div className="company-drawer-backdrop" onMouseDown={() => !composeSending && setComposeOpen(false)}>
-          <aside className="company-drawer automations-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Compose email">
+          <aside className="company-drawer automations-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label={t("emailInbox.composeModal.title")}>
             <header>
-              <div><span>Email / AI Inbox</span><h2>Compose Email</h2></div>
-              <button type="button" className="company-drawer-close" aria-label="Close composer" onClick={() => setComposeOpen(false)} disabled={composeSending}>×</button>
+              <div><span>{t("emailInbox.composeModal.kicker")}</span><h2>{t("emailInbox.composeModal.title")}</h2></div>
+              <button type="button" className="company-drawer-close" aria-label={t("emailInbox.composeModal.closeAria")} onClick={() => setComposeOpen(false)} disabled={composeSending}>×</button>
             </header>
             <form onSubmit={(event) => { event.preventDefault(); void submitCompose(false); }}>
               <section>
-                <h3>Sender and recipients</h3>
+                <h3>{t("emailInbox.composeModal.senderRecipients")}</h3>
                 <label>
-                  <span>From</span>
+                  <span>{t("emailInbox.composeModal.fromLabel")}</span>
                   <select value={composeAccountId} onChange={(event) => setComposeAccountId(event.target.value)} required>
-                    <option value="">Select an email account</option>
+                    <option value="">{t("emailInbox.composeModal.selectAccountPlaceholder")}</option>
                     {accounts.map((account) => (
                       <option key={account.id} value={account.id}>
-                        {account.displayName ? `${account.displayName} — ` : ""}{account.emailAddress}{account.testMode ? " (Test Mode)" : account.status && account.status !== "connected" ? ` (${account.status.replaceAll("_", " ")})` : ""}
+                        {account.displayName ? `${account.displayName} — ` : ""}{account.emailAddress}{account.testMode ? t("emailInbox.composeModal.testModeSuffix") : account.status && account.status !== "connected" ? ` (${account.status.replaceAll("_", " ")})` : ""}
                       </option>
                     ))}
                   </select>
                 </label>
-                <label><span>To</span><input type="text" value={composeTo} onChange={(event) => setComposeTo(event.target.value)} placeholder="client@example.com, second@example.com" required /></label>
-                <label><span>CC</span><input type="text" value={composeCc} onChange={(event) => setComposeCc(event.target.value)} placeholder="Optional, comma-separated" /></label>
-                <label><span>BCC</span><input type="text" value={composeBcc} onChange={(event) => setComposeBcc(event.target.value)} placeholder="Optional, comma-separated" /></label>
+                <label><span>{t("emailInbox.composeModal.toLabel")}</span><input type="text" value={composeTo} onChange={(event) => setComposeTo(event.target.value)} placeholder={t("emailInbox.composeModal.toPlaceholder")} required /></label>
+                <label><span>{t("emailInbox.composeModal.ccLabel")}</span><input type="text" value={composeCc} onChange={(event) => setComposeCc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} /></label>
+                <label><span>{t("emailInbox.composeModal.bccLabel")}</span><input type="text" value={composeBcc} onChange={(event) => setComposeBcc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} /></label>
               </section>
               <section>
-                <h3>Message</h3>
-                <label><span>Subject</span><input value={composeSubject} onChange={(event) => setComposeSubject(event.target.value)} maxLength={998} required /></label>
-                <label><span>Body</span><textarea value={composeBody} onChange={(event) => setComposeBody(event.target.value)} rows={12} placeholder="Write your email…" required /></label>
+                <h3>{t("emailInbox.composeModal.messageHeading")}</h3>
+                <label><span>{t("emailInbox.composeModal.subjectLabel")}</span><input value={composeSubject} onChange={(event) => setComposeSubject(event.target.value)} maxLength={998} required /></label>
+                <label><span>{t("emailInbox.composeModal.bodyLabel")}</span><textarea value={composeBody} onChange={(event) => setComposeBody(event.target.value)} rows={12} placeholder={t("emailInbox.composeModal.bodyPlaceholder")} required /></label>
                 <label>
-                  <span>Attachments</span>
+                  <span>{t("emailInbox.composeModal.attachmentsLabel")}</span>
                   <input
                     type="file"
                     multiple
                     onChange={(event) => {
                       const files = Array.from(event.target.files || []);
                       if (files.some((file) => file.size > 10 * 1024 * 1024)) {
-                        setNotice("Each attachment must be at most 10 MB.");
+                        setNotice(t("emailInbox.notices.fileTooLarge"));
                         event.target.value = "";
                         return;
                       }
                       const combined = [...composeFiles, ...files];
                       if (combined.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
-                        setNotice("Total attachments must be at most 25 MB.");
+                        setNotice(t("emailInbox.notices.totalTooLarge"));
                         event.target.value = "";
                         return;
                       }
@@ -1896,8 +1895,8 @@ export function EmailInboxPage() {
                         <button
                           type="button"
                           className="attachment-chip-remove"
-                          title="Remove file"
-                          aria-label={`Remove ${file.name}`}
+                          title={t("emailInbox.composer.removeFileTitle")}
+                          aria-label={t("emailInbox.composer.removeFileAria").replace("{filename}", file.name)}
                           onClick={() => {
                             setComposeFiles((prev) => prev.filter((_, i) => i !== idx));
                           }}
@@ -1909,15 +1908,15 @@ export function EmailInboxPage() {
                   </div>
                 )}
                 {accounts.find((account) => account.id === composeAccountId)?.testMode && (
-                  <div className="workspace-notice">Test Mode is enabled for this account. Send will run the full flow without external SMTP delivery.</div>
+                  <div className="workspace-notice">{t("emailInbox.composeModal.testModeNotice")}</div>
                 )}
               </section>
               <footer>
                 <button type="button" className="button-secondary" disabled={composeSending || !composeAccountId || !composeTo.trim() || !composeSubject.trim() || !composeBody.trim()} onClick={() => void submitCompose(true)}>
-                  Save Draft
+                  {t("emailInbox.composeModal.saveDraft")}
                 </button>
                 <button type="submit" className="button-primary" disabled={composeSending || !composeAccountId || !composeTo.trim() || !composeSubject.trim() || !composeBody.trim()}>
-                  {composeSending ? "Sending…" : "Send Email"}
+                  {composeSending ? t("emailInbox.composeModal.sending") : t("emailInbox.composeModal.sendEmail")}
                 </button>
               </footer>
             </form>
@@ -1927,7 +1926,7 @@ export function EmailInboxPage() {
 
       {imagePreview && (
         <div className="email-image-preview-backdrop" role="dialog" aria-modal="true" aria-label={imagePreview.filename} onClick={() => setImagePreview(null)}>
-          <button type="button" className="email-image-preview-close" aria-label="Close image preview" onClick={() => setImagePreview(null)}>×</button>
+          <button type="button" className="email-image-preview-close" aria-label={t("emailInbox.notices.closeImagePreview")} onClick={() => setImagePreview(null)}>×</button>
           <figure onClick={(event) => event.stopPropagation()}>
             <img src={imagePreview.source} alt={imagePreview.filename} />
             <figcaption>{imagePreview.filename}</figcaption>
