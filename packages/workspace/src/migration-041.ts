@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 export async function runMigration041(client: PoolClient): Promise<void> {
   await client.query(`
     CREATE TABLE IF NOT EXISTS company_email_deleted_messages (
-      workspace_id UUID NOT NULL,
+      workspace_id TEXT NOT NULL,
       company_id TEXT NOT NULL,
       email_account_id UUID,
       external_message_id TEXT NOT NULL,

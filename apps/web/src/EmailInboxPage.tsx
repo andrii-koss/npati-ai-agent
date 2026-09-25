@@ -239,6 +239,7 @@ export function EmailInboxPage() {
   const threadRequestIdRef = useRef(0);
   const deletedThreadIdsRef = useRef(new Set<string>());
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
+  const latestInboundMessageRef = useRef<HTMLDivElement | null>(null);
   const [expandedQuotedMessages, setExpandedQuotedMessages] = useState<Set<string>>(() => new Set());
 
   // Filters & Search
@@ -366,13 +367,15 @@ export function EmailInboxPage() {
   );
 
   useEffect(() => {
-    const newestMessageId = visibleMessages.at(-1)?.id;
-    if (!newestMessageId) return;
+    if (!latestInboundId) return;
     window.requestAnimationFrame(() => {
       const container = messageScrollRef.current;
-      if (container) container.scrollTop = container.scrollHeight;
+      const latestInbound = latestInboundMessageRef.current;
+      if (container && latestInbound) {
+        container.scrollTop = Math.max(0, latestInbound.offsetTop - container.offsetTop - 16);
+      }
     });
-  }, [selectedThreadId, visibleMessages.at(-1)?.id]);
+  }, [selectedThreadId, latestInboundId]);
 
   function openCompose() {
     setComposeAccountId(selectedAccountId !== "all" ? selectedAccountId : accounts[0]?.id || "");
@@ -1484,16 +1487,6 @@ export function EmailInboxPage() {
                   </div>
                 )}
 
-                {activeThread.unreadCount > 0 && (
-                  <div className="email-new-messages-banner">
-                    <span>
-                      <strong>{activeThread.unreadCount} new {activeThread.unreadCount === 1 ? "message" : "messages"}</strong>
-                      {" "}in this conversation. The latest customer reply is highlighted below.
-                    </span>
-                    <button type="button" onClick={() => void updateActiveThread({ unreadCount: 0 })}>Mark as read</button>
-                  </div>
-                )}
-
                 {/* Messages Scroll Timeline */}
                 <div className="email-inbox-messages-scroll" ref={messageScrollRef}>
                   {visibleMessages.length === 0 ? (
@@ -1511,21 +1504,22 @@ export function EmailInboxPage() {
                       return (
                         <div
                           key={m.id}
+                          ref={isLatestInbound ? latestInboundMessageRef : undefined}
                           className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"
                             } ${isLatestInbound ? "latest-inbound" : ""
                             }`}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
-                            <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
-                                {isInbound ? `Customer · ${m.fromName || m.fromAddress}` : m.isAiGenerated ? "AI Assistant" : "You · Support Agent"}
+                                {isInbound ? `Customer — ${m.fromName || m.fromAddress}` : m.isAiGenerated ? "AI Assistant" : "You"}
                               </div>
-                              <div style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>
-                                {isInbound ? "Received" : m.isAiGenerated ? "AI response sent" : "Sent"} · {m.fromAddress} → {m.toAddresses.join(", ")}
-                              </div>
+                              <span className={`email-message-direction ${isInbound ? "received" : "sent"}`}>
+                                {isInbound ? "Received" : "Sent"}
+                              </span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                              {isLatestInbound && <span className="email-latest-reply-badge">Latest reply</span>}
+                              {isLatestInbound && <span className="email-latest-reply-badge">Latest customer message</span>}
                               <small style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>
                                 {new Date(m.createdAt).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                               </small>
