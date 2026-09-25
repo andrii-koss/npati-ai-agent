@@ -697,6 +697,10 @@ export function registerEmailInboxRoutes(
       });
 
       if (!isDraft) {
+        const obsoleteDrafts = existingThreadMessages.filter((m) => m.isDraft && m.direction === "outbound");
+        for (const draft of obsoleteDrafts) {
+          await repo.updateMessage(c, r.params.companyId, draft.id, { isDraft: false });
+        }
         if (account && !account.testMode) {
           await repo.enqueueJob(c, r.params.companyId, {
             jobType: "send", emailAccountId: account.id, threadId: thread.id,

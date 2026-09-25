@@ -14841,10 +14841,33 @@ body:has(.npati-dialog-backdrop) .sidebar {
 
 .email-thread-message-count {
   margin-left: auto;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 1px 7px;
+  border-radius: 999px;
   white-space: nowrap;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  transition: all 120ms ease;
+}
+
+.email-inbox-thread-card:hover .email-thread-message-count {
+  background: #e2e8f0;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.email-inbox-thread-card.active .email-thread-message-count {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .email-image-attachment {
