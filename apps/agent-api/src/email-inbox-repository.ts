@@ -552,8 +552,27 @@ export class EmailInboxRepository {
       const params: any[] = [ctx.workspaceId, companyId];
 
       if (filter.folder) {
-        params.push(filter.folder);
-        conditions.push(`folder = $${params.length}`);
+        if (filter.folder === "sent") {
+          conditions.push(`EXISTS (
+            SELECT 1 FROM company_email_messages folder_message
+            WHERE folder_message.workspace_id = company_email_threads.workspace_id
+              AND folder_message.company_id = company_email_threads.company_id
+              AND folder_message.thread_id = company_email_threads.id
+              AND folder_message.direction = 'outbound'
+              AND folder_message.is_draft = false
+          )`);
+        } else if (filter.folder === "drafts") {
+          conditions.push(`EXISTS (
+            SELECT 1 FROM company_email_messages folder_message
+            WHERE folder_message.workspace_id = company_email_threads.workspace_id
+              AND folder_message.company_id = company_email_threads.company_id
+              AND folder_message.thread_id = company_email_threads.id
+              AND folder_message.is_draft = true
+          )`);
+        } else {
+          params.push(filter.folder);
+          conditions.push(`folder = $${params.length}`);
+        }
       }
       if (filter.status) {
         params.push(filter.status);
@@ -593,7 +612,17 @@ export class EmailInboxRepository {
       (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId
     );
 
-    if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
+    if (filter.folder === "sent") {
+      items = items.filter((thread) => Array.from(this.memoryMessages.values()).some((message) =>
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+        message.threadId === thread.id && message.direction === "outbound" && !message.isDraft
+      ));
+    } else if (filter.folder === "drafts") {
+      items = items.filter((thread) => Array.from(this.memoryMessages.values()).some((message) =>
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+        message.threadId === thread.id && message.isDraft
+      ));
+    } else if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
     if (filter.status) items = items.filter((t) => t.status === filter.status);
     if (filter.priority) items = items.filter((t) => t.priority === filter.priority);
     if (filter.accountId) items = items.filter((t) => t.emailAccountId === filter.accountId);
@@ -609,6 +638,66 @@ export class EmailInboxRepository {
     }
 
     return items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
+  }
+
+  async getFolderCounts(
+    ctx: AuthContext,
+    companyId: string,
+    accountId?: string
+  ): Promise<Record<EmailFolder, number>> {
+    if (this.pool) {
+      const params: unknown[] = [ctx.workspaceId, companyId];
+      const accountCondition = accountId ? ` AND thread.email_account_id = $3` : "";
+      if (accountId) params.push(accountId);
+      const result = await this.pool.query<{
+        inbox: string; sent: string; drafts: string; archived: string; spam: string;
+      }>(
+        `SELECT
+          COUNT(*) FILTER (WHERE thread.folder = 'inbox') AS inbox,
+          COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM company_email_messages message
+            WHERE message.workspace_id = thread.workspace_id
+              AND message.company_id = thread.company_id
+              AND message.thread_id = thread.id
+              AND message.direction = 'outbound'
+              AND message.is_draft = false
+          )) AS sent,
+          COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM company_email_messages message
+            WHERE message.workspace_id = thread.workspace_id
+              AND message.company_id = thread.company_id
+              AND message.thread_id = thread.id
+              AND message.is_draft = true
+          )) AS drafts,
+          COUNT(*) FILTER (WHERE thread.folder = 'archived') AS archived,
+          COUNT(*) FILTER (WHERE thread.folder = 'spam') AS spam
+        FROM company_email_threads thread
+        WHERE thread.workspace_id = $1 AND thread.company_id = $2${accountCondition}`,
+        params
+      );
+      const row = result.rows[0];
+      return {
+        inbox: Number(row?.inbox || 0), sent: Number(row?.sent || 0), drafts: Number(row?.drafts || 0),
+        archived: Number(row?.archived || 0), spam: Number(row?.spam || 0),
+      };
+    }
+
+    const allThreads = Array.from(this.memoryThreads.values()).filter((thread) =>
+      thread.workspaceId === ctx.workspaceId && thread.companyId === companyId &&
+      (!accountId || thread.emailAccountId === accountId)
+    );
+    const hasMessage = (threadId: string, predicate: (message: CompanyEmailMessage) => boolean) =>
+      Array.from(this.memoryMessages.values()).some((message) =>
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+        message.threadId === threadId && predicate(message)
+      );
+    return {
+      inbox: allThreads.filter((thread) => thread.folder === "inbox").length,
+      sent: allThreads.filter((thread) => hasMessage(thread.id, (message) => message.direction === "outbound" && !message.isDraft)).length,
+      drafts: allThreads.filter((thread) => hasMessage(thread.id, (message) => message.isDraft)).length,
+      archived: allThreads.filter((thread) => thread.folder === "archived").length,
+      spam: allThreads.filter((thread) => thread.folder === "spam").length,
+    };
   }
 
   async getThread(ctx: AuthContext, companyId: string, threadId: string): Promise<CompanyEmailThread | null> {

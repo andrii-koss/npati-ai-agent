@@ -365,7 +365,7 @@ export function registerEmailInboxRoutes(
       r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
       const accounts = await repo.listAccounts(c, r.params.companyId);
       const account = accounts.find((item) => item.id === r.body?.accountId);
-      if (!account) throw Object.assign(new Error("Select a valid company email account."), { status: 400 });
+      if (!account) throw Object.assign(new Error("Select a valid email account."), { status: 400 });
 
       const normalizeRecipients = (values: unknown) => Array.isArray(values)
         ? [...new Set(values.map(String).map((value) => value.trim().toLowerCase()).filter(Boolean))]
@@ -458,7 +458,21 @@ export function registerEmailInboxRoutes(
         limit: r.query.limit ? Number(r.query.limit) : 50,
       });
 
-      return reply.code(200).send({ threads });
+      return reply.header("Cache-Control", "no-store").code(200).send({ threads });
+    } catch (e) {
+      return err(reply, e);
+    }
+  });
+
+  app.get<{
+    Params: { companyId: string };
+    Querystring: { accountId?: string };
+  }>("/companies/:companyId/email-inbox/folder-counts", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:read_messages");
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
+      const counts = await repo.getFolderCounts(c, r.params.companyId, r.query.accountId);
+      return reply.header("Cache-Control", "no-store").code(200).send({ counts });
     } catch (e) {
       return err(reply, e);
     }
@@ -486,7 +500,7 @@ export function registerEmailInboxRoutes(
           .slice(0, 20)
           .map((run) => ({ id: run.id, task: run.task, status: run.status, createdAt: run.createdAt }));
 
-        return reply.code(200).send({
+        return reply.header("Cache-Control", "no-store").code(200).send({
           thread, messages, contact,
           customerContext: { previousThreads, tasks: relatedTasks },
         });

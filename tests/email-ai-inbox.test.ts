@@ -621,7 +621,7 @@ describe("Email / AI Inbox Module", () => {
     await expect(storage.open(mockAuth, "attachment-company", fileId)).resolves.toBeNull();
   });
 
-  it("31. Composes a brand-new outbound email and queues it for SMTP", async () => {
+  it("31. Keeps a composed message in Sent and correlates the recipient reply into the same Inbox history", async () => {
     const isolatedRepo = new EmailInboxRepository();
     let account = await isolatedRepo.createAccount(mockAuth, "compose-company", {
       emailAddress: "sales@company.com", mode: "manual", testMode: false,
@@ -651,6 +651,44 @@ describe("Email / AI Inbox Module", () => {
       thread: { customerEmail: "customer@example.net", folder: "sent" },
       message: { fromAddress: "sales@company.com", isDraft: false, isAiGenerated: false, deliveryStatus: "sending" },
     });
+    const composed = response.json();
+    await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "sent" })).resolves.toEqual([
+      expect.objectContaining({ id: composed.thread.id, subject: "A new conversation" }),
+    ]);
+
+    const inbound = await new EmailAIProcessor(isolatedRepo).processInbound(mockAuth, "compose-company", {
+      from: "customer@example.net",
+      to: "sales@company.com",
+      subject: "Re: A new conversation",
+      body: "This is the recipient reply.",
+      messageId: "<recipient-reply@example.net>",
+      inReplyTo: `<${composed.message.messageId}@company.com>`,
+    });
+    expect(inbound.thread.id).toBe(composed.thread.id);
+    const history = await isolatedRepo.listMessages(mockAuth, "compose-company", composed.thread.id);
+    expect(history.map((message) => message.direction)).toEqual(["outbound", "inbound"]);
+    await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "inbox" })).resolves.toEqual([
+      expect.objectContaining({ id: composed.thread.id }),
+    ]);
+    await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "sent" })).resolves.toEqual([
+      expect.objectContaining({ id: composed.thread.id }),
+    ]);
+    await expect(isolatedRepo.getFolderCounts(mockAuth, "compose-company")).resolves.toMatchObject({
+      inbox: 1, sent: 1, drafts: 0, archived: 0, spam: 0,
+    });
+
+    const countsResponse = await app.inject({
+      method: "GET", url: "/companies/compose-company/email-inbox/folder-counts",
+    });
+    expect(countsResponse.statusCode).toBe(200);
+    expect(countsResponse.json().counts).toMatchObject({ inbox: 1, sent: 1 });
+
+    const deleted = await app.inject({
+      method: "DELETE", url: `/companies/compose-company/email-inbox/threads/${composed.thread.id}`,
+    });
+    expect(deleted.statusCode).toBe(200);
+    await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "inbox" })).resolves.toEqual([]);
+    await expect(isolatedRepo.listThreads(mockAuth, "compose-company", { folder: "sent" })).resolves.toEqual([]);
     const jobs = await isolatedRepo.claimJobs("compose-test-worker", 10);
     expect(jobs).toEqual([expect.objectContaining({ jobType: "send", emailAccountId: account.id })]);
     await app.close();
@@ -720,9 +758,23 @@ describe("Email / AI Inbox Module", () => {
     expect(listed.statusCode).toBe(200);
     expect(listed.json().accounts).toHaveLength(1);
 
-    const duplicate = await app.inject({ method: "POST", url: "/companies/another-company/email-accounts", payload: mailbox });
+    const duplicate = await app.inject({
+      method: "POST", url: "/companies/another-company/email-accounts",
+      payload: {
+        ...mailbox,
+        imapConfig: { authType: "oauth2", host: "mail.example.com", port: 993, secure: true, username: "personal@example.com", accessToken: "oauth-token" },
+        smtpConfig: { authType: "oauth2", host: "mail.example.com", port: 465, secure: true, username: "personal@example.com", accessToken: "oauth-token" },
+      },
+    });
     expect(duplicate.statusCode).toBe(409);
     expect(duplicate.json().error.message).toMatch(/already connected/i);
+
+    const composed = await app.inject({
+      method: "POST", url: "/companies/personal/email-inbox/compose",
+      payload: { accountId: created.json().account.id, toAddresses: ["recipient@example.net"], subject: "Personal mailbox", bodyText: "Works without a Company." },
+    });
+    expect(composed.statusCode).toBe(201);
+    expect(composed.json()).toMatchObject({ status: "simulated_send", thread: { folder: "sent" } });
     await app.close();
   });
 });
