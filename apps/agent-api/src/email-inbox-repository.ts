@@ -69,6 +69,13 @@ export function subjectCompareKey(subject?: string | null): string {
   return norm.toLowerCase().replace(/[\p{P}\p{S}]+/gu, " ").replace(/\s+/g, " ").trim();
 }
 
+export function cleanEmailSnippet(text?: string | null): string {
+  if (!text) return "";
+  const clean = text
+    .split(/\r?\nOn .+?wrote:|\r?\n--- Original Message ---|\r?\n_{3,}|\r?\nFrom:/i)[0] || text;
+  return clean.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 180);
+}
+
 export function extractCandidateMessageIds(headerValue?: string | null): string[] {
   if (!headerValue || typeof headerValue !== "string") return [];
   const candidates = new Set<string>();
@@ -546,8 +553,24 @@ export class EmailInboxRepository {
       const params: any[] = [ctx.workspaceId, companyId];
 
       if (filter.folder) {
-        params.push(filter.folder);
-        conditions.push(`folder = $${params.length}`);
+        if (filter.folder === "sent") {
+          conditions.push(`(folder = 'sent' OR EXISTS (
+            SELECT 1 FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'outbound'
+              AND m.is_draft = false
+          )) AND folder != 'spam'`);
+        } else if (filter.folder === "drafts") {
+          conditions.push(`(folder = 'drafts' OR EXISTS (
+            SELECT 1 FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'outbound'
+              AND m.is_draft = true
+          )) AND folder != 'spam'`);
+        } else {
+          params.push(filter.folder);
+          conditions.push(`folder = $${params.length}`);
+        }
       }
       if (filter.status) {
         params.push(filter.status);
@@ -574,20 +597,73 @@ export class EmailInboxRepository {
 
       params.push(limit);
       const query = `
-        SELECT ${threadCols} FROM company_email_threads
+        SELECT
+          ${threadCols},
+          (
+            SELECT m.body_text
+            FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ) AS "rawLatestSnippet",
+          (
+            SELECT m.body_text
+            FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'inbound'
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ) AS "rawInboundSnippet",
+          (
+            SELECT m.body_text
+            FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'outbound'
+              AND m.is_draft = false
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ) AS "rawOutboundSnippet"
+        FROM company_email_threads
         WHERE ${conditions.join(" AND ")}
         ORDER BY last_message_at DESC
         LIMIT $${params.length}
       `;
       const result = await this.pool.query<CompanyEmailThread>(query, params);
-      return result.rows;
+      return result.rows.map((row) => {
+        const t = { ...row };
+        t.latestMessageSnippet = cleanEmailSnippet((row as any).rawLatestSnippet);
+        t.latestInboundSnippet = cleanEmailSnippet((row as any).rawInboundSnippet);
+        t.latestOutboundSnippet = cleanEmailSnippet((row as any).rawOutboundSnippet);
+        delete (t as any).rawLatestSnippet;
+        delete (t as any).rawInboundSnippet;
+        delete (t as any).rawOutboundSnippet;
+        return t;
+      });
     }
 
     let items = Array.from(this.memoryThreads.values()).filter(
       (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId
     );
 
-    if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
+    if (filter.folder) {
+      if (filter.folder === "sent") {
+        items = items.filter((t) => {
+          if (t.folder === "spam") return false;
+          if (t.folder === "sent") return true;
+          const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
+          return msgs.some((m) => m.direction === "outbound" && !m.isDraft);
+        });
+      } else if (filter.folder === "drafts") {
+        items = items.filter((t) => {
+          if (t.folder === "spam") return false;
+          if (t.folder === "drafts") return true;
+          const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
+          return msgs.some((m) => m.direction === "outbound" && m.isDraft);
+        });
+      } else {
+        items = items.filter((t) => t.folder === filter.folder);
+      }
+    }
     if (filter.status) items = items.filter((t) => t.status === filter.status);
     if (filter.priority) items = items.filter((t) => t.priority === filter.priority);
     if (filter.accountId) items = items.filter((t) => t.emailAccountId === filter.accountId);
@@ -602,7 +678,85 @@ export class EmailInboxRepository {
       );
     }
 
-    return items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
+    const sorted = items.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()).slice(0, limit);
+    return sorted.map((item) => {
+      const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === item.id);
+      const sortedMsgs = [...msgs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const latest = sortedMsgs[0];
+      const latestInbound = sortedMsgs.find((m) => m.direction === "inbound");
+      const latestOutbound = sortedMsgs.find((m) => m.direction === "outbound" && !m.isDraft);
+      return {
+        ...item,
+        latestMessageSnippet: cleanEmailSnippet(latest?.bodyText),
+        latestInboundSnippet: cleanEmailSnippet(latestInbound?.bodyText),
+        latestOutboundSnippet: cleanEmailSnippet(latestOutbound?.bodyText),
+      };
+    });
+  }
+
+  async getFolderCounts(
+    ctx: AuthContext,
+    companyId: string,
+    accountId?: string
+  ): Promise<{ inbox: number; sent: number; drafts: number; archived: number; spam: number }> {
+    if (this.pool) {
+      const params: any[] = [ctx.workspaceId, companyId];
+      let accountCond = "";
+      if (accountId && accountId !== "all") {
+        params.push(accountId);
+        accountCond = `AND email_account_id = $${params.length}`;
+      }
+      const query = `
+        SELECT
+          COUNT(*) FILTER (WHERE folder = 'inbox')::int AS inbox,
+          COUNT(*) FILTER (WHERE (folder = 'sent' OR EXISTS (
+            SELECT 1 FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'outbound'
+              AND m.is_draft = false
+          )) AND folder != 'spam')::int AS sent,
+          COUNT(*) FILTER (WHERE (folder = 'drafts' OR EXISTS (
+            SELECT 1 FROM company_email_messages m
+            WHERE m.thread_id = company_email_threads.id
+              AND m.direction = 'outbound'
+              AND m.is_draft = true
+          )) AND folder != 'spam')::int AS drafts,
+          COUNT(*) FILTER (WHERE folder = 'archived')::int AS archived,
+          COUNT(*) FILTER (WHERE folder = 'spam')::int AS spam
+        FROM company_email_threads
+        WHERE workspace_id = $1 AND company_id = $2 ${accountCond}
+      `;
+      const res = await this.pool.query(query, params);
+      const row = res.rows[0] || {};
+      return {
+        inbox: Number(row.inbox || 0),
+        sent: Number(row.sent || 0),
+        drafts: Number(row.drafts || 0),
+        archived: Number(row.archived || 0),
+        spam: Number(row.spam || 0),
+      };
+    }
+
+    const items = Array.from(this.memoryThreads.values()).filter(
+      (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId && (!accountId || accountId === "all" || t.emailAccountId === accountId)
+    );
+    return {
+      inbox: items.filter((t) => t.folder === "inbox").length,
+      sent: items.filter((t) => {
+        if (t.folder === "spam") return false;
+        if (t.folder === "sent") return true;
+        const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
+        return msgs.some((m) => m.direction === "outbound" && !m.isDraft);
+      }).length,
+      drafts: items.filter((t) => {
+        if (t.folder === "spam") return false;
+        if (t.folder === "drafts") return true;
+        const msgs = Array.from(this.memoryMessages.values()).filter((m) => m.threadId === t.id);
+        return msgs.some((m) => m.direction === "outbound" && m.isDraft);
+      }).length,
+      archived: items.filter((t) => t.folder === "archived").length,
+      spam: items.filter((t) => t.folder === "spam").length,
+    };
   }
 
   async getThread(ctx: AuthContext, companyId: string, threadId: string): Promise<CompanyEmailThread | null> {

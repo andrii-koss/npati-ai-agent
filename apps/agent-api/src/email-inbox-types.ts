@@ -139,6 +139,8 @@ export interface CompanyEmailThread {
   updatedAt: string;
   messagesCount?: number;
   latestMessageSnippet?: string;
+  latestInboundSnippet?: string;
+  latestOutboundSnippet?: string;
 }
 
 export type EmailDeliveryStatus = "sending" | "sent" | "delivered" | "bounced" | "rejected" | "failed";

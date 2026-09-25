@@ -40,6 +40,9 @@ interface EmailThread {
   aiConfidenceScore?: number | null;
   aiClassificationSummary?: string | null;
   detectedLanguage?: string | null;
+  latestMessageSnippet?: string;
+  latestInboundSnippet?: string;
+  latestOutboundSnippet?: string;
 }
 
 interface EmailMessage {
@@ -203,6 +206,13 @@ export function EmailInboxPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
   const [folder, setFolder] = useState<"inbox" | "sent" | "drafts" | "archived" | "spam">("inbox");
+  const [folderCounts, setFolderCounts] = useState<Record<string, number>>({
+    inbox: 0,
+    sent: 0,
+    drafts: 0,
+    archived: 0,
+    spam: 0,
+  });
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
@@ -482,10 +492,13 @@ export function EmailInboxPage() {
       if (priorityFilter !== "all") q.set("priority", priorityFilter);
       if (searchQuery.trim()) q.set("search", searchQuery.trim());
 
-      const res = await api<{ threads: EmailThread[] }>(
+      const res = await api<{ threads: EmailThread[]; folderCounts?: Record<string, number> }>(
         `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
       );
       setThreads(res.threads);
+      if (res.folderCounts) {
+        setFolderCounts(res.folderCounts);
+      }
       if (res.threads.length === 0) {
         setSelectedThreadId(null);
         setActiveThread(null);
@@ -505,6 +518,15 @@ export function EmailInboxPage() {
 
   useEffect(() => {
     loadThreads();
+  }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
+
+  // Polling for new incoming messages and folder count updates
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    const interval = window.setInterval(() => {
+      void loadThreads();
+    }, 4000);
+    return () => window.clearInterval(interval);
   }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
 
   // Load thread detail
@@ -925,23 +947,26 @@ export function EmailInboxPage() {
               { id: "drafts", label: "Drafts", icon: "📝" },
               { id: "archived", label: "Archived", icon: "📁" },
               { id: "spam", label: "Spam", icon: "🚫" },
-            ].map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
-                onClick={() => setFolder(f.id as any)}
-                title={f.label}
-              >
-                <span className="email-folder-btn-content">
-                  <span className="email-folder-icon">{f.icon}</span>
-                  {!sidebarCollapsed && <span>{f.label}</span>}
-                </span>
-                {!sidebarCollapsed && folder === f.id && threads.length > 0 && (
-                  <span className="email-folder-count">({threads.length})</span>
-                )}
-              </button>
-            ))}
+            ].map((f) => {
+              const count = folderCounts[f.id] ?? (folder === f.id ? threads.length : 0);
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
+                  onClick={() => setFolder(f.id as any)}
+                  title={f.label}
+                >
+                  <span className="email-folder-btn-content">
+                    <span className="email-folder-icon">{f.icon}</span>
+                    {!sidebarCollapsed && <span>{f.label}</span>}
+                  </span>
+                  {!sidebarCollapsed && typeof count === "number" && count > 0 && (
+                    <span className="email-folder-count">({count})</span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </aside>
 
@@ -1025,9 +1050,21 @@ export function EmailInboxPage() {
                       </small>
                     </div>
 
-                    <div style={{ fontSize: 13, color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
                       {t.subject}
                     </div>
+
+                    {(() => {
+                      const snippet = folder === "sent"
+                        ? (t.latestOutboundSnippet || t.latestMessageSnippet)
+                        : (t.latestInboundSnippet || t.latestMessageSnippet);
+                      if (!snippet) return null;
+                      return (
+                        <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+                          {snippet}
+                        </div>
+                      );
+                    })()}
 
                     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
                       <span className={`email-status-pill status-${t.status}`}>

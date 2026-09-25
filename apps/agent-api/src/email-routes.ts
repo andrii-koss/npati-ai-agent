@@ -452,17 +452,34 @@ export function registerEmailInboxRoutes(
       const c = await ctx(auth, r, "email:read_messages");
       r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
 
-      const threads = await repo.listThreads(c, r.params.companyId, {
-        folder: r.query.folder,
-        status: r.query.status,
-        priority: r.query.priority,
-        search: r.query.search,
-        accountId: r.query.accountId,
-        isVip: r.query.isVip ? r.query.isVip === "true" : undefined,
-        limit: r.query.limit ? Number(r.query.limit) : 50,
-      });
+      const [threads, folderCounts] = await Promise.all([
+        repo.listThreads(c, r.params.companyId, {
+          folder: r.query.folder,
+          status: r.query.status,
+          priority: r.query.priority,
+          search: r.query.search,
+          accountId: r.query.accountId,
+          isVip: r.query.isVip ? r.query.isVip === "true" : undefined,
+          limit: r.query.limit ? Number(r.query.limit) : 50,
+        }),
+        repo.getFolderCounts(c, r.params.companyId, r.query.accountId),
+      ]);
 
-      return reply.code(200).send({ threads });
+      return reply.code(200).send({ threads, folderCounts });
+    } catch (e) {
+      return err(reply, e);
+    }
+  });
+
+  app.get<{
+    Params: { companyId: string };
+    Querystring: { accountId?: string };
+  }>("/companies/:companyId/email-inbox/folder-counts", async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:read_messages");
+      r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
+      const folderCounts = await repo.getFolderCounts(c, r.params.companyId, r.query.accountId);
+      return reply.code(200).send({ folderCounts });
     } catch (e) {
       return err(reply, e);
     }
