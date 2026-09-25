@@ -206,7 +206,7 @@ export class EmailInboxWorker {
           await this.processor.processInbound(ctx, account.companyId, {
             from: message.from, to: message.to, subject: message.subject, body: message.body,
             bodyHtml: message.bodyHtml, messageId: message.messageId || `imap:${account.id}:${message.uid}`,
-            inReplyTo: message.inReplyTo, attachments: message.attachments,
+            inReplyTo: message.inReplyTo, references: message.references, attachments: message.attachments,
           });
           lastUid = Math.max(lastUid, message.uid);
         }

@@ -653,6 +653,8 @@ export function registerEmailInboxRoutes(
       const messageAttachments = r.body.attachments?.length && attachmentStorage
         ? await attachmentStorage.persist(c, r.params.companyId, thread.id, r.body.attachments)
         : r.body.attachments;
+      const existingThreadMessages = await repo.listMessages(c, r.params.companyId, thread.id);
+      const latestInbound = [...existingThreadMessages].reverse().find((m) => m.direction === "inbound");
       const msg = await repo.createMessage(c, r.params.companyId, {
         threadId: thread.id,
         emailAccountId: account?.id,
@@ -665,6 +667,7 @@ export function registerEmailInboxRoutes(
         bodyText: r.body.bodyText,
         bodyHtml: r.body.bodyHtml,
         attachments: messageAttachments,
+        inReplyTo: latestInbound?.messageId || undefined,
         isDraft,
         sentByUserId: c.userId,
         deliveryStatus: isDraft ? "sending" : account?.testMode ? "delivered" : "sending",
@@ -824,6 +827,7 @@ export function registerEmailInboxRoutes(
       threadKey?: string;
       messageId?: string;
       inReplyTo?: string;
+      references?: string;
     };
   }>("/companies/:companyId/email-inbox/inbound", async (r, reply) => {
     try {
