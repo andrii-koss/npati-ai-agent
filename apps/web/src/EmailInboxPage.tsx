@@ -143,8 +143,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) headers.set("authorization", `Bearer ${token}`);
   if (init?.body != null && !headers.has("content-type")) headers.set("content-type", "application/json");
   const response = await fetch(`/api${path}`, { ...init, headers });
-  const body = (await response.json().catch(() => null)) as T & { error?: { message?: string } };
-  if (!response.ok) throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+  const body = (await response.json().catch(() => null)) as T & { error?: { message?: string } | string; message?: string };
+  if (!response.ok) {
+    const apiMessage = typeof body?.error === "string" ? body?.message || body.error : body?.error?.message || body?.message;
+    const deploymentHint = response.status === 404 && (!apiMessage || /^Route .* not found$/i.test(apiMessage))
+      ? `${apiMessage ? `${apiMessage} ` : ""}Deploy/restart both the web and agent-api services from the same revision.`
+      : undefined;
+    throw new Error(apiMessage || deploymentHint || `Request failed (${response.status})`);
+  }
   return body;
 }
 
