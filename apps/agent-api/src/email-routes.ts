@@ -401,7 +401,7 @@ export function registerEmailInboxRoutes(
       const thread = await repo.createThread(c, r.params.companyId, {
         emailAccountId: account.id, subject, customerEmail: toAddresses[0]!,
         status: isDraft ? "draft_ready" : account.testMode ? "answered" : "ai_processing",
-        folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId,
+        folder: isDraft ? "drafts" : "sent", assignedAgentId: account.agentId, unreadCount: 0,
       });
       const attachments = rawAttachments.length && attachmentStorage
         ? await attachmentStorage.persist(c, r.params.companyId, thread.id, rawAttachments)

@@ -115,6 +115,7 @@ export class EmailInboxRepository {
     tokenUrl: string; clientId: string; clientSecret?: string; redirectUri: string; expiresAt: string;
   }>();
   private memoryNotifications = new Map<string, CompanyEmailNotification>();
+  private memoryDeletedMessageIds = new Set<string>();
 
   constructor(databaseUrl?: string, pool?: Pool, vault: CryptoVault = defaultVault) {
     this.vault = vault;
@@ -653,22 +654,20 @@ export class EmailInboxRepository {
         inbox: string; sent: string; drafts: string; archived: string; spam: string;
       }>(
         `SELECT
-          COUNT(*) FILTER (WHERE thread.folder = 'inbox') AS inbox,
-          COUNT(*) FILTER (WHERE EXISTS (
-            SELECT 1 FROM company_email_messages message
+          COALESCE(SUM(thread.unread_count) FILTER (WHERE thread.folder = 'inbox'), 0) AS inbox,
+          COALESCE(SUM((SELECT COUNT(*) FROM company_email_messages message
             WHERE message.workspace_id = thread.workspace_id
               AND message.company_id = thread.company_id
               AND message.thread_id = thread.id
               AND message.direction = 'outbound'
               AND message.is_draft = false
-          )) AS sent,
-          COUNT(*) FILTER (WHERE EXISTS (
-            SELECT 1 FROM company_email_messages message
+          )), 0) AS sent,
+          COALESCE(SUM((SELECT COUNT(*) FROM company_email_messages message
             WHERE message.workspace_id = thread.workspace_id
               AND message.company_id = thread.company_id
               AND message.thread_id = thread.id
               AND message.is_draft = true
-          )) AS drafts,
+          )), 0) AS drafts,
           COUNT(*) FILTER (WHERE thread.folder = 'archived') AS archived,
           COUNT(*) FILTER (WHERE thread.folder = 'spam') AS spam
         FROM company_email_threads thread
@@ -686,15 +685,15 @@ export class EmailInboxRepository {
       thread.workspaceId === ctx.workspaceId && thread.companyId === companyId &&
       (!accountId || thread.emailAccountId === accountId)
     );
-    const hasMessage = (threadId: string, predicate: (message: CompanyEmailMessage) => boolean) =>
-      Array.from(this.memoryMessages.values()).some((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
-        message.threadId === threadId && predicate(message)
-      );
     return {
-      inbox: allThreads.filter((thread) => thread.folder === "inbox").length,
-      sent: allThreads.filter((thread) => hasMessage(thread.id, (message) => message.direction === "outbound" && !message.isDraft)).length,
-      drafts: allThreads.filter((thread) => hasMessage(thread.id, (message) => message.isDraft)).length,
+      inbox: allThreads.filter((thread) => thread.folder === "inbox").reduce((sum, thread) => sum + thread.unreadCount, 0),
+      sent: allThreads.reduce((sum, thread) => sum + Array.from(this.memoryMessages.values()).filter((message) =>
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id &&
+        message.direction === "outbound" && !message.isDraft
+      ).length, 0),
+      drafts: allThreads.reduce((sum, thread) => sum + Array.from(this.memoryMessages.values()).filter((message) =>
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id && message.isDraft
+      ).length, 0),
       archived: allThreads.filter((thread) => thread.folder === "archived").length,
       spam: allThreads.filter((thread) => thread.folder === "spam").length,
     };
@@ -1012,13 +1011,39 @@ export class EmailInboxRepository {
 
   async deleteThread(ctx: AuthContext, companyId: string, threadId: string): Promise<void> {
     if (this.pool) {
-      await this.pool.query(
-        `DELETE FROM company_email_threads WHERE workspace_id = $1 AND company_id = $2 AND id = $3`,
-        [ctx.workspaceId, companyId, threadId]
-      );
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO company_email_deleted_messages
+             (workspace_id, company_id, email_account_id, external_message_id)
+           SELECT workspace_id, company_id, email_account_id, message_id
+             FROM company_email_messages
+            WHERE workspace_id = $1 AND company_id = $2 AND thread_id = $3
+              AND message_id IS NOT NULL AND message_id <> ''
+           ON CONFLICT (workspace_id, company_id, external_message_id)
+           DO UPDATE SET deleted_at = now()`,
+          [ctx.workspaceId, companyId, threadId]
+        );
+        await client.query(
+          `DELETE FROM company_email_threads WHERE workspace_id = $1 AND company_id = $2 AND id = $3`,
+          [ctx.workspaceId, companyId, threadId]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
       return;
     }
 
+    for (const message of this.memoryMessages.values()) {
+      if (message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === threadId && message.messageId) {
+        this.memoryDeletedMessageIds.add(`${ctx.workspaceId}|${companyId}|${message.messageId}`);
+      }
+    }
     this.memoryThreads.delete(threadId);
     // Also remove associated messages
     for (const [msgId, msg] of this.memoryMessages.entries()) {
@@ -1026,6 +1051,22 @@ export class EmailInboxRepository {
         this.memoryMessages.delete(msgId);
       }
     }
+  }
+
+  async isExternalMessageDeleted(ctx: AuthContext, companyId: string, externalMessageId: string): Promise<boolean> {
+    const candidates = extractCandidateMessageIds(externalMessageId);
+    if (!candidates.length) return false;
+    if (this.pool) {
+      const result = await this.pool.query(
+        `SELECT 1 FROM company_email_deleted_messages
+          WHERE workspace_id = $1 AND company_id = $2
+            AND external_message_id = ANY($3::text[])
+          LIMIT 1`,
+        [ctx.workspaceId, companyId, candidates]
+      );
+      return Boolean(result.rowCount);
+    }
+    return candidates.some((candidate) => this.memoryDeletedMessageIds.has(`${ctx.workspaceId}|${companyId}|${candidate}`));
   }
 
   // =========================================================================

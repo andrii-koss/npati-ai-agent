@@ -199,6 +199,10 @@ export class EmailInboxWorker {
         const messages = await ImapEmailTransport.poll(account);
         let lastUid = account.imapConfig.lastUid || 0;
         for (const message of messages) {
+          if (message.messageId && await this.repo.isExternalMessageDeleted(ctx, account.companyId, message.messageId)) {
+            lastUid = Math.max(lastUid, message.uid);
+            continue;
+          }
           if (await this.handleDeliveryNotification(ctx, account, message)) {
             lastUid = Math.max(lastUid, message.uid);
             continue;

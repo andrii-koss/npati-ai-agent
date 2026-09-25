@@ -14831,6 +14831,76 @@ body:has(.npati-dialog-backdrop) .sidebar {
   border-color: #bfdbfe;
 }
 
+.email-inbox-message-bubble.latest-inbound {
+  border: 2px solid #2563eb;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.14);
+}
+
+.email-latest-reply-badge,
+.email-thread-new-count {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.email-thread-new-count {
+  margin-top: 2px;
+}
+
+.email-new-messages-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 18px 8px;
+  padding: 9px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.email-new-messages-banner button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  padding: 5px 9px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.email-quoted-toggle {
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.email-quoted-content {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #64748b;
+  white-space: pre-wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 .email-sanitized-html {
   max-width: 100%;
   overflow-x: auto;
