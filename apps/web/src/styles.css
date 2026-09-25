@@ -14617,6 +14617,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
 
 /* Messages Scroll & Bubbles */
 /* Middle Scrollable Detail Body Container */
+/* Middle Scrollable Detail Body Container */
 .email-inbox-detail-body {
   flex: 1 1 0%;
   min-height: 0;
@@ -14626,6 +14627,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   gap: 12px;
   background: #f8fafc;
   padding: 12px 18px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 .email-inbox-detail-body .email-customer-card {
@@ -14641,6 +14644,38 @@ body:has(.npati-dialog-backdrop) .sidebar {
   overflow-y: visible;
   padding: 0;
   background: transparent;
+}
+
+/* Sleek narrow scrollbars for email inbox panes and draft text */
+.email-inbox-card * {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.email-inbox-card *::-webkit-scrollbar,
+.email-inbox-detail-body::-webkit-scrollbar,
+.email-draft-text-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.email-inbox-card *::-webkit-scrollbar-track,
+.email-inbox-detail-body::-webkit-scrollbar-track,
+.email-draft-text-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.email-inbox-card *::-webkit-scrollbar-thumb,
+.email-inbox-detail-body::-webkit-scrollbar-thumb,
+.email-draft-text-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.email-inbox-card *::-webkit-scrollbar-thumb:hover,
+.email-inbox-detail-body::-webkit-scrollbar-thumb:hover,
+.email-draft-text-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 /* Messages Scroll & Bubbles */

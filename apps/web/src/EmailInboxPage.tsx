@@ -1092,10 +1092,15 @@ export function EmailInboxPage() {
                         type="button"
                         className={`email-expand-pane-btn ${readingFocus ? "active" : ""}`}
                         onClick={() => setReadingFocus(!readingFocus)}
-                        style={{ fontSize: 11.5, padding: "3px 8px" }}
-                        title={readingFocus ? "Restore split view" : "Expand reading view"}
+                        style={{ fontSize: 11.5, padding: "3px 8px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
+                        aria-label={readingFocus ? "Restore split view" : "Expand reading view"}
                       >
-                        {readingFocus ? "Split" : "Expand"}
+                        {readingFocus ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7"/></svg>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1148,7 +1153,17 @@ export function EmailInboxPage() {
                           onClick={() => setReadingFocus(!readingFocus)}
                           title={readingFocus ? "Restore split view (show list)" : "Expand reading view (hide list)"}
                         >
-                          {readingFocus ? "Split View" : "Expand View"}
+                          {readingFocus ? (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M4 14h6m0 0v6m0-6L3 21m17-7h-6m0 0v6m0-6l7 7M4 10h6m0 0V4m0 6L3 3m17 7h-6m0 0V4m0 6l7-7"/></svg>
+                              <span>Split View</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 3h6m0 0v6m0-6L14 10M9 21H3m0 0v-6m0 6l7-7M3 9V3m0 0h6m-6 0l7 7m11 11v-6m0 6h-6m6 0l-7-7"/></svg>
+                              <span>Expand View</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1343,7 +1358,7 @@ export function EmailInboxPage() {
                           style={{ width: "100%", borderRadius: 6, border: "1px solid #cbd5e1", padding: 8, fontFamily: "inherit", fontSize: 13 }}
                         />
                       ) : (
-                        <div style={{ fontSize: 13, color: "#451a03", whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: "200px", overflowY: "auto" }}>
+                        <div className="email-draft-text-scroll" style={{ fontSize: 13, color: "#451a03", whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: "200px", overflowY: "auto" }}>
                           {draftText}
                         </div>
                       )
