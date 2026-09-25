@@ -627,6 +627,10 @@ describe("Email / AI Inbox Module", () => {
       emailAddress: "sales@company.com", mode: "manual", testMode: false,
     });
     account = await isolatedRepo.updateAccount(mockAuth, "compose-company", account.id, { status: "connected" });
+    account = await isolatedRepo.updateAccount(mockAuth, "compose-company", account.id, {
+      status: "imap_error",
+      imapConfig: { lastError: "Temporary IMAP polling failure" },
+    });
     const app = Fastify();
     registerEmailInboxRoutes(app, {
       auth: { authenticate: async () => mockAuth },

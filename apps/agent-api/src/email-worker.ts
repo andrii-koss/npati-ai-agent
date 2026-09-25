@@ -192,7 +192,9 @@ export class EmailInboxWorker {
   private async pollMailboxes(): Promise<void> {
     const accounts = await this.repo.listAccountsForWorker();
     for (let account of accounts) {
-      if (account.testMode || account.status !== "connected" || !account.imapConfig.host) continue;
+      const imapPollingAllowed = account.status === "connected" || account.status === "imap_error" ||
+        account.status === "smtp_error" || account.status === "dns_error";
+      if (account.testMode || !imapPollingAllowed || !account.imapConfig.host) continue;
       const ctx = workerContext(account);
       try {
         account = await this.refreshOAuth(account, ctx);
@@ -215,7 +217,7 @@ export class EmailInboxWorker {
           lastUid = Math.max(lastUid, message.uid);
         }
         await this.repo.updateAccount(ctx, account.companyId, account.id, {
-          status: "connected",
+          status: account.smtpConfig.lastError ? "smtp_error" : "connected",
           imapConfig: { lastUid, lastSyncAt: new Date().toISOString(), lastError: null },
         });
       } catch (error) {
