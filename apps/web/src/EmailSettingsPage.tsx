@@ -261,6 +261,7 @@ export function EmailSettingsPage() {
 
   // Analytics
   const [analytics, setAnalytics] = useState<EmailAnalytics | null>(null);
+  const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
 
   // Granular permissions are delegated through the existing scoped API-key system.
   const [permissionKeys, setPermissionKeys] = useState<EmailPermissionKey[]>([]);
@@ -901,31 +902,6 @@ export function EmailSettingsPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            <select
-              aria-label="Select mailbox owner"
-              value={selectedCompanyId}
-              onChange={(e) => {
-                setSelectedCompanyId(e.target.value);
-                setSearchParams({ company: e.target.value }, { replace: true });
-              }}
-              className="page-size-select"
-            >
-              <option value="personal">Personal / No Company</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  Company: {c.name}
-                </option>
-              ))}
-            </select>
-            <Link
-              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
-              className="button-primary automations-action-primary"
-              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
-              title={accounts.length ? "Write and send a new email" : "Add an email address, then compose a message"}
-              aria-disabled={accounts.length === 0}
-            >
-              + Compose Email
-            </Link>
             <Link
               to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}`}
               className="button-secondary automations-action-primary"
@@ -935,7 +911,7 @@ export function EmailSettingsPage() {
             </Link>
             <button
               type="button"
-              className="button-secondary automations-action-primary"
+              className="button-primary automations-action-primary"
               onClick={openCreateDrawer}
               title="Add an email address to the selected personal or Company scope"
             >
@@ -944,6 +920,73 @@ export function EmailSettingsPage() {
           </div>
         </div>
       </header>
+
+      {/* Mailbox Scope & Quick Actions Toolbar */}
+      <div className="email-scope-toolbar">
+        <div className="email-scope-left">
+          <div className="email-scope-pill">
+            <span className="email-scope-badge">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                {selectedCompanyId === "personal" ? (
+                  <>
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </>
+                ) : (
+                  <>
+                    <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+                    <path d="M9 22v-4h6v4" />
+                    <path d="M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01" />
+                  </>
+                )}
+              </svg>
+              <span>Mailbox Scope:</span>
+            </span>
+
+            <div className="email-scope-select-wrap">
+              <select
+                aria-label="Select mailbox owner"
+                value={selectedCompanyId}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setSearchParams({ company: e.target.value }, { replace: true });
+                }}
+                className="email-scope-select"
+              >
+                <option value="personal">Personal / No Company</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    Company: {c.name}
+                  </option>
+                ))}
+              </select>
+              <svg className="email-scope-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          </div>
+          <span className="email-scope-context-hint">
+            {selectedCompanyId === "personal"
+              ? "Personal mailboxes & individual routing"
+              : `Company mailboxes for ${companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization"}`}
+          </span>
+        </div>
+
+        <div className="email-scope-right">
+          <Link
+            to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
+            className="email-compose-btn"
+            title={accounts.length ? "Write and send a new email" : "Add an email address, then compose a message"}
+            aria-disabled={accounts.length === 0}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            <span>+ Compose Email</span>
+          </Link>
+        </div>
+      </div>
 
       {/* 4 Stat Overview Cards matching /settings/activity and /settings/capabilities */}
       <section className="overview-grid inspector-stats-grid automations-stats-grid">
@@ -970,49 +1013,291 @@ export function EmailSettingsPage() {
       </section>
 
       {analytics && (
-        <>
-          <section className="email-stats-grid" aria-label="Detailed email analytics">
-            {[
-              ["AI Answered", analytics.aiAnswered],
-              ["Human Answered", analytics.humanAnswered],
-              ["Approved by Human", analytics.approvedByHuman],
-              ["Escalated to Human", analytics.escalatedToHuman],
-              ["Edited AI Responses", analytics.editedAiResponsesCount],
-              ["Failed", analytics.failedEmails],
-              ["Bounced", analytics.bouncedEmails],
-              ["Avg. Response", `${analytics.averageResponseTimeMinutes} min`],
-              ["Avg. First Response", `${analytics.averageFirstResponseTimeMinutes} min`],
-              ["High Confidence", analytics.confidenceDistribution.high],
-              ["Medium Confidence", analytics.confidenceDistribution.medium],
-              ["Low Confidence", analytics.confidenceDistribution.low],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <strong>{value}</strong>
-                <span>{label}</span>
+        <div className="email-analytics-dashboard">
+          <div className="email-analytics-dashboard-header">
+            <div className="email-analytics-header-left">
+              <div className="email-analytics-icon-badge">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3v18h18" />
+                  <path d="M18 9l-5 5-4-4-6 6" />
+                </svg>
               </div>
-            ))}
-          </section>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 20 }}>
-            <section className="automations-panel-card">
-              <h3>Email Volume by Day</h3>
-              <table className="automations-table"><thead><tr><th>Date</th><th>Received</th><th>Sent</th></tr></thead><tbody>
-                {analytics.volumeByDay.map((row) => <tr key={row.date}><td>{row.date}</td><td>{row.received}</td><td>{row.sent}</td></tr>)}
-              </tbody></table>
-            </section>
-            <section className="automations-panel-card">
-              <h3>Volume by Agent</h3>
-              <table className="automations-table"><thead><tr><th>Agent</th><th>Messages</th></tr></thead><tbody>
-                {analytics.volumeByAgent.map((row) => <tr key={row.agentId}><td>{row.agentName}</td><td>{row.count}</td></tr>)}
-              </tbody></table>
-            </section>
-            <section className="automations-panel-card">
-              <h3>Volume by Account</h3>
-              <table className="automations-table"><thead><tr><th>Account</th><th>Messages</th></tr></thead><tbody>
-                {analytics.volumeByAccount.map((row) => <tr key={row.accountId}><td>{row.email}</td><td>{row.count}</td></tr>)}
-              </tbody></table>
-            </section>
+              <div>
+                <h3>AI Inbox Analytics & Delivery Performance</h3>
+                <p>Breakdown of automated vs. human responses, delivery health, response speed, and volume</p>
+              </div>
+            </div>
+            <div className="email-analytics-header-right">
+              <button
+                type="button"
+                className="email-analytics-collapse-btn"
+                onClick={() => setAnalyticsExpanded((prev) => !prev)}
+                aria-expanded={analyticsExpanded}
+              >
+                {analyticsExpanded ? (
+                  <>
+                    <span>Hide Details</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 15l-6-6-6 6" /></svg>
+                  </>
+                ) : (
+                  <>
+                    <span>Show Details</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </>
+
+          {analyticsExpanded && (
+            <div className="email-analytics-dashboard-content">
+              {/* 3 Metric Categories */}
+              <div className="email-metrics-categories-grid">
+                {/* Category 1: AI & Human Handling */}
+                <div className="email-metric-category-card">
+                  <div className="email-metric-category-title">
+                    <span className="email-cat-icon">🤖</span>
+                    <span>Handling & Resolution</span>
+                  </div>
+                  <div className="email-metric-items-list">
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-blue" />
+                        <span className="email-metric-label">AI Answered</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.aiAnswered}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-indigo" />
+                        <span className="email-metric-label">Human Answered</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.humanAnswered}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-emerald" />
+                        <span className="email-metric-label">Approved by Human</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.approvedByHuman}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-amber" />
+                        <span className="email-metric-label">Escalated to Human</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.escalatedToHuman}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-purple" />
+                        <span className="email-metric-label">Edited AI Responses</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.editedAiResponsesCount}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category 2: Speed & Delivery Health */}
+                <div className="email-metric-category-card">
+                  <div className="email-metric-category-title">
+                    <span className="email-cat-icon">⚡</span>
+                    <span>Speed & Deliverability</span>
+                  </div>
+                  <div className="email-metric-items-list">
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-cyan" />
+                        <span className="email-metric-label">Avg. Response</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.averageResponseTimeMinutes} min</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-teal" />
+                        <span className="email-metric-label">Avg. First Response</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.averageFirstResponseTimeMinutes} min</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-rose" />
+                        <span className="email-metric-label">Failed Deliveries</span>
+                      </div>
+                      <strong className={`email-metric-val ${analytics.failedEmails > 0 ? "val-danger" : ""}`}>
+                        {analytics.failedEmails}
+                      </strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-metric-dot bg-orange" />
+                        <span className="email-metric-label">Bounced Emails</span>
+                      </div>
+                      <strong className={`email-metric-val ${analytics.bouncedEmails > 0 ? "val-danger" : ""}`}>
+                        {analytics.bouncedEmails}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category 3: AI Confidence Distribution */}
+                <div className="email-metric-category-card">
+                  <div className="email-metric-category-title">
+                    <span className="email-cat-icon">🎯</span>
+                    <span>AI Confidence Level</span>
+                  </div>
+                  <div className="email-metric-items-list">
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-confidence-badge conf-high">High</span>
+                        <span className="email-metric-label">High Confidence</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.confidenceDistribution.high}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-confidence-badge conf-med">Med</span>
+                        <span className="email-metric-label">Medium Confidence</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.confidenceDistribution.medium}</strong>
+                    </div>
+                    <div className="email-metric-item">
+                      <div className="email-metric-label-group">
+                        <span className="email-confidence-badge conf-low">Low</span>
+                        <span className="email-metric-label">Low Confidence</span>
+                      </div>
+                      <strong className="email-metric-val">{analytics.confidenceDistribution.low}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 Volume Breakdown Tables */}
+              <div className="email-volume-panels-grid">
+                {/* Volume by Day */}
+                <div className="email-volume-card">
+                  <div className="email-volume-card-header">
+                    <div className="email-volume-card-title">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                      <h4>Email Volume by Day</h4>
+                    </div>
+                    <span className="email-volume-count-badge">{analytics.volumeByDay.length} days</span>
+                  </div>
+                  {analytics.volumeByDay.length === 0 ? (
+                    <div className="email-volume-empty">
+                      <p>No email traffic recorded for this period</p>
+                    </div>
+                  ) : (
+                    <div className="email-volume-table-wrap">
+                      <table className="automations-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th style={{ textAlign: "right" }}>Received</th>
+                            <th style={{ textAlign: "right" }}>Sent</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {analytics.volumeByDay.map((row) => (
+                            <tr key={row.date}>
+                              <td><strong>{row.date}</strong></td>
+                              <td style={{ textAlign: "right" }}><span className="email-traffic-pill in">{row.received}</span></td>
+                              <td style={{ textAlign: "right" }}><span className="email-traffic-pill out">{row.sent}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Volume by Agent */}
+                <div className="email-volume-card">
+                  <div className="email-volume-card-header">
+                    <div className="email-volume-card-title">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><line x1="8" y1="16" x2="8" y2="16" /><line x1="16" y1="16" x2="16" y2="16" /></svg>
+                      <h4>Volume by Agent</h4>
+                    </div>
+                    <span className="email-volume-count-badge">{analytics.volumeByAgent.length} agents</span>
+                  </div>
+                  {analytics.volumeByAgent.length === 0 ? (
+                    <div className="email-volume-empty">
+                      <p>No agent responses recorded yet</p>
+                    </div>
+                  ) : (
+                    <div className="email-volume-table-wrap">
+                      <table className="automations-table">
+                        <thead>
+                          <tr>
+                            <th>Agent</th>
+                            <th style={{ textAlign: "right" }}>Messages</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {analytics.volumeByAgent.map((row) => (
+                            <tr key={row.agentId}>
+                              <td>
+                                <div className="email-table-agent-cell">
+                                  <span className="agent-avatar-mini">🤖</span>
+                                  <span>{row.agentName}</span>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <span className="email-traffic-pill msg">{row.count}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Volume by Account */}
+                <div className="email-volume-card">
+                  <div className="email-volume-card-header">
+                    <div className="email-volume-card-title">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
+                      <h4>Volume by Account</h4>
+                    </div>
+                    <span className="email-volume-count-badge">{analytics.volumeByAccount.length} accounts</span>
+                  </div>
+                  {analytics.volumeByAccount.length === 0 ? (
+                    <div className="email-volume-empty">
+                      <p>No account activity recorded yet</p>
+                    </div>
+                  ) : (
+                    <div className="email-volume-table-wrap">
+                      <table className="automations-table">
+                        <thead>
+                          <tr>
+                            <th>Account</th>
+                            <th style={{ textAlign: "right" }}>Messages</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {analytics.volumeByAccount.map((row) => (
+                            <tr key={row.accountId}>
+                              <td>
+                                <div className="email-table-account-cell">
+                                  <span className="email-avatar-mini">✉️</span>
+                                  <span className="email-truncate-address" title={row.email}>{row.email}</span>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <span className="email-traffic-pill msg">{row.count}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Search & Tabs Controls Bar matching /settings/automations */}
