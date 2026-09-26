@@ -8587,7 +8587,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .activity-header h1,
 .automations-header h1 {
   margin: 0 0 8px;
-  font-size: clamp(26px, 3vw, 34px);
+  font-size: clamp(21px, 2.2vw, 25px);
   line-height: 1.15;
   letter-spacing: -.03em;
   display: flex;
@@ -13425,7 +13425,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
   }
 
   .automations-header h1 {
-    font-size: 24px !important;
+    font-size: 20px !important;
     flex-wrap: wrap !important;
     gap: 10px !important;
   }
@@ -16057,11 +16057,32 @@ body:has(.npati-dialog-backdrop) .sidebar {
   padding: 10px 16px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-left: 4px solid var(--npati-red);
+  border-left: 4px solid #0284c7;
   border-radius: 10px;
   font-size: 13px;
   color: #334155;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.workspace-notice.success {
+  background: #f0fdf4 !important;
+  border-color: #bbf7d0 !important;
+  border-left: 4px solid #16a34a !important;
+  color: #166534 !important;
+}
+
+.workspace-notice.error {
+  background: #fff3f4 !important;
+  border-color: #fecaca !important;
+  border-left: 4px solid #dc2626 !important;
+  color: #991b1b !important;
+}
+
+.workspace-notice.info {
+  background: #f0f9ff !important;
+  border-color: #bae6fd !important;
+  border-left: 4px solid #0284c7 !important;
+  color: #0369a1 !important;
 }
 
 .workspace-notice-close {

@@ -1642,7 +1642,7 @@ export const uk: TranslationSchema = {
       connectAccountFirst: "Спочатку підключіть або оберіть корпоративний акаунт пошти.",
       draftSaved: "Чернетку збережено.",
       testModeSent: "Тестовий режим: лист симульовано і не надіслано зовнішнім сервером.",
-      queuedDelivery: "Лист додано до черги доставки SMTP.",
+      queuedDelivery: "Лист успішно надіслано (додано до черги доставки SMTP).",
       attachmentNotAvailable: "Вміст вкладення недоступний для завантаження.",
       enterForwardRecipient: "Вкажіть хоча б одного одержувача для пересилання.",
       simulatedSuccess: "Змодельований вхідний лист успішно оброблено!",

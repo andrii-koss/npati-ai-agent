@@ -10,6 +10,7 @@ import { EmailDnsVerifier } from "./email-dns-verifier";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailAgentTools } from "./email-agent-tools";
 import type { EmailAttachmentStorage } from "./email-attachment-storage";
+import type { EmailInboxWorker } from "./email-worker";
 import type {
   CompanyEmailAccount,
   EmailAttachment,
@@ -87,9 +88,10 @@ export function registerEmailInboxRoutes(
     aiEngine?: AIEngine;
     automationHooks?: EmailAutomationHooks;
     attachmentStorage?: EmailAttachmentStorage;
+    worker?: EmailInboxWorker;
   }
 ) {
-  const { auth, store, repo, auditRepo, aiEngine, automationHooks, attachmentStorage } = options;
+  const { auth, store, repo, auditRepo, aiEngine, automationHooks, attachmentStorage, worker } = options;
   const aiProcessor = new EmailAIProcessor(repo, auditRepo, aiEngine, automationHooks);
   const agentTools = new EmailAgentTools(repo);
 
@@ -417,6 +419,7 @@ export function registerEmailInboxRoutes(
           jobType: "send", emailAccountId: account.id, threadId: thread.id,
           messageId: message.id, idempotencyKey: `send:${message.id}`,
         });
+        worker?.triggerTick();
       }
       if (auditRepo) {
         await auditRepo.log(c, r.params.companyId, {
@@ -651,6 +654,7 @@ export function registerEmailInboxRoutes(
             jobType: "send", emailAccountId: account.id, threadId: thread.id,
             messageId: updatedDraft.id, idempotencyKey: `send:${updatedDraft.id}`,
           });
+          worker?.triggerTick();
         }
 
         await repo.updateThread(c, r.params.companyId, thread.id, {
@@ -702,6 +706,7 @@ export function registerEmailInboxRoutes(
             jobType: "send", emailAccountId: account.id, threadId: thread.id,
             messageId: msg.id, idempotencyKey: `send:${msg.id}`,
           });
+          worker?.triggerTick();
         }
         await repo.updateThread(c, r.params.companyId, thread.id, {
           status: account?.testMode ? "answered" : "ai_processing",

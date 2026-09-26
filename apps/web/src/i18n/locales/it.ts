@@ -1809,7 +1809,7 @@ export const it: TranslationSchema = {
       connectAccountFirst: "Connetti o seleziona prima un account email aziendale.",
       draftSaved: "Bozza salvata.",
       testModeSent: "Modalità test: l'email è stata simulata e non inviata esternamente.",
-      queuedDelivery: "Email in coda per la consegna SMTP.",
+      queuedDelivery: "Email inviata con successo (in coda per la consegna SMTP).",
       attachmentNotAvailable: "Il contenuto dell'allegato non è disponibile per il download.",
       enterForwardRecipient: "Inserisci almeno un destinatario per l'inoltro.",
       simulatedSuccess: "Email in arrivo simulata elaborata con successo!",

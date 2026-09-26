@@ -319,13 +319,23 @@ export function EmailInboxPage() {
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
   const [draftIsAiGenerated, setDraftIsAiGenerated] = useState(false);
   const [sending, setSending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  type NoticeInfo = { text: string; type: "success" | "error" | "info" };
+  const [notice, setNoticeState] = useState<NoticeInfo | null>(null);
+  const setNotice = (val: string | NoticeInfo | null, type: "success" | "error" | "info" = "info") => {
+    if (!val) {
+      setNoticeState(null);
+    } else if (typeof val === "string") {
+      setNoticeState({ text: val, type });
+    } else {
+      setNoticeState(val);
+    }
+  };
 
   // Auto-dismiss notification after 4 seconds
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => {
-      setNotice(null);
+      setNoticeState(null);
     }, 4000);
     return () => clearTimeout(timer);
   }, [notice]);
@@ -464,9 +474,9 @@ export function EmailInboxPage() {
       setFolder(isDraft ? "drafts" : "sent");
       setSelectedAccountId(composeAccountId);
       setSelectedThreadId(result.thread.id);
-      setNotice(isDraft ? t("emailInbox.notices.draftSaved") : result.status === "simulated_send" ? t("emailInbox.notices.testModeSent") : t("emailInbox.notices.queuedDelivery"));
+      setNotice(isDraft ? t("emailInbox.notices.draftSaved") : result.status === "simulated_send" ? t("emailInbox.notices.testModeSent") : t("emailInbox.notices.queuedDelivery"), "success");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setComposeSending(false);
     }
@@ -1016,10 +1026,10 @@ export function EmailInboxPage() {
       </div>
 
       {notice && (
-        <div className="workspace-notice" style={{ marginBottom: 16 }}>
+        <div className={`workspace-notice ${notice.type}`} style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>ℹ️</span>
-            <span>{notice}</span>
+            <span style={{ fontSize: 16 }}>{notice.type === "success" ? "✓" : notice.type === "error" ? "⚠️" : "ℹ️"}</span>
+            <span>{notice.text}</span>
           </div>
           <button
             type="button"
@@ -1388,10 +1398,6 @@ export function EmailInboxPage() {
                               VIP
                             </span>
                           )}
-                          <span className={`email-status-pill status-${activeThread.status}`}>
-                            <span className="email-status-dot" />
-                            {getStatusLabel(activeThread.status, t)}
-                          </span>
                         </div>
                         <div className="email-detail-sender-row">
                           <span>
