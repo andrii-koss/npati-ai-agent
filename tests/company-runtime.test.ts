@@ -42,6 +42,31 @@ async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key
 }
 
 describe("Company delegation runtime", () => {
+  it("accepts legacy browser capability display names in an existing agent allowlist", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const ctx = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] };
+    await store.initialize();
+    const company = await store.createCompany(ctx, { name: "Browser Co" }, "browser-company");
+    const agent = await store.createCompanyAgent(ctx, company.id, {
+      name: "Browser Agent", role: "Browser tester", tools: ["Browser Navigation & Jobs"],
+    }, "browser-agent");
+    await store.setCompanyMainAgent(ctx, company.id, agent.id, company.revision);
+    const execute = vi.fn(async () => ({ jobId: "browser-job", status: "completed", trace: [], _npatiBrowserTrace: true }));
+    const runtime = new CompanyDelegationRuntime(store, engine({
+      a2aSend: async () => ({ taskId: "browser-plan", content: JSON.stringify({
+        mode: "single", agentIds: [], toolRequests: [{
+          agentId: agent.id, tool: "browser.browser_tab_control", input: { operation: "navigate", url: "https://example.com" },
+        }],
+      }), metadata: {} }),
+    }), 5_000, { execute });
+
+    const result = await runtime.execute(ctx, company.id, { task: "Open example.com", mode: "single" }, "browser-run");
+
+    expect(result.run.status).toBe("completed");
+    expect(execute).toHaveBeenCalledWith(ctx, expect.objectContaining({ id: company.id }), "browser.browser_tab_control",
+      expect.objectContaining({ operation: "navigate", url: "https://example.com" }), expect.any(AbortSignal));
+  });
+
   it("uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency", async () => {
     const combos: OmniRouteComboInput[] = [];
     const chat = vi.fn(async () => ({
