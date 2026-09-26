@@ -99,6 +99,14 @@ export class BrowserUseClient {
       if (!validated.allowed) throw Object.assign(new Error(validated.reason || "Browser URL is not allowed"), { code: "BROWSER_URL_BLOCKED" });
       input = { ...input, url: validated.normalizedUrl };
     }
+    const campaignTargetId = typeof input.campaignTargetId === "string" ? input.campaignTargetId : undefined;
+    const campaignTarget = campaignTargetId && this.credentials
+      ? await this.credentials.getTarget(ctx, company.id, campaignTargetId)
+      : null;
+    if (campaignTargetId && !campaignTarget) throw Object.assign(new Error("Browser campaign target was not found for this Company"), { status: 404 });
+    if (url && campaignTarget && new URL(url).hostname.toLowerCase() !== campaignTarget.allowedDomain) {
+      throw Object.assign(new Error("Browser URL is outside the campaign target domain"), { code: "BROWSER_URL_BLOCKED" });
+    }
 
     const secrets: Record<string, string> = {};
     const refs = Array.isArray(input.credentialRefs) ? input.credentialRefs : [];
@@ -175,14 +183,41 @@ export class BrowserUseClient {
       await Promise.all(temporaryUploads.map((file) => unlink(file).catch(() => undefined)));
     }
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) throw Object.assign(new Error(String((payload.error as any)?.message ?? payload.detail ?? `Browser Use Worker returned ${response.status}`)), { status: response.status, code: (payload.error as any)?.code ?? "BROWSER_WORKER_FAILED" });
+    if (!response.ok) {
+      if (campaignTargetId && this.credentials) await this.credentials.recordTargetResult(ctx, company.id, campaignTargetId, {
+        status: "failed", runId, errorMessage: String((payload.error as any)?.message ?? payload.detail ?? `Browser Use Worker returned ${response.status}`),
+      });
+      throw Object.assign(new Error(String((payload.error as any)?.message ?? payload.detail ?? `Browser Use Worker returned ${response.status}`)), { status: response.status, code: (payload.error as any)?.code ?? "BROWSER_WORKER_FAILED" });
+    }
     if (payload.status === "waiting_email" && this.credentials && typeof payload.jobId === "string" && typeof input.__npatiTaskRunId === "string") {
       await this.credentials.registerEmailWait(ctx, company.id, {
         jobId: payload.jobId,
         runId: input.__npatiTaskRunId,
         profileId,
         senderHint: typeof input.emailHint === "string" ? input.emailHint : undefined,
+        campaignTargetId,
       });
+    }
+    if (campaignTargetId && this.credentials) {
+      const result = payload.result && typeof payload.result === "object" ? payload.result as Record<string, unknown> : {};
+      const trace = Array.isArray(payload.trace) ? payload.trace as Array<Record<string, unknown>> : [];
+      const resultUrl = [result.publishedUrl, result.resultUrl, result.url, ...trace.slice().reverse().map((item) => item.url)]
+        .find((value) => typeof value === "string" && /^https:\/\//i.test(value)) as string | undefined;
+      if (payload.status === "waiting_email") {
+        await this.credentials.recordTargetResult(ctx, company.id, campaignTargetId, {
+          status: "waiting_email", browserJobId: typeof payload.jobId === "string" ? payload.jobId : undefined, runId, resultUrl,
+        });
+      } else if (payload.status === "completed") {
+        if (campaignTarget) await this.credentials.recordTargetResult(ctx, company.id, campaignTargetId, {
+          status: campaignTarget.publishUrl ? "published" : "registered", browserJobId: typeof payload.jobId === "string" ? payload.jobId : undefined,
+          runId, resultUrl,
+        });
+      } else if (payload.status === "failed") {
+        await this.credentials.recordTargetResult(ctx, company.id, campaignTargetId, {
+          status: "failed", browserJobId: typeof payload.jobId === "string" ? payload.jobId : undefined, runId,
+          errorMessage: String(result.error ?? "Browser job failed"),
+        });
+      }
     }
     return { ...(payload as Omit<BrowserToolResult, "_npatiBrowserTrace">), _npatiBrowserTrace: true };
   }

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
-import type { CompanyAutomationsRepository } from "./automations-repository";
+import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
 import { computeNextCronDate, isValidCronExpression, type AutomationScheduler } from "./automation-scheduler";
 import {
   TaskFlowEngine,
@@ -65,7 +65,7 @@ export function registerCompanyAutomationsRoutes(
     store: WorkspaceStore;
     repo: CompanyAutomationsRepository;
     scheduler?: AutomationScheduler;
-    triggerRun?: (autoId: string) => Promise<{ result: string }>;
+    triggerRun?: (automation: CompanyAutomation) => Promise<{ result: string }>;
   }
 ) {
   const { auth, store, repo, triggerRun } = deps;
@@ -141,7 +141,11 @@ export function registerCompanyAutomationsRoutes(
           throw new Error(`Invalid standard cron expression: "${r.body.cronExpression}". Expected 5 fields (e.g. "0 9 * * *").`);
         }
 
-        const nextRunAt = computeNextCronDate(r.body.cronExpression).toISOString();
+        const nextRunAt = computeNextCronDate(
+          r.body.cronExpression,
+          new Date(),
+          r.body.timezone || "Europe/Kyiv",
+        ).toISOString();
         const created = await repo.create(c, r.params.companyId, {
           ...r.body,
           nextRunAt,
@@ -173,11 +177,17 @@ export function registerCompanyAutomationsRoutes(
         const c = await ctx(auth, r, "business:manage");
         let nextRunAt: string | undefined;
 
-        if (r.body.cronExpression) {
-          if (!isValidCronExpression(r.body.cronExpression)) {
-            throw new Error(`Invalid standard cron expression: "${r.body.cronExpression}".`);
+        if (r.body.cronExpression || r.body.timezone) {
+          const current = await repo.get(c, r.params.companyId, r.params.automationId);
+          const cronExpression = r.body.cronExpression || current.cronExpression;
+          if (!isValidCronExpression(cronExpression)) {
+            throw new Error(`Invalid standard cron expression: "${cronExpression}".`);
           }
-          nextRunAt = computeNextCronDate(r.body.cronExpression).toISOString();
+          nextRunAt = computeNextCronDate(
+            cronExpression,
+            new Date(),
+            r.body.timezone || current.timezone,
+          ).toISOString();
         }
 
         const updated = await repo.update(c, r.params.companyId, r.params.automationId, {
@@ -219,21 +229,21 @@ export function registerCompanyAutomationsRoutes(
 
         if (triggerRun) {
           try {
-            const runRes = await triggerRun(auto.id);
+            const runRes = await triggerRun(auto);
             const durationMs = Date.now() - startTime;
-            const nextRunAt = computeNextCronDate(auto.cronExpression).toISOString();
+            const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
             await repo.recordRunComplete(runRecord.id, auto.id, nextRunAt, runRes.result, durationMs);
             return reply.code(200).send({ status: "completed", runId: runRecord.id, result: runRes.result, durationMs });
           } catch (runErr: any) {
             const durationMs = Date.now() - startTime;
-            const nextRunAt = computeNextCronDate(auto.cronExpression).toISOString();
+            const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
             await repo.recordRunFail(runRecord.id, auto.id, nextRunAt, runErr.message || String(runErr), durationMs);
             return reply.code(500).send({ status: "failed", runId: runRecord.id, error: runErr.message });
           }
         }
 
         const durationMs = Date.now() - startTime;
-        const nextRunAt = computeNextCronDate(auto.cronExpression).toISOString();
+        const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
         const simulatedResult = `Automation '${auto.name}' executed successfully.`;
         await repo.recordRunComplete(runRecord.id, auto.id, nextRunAt, simulatedResult, durationMs);
 

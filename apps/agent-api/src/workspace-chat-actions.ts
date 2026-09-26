@@ -197,8 +197,8 @@ function finish(directive: WorkspaceDirective, card: string): string {
   return `${intro(directive)}\n\n${card}${followUp(directive) ? `\n\n${followUp(directive)}` : ""}`;
 }
 
-function automationSettingsUrl(_companyId: string): string {
-  return "/settings/automations";
+function automationSettingsUrl(companyId: string): string {
+  return `/settings/automations?company=${encodeURIComponent(companyId)}`;
 }
 
 function idempotency(auth: AuthContext, conversationId: string, requestMessage: string, action: string): string {
@@ -377,12 +377,17 @@ Use activity.run when the user asks the company agents to perform work and wants
             if (!agents.some((agent) => agent.id === item.agentId)) throw new Error("Agent is not owned by this company");
           }
           if (item.cronExpression !== undefined && !isValidCronExpression(item.cronExpression)) throw new Error("Invalid automation schedule");
+          const nextCronExpression = item.cronExpression?.trim() || current.cronExpression;
+          const nextTimezone = item.timezone !== undefined ? clean(item.timezone, 100) : current.timezone;
           const update = {
             ...(item.name !== undefined ? { name: clean(item.name, 300) } : {}),
             ...(item.description !== undefined ? { description: clean(item.description, 2000) } : {}),
             ...(item.prompt !== undefined ? { prompt: clean(item.prompt) } : {}),
-            ...(item.cronExpression !== undefined ? { cronExpression: item.cronExpression.trim(), nextRunAt: computeNextCronDate(item.cronExpression).toISOString() } : {}),
+            ...(item.cronExpression !== undefined ? { cronExpression: nextCronExpression } : {}),
             ...(item.timezone !== undefined ? { timezone: clean(item.timezone, 100) } : {}),
+            ...(item.cronExpression !== undefined || item.timezone !== undefined
+              ? { nextRunAt: computeNextCronDate(nextCronExpression, new Date(), nextTimezone).toISOString() }
+              : {}),
             ...(item.agentId !== undefined ? { agentId: item.agentId } : {}),
             ...(item.status !== undefined ? { status: item.status } : {}),
           };
@@ -399,12 +404,13 @@ Use activity.run when the user asks the company agents to perform work and wants
         const automationName = clean(item.name, 300);
         const automationPrompt = clean(item.prompt);
         const cronExpression = item.cronExpression.trim();
+        const timezone = clean(item.timezone, 100) || "Europe/Kyiv";
         const created: CompanyAutomation = (await deps.automations.list(auth, company.id)).find((entry) =>
           entry.name === automationName && entry.prompt === automationPrompt && entry.cronExpression === cronExpression
         ) ?? await deps.automations.create(auth, company.id, {
           name: automationName, description: clean(item.description, 2000) || undefined, prompt: automationPrompt,
-          cronExpression, timezone: clean(item.timezone, 100) || "Europe/Kyiv", agentId: item.agentId ?? undefined,
-          nextRunAt: computeNextCronDate(cronExpression).toISOString(),
+          cronExpression, timezone, agentId: item.agentId ?? undefined,
+          nextRunAt: computeNextCronDate(cronExpression, new Date(), timezone).toISOString(),
         });
         const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };

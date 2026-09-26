@@ -14,6 +14,7 @@ export type PresenceType = "online" | "local" | "both";
 export interface Business {
   id: string; workspaceId: string; ownerUserId: string; name: string;
   businessType?: string; industry?: string; niche?: string; country?: string; market?: string; website?: string;
+  legalName?: string; contactEmail?: string; contactPhone?: string; postalAddress?: string; registrationDetails?: string; logoFileId?: string;
   businessStage: BusinessStage; teamType?: TeamType; businessModel?: string; presenceType?: PresenceType;
   description?: string; audienceSummary?: string; productsServicesSummary?: string;
   activationStatus: "draft" | "active"; createdAt: string; updatedAt: string;

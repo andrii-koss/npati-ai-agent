@@ -45,6 +45,7 @@ import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
+import { AutomationScheduler } from "./automation-scheduler";
 import { ContentLibraryStore } from "./content-library-store";
 import { registerContentLibraryRoutes } from "./content-library-routes";
 import { CompanyApprovalsRepository } from "./approvals-repository";
@@ -674,7 +675,7 @@ export function buildApp(config: AppConfig = {}) {
         task: [
           `Continue Agent Task ${awaitingRunId} after receiving its awaited email reply.`,
           typeof thread.metadata.awaitingBrowserJobId === "string"
-            ? `Resume Browser Job ${thread.metadata.awaitingBrowserJobId} with profile ${String(thread.metadata.awaitingBrowserProfileId || "default")} using browser.resume.`
+            ? `Resume Browser Job ${thread.metadata.awaitingBrowserJobId} with profile ${String(thread.metadata.awaitingBrowserProfileId || "default")} using browser.resume.${typeof thread.metadata.awaitingBrowserCampaignTargetId === "string" ? ` Include campaignTargetId ${thread.metadata.awaitingBrowserCampaignTargetId} in the browser input.` : ""}`
             : "",
           `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
           verification.verificationCode ? `Verification code: ${verification.verificationCode}.` : "",
@@ -720,6 +721,86 @@ export function buildApp(config: AppConfig = {}) {
   const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks, undefined, emailAttachmentStorage);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
+  const runAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
+    const automationContext: AuthContext = {
+      workspaceId: automation.workspaceId,
+      userId: automation.userId,
+      permissions: ["workspace:read", "workspace:write", "business:manage", "tools:execute", "automation:execute_browser"],
+    };
+    const configuredTargets = browserCredentials
+      ? (await browserCredentials.listTargets(automationContext, automation.companyId)).filter((target) => target.automationId === automation.id)
+      : [];
+    if (browserCredentials && configuredTargets.length) {
+      const claimed = await browserCredentials.claimTargets(automationContext, automation.companyId, automation.id, 10);
+      if (!claimed.length) return { result: "No pending browser campaign sites. Up to 10 sites are processed per scheduled run." };
+      const results: string[] = [];
+      for (const target of claimed) {
+        try {
+          if (!target.emailAccountId) throw new Error("A Company email account must be selected for this site");
+          const emailAccount = await emailInboxRepo.getAccount(automationContext, automation.companyId, target.emailAccountId);
+          if (!emailAccount) throw new Error("The selected Company email account is no longer available");
+          const credentialId = await browserCredentials.ensureTargetCredential(automationContext, automation.companyId, target, emailAccount.emailAddress);
+          const targetTask = [
+            automation.prompt,
+            `Process exactly one approved browser campaign site: ${target.siteName}.`,
+            `Registration URL: ${target.registrationUrl}`,
+            target.publishUrl ? `Article publishing URL: ${target.publishUrl}` : "",
+            `Allowed domain: ${target.allowedDomain}`,
+            `Company email: ${emailAccount.emailAddress}`,
+            target.articleTitle ? `Article title: ${target.articleTitle}` : "",
+            target.articleBody ? `Article body:\n${target.articleBody}` : "",
+            `Use browser.browser_clicktype with operation \"task\", url \"${target.registrationUrl}\", allowedDomains [\"${target.allowedDomain}\"], campaignTargetId \"${target.id}\", emailHint \"${target.allowedDomain}\", and credentialRefs [{\"id\":\"${credentialId}\",\"alias\":\"account\"}].`,
+            "Register if necessary, complete email verification when requested, publish the article when a publishing URL is present, and return the final public URL. Never claim success without browser evidence.",
+          ].filter(Boolean).join("\n\n");
+          const details = await companyRuntime.execute(
+            automationContext,
+            automation.companyId,
+            { task: targetTask, mode: automation.agentId ? "single" : "auto" },
+            `${executionKey}:target:${target.id}:attempt:${target.attempts}`,
+          );
+          const refreshed = await browserCredentials.getTarget(automationContext, automation.companyId, target.id);
+          if (details.run.status !== "completed") {
+            await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
+              status: "failed", runId: details.run.id, errorMessage: details.run.errorMessage || `Company run ended with ${details.run.status}`,
+            });
+            results.push(`${target.siteName}: failed`);
+          } else if (!refreshed || refreshed.status === "processing") {
+            await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
+              status: "failed", runId: details.run.id, errorMessage: "Agent finished without a verified browser result",
+            });
+            results.push(`${target.siteName}: failed (no verified browser result)`);
+          } else {
+            results.push(`${target.siteName}: ${refreshed.status}${refreshed.resultUrl ? ` — ${refreshed.resultUrl}` : ""}`);
+          }
+        } catch (error) {
+          await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
+            status: "failed", errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          results.push(`${target.siteName}: failed — ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return { result: `Browser campaign processed ${claimed.length} site(s):\n${results.join("\n")}` };
+    }
+    const task = [
+      automation.prompt,
+      automation.agentId ? `Assigned automation agent: ${automation.agentId}.` : "",
+      "This is an unattended scheduled Company automation. Use the linked Business profile, Company Knowledge, and approved browser credential references. Report concrete completed actions and resulting public URLs; never report success without verified browser evidence.",
+    ].filter(Boolean).join("\n\n");
+    const details = await companyRuntime.execute(
+      automationContext,
+      automation.companyId,
+      { task, mode: automation.agentId ? "single" : "auto" },
+      executionKey,
+    );
+    if (details.run.status !== "completed") {
+      throw new Error(details.run.errorMessage || `Company automation run ended with status ${details.run.status}`);
+    }
+    return { result: details.run.result || `Company run ${details.run.id} completed.` };
+  };
+  const automationScheduler = new AutomationScheduler(
+    automationsRepo,
+    (automation) => runAutomation(automation, `automation:${automation.id}:${automation.nextRunAt}`),
+  );
   const contentLibrary = new ContentLibraryStore(workspaceStore);
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
   const getAIContext = async (auth: AuthContext) => {
@@ -1663,7 +1744,48 @@ ${localized.next}`;
   });
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
-  if (automationsRepo) registerCompanyAutomationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: automationsRepo });
+  if (automationsRepo) registerCompanyAutomationsRoutes(app, {
+    auth: authProvider,
+    store: workspaceStore,
+    repo: automationsRepo,
+    scheduler: automationScheduler,
+    triggerRun: (automation) => runAutomation(automation, `automation:manual:${automation.id}:${Date.now()}`),
+  });
+  app.post<{ Params: { businessId: string }; Body: { filename: string; mimeType: string; data: string } }>(
+    "/businesses/:businessId/logo",
+    { bodyLimit: 8 * 1024 * 1024 },
+    async (request, reply) => {
+      if (!chatFiles) return reply.code(503).send({ error: { code: "STORAGE_UNAVAILABLE", message: "File storage is not configured" } });
+      const context = await authProvider.authenticate(request);
+      if (!context.permissions.some((permission) => ["*", "owner", "business:manage", "workspace:write"].includes(permission))) {
+        return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Business management permission is required" } });
+      }
+      await workspaceStore.getBusiness(context, request.params.businessId);
+      const mimeType = request.body.mimeType.toLowerCase().split(";")[0]!.trim();
+      if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
+        return reply.code(400).send({ error: { code: "INVALID_LOGO", message: "Logo must be a PNG, JPEG, or WebP image" } });
+      }
+      const data = Buffer.from(request.body.data, "base64");
+      if (!data.length || data.length > 5 * 1024 * 1024) {
+        return reply.code(400).send({ error: { code: "INVALID_LOGO", message: "Logo must be between 1 byte and 5 MB" } });
+      }
+      const logo = await chatFiles.persistBusinessAsset(context, request.params.businessId, {
+        kind: "image", name: request.body.filename.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 255), mimeType, data,
+      });
+      const business = await workspaceStore.updateBusiness(context, request.params.businessId, { logoFileId: logo.id });
+      const linkedCompanies = (await workspaceStore.listCompanies(context, 100)).items.filter((company) => company.businessId === business.id);
+      for (const company of linkedCompanies) {
+        const knowledge = company.knowledge.filter((item) => {
+          if (!item || typeof item !== "object") return true;
+          const value = item as Record<string, unknown>;
+          return value.source !== "linked_business" || value.name !== "Company logo";
+        });
+        knowledge.push({ attachmentId: logo.id, kind: "image", name: "Company logo", source: "linked_business" });
+        await workspaceStore.updateCompany(context, company.id, { knowledge }, company.revision);
+      }
+      return reply.code(201).send({ logo, business });
+    },
+  );
   registerContentLibraryRoutes(app, authProvider, workspaceStore, contentLibrary);
   if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
@@ -1676,10 +1798,10 @@ ${localized.next}`;
   registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
   registerReliabilityAndOperationsRoutes(app, authProvider, workspaceStore);
   registerBrowserAutomationRoutes(app, authProvider);
-  if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool });
+  if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await emailInboxRepo.encryptLegacyAccountCredentials();
@@ -1687,6 +1809,7 @@ ${localized.next}`;
     if (chatFiles) { const legacy = await chatFiles.migrateLegacy(); if (legacy.failed) app.log.warn(legacy,"Some legacy attachments could not be migrated"); await chatFiles.cleanupPending(); }
     storageReconciler?.start();
     emailInboxWorker.start();
+    automationScheduler.start();
   });
 
   app.get("/health", async (): Promise<HealthResponse> => {

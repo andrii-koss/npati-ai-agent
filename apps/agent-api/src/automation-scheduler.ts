@@ -103,7 +103,7 @@ function parseField(field: string, min: number, max: number): Set<number> {
 /**
  * Computes the next Date matching the given cron expression strictly after `fromDate`.
  */
-export function computeNextCronDate(cron: string, fromDate = new Date()): Date {
+export function computeNextCronDate(cron: string, fromDate = new Date(), timezone?: string): Date {
   if (!isValidCronExpression(cron)) {
     throw new Error(`Invalid cron expression: "${cron}"`);
   }
@@ -117,6 +117,36 @@ export function computeNextCronDate(cron: string, fromDate = new Date()): Date {
 
   // Map 7 (Sunday) to 0
   if (dayOfWeekSet.has(7)) dayOfWeekSet.add(0);
+
+  if (timezone) {
+    let formatter: Intl.DateTimeFormat;
+    try {
+      formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        minute: "2-digit", hour: "2-digit", hourCycle: "h23",
+        day: "2-digit", month: "2-digit", weekday: "short",
+      });
+    } catch {
+      throw new Error(`Invalid automation timezone: "${timezone}"`);
+    }
+    const weekdayNumbers: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const candidate = new Date(fromDate.getTime());
+    candidate.setUTCSeconds(0, 0);
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+    const MAX_ITERATIONS = 60 * 24 * 366;
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const values = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
+      const minute = Number(values.minute);
+      const hour = Number(values.hour);
+      const day = Number(values.day);
+      const month = Number(values.month);
+      const weekday = weekdayNumbers[values.weekday || ""];
+      if (minuteSet.has(minute) && hourSet.has(hour) && dayOfMonthSet.has(day) &&
+          monthSet.has(month) && weekday !== undefined && dayOfWeekSet.has(weekday)) return candidate;
+      candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+    }
+    throw new Error(`Could not find next execution time within 1 year for cron "${cron}" in ${timezone}`);
+  }
 
   // Start from the next whole minute
   const candidate = new Date(fromDate.getTime());
@@ -181,6 +211,7 @@ export class AutomationScheduler {
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => void this.tick(), this.tickIntervalMs);
+    this.timer.unref();
     void this.tick();
   }
 
@@ -202,7 +233,7 @@ export class AutomationScheduler {
         processed++;
         const startTime = Date.now();
         const run = await this.repo.recordRunStart(auto);
-        const nextDate = computeNextCronDate(auto.cronExpression);
+        const nextDate = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone);
 
         try {
           const { result } = await this.executor(auto);

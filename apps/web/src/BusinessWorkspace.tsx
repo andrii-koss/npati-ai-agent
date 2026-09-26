@@ -16,6 +16,7 @@ type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
   market?: string; website?: string; businessStage: string; teamType?: string; businessModel?: string;
   presenceType?: string; description?: string; audienceSummary?: string; productsServicesSummary?: string;
+  legalName?: string; contactEmail?: string; contactPhone?: string; postalAddress?: string; registrationDetails?: string; logoFileId?: string;
   activationStatus?: "draft" | "active";
 };
 type OnboardingSession = {
@@ -162,7 +163,8 @@ export function BusinessSwitcher() {
 const blankBusiness = {
   name: "", businessType: "", industry: "", niche: "", country: "", market: "", website: "",
   businessStage: "starting", teamType: "solo", businessModel: "", presenceType: "online",
-  description: "", audienceSummary: "", productsServicesSummary: "",
+  description: "", audienceSummary: "", productsServicesSummary: "", legalName: "", contactEmail: "",
+  contactPhone: "", postalAddress: "", registrationDetails: "", logoFileId: "",
 };
 
 function PageIntro({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy: string; action?: ReactNode }) {
@@ -240,6 +242,7 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
   const [form, setForm] = useState({ ...blankBusiness, ...initial });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
 
   // Cross-linking state: Goals, Memory
   const [availableGoals, setAvailableGoals] = useState<Goal[]>([]);
@@ -306,6 +309,19 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
       const targetBusinessId = saved.id || initial?.id;
 
       if (targetBusinessId) {
+        if (logoFile) {
+          if (logoFile.size > 5 * 1024 * 1024) throw new Error("Logo must be 5 MB or smaller");
+          const data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error ?? new Error("Could not read logo"));
+            reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+            reader.readAsDataURL(logoFile);
+          });
+          await api(`/businesses/${targetBusinessId}/logo`, {
+            method: "POST",
+            body: JSON.stringify({ filename: logoFile.name, mimeType: logoFile.type, data }),
+          });
+        }
         // 1. Goal: link selected or create new
         if (selectedGoalId === "create_new" && newGoalTitle.trim()) {
           await api(`/businesses/${targetBusinessId}/goals`, {
@@ -362,6 +378,11 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <label className="field"><span>{t("businessSettings.form.presence")}</span><select {...field("presenceType")}><option value="online">{t("businessSettings.form.presenceOnline")}</option><option value="local">{t("businessSettings.form.presenceLocal")}</option><option value="both">{t("businessSettings.form.presenceBoth")}</option></select></label>
         <label className="field"><span>{t("businessSettings.form.businessModel")}</span><input {...field("businessModel")} placeholder={t("businessSettings.form.businessModelPlaceholder")} /></label>
         <label className="field"><span>{t("businessSettings.form.website")}</span><input {...field("website")} type="url" placeholder="https://" /></label>
+        <label className="field"><span>Legal company name</span><input {...field("legalName")} placeholder="Registered legal name" /></label>
+        <label className="field"><span>Contact email</span><input {...field("contactEmail")} type="email" placeholder="company@example.com" /></label>
+        <label className="field"><span>Contact phone</span><input {...field("contactPhone")} type="tel" placeholder="+380…" /></label>
+        <label className="field"><span>Postal address</span><input {...field("postalAddress")} placeholder="Street, city, country" /></label>
+        <label className="field"><span>Company logo</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} />{initial?.logoFileId && !logoFile ? <small>Logo already uploaded</small> : null}</label>
       </div>
 
       <div className="form-section-title" style={{ marginTop: "1.5rem" }}>
@@ -459,6 +480,7 @@ function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: Business
         <label className="field"><span>{t("businessSettings.form.whatDoes")}</span><textarea {...field("description")} placeholder={t("businessSettings.form.whatDoesPlaceholder")} /></label>
         <label className="field"><span>{t("businessSettings.form.productsServices")}</span><textarea {...field("productsServicesSummary")} placeholder={t("businessSettings.form.productsPlaceholder")} /></label>
         <label className="field"><span>{t("businessSettings.form.targetAudience")}</span><textarea {...field("audienceSummary")} placeholder={t("businessSettings.form.audiencePlaceholder")} /></label>
+        <label className="field"><span>Registration details</span><textarea {...field("registrationDetails")} placeholder="Company number, tax/VAT ID, preferred username, profile instructions, and other data the agent may enter on approved sites." /></label>
       </div>
       <div className="form-actions">{onCancel && <button type="button" className="button-secondary" onClick={onCancel} disabled={saving}>{t("common.cancel")}</button>}<button className="button-primary" disabled={saving}>{saving ? t("businessSettings.form.saving") : initial ? t("businessSettings.form.saveChanges") : t("businessSettings.form.createBusiness")}</button></div>
     </form>

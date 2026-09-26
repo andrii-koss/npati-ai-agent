@@ -13,7 +13,7 @@ function workerContext(account: CompanyEmailAccount): AuthContext {
   return {
     workspaceId: account.workspaceId,
     userId: account.userId,
-    permissions: ["workspace:read", "workspace:write", "business:manage"],
+    permissions: ["workspace:read", "workspace:write", "business:manage", "browser:resume_email"],
   };
 }
 

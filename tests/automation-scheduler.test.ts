@@ -53,6 +53,12 @@ describe("Automations and Cron Scheduler (Automations System)", () => {
       // Next execution should be the next day
       expect(nextRun.getDate()).toBe(2);
     });
+
+    it("computes the configured wall-clock hour in the automation timezone", () => {
+      const baseDate = new Date("2026-09-01T05:30:00.000Z");
+      const nextRun = computeNextCronDate("0 9 * * *", baseDate, "Europe/Kyiv");
+      expect(nextRun.toISOString()).toBe("2026-09-01T06:00:00.000Z");
+    });
   });
 
   describe("AutomationScheduler Execution & Lease Locking", () => {
