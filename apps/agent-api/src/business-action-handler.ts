@@ -18,7 +18,24 @@ export interface BusinessActionDirective {
     description?: string;
     productsServicesSummary?: string;
     audienceSummary?: string;
+    legalName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    postalAddress?: string;
+    logoAttachmentName?: string;
   };
+}
+
+export interface BusinessLogoAttachment {
+  name: string;
+  mimeType: string;
+  data: Buffer;
+  kind?: string;
+}
+
+export interface BusinessActionOptions {
+  logoAttachments?: BusinessLogoAttachment[];
+  persistBusinessLogo?: (context: AuthContext, businessId: string, attachment: BusinessLogoAttachment) => Promise<Business>;
 }
 
 export interface GoalActionDirective {
@@ -81,7 +98,7 @@ export class BusinessActionHandler {
     goalsByBusiness: Array<{ businessId: string; businessName: string; goals: Goal[] }> = []
   ): string {
     const businessList = userBusinesses.length > 0
-      ? userBusinesses.map((b) => `- ID: "${b.id}", Name: "${b.name}", Stage: "${b.businessStage || 'starting'}", Industry: "${b.industry || '-'}", Niche: "${b.niche || '-'}"`).join("\n")
+      ? userBusinesses.map((b) => `- ID: "${b.id}", Name: "${b.name}", Stage: "${b.businessStage || 'starting'}", Industry: "${b.industry || '-'}", Niche: "${b.niche || '-'}", Legal name: "${b.legalName || '-'}", Contact email: "${b.contactEmail || '-'}", Contact phone: "${b.contactPhone || '-'}", Postal address: "${b.postalAddress || '-'}", Logo file ID present: ${Boolean(b.logoFileId)}`).join("\n")
       : "(No existing business profiles for this user yet)";
 
     const goalsList = goalsByBusiness.length > 0 && goalsByBusiness.some((entry) => entry.goals.length > 0)
@@ -118,7 +135,7 @@ USER ISOLATION & SECURITY:
 STEP 1 - BUSINESS PROFILE (CREATION, EDITING & DELETION):
 ==================================================
 When the user asks to create or edit a business idea:
-1. Formulate ALL 13 profile fields completely:
+1. Formulate the relevant profile fields:
    - name: Distinctive business name
    - businessStage: "idea" | "starting" | "operating" | "growing" | "scaling"
    - industry: e.g. E-commerce, Консалтинг, HoReCa, IT / SaaS, тощо.
@@ -132,6 +149,12 @@ When the user asks to create or edit a business idea:
    - description: What does the business do? Value proposition.
    - productsServicesSummary: Core products or services
    - audienceSummary: Target audience, customer pain points
+   - legalName: Registered legal company name
+   - contactEmail: Public business contact email
+   - contactPhone: Public business contact phone
+   - postalAddress: Company postal address
+   - logoAttachmentName: exact filename of a PNG, JPEG, or WebP image attached to the latest user message. Never invent or accept a logoFileId.
+For an update, include only fields the user explicitly supplied or asked to change. Never guess legal or contact details.
 
 2. Emit an executable directive at the end of your message:
 \`\`\`business-action
@@ -150,7 +173,12 @@ When the user asks to create or edit a business idea:
     "website": "https://...",
     "description": "...",
     "productsServicesSummary": "...",
-    "audienceSummary": "..."
+    "audienceSummary": "...",
+    "legalName": "...",
+    "contactEmail": "company@example.com",
+    "contactPhone": "+380...",
+    "postalAddress": "...",
+    "logoAttachmentName": "company-logo.png"
   }
 }
 \`\`\`
@@ -263,7 +291,8 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
     text: string,
     workspaceStore: WorkspaceStore,
     log?: { warn(obj: unknown, msg?: string): void },
-    beforeDeleteBusiness?: (context: AuthContext, businessId: string) => Promise<void>
+    beforeDeleteBusiness?: (context: AuthContext, businessId: string) => Promise<void>,
+    options: BusinessActionOptions = {}
   ): Promise<{
     cleanText: string;
     businessAction?: { action: "create" | "update" | "delete"; business?: Business; businessId?: string };
@@ -285,10 +314,11 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
             let targetId = directive.businessId?.trim();
             let targetBusiness: Business | undefined;
 
-            if (targetId && userBusinesses.some((b) => b.id === targetId)) {
+            if (targetId) {
               targetBusiness = userBusinesses.find((b) => b.id === targetId);
+              if (!targetBusiness) throw new Error(`Business "${targetId}" not found or not owned by user.`);
             } else {
-              const searchName = (directive.businessName || (directive.profile as any)?.name || targetId || "").toLowerCase().trim();
+              const searchName = (directive.businessName || (directive.profile as any)?.name || "").toLowerCase().trim();
               if (searchName) {
                 targetBusiness = userBusinesses.find(
                   (b) => b.name.toLowerCase() === searchName ||
@@ -296,7 +326,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
                          searchName.includes(b.name.toLowerCase())
                 );
               }
-              if (!targetBusiness && userBusinesses.length === 1) {
+              if (!targetBusiness && !searchName && userBusinesses.length === 1) {
                 targetBusiness = userBusinesses[0];
               }
             }
@@ -316,38 +346,59 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
             const p = directive.profile || {};
             const name = String(p.name || directive.businessName || "").trim() || "Нова бізнес-ідея";
 
-            const input: BusinessInput = {
-              name,
-              businessStage: normalizeBusinessStage(p.businessStage),
+            const logoName = p.logoAttachmentName?.trim();
+            const logoAttachment = logoName
+              ? options.logoAttachments?.filter((item) => item.name.toLocaleLowerCase() === logoName.toLocaleLowerCase())
+              : undefined;
+            if (logoName && (!options.persistBusinessLogo || logoAttachment?.length !== 1)) {
+              throw new Error("The requested logo attachment is missing or ambiguous");
+            }
+            if (p.contactEmail !== undefined) {
+              const email = String(p.contactEmail).trim();
+              if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Invalid business contact email");
+            }
+            const input: Partial<BusinessInput> = {
+              ...(directive.action === "create" || p.name !== undefined ? { name } : {}),
+              ...(directive.action === "create" || p.businessStage !== undefined ? { businessStage: normalizeBusinessStage(p.businessStage) } : {}),
               industry: p.industry ? String(p.industry).trim() : undefined,
               niche: p.niche ? String(p.niche).trim() : undefined,
               country: p.country ? String(p.country).trim() : undefined,
               market: p.market ? String(p.market).trim() : undefined,
-              teamType: normalizeTeamType(p.teamType),
-              presenceType: normalizePresenceType(p.presenceType),
+              ...(directive.action === "create" || p.teamType !== undefined ? { teamType: normalizeTeamType(p.teamType) } : {}),
+              ...(directive.action === "create" || p.presenceType !== undefined ? { presenceType: normalizePresenceType(p.presenceType) } : {}),
               businessModel: p.businessModel ? String(p.businessModel).trim() : undefined,
               website: p.website ? String(p.website).trim() : undefined,
               description: p.description ? String(p.description).trim() : undefined,
               productsServicesSummary: p.productsServicesSummary ? String(p.productsServicesSummary).trim() : undefined,
               audienceSummary: p.audienceSummary ? String(p.audienceSummary).trim() : undefined,
+              ...(p.legalName !== undefined ? { legalName: String(p.legalName).trim().slice(0, 300) } : {}),
+              ...(p.contactEmail !== undefined ? { contactEmail: String(p.contactEmail).trim().slice(0, 320) } : {}),
+              ...(p.contactPhone !== undefined ? { contactPhone: String(p.contactPhone).trim().slice(0, 100) } : {}),
+              ...(p.postalAddress !== undefined ? { postalAddress: String(p.postalAddress).trim().slice(0, 1000) } : {}),
             };
 
             let business: Business;
             if (directive.action === "create") {
-              business = await workspaceStore.createBusiness(auth, input);
+              business = await workspaceStore.createBusiness(auth, input as BusinessInput);
             } else {
               const userBusinesses = await workspaceStore.listUserBusinesses(auth);
               let targetId = directive.businessId?.trim();
-              if (!targetId || !userBusinesses.some((b) => b.id === targetId)) {
+              if (targetId && !userBusinesses.some((b) => b.id === targetId)) {
+                throw new Error(`Business "${targetId}" not found or not owned by user.`);
+              }
+              if (!targetId) {
                 const matched = userBusinesses.find(
                   (b) => b.name.toLowerCase() === name.toLowerCase() ||
                          (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
                 );
                 if (matched) targetId = matched.id;
-                else if (userBusinesses.length === 1) targetId = userBusinesses[0]!.id;
+                else if (!directive.businessName && p.name === undefined && userBusinesses.length === 1) targetId = userBusinesses[0]!.id;
                 else throw new Error(`Business "${name}" not found or not owned by user.`);
               }
               business = await workspaceStore.updateUserBusiness(auth, targetId, input);
+            }
+            if (logoName && logoAttachment?.[0] && options.persistBusinessLogo) {
+              business = await options.persistBusinessLogo(auth, business.id, logoAttachment[0]);
             }
 
             businessAction = { action: directive.action, business, businessId: business.id };
