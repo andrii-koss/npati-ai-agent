@@ -399,7 +399,7 @@ export class EmailInboxRepository {
       rateLimits: input.rateLimits || {
         maxPerHour: 50,
         maxPerDay: 500,
-        maxPerRecipientDaily: 5,
+        maxPerRecipientDaily: 100,
         maxFollowups: 3,
         maxCompanyPerHour: 500,
         maxCompanyPerDay: 5000,
@@ -1771,21 +1771,21 @@ export class EmailInboxRepository {
       const companyLastHour = Number(result.rows[0]?.company_hour_count || 0);
       const companyLastDay = Number(result.rows[0]?.company_day_count || 0);
       if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
-        return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
+        return { allowed: false, reason: `Company hourly email limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500}). Increase "Company / hour" in Settings > Email > Email Accounts > Limits, or try again later.` };
       }
       if (companyLastDay >= (account.rateLimits.maxCompanyPerDay || 5000)) {
-        return { allowed: false, reason: `Company daily limit reached (${companyLastDay}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
+        return { allowed: false, reason: `Company daily email limit reached (${companyLastDay}/${account.rateLimits.maxCompanyPerDay || 5000}). Increase "Company / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.` };
       }
       if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
-        return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
+        return { allowed: false, reason: `Hourly email-account limit reached (${sentLastHour}/${account.rateLimits.maxPerHour}). Increase "Per hour" in Settings > Email > Email Accounts > Limits, or try again later.` };
       }
       if (sentLastDay >= (account.rateLimits.maxPerDay || 500)) {
-        return { allowed: false, reason: `Daily limit reached (${sentLastDay}/${account.rateLimits.maxPerDay} emails).` };
+        return { allowed: false, reason: `Daily email-account limit reached (${sentLastDay}/${account.rateLimits.maxPerDay}). Increase "Per day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.` };
       }
-      if (sentToRecipient >= (account.rateLimits.maxPerRecipientDaily || 5)) {
+      if (sentToRecipient >= (account.rateLimits.maxPerRecipientDaily || 100)) {
         return {
           allowed: false,
-          reason: `Daily limit for recipient ${recipientEmail} reached (${sentToRecipient}/${account.rateLimits.maxPerRecipientDaily}).`,
+          reason: `Daily recipient limit reached for ${recipientEmail} (${sentToRecipient}/${account.rateLimits.maxPerRecipientDaily || 100}). Increase "Per recipient / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.`,
         };
       }
       return { allowed: true };
@@ -1802,10 +1802,10 @@ export class EmailInboxRepository {
     this.sentTimestamps.set(companyKey, companySent);
     const companyLastHour = companySent.filter((t) => t > oneHourAgo).length;
     if (companyLastHour >= (account.rateLimits.maxCompanyPerHour || 500)) {
-      return { allowed: false, reason: `Company hourly limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500} emails).` };
+      return { allowed: false, reason: `Company hourly email limit reached (${companyLastHour}/${account.rateLimits.maxCompanyPerHour || 500}). Increase "Company / hour" in Settings > Email > Email Accounts > Limits, or try again later.` };
     }
     if (companySent.length >= (account.rateLimits.maxCompanyPerDay || 5000)) {
-      return { allowed: false, reason: `Company daily limit reached (${companySent.length}/${account.rateLimits.maxCompanyPerDay || 5000} emails).` };
+      return { allowed: false, reason: `Company daily email limit reached (${companySent.length}/${account.rateLimits.maxCompanyPerDay || 5000}). Increase "Company / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.` };
     }
 
     const accountSent = (this.sentTimestamps.get(accountKey) || []).filter((t) => t > oneDayAgo);
@@ -1813,20 +1813,20 @@ export class EmailInboxRepository {
 
     const sentLastHour = accountSent.filter((t) => t > oneHourAgo).length;
     if (sentLastHour >= (account.rateLimits.maxPerHour || 50)) {
-      return { allowed: false, reason: `Hourly limit reached (${sentLastHour}/${account.rateLimits.maxPerHour} emails).` };
+      return { allowed: false, reason: `Hourly email-account limit reached (${sentLastHour}/${account.rateLimits.maxPerHour}). Increase "Per hour" in Settings > Email > Email Accounts > Limits, or try again later.` };
     }
 
     if (accountSent.length >= (account.rateLimits.maxPerDay || 500)) {
-      return { allowed: false, reason: `Daily limit reached (${accountSent.length}/${account.rateLimits.maxPerDay} emails).` };
+      return { allowed: false, reason: `Daily email-account limit reached (${accountSent.length}/${account.rateLimits.maxPerDay}). Increase "Per day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.` };
     }
 
     const recipientSent = (this.sentTimestamps.get(recipientKey) || []).filter((t) => t > oneDayAgo);
     this.sentTimestamps.set(recipientKey, recipientSent);
 
-    if (recipientSent.length >= (account.rateLimits.maxPerRecipientDaily || 5)) {
+    if (recipientSent.length >= (account.rateLimits.maxPerRecipientDaily || 100)) {
       return {
         allowed: false,
-        reason: `Daily limit for recipient ${recipientEmail} reached (${recipientSent.length}/${account.rateLimits.maxPerRecipientDaily}).`,
+        reason: `Daily recipient limit reached for ${recipientEmail} (${recipientSent.length}/${account.rateLimits.maxPerRecipientDaily || 100}). Increase "Per recipient / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.`,
       };
     }
 
@@ -1901,15 +1901,15 @@ export class EmailInboxRepository {
       const companyDayCount = Number(counts.rows[0]?.company_day_count || 0);
       let deniedReason: string | undefined;
       if (companyHourCount >= (account.rateLimits.maxCompanyPerHour || 500)) {
-        deniedReason = `Company hourly limit reached (${companyHourCount}/${account.rateLimits.maxCompanyPerHour || 500} emails).`;
+        deniedReason = `Company hourly email limit reached (${companyHourCount}/${account.rateLimits.maxCompanyPerHour || 500}). Increase "Company / hour" in Settings > Email > Email Accounts > Limits, or try again later.`;
       } else if (companyDayCount >= (account.rateLimits.maxCompanyPerDay || 5000)) {
-        deniedReason = `Company daily limit reached (${companyDayCount}/${account.rateLimits.maxCompanyPerDay || 5000} emails).`;
+        deniedReason = `Company daily email limit reached (${companyDayCount}/${account.rateLimits.maxCompanyPerDay || 5000}). Increase "Company / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.`;
       } else if (hourCount >= (account.rateLimits.maxPerHour || 50)) {
-        deniedReason = `Hourly limit reached (${hourCount}/${account.rateLimits.maxPerHour} emails).`;
+        deniedReason = `Hourly email-account limit reached (${hourCount}/${account.rateLimits.maxPerHour}). Increase "Per hour" in Settings > Email > Email Accounts > Limits, or try again later.`;
       } else if (dayCount >= (account.rateLimits.maxPerDay || 500)) {
-        deniedReason = `Daily limit reached (${dayCount}/${account.rateLimits.maxPerDay} emails).`;
-      } else if (recipientCount >= (account.rateLimits.maxPerRecipientDaily || 5)) {
-        deniedReason = `Daily limit for recipient ${recipientEmail} reached (${recipientCount}/${account.rateLimits.maxPerRecipientDaily}).`;
+        deniedReason = `Daily email-account limit reached (${dayCount}/${account.rateLimits.maxPerDay}). Increase "Per day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.`;
+      } else if (recipientCount >= (account.rateLimits.maxPerRecipientDaily || 100)) {
+        deniedReason = `Daily recipient limit reached for ${recipientEmail} (${recipientCount}/${account.rateLimits.maxPerRecipientDaily || 100}). Increase "Per recipient / day" in Settings > Email > Email Accounts > Limits, or try again tomorrow.`;
       }
       if (deniedReason) {
         await client.query("COMMIT");

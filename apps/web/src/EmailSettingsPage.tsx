@@ -191,7 +191,7 @@ export function EmailSettingsPage() {
   const [smtpPass, setSmtpPass] = useState("");
   const [maxPerHour, setMaxPerHour] = useState(50);
   const [maxPerDay, setMaxPerDay] = useState(500);
-  const [maxPerRecipientDaily, setMaxPerRecipientDaily] = useState(5);
+  const [maxPerRecipientDaily, setMaxPerRecipientDaily] = useState(100);
   const [maxCompanyPerHour, setMaxCompanyPerHour] = useState(500);
   const [maxCompanyPerDay, setMaxCompanyPerDay] = useState(5000);
   const [followupEnabled, setFollowupEnabled] = useState(false);
@@ -405,7 +405,7 @@ export function EmailSettingsPage() {
     setSmtpPass("");
     setMaxPerHour(50);
     setMaxPerDay(500);
-    setMaxPerRecipientDaily(5);
+    setMaxPerRecipientDaily(100);
     setMaxCompanyPerHour(500);
     setMaxCompanyPerDay(5000);
     setFollowupEnabled(false);
