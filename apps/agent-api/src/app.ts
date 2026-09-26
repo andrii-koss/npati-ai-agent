@@ -1125,13 +1125,13 @@ ${localized.next}`;
     });
   }
 
-  async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
+  async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; attachments?: import("./email-inbox-types").EmailAttachment[] }) {
     const managementRequest = Boolean(requestMessage && EmailChatActions.isManagementRequest(requestMessage));
     if (!/```email-action/i.test(content) && !managementRequest) return { cleanText: content, emailAction: undefined };
     let actionText = content;
     if (!/```email-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
-        const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId);
+        const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId, apiKeysRepo);
         const planned = await aiEngine.chat({
           model: route?.model,
           fallbackModel: route?.fallbackModel,
@@ -1152,6 +1152,10 @@ ${localized.next}`;
     return EmailChatActions.extractAndExecute(auth, actionText, workspaceStore, emailInboxRepo, {
       requestMessage,
       selectedCompanyId: route?.selectedCompanyId,
+      apiKeys: apiKeysRepo,
+      attachmentStorage: emailAttachmentStorage,
+      attachments: route?.attachments,
+      onEmailQueued: () => emailInboxWorker?.triggerTick(),
       onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Email action execution failed"),
     });
   }
@@ -1269,7 +1273,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt) + chatLanguageInstruction(safePrompt);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt);
     const result = await agent.handleBusinessMessage({
       message: safePrompt,
       context,
@@ -1282,7 +1286,10 @@ ${localized.next}`;
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
+    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
+      model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal,
+      attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
+    });
     const companyAction = EmailChatActions.isManagementRequest(safePrompt)
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
@@ -1290,7 +1297,7 @@ ${localized.next}`;
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
+    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
   async function runNeutralMessage(
@@ -1309,6 +1316,17 @@ ${localized.next}`;
       : undefined;
     const previousAssistant = [...(priorExisting?.messages ?? [])].reverse().find((item) => item.role === "assistant")?.content ?? "";
     const effectiveMessage = resolveContextualCompanyFollowUp(message, previousAssistant);
+    if (EmailChatActions.containsCredentialSubmission(effectiveMessage)) {
+      const safetyMessage = EmailChatActions.credentialSafetyMessage();
+      onDelta?.(safetyMessage);
+      return {
+        message: safetyMessage,
+        suggestedActions: [],
+        conversationId,
+        noMemory: memoryPolicy.noMemoryActive,
+        contextCompaction: { applied: false, originalCount: priorExisting?.messages.length ?? 0, preservedCount: priorExisting?.messages.length ?? 0 },
+      };
+    }
     let effectiveManagementCompany = managementCompany;
     if (!effectiveManagementCompany && effectiveMessage !== message) {
       const linkedCompanyId = /\/settings\/company\?company=([0-9a-f-]{36})/iu.exec(previousAssistant)?.[1];
@@ -1557,7 +1575,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id) + chatLanguageInstruction(safeUserRequest);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest);
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1579,7 +1597,7 @@ ${localized.next}`;
           if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
           const cleanChunk = chunk.replace(/[\u2014\u2013]/g, " - ");
           content+=cleanChunk;
-          if (!WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta(cleanChunk);
+          if (!emailSettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta(cleanChunk);
         }
       }else {
         chatResult=await aiEngine.chat(chatRequest);
@@ -1591,7 +1609,7 @@ ${localized.next}`;
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;
-        if (!companySettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest)) onDelta?.(extra);
+        if (!emailSettingsRequest && !companySettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest)) onDelta?.(extra);
       }
     }
     if (!companySettingsRequest) progress?.({ type: "final_generation_completed" });
@@ -1680,7 +1698,10 @@ ${localized.next}`;
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
+      model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
+      attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
+    });
     const companyAction = emailSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
@@ -1696,6 +1717,7 @@ ${localized.next}`;
       businessAction: executedAction.businessAction,
       goalAction: executedAction.goalAction,
       emailAction: emailAction.emailAction,
+      emailActions: emailAction.emailActions,
       companyAction: companyAction.companyAction,
       workspaceAction: workspaceAction.workspaceAction,
       companyRunId: workspaceAction.companyRunId,
