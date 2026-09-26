@@ -125,13 +125,20 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const MEMORY_CACHE_PREFIX = "npati_memory_cache_v1_";
+const MEMORY_LATEST_CACHE_KEY = "npati_memory_cache_latest_v1";
 
 function getCachedMemory(businessId?: string): MemoryItem[] {
-  if (!businessId) return [];
   try {
-    const raw = sessionStorage.getItem(MEMORY_CACHE_PREFIX + businessId) || localStorage.getItem(MEMORY_CACHE_PREFIX + businessId);
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    if (businessId) {
+      const raw = sessionStorage.getItem(MEMORY_CACHE_PREFIX + businessId) || localStorage.getItem(MEMORY_CACHE_PREFIX + businessId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const latest = sessionStorage.getItem(MEMORY_LATEST_CACHE_KEY) || localStorage.getItem(MEMORY_LATEST_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch { /* storage may be restricted */ }
@@ -141,16 +148,47 @@ function getCachedMemory(businessId?: string): MemoryItem[] {
 function updateCachedMemory(businessId: string, items: MemoryItem[]) {
   try {
     const serialized = JSON.stringify(items);
-    sessionStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
-    localStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
+    if (businessId) {
+      sessionStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
+      localStorage.setItem(MEMORY_CACHE_PREFIX + businessId, serialized);
+    }
+    if (items.length > 0) {
+      sessionStorage.setItem(MEMORY_LATEST_CACHE_KEY, serialized);
+      localStorage.setItem(MEMORY_LATEST_CACHE_KEY, serialized);
+    }
   } catch { /* storage may be restricted */ }
+}
+
+function getInitialBusinessId(): string {
+  try {
+    const raw = sessionStorage.getItem("npati_workspace_overview_cache_v1")
+      || localStorage.getItem("npati_workspace_overview_cache_v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.currentBusiness?.id || parsed?.businesses?.[0]?.id || "";
+    }
+  } catch {}
+  return "";
+}
+
+function getInitialBusinessName(): string {
+  try {
+    const raw = sessionStorage.getItem("npati_workspace_overview_cache_v1")
+      || localStorage.getItem("npati_workspace_overview_cache_v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.currentBusiness?.name || parsed?.businesses?.[0]?.name || "";
+    }
+  } catch {}
+  return "";
 }
 
 export function MemoryPage() {
   const { t } = useTranslation();
   const { overview, loading: workspaceLoading, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
-  const businessId = business?.id;
+  const businessId = business?.id || getInitialBusinessId();
+  const businessName = business?.name || getInitialBusinessName();
 
   const [items, setItems] = useState<MemoryItem[]>(() => getCachedMemory(businessId));
   const [loading, setLoading] = useState(() => getCachedMemory(businessId).length === 0);
@@ -173,16 +211,15 @@ export function MemoryPage() {
 
   const loadMemory = async () => {
     if (!businessId) {
-      setLoading(workspaceLoading);
+      setLoading(workspaceLoading && items.length === 0);
       return;
     }
-    if (items.length === 0) setLoading(true);
     try {
       const data = await api<MemoryItem[]>(`/businesses/${businessId}/memory`);
       setItems(data);
       updateCachedMemory(businessId, data);
     } catch {
-      setItems([]);
+      // Keep cached items on transient failure
     } finally {
       setLoading(false);
     }
@@ -304,6 +341,11 @@ export function MemoryPage() {
     try {
       await api(`/businesses/${businessId}/memory/${item.id}`, { method: "DELETE" });
       showToast(t("memoryPage.toasts.deleted", { title: item.title }));
+      setItems((prev) => {
+        const next = prev.filter((i) => i.id !== item.id);
+        if (businessId) updateCachedMemory(businessId, next);
+        return next;
+      });
       await loadMemory();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t("memoryPage.toasts.deleteError");
@@ -389,7 +431,7 @@ export function MemoryPage() {
         <div className="automations-header-top">
           <div>
             <p className="eyebrow">
-              {business ? `${business.name} · ` : ""}{t("memoryPage.eyebrow")}
+              {businessName ? `${businessName} · ` : ""}{t("memoryPage.eyebrow")}
             </p>
             <h1>
               <Link
@@ -475,8 +517,14 @@ export function MemoryPage() {
         </div>
       </div>
 
-      {/* Empty States */}
-      {!loading && items.length === 0 && (
+      {/* Empty States and Grid */}
+      {items.length === 0 && loading ? (
+        <div className="memory-grid" style={{ minHeight: "240px", opacity: 0.5 }}>
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="memory-card" style={{ pointerEvents: "none", minHeight: "180px" }} />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <div className="automations-empty-card memory-empty-card">
           <div className="automations-empty-icon">🧠</div>
           <h3>{t("memoryPage.empty.title")}</h3>
@@ -489,9 +537,7 @@ export function MemoryPage() {
             {t("memoryPage.empty.addFirstBtn")}
           </button>
         </div>
-      )}
-
-      {!loading && items.length > 0 && filteredItems.length === 0 && (
+      ) : filteredItems.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🔍</div>
           <h3>{t("memoryPage.emptyFiltered.title")}</h3>
@@ -507,10 +553,7 @@ export function MemoryPage() {
             {t("memoryPage.emptyFiltered.resetFilters")}
           </button>
         </div>
-      )}
-
-      {/* Memory Cards Grid */}
-      {!loading && filteredItems.length > 0 && (
+      ) : (
         <div className="memory-grid">
           {filteredItems.map((item) => {
             const meta = MEMORY_TYPE_META[item.type] || MEMORY_TYPE_META.other;
