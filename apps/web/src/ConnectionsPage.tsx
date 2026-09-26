@@ -20,17 +20,91 @@ interface ServiceStatus extends RawServiceStatus {
   details: string;
 }
 
+const DEFAULT_SERVICES: RawServiceStatus[] = [
+  {
+    id: "omniroute",
+    icon: "⚡",
+    category: "internal",
+    status: "ok",
+    endpoint: "http://omniroute:20128",
+  },
+  {
+    id: "postgres",
+    icon: "🐘",
+    category: "storage",
+    status: "ok",
+    endpoint: "postgresql://postgres:5432/npati_agent",
+  },
+  {
+    id: "redis",
+    icon: "🧠",
+    category: "internal",
+    status: "ok",
+    endpoint: "redis://redis:6379",
+  },
+  {
+    id: "minio",
+    icon: "🗄️",
+    category: "storage",
+    status: "ok",
+    endpoint: "http://minio:9000",
+  },
+  {
+    id: "crawler",
+    icon: "🕷️",
+    category: "internal",
+    status: "ok",
+    endpoint: "http://crawler:11235",
+  },
+  {
+    id: "core-backend",
+    icon: "⚙️",
+    category: "internal",
+    status: "ok",
+    endpoint: "http://localhost:4000",
+  },
+  {
+    id: "cloud-hub",
+    icon: "☁️",
+    category: "provider",
+    status: "not_configured",
+    endpoint: "https://hub.npati.io",
+  },
+];
+
+const STORAGE_CONNECTIONS_KEY = "npati_connections_cache_v1";
+
+function getCachedConnections(): RawServiceStatus[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_CONNECTIONS_KEY) || localStorage.getItem(STORAGE_CONNECTIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_SERVICES;
+}
+
+function updateCachedConnections(items: RawServiceStatus[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(STORAGE_CONNECTIONS_KEY, serialized);
+    localStorage.setItem(STORAGE_CONNECTIONS_KEY, serialized);
+  } catch {}
+}
+
 export function ConnectionsPage() {
   const { t } = useTranslation();
-  const [rawServices, setRawServices] = useState<RawServiceStatus[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rawServices, setRawServices] = useState<RawServiceStatus[]>(getCachedConnections);
   const [checking, setChecking] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
 
-  async function checkConnections() {
-    setChecking(true);
+  async function checkConnections(isManual = false) {
+    if (isManual) {
+      setChecking(true);
+    }
     try {
       const headers: HeadersInit = {};
       const token = getStoredAuthToken();
@@ -93,16 +167,16 @@ export function ConnectionsPage() {
       ];
 
       setRawServices(items);
+      updateCachedConnections(items);
     } catch {
       // Fallback handled gracefully
     } finally {
-      setLoading(false);
       setChecking(false);
     }
   }
 
   useEffect(() => {
-    void checkConnections();
+    void checkConnections(false);
   }, []);
 
   const services = useMemo<ServiceStatus[]>(() => {
@@ -279,7 +353,8 @@ export function ConnectionsPage() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              onClick={() => void checkConnections()}
+              style={{ minWidth: "155px" }}
+              onClick={() => void checkConnections(true)}
               disabled={checking}
               title={t("connectionsPage.refreshTitle")}
             >
@@ -332,7 +407,7 @@ export function ConnectionsPage() {
         </div>
       </div>
 
-      {!loading && filteredServices.length === 0 && (
+      {filteredServices.length === 0 ? (
         <div className="automations-empty-card" style={{ marginTop: "16px" }}>
           <div className="automations-empty-icon">🔍</div>
           <h3>{t("connectionsPage.empty.title")}</h3>
@@ -348,10 +423,7 @@ export function ConnectionsPage() {
             {t("connectionsPage.empty.resetFilters")}
           </button>
         </div>
-      )}
-
-      {/* Unified Service Cards Grid */}
-      {!loading && filteredServices.length > 0 && (
+      ) : (
         <div className="connections-grid">
           {filteredServices.map((svc) => (
             <article key={svc.id} className="connection-card">
