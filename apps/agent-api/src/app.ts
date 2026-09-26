@@ -602,6 +602,34 @@ export function buildApp(config: AppConfig = {}) {
   const fileRepository = config.fileMetadataRepository ?? (config.databaseUrl ? new PostgresFileMetadataRepository(config.databaseUrl) : new InMemoryFileMetadataRepository());
   const storageProtection = config.storageProtection ?? (config.redisUrl ? new RedisStorageProtection(config.redisUrl) : new InMemoryStorageProtection());
   const chatFiles = objectStorage ? new ChatFileService(objectStorage,fileRepository,workspaceStore,attachmentDirectory,storageProtection) : undefined;
+  const persistBusinessLogo = async (context: AuthContext, businessId: string, attachment: { name: string; mimeType: string; data: Buffer; kind?: string }) => {
+    if (!chatFiles) throw new Error("Persistent object storage is not configured");
+    const mimeType = attachment.mimeType.toLowerCase().split(";")[0]!.trim();
+    if (attachment.kind !== "image" || !["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
+      throw new Error("Logo must be a PNG, JPEG, or WebP image");
+    }
+    if (!attachment.data.length || attachment.data.length > 5 * 1024 * 1024) {
+      throw new Error("Logo must be between 1 byte and 5 MB");
+    }
+    const logo = await chatFiles.persistBusinessAsset(context, businessId, {
+      kind: "image",
+      name: attachment.name.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 255),
+      mimeType,
+      data: attachment.data,
+    });
+    const business = await workspaceStore.updateBusiness(context, businessId, { logoFileId: logo.id });
+    const linkedCompanies = (await workspaceStore.listCompanies(context, 100)).items.filter((company) => company.businessId === business.id);
+    for (const company of linkedCompanies) {
+      const knowledge = company.knowledge.filter((item) => {
+        if (!item || typeof item !== "object") return true;
+        const value = item as Record<string, unknown>;
+        return value.source !== "linked_business" || value.name !== "Company logo";
+      });
+      knowledge.push({ attachmentId: logo.id, kind: "image", name: "Company logo", source: "linked_business" });
+      await workspaceStore.updateCompany(context, company.id, { knowledge }, company.revision);
+    }
+    return business;
+  };
   const storageReconciler = config.databaseUrl && objectStorage ? new StorageReconciler(objectStorage,fileRepository,storageProtection,{...config.storageReconcilerOptions,onResult:(summary)=>app.log.info(summary,"Storage reconciliation completed"),onError:(error)=>app.log.error(error,"Storage reconciliation failed")}) : undefined;
   const npatiBackendUrl = config.npatiBackendUrl ?? process.env.NPATI_BACKEND_URL;
   const npatiJwtSecret = config.npatiJwtSecret ?? process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET;
@@ -1305,7 +1333,10 @@ ${localized.next}`;
       signal,
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
+      logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
+      persistBusinessLogo,
+    });
     const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt);
     const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
       model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal,
@@ -1719,7 +1750,10 @@ ${localized.next}`;
       }
     }
 
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
+      logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
+      persistBusinessLogo,
+    });
     const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
@@ -1805,29 +1839,15 @@ ${localized.next}`;
         return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Business management permission is required" } });
       }
       await workspaceStore.getBusiness(context, request.params.businessId);
-      const mimeType = request.body.mimeType.toLowerCase().split(";")[0]!.trim();
-      if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
-        return reply.code(400).send({ error: { code: "INVALID_LOGO", message: "Logo must be a PNG, JPEG, or WebP image" } });
-      }
       const data = Buffer.from(request.body.data, "base64");
-      if (!data.length || data.length > 5 * 1024 * 1024) {
-        return reply.code(400).send({ error: { code: "INVALID_LOGO", message: "Logo must be between 1 byte and 5 MB" } });
-      }
-      const logo = await chatFiles.persistBusinessAsset(context, request.params.businessId, {
-        kind: "image", name: request.body.filename.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 255), mimeType, data,
-      });
-      const business = await workspaceStore.updateBusiness(context, request.params.businessId, { logoFileId: logo.id });
-      const linkedCompanies = (await workspaceStore.listCompanies(context, 100)).items.filter((company) => company.businessId === business.id);
-      for (const company of linkedCompanies) {
-        const knowledge = company.knowledge.filter((item) => {
-          if (!item || typeof item !== "object") return true;
-          const value = item as Record<string, unknown>;
-          return value.source !== "linked_business" || value.name !== "Company logo";
+      try {
+        const business = await persistBusinessLogo(context, request.params.businessId, {
+          kind: "image", name: request.body.filename, mimeType: request.body.mimeType, data,
         });
-        knowledge.push({ attachmentId: logo.id, kind: "image", name: "Company logo", source: "linked_business" });
-        await workspaceStore.updateCompany(context, company.id, { knowledge }, company.revision);
+        return reply.code(201).send({ logo: { id: business.logoFileId, kind: "image", name: request.body.filename }, business });
+      } catch (error) {
+        return reply.code(400).send({ error: { code: "INVALID_LOGO", message: error instanceof Error ? error.message : "Could not save logo" } });
       }
-      return reply.code(201).send({ logo, business });
     },
   );
   registerContentLibraryRoutes(app, authProvider, workspaceStore, contentLibrary);
