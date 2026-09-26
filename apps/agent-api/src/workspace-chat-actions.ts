@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import type { AuthContext, Business, Company, CompanyAgentRunDetails, CompanyRunMode, MemoryInput, WorkspaceStore } from "@npati/workspace";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
 import { computeNextCronDate, isValidCronExpression } from "./automation-scheduler";
+import type { BrowserCampaignTarget, BrowserCampaignTargetInput, BrowserCredentialsRepository } from "./browser-credentials-repository";
+import type { CompanyEmailAccount } from "./email-inbox-types";
+import type { EmailInboxRepository } from "./email-inbox-repository";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
 
-type WorkspaceActionKind = "activity.run" | "activity.cancel" | "automation.create" | "automation.update" | "automation.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete";
+type WorkspaceActionKind = "activity.run" | "activity.cancel" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete";
 type ContentType = "article" | "seo_blueprint" | "social_post" | "brief" | "strategy" | "other";
 
 type WorkspaceDirective = {
@@ -16,6 +19,12 @@ type WorkspaceDirective = {
   businessName?: string;
   automationId?: string;
   automationName?: string;
+  websiteId?: string;
+  websiteName?: string;
+  emailAccountId?: string;
+  emailAddress?: string;
+  startAt?: string;
+  historyLimit?: number;
   contentId?: string;
   contentTitle?: string;
   memoryId?: string;
@@ -24,6 +33,8 @@ type WorkspaceDirective = {
   followUp?: string;
   activity?: { runId?: string; title?: string; task?: string; mode?: CompanyRunMode };
   automation?: { name?: string; description?: string; prompt?: string; cronExpression?: string; timezone?: string; agentId?: string | null; status?: "active" | "paused" };
+  website?: BrowserCampaignTargetInput;
+  websites?: BrowserCampaignTargetInput[];
   content?: { title?: string; type?: ContentType; content?: string; task?: string; mode?: CompanyRunMode };
   memory?: { type?: MemoryInput["type"]; title?: string; content?: string; confidence?: number };
 };
@@ -40,11 +51,37 @@ export type WorkspaceChatActionDependencies = {
   content: ContentLibraryStore;
   runCompany: (auth: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode }, idempotencyKey: string) => Promise<CompanyAgentRunDetails>;
   cancelCompanyRun: (auth: AuthContext, companyId: string, runId: string) => Promise<CompanyAgentRunDetails>;
+  runAutomation?: (auth: AuthContext, automation: CompanyAutomation) => Promise<{ runId: string; result: string; durationMs: number }>;
+  browserTargets?: Pick<BrowserCredentialsRepository, "listTargets" | "createTarget" | "updateTarget" | "deleteTarget">;
+  email?: Pick<EmailInboxRepository, "listAccounts" | "getAccount">;
 };
+type WorkspacePromptResources = Pick<WorkspaceChatActionDependencies, "automations" | "content"> &
+  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email">>;
 
 const memoryTypes = new Set<MemoryInput["type"]>(["business_fact", "audience", "brand", "preference", "decision", "product", "channel", "experiment", "result", "other"]);
 const contentTypes = new Set<ContentType>(["article", "seo_blueprint", "social_post", "brief", "strategy", "other"]);
 const runModes = new Set<CompanyRunMode>(["auto", "single", "pipeline", "fusion"]);
+const websiteStatuses = new Set(["pending", "paused"]);
+const demoWebsites: BrowserCampaignTargetInput[] = [
+  {
+    siteName: "WordPress Playground (isolated demo)",
+    registrationUrl: "https://playground.wordpress.net/?storage=browser&url=/wp-admin/post-new.php",
+    publishUrl: "https://playground.wordpress.net/?storage=browser&url=/wp-admin/post-new.php",
+    articleTitle: "NPATI browser automation test",
+    articleBody: "This draft verifies that the browser agent can create and publish an article in an isolated WordPress Playground session.",
+    priority: 10,
+    status: "paused",
+  },
+  {
+    siteName: "RealWorld Conduit (public demo)",
+    registrationUrl: "https://realworld.svelte.dev/register",
+    publishUrl: "https://realworld.svelte.dev/editor",
+    articleTitle: "NPATI browser automation test",
+    articleBody: "A test article created by the NPATI browser automation in the public RealWorld demo application.",
+    priority: 20,
+    status: "paused",
+  },
+];
 
 type CardCopy = { type: string; business: string; confidence: string; company: string; status: string; active: string; completed: string; schedule: string; timezone: string; nextRun: string; mode: string; steps: string; toolCalls: string; duration: string; openMemory: string; openAutomations: string; openActivity: string; openContent: string };
 const cardCopies: Record<string, CardCopy> = {
@@ -145,6 +182,16 @@ const referenceSignals = [
   /(?:इसे|यह|इसको|अंतिम|पिछल)/u,
 ];
 
+const automationReadSignals = [
+  /\b(?:list|show|which|when|status|history|runs?|tasks?|websites?|sites?)\b/iu,
+  /(?:покажи|перегля|список|який|яка|які|коли|статус|історі|запуск|завдан|сайт)/iu,
+];
+const websiteResourceSignals = [
+  /\b(?:website registration|website publishing|browser campaign|campaign sites?|websites|sites)\b/iu,
+  /(?:реєстрац\p{L}*.*сайт|публікац\p{L}*.*сайт|сайт\p{L}*.*(?:реєстрац|публікац)|сайти|сайтів|вебсайти|вебсайтів)/iu,
+  /(?:автоматизац\p{L}*|запланован\p{L}*.*завдан|агент\p{L}*.*завдан)/iu,
+];
+
 function clean(value: unknown, max = 12_000): string {
   if (typeof value !== "string") return "";
   return value.replace(/```/g, "'''").trim().slice(0, max);
@@ -173,6 +220,47 @@ async function resolveCompany(store: WorkspaceStore, auth: AuthContext, directiv
   const matches = name ? all.filter((item) => item.name.toLocaleLowerCase() === name) : all;
   if (matches.length !== 1) throw new Error(matches.length ? "Specify which company to use" : "Create a company before using this action");
   return matches[0]!;
+}
+
+async function resolveAutomation(deps: WorkspaceChatActionDependencies, auth: AuthContext, companyId: string, directive: WorkspaceDirective, item?: Partial<BrowserCampaignTargetInput>): Promise<CompanyAutomation> {
+  const available = await deps.automations.list(auth, companyId);
+  const id = item?.automationId || directive.automationId;
+  const name = directive.automationName?.trim().toLocaleLowerCase();
+  const matches = id
+    ? available.filter((entry) => entry.id === id)
+    : available.filter((entry) => entry.name.toLocaleLowerCase() === name);
+  if (matches.length !== 1) throw new Error("Automation target is missing or ambiguous");
+  return matches[0]!;
+}
+
+async function resolveEmailAccount(deps: WorkspaceChatActionDependencies, auth: AuthContext, companyId: string, directive: WorkspaceDirective, item?: Partial<BrowserCampaignTargetInput>): Promise<CompanyEmailAccount> {
+  if (!deps.email) throw new Error("Email accounts are unavailable");
+  const available = await deps.email.listAccounts(auth, companyId);
+  const id = item?.emailAccountId || directive.emailAccountId;
+  const address = directive.emailAddress?.trim().toLocaleLowerCase();
+  const matches = id
+    ? available.filter((entry) => entry.id === id)
+    : available.filter((entry) => entry.emailAddress.toLocaleLowerCase() === address);
+  if (matches.length !== 1) throw new Error("Connected Company email target is missing or ambiguous");
+  if (matches[0]!.status !== "connected") throw new Error("The selected Company email account is not connected");
+  return matches[0]!;
+}
+
+function resolveWebsite(available: BrowserCampaignTarget[], directive: WorkspaceDirective): BrowserCampaignTarget {
+  const name = directive.websiteName?.trim().toLocaleLowerCase();
+  const matches = directive.websiteId
+    ? available.filter((entry) => entry.id === directive.websiteId)
+    : available.filter((entry) => entry.siteName.toLocaleLowerCase() === name);
+  if (matches.length !== 1) throw new Error("Website target is missing or ambiguous");
+  return matches[0]!;
+}
+
+function requestedStartAt(value?: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error("Website automation startAt must be a valid ISO date");
+  if (date.getTime() < Date.now() - 60_000) throw new Error("Website automation startAt cannot be in the past");
+  return date.toISOString();
 }
 
 async function resolveBusiness(store: WorkspaceStore, auth: AuthContext, directive: WorkspaceDirective, selectedBusinessId?: string): Promise<Business> {
@@ -221,7 +309,8 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 
 export class WorkspaceChatActions {
   static isManagementRequest(message: string): boolean {
-    return actionSignals.some((pattern) => pattern.test(message)) && resourceSignals.some((pattern) => pattern.test(message));
+    const resource = resourceSignals.some((pattern) => pattern.test(message)) || websiteResourceSignals.some((pattern) => pattern.test(message));
+    return resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
   static isPotentialMutationRequest(message: string): boolean {
@@ -244,9 +333,9 @@ export class WorkspaceChatActions {
     return messages[language] ?? "I could not complete this action safely. Specify the company or business and the required settings.";
   }
 
-  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: { automations: CompanyAutomationsRepository; content: ContentLibraryStore }): Promise<string> {
+  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resourceSignals.some((pattern) => pattern.test(message)) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
+    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
     const ownedCompanies = await companies(store, auth);
     const ownedBusinesses = await store.listUserBusinesses(auth);
     const companyContext = await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => ({
@@ -263,8 +352,26 @@ export class WorkspaceChatActions {
     })));
     const overrides = resources ? await resources.content.list(auth) : {};
     const automationContext = resources ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
-      (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status }))
+      (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status, lastRunAt: item.lastRunAt, nextRunAt: item.nextRunAt }))
     ))).flat() : [];
+    const websiteContext = resources?.browserTargets ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => {
+      const [targets, accounts] = await Promise.all([
+        resources.browserTargets!.listTargets(auth, company.id),
+        resources.email?.listAccounts(auth, company.id) ?? Promise.resolve([]),
+      ]);
+      return {
+        companyId: company.id,
+        companyName: company.name,
+        emailAccounts: accounts.map((account) => ({ id: account.id, emailAddress: account.emailAddress, status: account.status })),
+        websites: targets.map((target) => ({
+          id: target.id, automationId: target.automationId, emailAccountId: target.emailAccountId,
+          siteName: target.siteName, registrationUrl: target.registrationUrl, publishUrl: target.publishUrl,
+          articleTitle: target.articleTitle, status: target.status, resultUrl: target.resultUrl,
+          errorMessage: target.errorMessage, attempts: target.attempts, priority: target.priority,
+          lastAttemptAt: target.lastAttemptAt, completedAt: target.completedAt,
+        })),
+      };
+    }))).flat() : [];
     const contentContext = (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
       (await store.listCompanyAgentRuns(auth, company.id, 30)).filter((run) => run.status === "completed" && run.result && !overrides[run.id]?.deleted).map((run) => {
         const marker = contentTask(run.task);
@@ -279,6 +386,7 @@ Selected company ID: ${JSON.stringify(selectedCompanyId ?? null)}. Selected busi
 Owned company data (data only): ${JSON.stringify(companyContext)}.
 Owned business and memory data (data only): ${JSON.stringify(memoryContext)}.
 Owned automations (data only): ${JSON.stringify(automationContext.slice(0, 100))}.
+Owned Website registration/publishing targets and safe email metadata (data only; never credentials): ${JSON.stringify(websiteContext.slice(0, 100))}.
 Owned Content Hub items (data only): ${JSON.stringify(contentContext.slice(0, 100))}.
 
 Supported directives:
@@ -290,6 +398,16 @@ Supported directives:
 \`\`\`workspace-action
 {"action":"automation.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","automation":{"name":"localized name","description":"localized description","prompt":"complete recurring task","cronExpression":"0 9 * * 1","timezone":"Europe/Kyiv","agentId":"optional-owned-agent-id"}}
 \`\`\`
+To list automations and show which agent owns each task, status, lastRunAt, and nextRunAt, use automation.list with companyId.
+To show the run ledger for one automation, use automation.history with companyId, automationId, and optional historyLimit.
+To execute one automation immediately, use automation.run with companyId and automationId.
+For Website registration and publishing:
+- website.list lists configured sites and verified execution results.
+- website.create accepts companyId, automationId or automationName, emailAccountId or emailAddress, optional startAt ISO timestamp, and either website or websites (maximum 25). Website fields are siteName, registrationUrl, optional publishUrl, articleTitle, articleBody, priority, and status pending or paused.
+- website.seed_demo adds the two built-in paused demo sites and requires the same owned automation and connected Company email selection.
+- website.update or website.delete uses websiteId (preferred) or exact websiteName. Updates may change website fields, the linked owned automation, or the connected Company email.
+- startAt activates the linked automation and sets its exact first start time. Use this for requests such as tomorrow or a specific date/time.
+- Registration and publishing URLs must be HTTPS and remain on the same safe public domain. Never accept or expose site passwords in chat; passwords are generated and encrypted by the server.
 3. Produce Content Hub content through a real company run:
 \`\`\`workspace-action
 {"action":"content.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","content":{"title":"localized title","type":"article","task":"complete content brief","mode":"auto"}}
@@ -319,7 +437,7 @@ Use activity.run when the user asks the company agents to perform work and wants
       if (!auth.permissions.includes("business:manage")) throw new Error("Permission denied");
       if (matches.length !== 1) throw new Error("Use one action per response");
       const directive = JSON.parse(matches[0][1]!.trim()) as WorkspaceDirective;
-      if (!directive || !["activity.run", "activity.cancel", "automation.create", "automation.update", "automation.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete"].includes(directive.action)) throw new Error("Invalid action");
+      if (!directive || !["activity.run", "activity.cancel", "automation.list", "automation.create", "automation.update", "automation.delete", "automation.run", "automation.history", "website.list", "website.create", "website.seed_demo", "website.update", "website.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete"].includes(directive.action)) throw new Error("Invalid action");
       const key = idempotency(auth, conversationId, options.requestMessage ?? matches[0][0], directive.action);
       const labels = copyFor(options.requestMessage);
 
@@ -358,8 +476,117 @@ Use activity.run when the user asks the company agents to perform work and wants
       }
 
       const company = await resolveCompany(deps.store, auth, directive, options.selectedCompanyId);
+      if (directive.action.startsWith("website.")) {
+        if (!deps.browserTargets || !deps.email) throw new Error("Website automation storage is unavailable");
+        const available = await deps.browserTargets.listTargets(auth, company.id);
+        if (directive.action === "website.list") {
+          const automations = await deps.automations.list(auth, company.id);
+          const agents = await deps.store.listCompanyAgents(auth, company.id);
+          const accounts = await deps.email.listAccounts(auth, company.id);
+          const lines = available.length ? available.map((target) => {
+            const automation = automations.find((entry) => entry.id === target.automationId);
+            const agent = agents.find((entry) => entry.id === automation?.agentId);
+            const account = accounts.find((entry) => entry.id === target.emailAccountId);
+            return [
+              "### " + clean(target.siteName, 300),
+              "**Status:** " + target.status,
+              "**Automation:** " + clean(automation?.name || "not selected", 300),
+              "**Agent:** " + clean(agent?.name || "automatic selection", 300),
+              "**Company email:** " + clean(account?.emailAddress || "not selected", 320),
+              "**Next run:** " + (automation?.nextRunAt || "not scheduled"),
+              "**Registration:** " + clean(target.registrationUrl, 2000),
+              target.publishUrl ? "**Publishing:** " + clean(target.publishUrl, 2000) : "",
+              target.resultUrl ? "**Result:** " + clean(target.resultUrl, 2000) : "",
+              target.errorMessage ? "**Error:** " + clean(target.errorMessage, 1000) : "",
+            ].filter(Boolean).join("\n");
+          }).join("\n\n") : "No Website registration/publishing targets are configured.";
+          return { cleanText: intro(directive) + "\n\n" + lines + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
+        }
+        if (directive.action === "website.create" || directive.action === "website.seed_demo") {
+          const requested = directive.action === "website.seed_demo"
+            ? demoWebsites
+            : directive.websites?.length ? directive.websites : directive.website ? [directive.website] : [];
+          if (!requested.length || requested.length > 25) throw new Error("Provide between 1 and 25 websites");
+          const startAt = requestedStartAt(directive.startAt);
+          const created: BrowserCampaignTarget[] = [];
+          const linkedAutomations = new Map<string, CompanyAutomation>();
+          for (const item of requested) {
+            if (!clean(item.siteName, 160) || !clean(item.registrationUrl, 2000)) throw new Error("Website name and registration URL are required");
+            if (item.status && !websiteStatuses.has(item.status)) throw new Error("New website status must be pending or paused");
+            const automation = await resolveAutomation(deps, auth, company.id, directive, item);
+            const account = await resolveEmailAccount(deps, auth, company.id, directive, item);
+            linkedAutomations.set(automation.id, automation);
+            const duplicate = available.find((entry) =>
+              entry.automationId === automation.id &&
+              entry.registrationUrl === item.registrationUrl &&
+              entry.siteName.toLocaleLowerCase() === item.siteName.trim().toLocaleLowerCase()
+            );
+            created.push(duplicate ?? await deps.browserTargets.createTarget(auth, company.id, {
+              ...item,
+              automationId: automation.id,
+              emailAccountId: account.id,
+              status: startAt ? "pending" : (item.status === "paused" ? "paused" : "pending"),
+            }));
+          }
+          if (startAt) {
+            await Promise.all(Array.from(linkedAutomations.values()).map((automation) =>
+              deps.automations.update(auth, company.id, automation.id, { status: "active", nextRunAt: startAt })
+            ));
+          }
+          const lines = created.map((target) => "- " + clean(target.siteName, 160) + ": " + target.status + " — " + clean(target.registrationUrl, 2000)).join("\n");
+          const schedule = startAt ? "\n\n**First run:** " + startAt : "";
+          return { cleanText: intro(directive) + "\n\n" + lines + schedule + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: created[0]!.id, companyId: company.id } };
+        }
+        const current = resolveWebsite(available, directive);
+        if (directive.action === "website.delete") {
+          if (!await deps.browserTargets.deleteTarget(auth, company.id, current.id)) throw new Error("Website target not found");
+          return { cleanText: intro(directive) + "\n\n" + clean(current.siteName, 300) + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+        }
+        const item = directive.website;
+        if (!item) throw new Error("Website changes are required");
+        if (item.status && !websiteStatuses.has(item.status)) throw new Error("Website status may only be pending or paused from chat");
+        const patch: Partial<BrowserCampaignTargetInput> = { ...item };
+        if (item.automationId || directive.automationId || directive.automationName) patch.automationId = (await resolveAutomation(deps, auth, company.id, directive, item)).id;
+        if (item.emailAccountId || directive.emailAccountId || directive.emailAddress) patch.emailAccountId = (await resolveEmailAccount(deps, auth, company.id, directive, item)).id;
+        const updated = await deps.browserTargets.updateTarget(auth, company.id, current.id, patch);
+        const startAt = requestedStartAt(directive.startAt);
+        if (startAt && updated.automationId) await deps.automations.update(auth, company.id, updated.automationId, { status: "active", nextRunAt: startAt });
+        return { cleanText: intro(directive) + "\n\n**Website:** " + clean(updated.siteName, 300) + "\n**Status:** " + updated.status + (startAt ? "\n**First run:** " + startAt : "") + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
+      }
       if (directive.action.startsWith("automation.")) {
         const item = directive.automation;
+        if (directive.action === "automation.list") {
+          const available = await deps.automations.list(auth, company.id);
+          const agents = await deps.store.listCompanyAgents(auth, company.id);
+          const lines = available.length ? available.map((automation) => {
+            const agent = agents.find((entry) => entry.id === automation.agentId);
+            return [
+              "### " + clean(automation.name, 300),
+              "**Status:** " + automation.status,
+              "**Agent:** " + clean(agent?.name || "automatic selection", 300),
+              "**Schedule:** " + automation.cronExpression + " (" + clean(automation.timezone, 100) + ")",
+              "**Last run:** " + (automation.lastRunAt || "never"),
+              "**Next run:** " + automation.nextRunAt,
+              clean(automation.description) || clean(automation.prompt),
+            ].join("\n");
+          }).join("\n\n") : "No automations are configured.";
+          return { cleanText: intro(directive) + "\n\n" + lines + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
+        }
+        if (directive.action === "automation.history" || directive.action === "automation.run") {
+          const current = await resolveAutomation(deps, auth, company.id, directive);
+          if (directive.action === "automation.history") {
+            const runs = await deps.automations.listRuns(auth, company.id, current.id, Math.min(50, Math.max(1, directive.historyLimit ?? 10)));
+            const lines = runs.length ? runs.map((run) =>
+              "- " + run.startedAt + " — " + run.status + " (" + run.durationMs + " ms)" +
+              (run.errorMessage ? ": " + clean(run.errorMessage, 500) : "") +
+              (run.result ? "\n  " + clean(run.result, 1000).replace(/\n/g, "\n  ") : "")
+            ).join("\n") : "This automation has no runs yet.";
+            return { cleanText: intro(directive) + "\n\n### " + clean(current.name, 300) + "\n" + lines + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+          }
+          if (!deps.runAutomation) throw new Error("Immediate automation execution is unavailable");
+          const run = await deps.runAutomation(auth, current);
+          return { cleanText: intro(directive) + "\n\n### " + clean(current.name, 300) + "\n**Status:** completed\n**Duration:** " + run.durationMs + " ms\n\n" + clean(run.result) + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+        }
         if (directive.action !== "automation.create") {
           const available = await deps.automations.list(auth, company.id);
           const name = directive.automationName?.trim().toLocaleLowerCase();
