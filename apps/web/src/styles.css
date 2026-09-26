@@ -6978,6 +6978,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
   border: 1px solid var(--npati-gray-100);
   border-radius: 50%;
   background: var(--npati-gray-50);
@@ -6992,6 +6993,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   height: 15px;
   display: block;
   stroke: currentColor;
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .company-drawer>header .company-drawer-close:hover {
@@ -7010,6 +7013,12 @@ body:has(.npati-dialog-backdrop) .sidebar {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+@media (max-width: 580px) {
+  .company-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .company-tool-grid {
