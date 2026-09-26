@@ -941,7 +941,7 @@ export function EmailInboxPage() {
           <div className="automations-header-actions">
             <Link
               to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email"}
-              className="button-secondary automations-action-primary"
+              className="button-secondary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
               {t("emailInbox.header.emailSettingsBtn")}
