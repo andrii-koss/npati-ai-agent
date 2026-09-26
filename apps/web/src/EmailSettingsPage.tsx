@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
+import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -148,16 +148,55 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+function readCachedAccounts(companyId: string): EmailAccount[] {
+  try {
+    const raw = sessionStorage.getItem(`npati_email_accounts_${companyId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedAccounts(companyId: string, accounts: EmailAccount[]): void {
+  try {
+    sessionStorage.setItem(`npati_email_accounts_${companyId}`, JSON.stringify(accounts));
+  } catch {}
+}
+
+function readCachedAnalytics(companyId: string): EmailAnalytics | null {
+  try {
+    const raw = sessionStorage.getItem(`npati_email_analytics_${companyId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedAnalytics(companyId: string, analytics: EmailAnalytics | null): void {
+  try {
+    if (analytics) {
+      sessionStorage.setItem(`npati_email_analytics_${companyId}`, JSON.stringify(analytics));
+    }
+  } catch {}
+}
+
 export function EmailSettingsPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("personal");
+  const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
+    const currentUrl = new URL(window.location.href);
+    return getInitialCompanyScope(currentUrl.searchParams.get("company"));
+  });
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+  const [accounts, setAccounts] = useState<EmailAccount[]>(() => {
+    const currentUrl = new URL(window.location.href);
+    const scope = getInitialCompanyScope(currentUrl.searchParams.get("company"));
+    return readCachedAccounts(scope);
+  });
   const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Email Account Drawer
@@ -262,7 +301,11 @@ export function EmailSettingsPage() {
   const [savingContact, setSavingContact] = useState(false);
 
   // Analytics
-  const [analytics, setAnalytics] = useState<EmailAnalytics | null>(null);
+  const [analytics, setAnalytics] = useState<EmailAnalytics | null>(() => {
+    const currentUrl = new URL(window.location.href);
+    const scope = getInitialCompanyScope(currentUrl.searchParams.get("company"));
+    return readCachedAnalytics(scope);
+  });
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
 
   // Granular permissions are delegated through the existing scoped API-key system.
@@ -277,13 +320,16 @@ export function EmailSettingsPage() {
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
         setCompanies(res.companies);
+        writeCachedCompanies(res.companies);
         const currentUrl = new URL(window.location.href);
         const requested = currentUrl.searchParams.get("company");
         const selected = requested === "personal"
           ? "personal"
           : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
-        setSelectedCompanyId(selected);
-        writeActiveCompanyId(selected === "personal" ? "" : selected);
+        if (selected !== selectedCompanyId) {
+          setSelectedCompanyId(selected);
+          writeActiveCompanyId(selected === "personal" ? "" : selected);
+        }
         if (requested) {
           currentUrl.searchParams.delete("company");
           window.history.replaceState(window.history.state, "", currentUrl.pathname + currentUrl.search + currentUrl.hash);
@@ -296,7 +342,6 @@ export function EmailSettingsPage() {
   // Load accounts, agents and analytics when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
-    setLoading(true);
     const personalScope = selectedCompanyId === "personal";
     Promise.all([
       api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
@@ -305,8 +350,12 @@ export function EmailSettingsPage() {
     ])
       .then(([accRes, agentRes, analRes]) => {
         setAccounts(accRes.accounts);
+        writeCachedAccounts(selectedCompanyId, accRes.accounts);
         setAgents(agentRes.agents);
-        if (analRes.analytics) setAnalytics(analRes.analytics);
+        if (analRes.analytics) {
+          setAnalytics(analRes.analytics);
+          writeCachedAnalytics(selectedCompanyId, analRes.analytics);
+        }
       })
       .catch((e) => setNotice(e.message))
       .finally(() => setLoading(false));
@@ -930,7 +979,7 @@ export function EmailSettingsPage() {
           </div>
           <div className="automations-header-actions">
             <Link
-              to="/settings/email/inbox"
+              to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox"}
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -982,10 +1031,19 @@ export function EmailSettingsPage() {
                   setRuleWorkflowId("");
                   setRuleCreateTask(false);
                   writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+                  const cachedAcc = readCachedAccounts(companyId);
+                  if (cachedAcc.length > 0) setAccounts(cachedAcc);
+                  const cachedAnal = readCachedAnalytics(companyId);
+                  if (cachedAnal) setAnalytics(cachedAnal);
                 }}
                 className="email-scope-select"
               >
                 <option value="personal">{t("emailSettings.scope.personalScope")}</option>
+                {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
+                  <option key={selectedCompanyId} value={selectedCompanyId}>
+                    {t("emailSettings.scope.companyScopePrefix")}{selectedCompanyId}
+                  </option>
+                )}
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {t("emailSettings.scope.companyScopePrefix")}{c.name}
@@ -1006,7 +1064,7 @@ export function EmailSettingsPage() {
 
         <div className="email-scope-right">
           <Link
-            to="/settings/email/inbox?compose=1"
+            to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?compose=1&company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox?compose=1"}
             className="email-compose-btn"
             title={accounts.length ? t("emailSettings.scope.composeTitle") : t("emailSettings.scope.composeDisabledTitle")}
             aria-disabled={accounts.length === 0}
@@ -1523,7 +1581,7 @@ export function EmailSettingsPage() {
                         <td>
                           <div className="automation-actions-cell">
                             <Link
-                              to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}`}
+                              to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}${selectedCompanyId && selectedCompanyId !== "personal" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
                               className="automation-action-btn"
                               title={t("emailSettings.accountsTab.actionComposeTitle").replace("{{email}}", acc.emailAddress)}
                             >
@@ -1972,8 +2030,28 @@ export function EmailSettingsPage() {
                 </p>
                 <label>
                   <span>{t("emailSettings.accountDrawer.mailboxOwnerLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
-                  <select value={selectedCompanyId} onChange={(e) => { const companyId = e.target.value; setSelectedCompanyId(companyId); writeActiveCompanyId(companyId === "personal" ? "" : companyId); setAgentId(""); setRuleAgentId(""); setRuleWorkflowId(""); setRuleCreateTask(false); }}>
+                  <select
+                    value={selectedCompanyId}
+                    onChange={(e) => {
+                      const companyId = e.target.value;
+                      setSelectedCompanyId(companyId);
+                      writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+                      setAgentId("");
+                      setRuleAgentId("");
+                      setRuleWorkflowId("");
+                      setRuleCreateTask(false);
+                      const cachedAcc = readCachedAccounts(companyId);
+                      if (cachedAcc.length > 0) setAccounts(cachedAcc);
+                      const cachedAnal = readCachedAnalytics(companyId);
+                      if (cachedAnal) setAnalytics(cachedAnal);
+                    }}
+                  >
                     <option value="personal">{t("emailSettings.scope.personalScope")}</option>
+                    {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((company) => company.id === selectedCompanyId) && (
+                      <option key={selectedCompanyId} value={selectedCompanyId}>
+                        {t("emailSettings.scope.companyScopePrefix")}{selectedCompanyId}
+                      </option>
+                    )}
                     {companies.map((company) => <option key={company.id} value={company.id}>{t("emailSettings.scope.companyScopePrefix")}{company.name}</option>)}
                   </select>
                   <small style={{ color: "#64748b" }}>{t("emailSettings.accountDrawer.mailboxOwnerHint")}</small>

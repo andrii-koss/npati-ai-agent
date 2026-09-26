@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
+import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -277,8 +277,11 @@ export function EmailInboxPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("personal");
+  const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
+    const requested = searchParams.get("company");
+    return getInitialCompanyScope(requested);
+  });
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
@@ -521,12 +524,15 @@ export function EmailInboxPage() {
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
         setCompanies(res.companies);
+        writeCachedCompanies(res.companies);
         const requested = searchParams.get("company");
         const sel = requested === "personal"
           ? "personal"
           : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
-        setSelectedCompanyId(sel);
-        writeActiveCompanyId(sel === "personal" ? "" : sel);
+        if (sel !== selectedCompanyId) {
+          setSelectedCompanyId(sel);
+          writeActiveCompanyId(sel === "personal" ? "" : sel);
+        }
         if (requested) {
           const next = new URLSearchParams(searchParams);
           next.delete("company");
@@ -898,7 +904,7 @@ export function EmailInboxPage() {
             <p className="eyebrow">{t("emailInbox.header.eyebrow")}</p>
             <h1>
               <Link
-                to="/settings/email"
+                to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email"}
                 className="marketplace-back-button"
                 aria-label={t("emailInbox.header.backAria")}
                 title={t("emailInbox.header.backTitle")}
@@ -924,7 +930,7 @@ export function EmailInboxPage() {
           </div>
           <div className="automations-header-actions">
             <Link
-              to="/settings/email"
+              to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email"}
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -968,6 +974,11 @@ export function EmailInboxPage() {
                 className="email-scope-select"
               >
                 <option value="personal">{t("emailInbox.scope.personalOption")}</option>
+                {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
+                  <option key={selectedCompanyId} value={selectedCompanyId}>
+                    {t("emailInbox.scope.companyOptionPrefix")}{selectedCompanyId}
+                  </option>
+                )}
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {t("emailInbox.scope.companyOptionPrefix")}{c.name}
