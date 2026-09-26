@@ -1,7 +1,12 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
+import {
+  chooseAvailableCompanyId,
+  readCachedCompanies,
+  writeActiveCompanyId,
+  writeCachedCompanies,
+} from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -65,16 +70,83 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+const AUTOMATIONS_CACHE_PREFIX = "npati_automations_cache_v1_";
+const AUTOMATIONS_AGENTS_CACHE_PREFIX = "npati_automations_agents_cache_v1_";
+const AUTOMATIONS_LATEST_CACHE_KEY = "npati_automations_cache_latest_v1";
+
+function getCachedAutomations(companyId?: string): CompanyAutomation[] {
+  try {
+    if (companyId) {
+      const raw = sessionStorage.getItem(AUTOMATIONS_CACHE_PREFIX + companyId)
+        || localStorage.getItem(AUTOMATIONS_CACHE_PREFIX + companyId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const latest = sessionStorage.getItem(AUTOMATIONS_LATEST_CACHE_KEY)
+      || localStorage.getItem(AUTOMATIONS_LATEST_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function updateCachedAutomations(companyId: string, items: CompanyAutomation[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    if (companyId) {
+      sessionStorage.setItem(AUTOMATIONS_CACHE_PREFIX + companyId, serialized);
+      localStorage.setItem(AUTOMATIONS_CACHE_PREFIX + companyId, serialized);
+    }
+    if (items.length > 0) {
+      sessionStorage.setItem(AUTOMATIONS_LATEST_CACHE_KEY, serialized);
+      localStorage.setItem(AUTOMATIONS_LATEST_CACHE_KEY, serialized);
+    }
+  } catch {}
+}
+
+function getCachedAgents(companyId?: string): Agent[] {
+  try {
+    if (companyId) {
+      const raw = sessionStorage.getItem(AUTOMATIONS_AGENTS_CACHE_PREFIX + companyId)
+        || localStorage.getItem(AUTOMATIONS_AGENTS_CACHE_PREFIX + companyId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    }
+  } catch {}
+  return [];
+}
+
+function updateCachedAgents(companyId: string, agents: Agent[]) {
+  try {
+    if (companyId) {
+      const serialized = JSON.stringify(agents);
+      sessionStorage.setItem(AUTOMATIONS_AGENTS_CACHE_PREFIX + companyId, serialized);
+      localStorage.setItem(AUTOMATIONS_AGENTS_CACHE_PREFIX + companyId, serialized);
+    }
+  } catch {}
+}
+
 export function AutomationsPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(requestedCompanyId);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [automations, setAutomations] = useState<CompanyAutomation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedCompanies = useMemo(() => readCachedCompanies<Company>(), []);
+  const [companies, setCompanies] = useState<Company[]>(cachedCompanies);
+  const initialCompanyId = useMemo(() => {
+    return chooseAvailableCompanyId(cachedCompanies, { requested: requestedCompanyId });
+  }, [cachedCompanies, requestedCompanyId]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
+  const initialAutomations = useMemo(() => getCachedAutomations(initialCompanyId), [initialCompanyId]);
+  const [automations, setAutomations] = useState<CompanyAutomation[]>(initialAutomations);
+  const [agents, setAgents] = useState<Agent[]>(() => getCachedAgents(initialCompanyId));
+  const [loading, setLoading] = useState(() => initialAutomations.length === 0);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Editor Drawer State
@@ -98,39 +170,77 @@ export function AutomationsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
 
+  const handleCompanyChange = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+    writeActiveCompanyId(companyId);
+    const cachedAuto = getCachedAutomations(companyId);
+    const cachedAg = getCachedAgents(companyId);
+    setAutomations(cachedAuto);
+    setAgents(cachedAg);
+    if (cachedAuto.length === 0) {
+      setLoading(true);
+    }
+  };
+
   // Load companies
   useEffect(() => {
+    let active = true;
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
+        if (!active) return;
         setCompanies(res.companies);
+        writeCachedCompanies(res.companies);
         const requested = searchParams.get("company");
         const selected = chooseAvailableCompanyId(res.companies, { requested });
-        setSelectedCompanyId(selected);
-        if (selected) writeActiveCompanyId(selected);
+        if (selected && selected !== selectedCompanyId) {
+          setSelectedCompanyId(selected);
+          writeActiveCompanyId(selected);
+        }
         if (requested) {
           const next = new URLSearchParams(searchParams);
           next.delete("company");
           setSearchParams(next, { replace: true });
         }
       })
-      .catch((e) => setNotice(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (active) setNotice(e.message);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Load automations & agents when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
-    setLoading(true);
+    let active = true;
+    const cachedAuto = getCachedAutomations(selectedCompanyId);
+    if (cachedAuto.length === 0 && automations.length === 0) {
+      setLoading(true);
+    }
+
     Promise.all([
       api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`),
       api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
     ])
       .then(([autoRes, agentsRes]) => {
+        if (!active) return;
         setAutomations(autoRes.automations);
         setAgents(agentsRes.agents);
+        updateCachedAutomations(selectedCompanyId, autoRes.automations);
+        updateCachedAgents(selectedCompanyId, agentsRes.agents);
       })
-      .catch((e) => setNotice(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (active) setNotice(e.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [selectedCompanyId]);
 
   const selectedCompany = useMemo(
@@ -223,7 +333,11 @@ export function AutomationsPage() {
             }),
           }
         );
-        setAutomations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+        setAutomations((prev) => {
+          const next = prev.map((a) => (a.id === updated.id ? updated : a));
+          updateCachedAutomations(selectedCompanyId, next);
+          return next;
+        });
       } else {
         const created = await api<CompanyAutomation>(
           `/companies/${selectedCompanyId}/automations`,
@@ -238,7 +352,11 @@ export function AutomationsPage() {
             }),
           }
         );
-        setAutomations((prev) => [created, ...prev]);
+        setAutomations((prev) => {
+          const next = [created, ...prev];
+          updateCachedAutomations(selectedCompanyId, next);
+          return next;
+        });
       }
       setDrawerOpen(false);
     } catch (err: any) {
@@ -258,7 +376,11 @@ export function AutomationsPage() {
           body: JSON.stringify({ status: nextStatus }),
         }
       );
-      setAutomations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      setAutomations((prev) => {
+        const next = prev.map((a) => (a.id === updated.id ? updated : a));
+        updateCachedAutomations(selectedCompanyId, next);
+        return next;
+      });
     } catch (err: any) {
       setNotice(err.message);
     }
@@ -275,7 +397,11 @@ export function AutomationsPage() {
     if (!confirmed) return;
     try {
       await api(`/companies/${selectedCompanyId}/automations/${id}`, { method: "DELETE" });
-      setAutomations((prev) => prev.filter((a) => a.id !== id));
+      setAutomations((prev) => {
+        const next = prev.filter((a) => a.id !== id);
+        updateCachedAutomations(selectedCompanyId, next);
+        return next;
+      });
       if (editingId === id) setDrawerOpen(false);
     } catch (err: any) {
       setNotice(err.message);
@@ -342,11 +468,7 @@ export function AutomationsPage() {
               <select
                 aria-label={t("automations.selectCompanyAria")}
                 value={selectedCompanyId}
-                onChange={(e) => {
-                  const companyId = e.target.value;
-                  setSelectedCompanyId(companyId);
-                  writeActiveCompanyId(companyId);
-                }}
+                onChange={(e) => handleCompanyChange(e.target.value)}
                 className="page-size-select"
               >
                 {companies.map((c) => (
@@ -463,7 +585,46 @@ export function AutomationsPage() {
         </div>
       </div>
 
-      {loading ? null : automations.length === 0 ? (
+      {loading && automations.length === 0 ? (
+        <div className="automations-table-container">
+          <table className="automations-table">
+            <thead>
+              <tr>
+                <th style={{ width: "110px" }}>{t("automations.table.colStatus")}</th>
+                <th style={{ minWidth: "260px" }}>{t("automations.table.colTask")}</th>
+                <th style={{ minWidth: "180px" }}>{t("automations.table.colSchedule")}</th>
+                <th style={{ minWidth: "160px" }}>{t("automations.table.colAssignedAgent")}</th>
+                <th style={{ width: "220px", textAlign: "right" }}>{t("automations.table.colActions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <tr key={`skeleton-${idx}`} style={{ opacity: 0.5 }}>
+                  <td>
+                    <span style={{ display: "inline-block", width: "70px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} />
+                  </td>
+                  <td className="automation-title-cell">
+                    <span style={{ display: "block", width: "180px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px", marginBottom: "6px" }} />
+                    <span style={{ display: "block", width: "240px", height: "12px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
+                  </td>
+                  <td>
+                    <span style={{ display: "inline-block", width: "90px", height: "18px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
+                  </td>
+                  <td>
+                    <span style={{ display: "inline-block", width: "100px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
+                  </td>
+                  <td>
+                    <div className="automation-actions-cell" style={{ justifyContent: "flex-end" }}>
+                      <span style={{ display: "inline-block", width: "70px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} />
+                      <span style={{ display: "inline-block", width: "50px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : automations.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⏱️</div>
           <h3>{t("automations.empty.noAutomationsTitle")}</h3>
