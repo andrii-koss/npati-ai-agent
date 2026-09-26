@@ -10,6 +10,8 @@ import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
   business_type AS "businessType", industry, niche, country, market, website, business_stage AS "businessStage",
+  legal_name AS "legalName", contact_email AS "contactEmail", contact_phone AS "contactPhone",
+  postal_address AS "postalAddress", registration_details AS "registrationDetails", logo_file_id AS "logoFileId",
   team_type AS "teamType", business_model AS "businessModel", presence_type AS "presenceType", description,
   audience_summary AS "audienceSummary", products_services_summary AS "productsServicesSummary",
   activation_status AS "activationStatus", created_at AS "createdAt", updated_at AS "updatedAt"`;
@@ -519,6 +521,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query('ROLLBACK'); throw error; }
       finally { client.release(); }
     }
+    const browserCampaignTargets = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='044_browser_campaign_targets'");
+    if (!browserCampaignTargets.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration044 } = await import("./migration-044");
+        await runMigration044(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('044_browser_campaign_targets') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
     if (context) await this.ensureIdentity(context);
   }
 
@@ -646,9 +660,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
     await this.assertMember(context);
     const id = randomUUID();
-    const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null, idempotencyKey ?? null];
+    const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null, input.legalName ?? null, input.contactEmail ?? null, input.contactPhone ?? null, input.postalAddress ?? null, input.registrationDetails ?? null, input.logoFileId || null, idempotencyKey ?? null];
     if (!values[3]) throw new Error("Business name is required");
-    const result = await this.pool.query<Business>(`INSERT INTO businesses(id,workspace_id,owner_user_id,name,business_type,industry,niche,country,market,website,business_stage,team_type,business_model,presence_type,description,audience_summary,products_services_summary,create_request_key)
+    const result = await this.pool.query<Business>(`INSERT INTO businesses(id,workspace_id,owner_user_id,name,business_type,industry,niche,country,market,website,business_stage,team_type,business_model,presence_type,description,audience_summary,products_services_summary,legal_name,contact_email,contact_phone,postal_address,registration_details,logo_file_id,create_request_key)
       VALUES (${values.map((_, index) => `$${index + 1}`).join(",")})
       ON CONFLICT (workspace_id,owner_user_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
       RETURNING ${businessColumns}`, values);
@@ -661,26 +675,30 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async updateBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
     await this.getBusiness(context, businessId);
-    const values = [businessId, context.workspaceId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary];
+    const values = [businessId, context.workspaceId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary, input.legalName, input.contactEmail, input.contactPhone, input.postalAddress, input.registrationDetails, input.logoFileId || undefined];
     const result = await this.pool.query<Business>(`UPDATE businesses SET
       name=COALESCE($3,name), business_type=COALESCE($4,business_type), industry=COALESCE($5,industry), niche=COALESCE($6,niche),
       country=COALESCE($7,country), market=COALESCE($8,market), website=COALESCE($9,website), business_stage=COALESCE($10,business_stage),
       team_type=COALESCE($11,team_type), business_model=COALESCE($12,business_model), presence_type=COALESCE($13,presence_type),
       description=COALESCE($14,description), audience_summary=COALESCE($15,audience_summary),
-      products_services_summary=COALESCE($16,products_services_summary), updated_at=now()
+      products_services_summary=COALESCE($16,products_services_summary),legal_name=COALESCE($17,legal_name),
+      contact_email=COALESCE($18,contact_email),contact_phone=COALESCE($19,contact_phone),postal_address=COALESCE($20,postal_address),
+      registration_details=COALESCE($21,registration_details),logo_file_id=COALESCE($22,logo_file_id),updated_at=now()
       WHERE id=$1 AND workspace_id=$2 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
     return result.rows[0]!;
   }
 
   async updateUserBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
     await this.getUserBusiness(context, businessId);
-    const values = [businessId, context.workspaceId, context.userId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary];
+    const values = [businessId, context.workspaceId, context.userId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary, input.legalName, input.contactEmail, input.contactPhone, input.postalAddress, input.registrationDetails, input.logoFileId || undefined];
     const result = await this.pool.query<Business>(`UPDATE businesses SET
       name=COALESCE($4,name), business_type=COALESCE($5,business_type), industry=COALESCE($6,industry), niche=COALESCE($7,niche),
       country=COALESCE($8,country), market=COALESCE($9,market), website=COALESCE($10,website), business_stage=COALESCE($11,business_stage),
       team_type=COALESCE($12,team_type), business_model=COALESCE($13,business_model), presence_type=COALESCE($14,presence_type),
       description=COALESCE($15,description), audience_summary=COALESCE($16,audience_summary),
-      products_services_summary=COALESCE($17,products_services_summary), updated_at=now()
+      products_services_summary=COALESCE($17,products_services_summary),legal_name=COALESCE($18,legal_name),
+      contact_email=COALESCE($19,contact_email),contact_phone=COALESCE($20,contact_phone),postal_address=COALESCE($21,postal_address),
+      registration_details=COALESCE($22,registration_details),logo_file_id=COALESCE($23,logo_file_id),updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
     return result.rows[0]!;
   }
@@ -769,6 +787,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       industry: business.industry,
       description: business.description,
       productsServices: business.productsServicesSummary,
+      knowledge: business.logoFileId ? [{ attachmentId: business.logoFileId, kind: "image", name: "Company logo", source: "linked_business" }] : [],
       companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
       memory,
       languages: ["Ukrainian", "English"],

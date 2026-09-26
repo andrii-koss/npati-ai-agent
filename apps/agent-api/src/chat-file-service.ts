@@ -69,6 +69,35 @@ export class ChatFileService {
     return saved;
   }
 
+  async persistBusinessAsset(context: AuthContext, businessId: string, item: PersistableAttachment) {
+    await this.workspace.getBusiness(context, businessId);
+    await this.protection?.consume(context, "upload", 1);
+    if (item.kind !== "image") throw new Error("Business asset must be an image");
+    SecurityPolicyEngine.protectVisualInput(item.data, item.transcript);
+    const id = uuid(item.clientId);
+    const checksum = createHash("sha256").update(item.data).digest("hex");
+    const key = objectKey(["workspace", segment(context.workspaceId), "user", segment(context.userId), "businesses", segment(businessId), "assets", id]);
+    const reservation = await this.repository.reserve(context, {
+      id, workspaceId: context.workspaceId, userId: context.userId, businessId,
+      bucket: NPATI_BUCKETS.chat, objectKey: key, originalFilename: item.name, mimeType: item.mimeType,
+      sizeBytes: item.data.length, checksum, category: "image", idempotencyKey: `business-asset:${businessId}:${checksum}`,
+    });
+    const file = reservation.file;
+    if (file.status !== "ready") {
+      try {
+        await this.storage.put(file.bucket, file.objectKey, item.data, {
+          "Content-Type": item.mimeType, "x-amz-meta-checksum-sha256": checksum, "x-amz-meta-file-id": file.id,
+        });
+        await this.repository.markReady(context, file.id);
+        await this.repository.audit(context, file.id, "upload", "succeeded", { businessId, asset: "logo" });
+      } catch (error) {
+        await this.repository.markFailed(context, file.id).catch(() => undefined);
+        throw error;
+      }
+    }
+    return { id: file.id, kind: "image" as const, name: item.name };
+  }
+
   async linkMessage(context: AuthContext, ids: string[], messageId: string) {
     await this.repository.attachMessage(context,ids,messageId);
   }

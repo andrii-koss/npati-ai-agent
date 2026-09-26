@@ -378,13 +378,14 @@ export class EmailAIProcessor {
       });
     }
 
-    const browserWait = await this.repo.claimBrowserEmailWait(ctx, companyId, parsed.from).catch(() => null);
+    const browserWait = await this.repo.claimBrowserEmailWait(ctx, companyId, parsed.from, effectiveAccount.id).catch(() => null);
     if (browserWait) {
       thread = await this.repo.updateThread(ctx, companyId, thread.id, { metadata: {
         ...thread.metadata,
         awaitingAgentRunId: browserWait.runId,
         awaitingBrowserJobId: browserWait.browserJobId,
         awaitingBrowserProfileId: browserWait.profileId,
+        awaitingBrowserCampaignTargetId: browserWait.campaignTargetId || null,
       }});
     }
     const awaitingRunId = typeof thread.metadata.awaitingAgentRunId === "string"

@@ -51,6 +51,27 @@ interface CompanyAutomationRun {
   completedAt?: string | null;
 }
 
+interface BrowserCampaignTarget {
+  id: string;
+  automationId?: string | null;
+  emailAccountId?: string | null;
+  credentialId?: string | null;
+  siteName: string;
+  registrationUrl: string;
+  publishUrl?: string | null;
+  status: "pending" | "processing" | "waiting_email" | "registered" | "published" | "failed" | "paused";
+  resultUrl?: string | null;
+  errorMessage?: string | null;
+  attempts: number;
+}
+
+interface BrowserEmailAccount {
+  id: string;
+  emailAddress: string;
+  displayName?: string | null;
+  status: string;
+}
+
 const PRESET_CRONS = [
   { key: "daily9", cron: "0 9 * * *" },
   { key: "daily18", cron: "0 18 * * *" },
@@ -169,6 +190,14 @@ export function AutomationsPage() {
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
+  const [browserTargets, setBrowserTargets] = useState<BrowserCampaignTarget[]>([]);
+  const [browserEmails, setBrowserEmails] = useState<BrowserEmailAccount[]>([]);
+  const [browserSaving, setBrowserSaving] = useState(false);
+  const [revealedCredentials, setRevealedCredentials] = useState<Record<string, Record<string, string>>>({});
+  const [targetForm, setTargetForm] = useState({
+    siteName: "", registrationUrl: "", publishUrl: "", automationId: "", emailAccountId: "",
+    articleTitle: "", articleBody: "",
+  });
 
   const handleCompanyChange = (companyId: string) => {
     setSelectedCompanyId(companyId);
@@ -223,11 +252,14 @@ export function AutomationsPage() {
     Promise.all([
       api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`),
       api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
+      api<{ targets: BrowserCampaignTarget[]; emailAccounts: BrowserEmailAccount[] }>(`/companies/${selectedCompanyId}/browser-targets`),
     ])
-      .then(([autoRes, agentsRes]) => {
+      .then(([autoRes, agentsRes, browserRes]) => {
         if (!active) return;
         setAutomations(autoRes.automations);
         setAgents(agentsRes.agents);
+        setBrowserTargets(browserRes.targets);
+        setBrowserEmails(browserRes.emailAccounts);
         updateCachedAutomations(selectedCompanyId, autoRes.automations);
         updateCachedAgents(selectedCompanyId, agentsRes.agents);
       })
@@ -441,6 +473,92 @@ export function AutomationsPage() {
       setNotice(err.message);
     } finally {
       setHistoryLoading(false);
+    }
+  };
+
+  const reloadBrowserTargets = async () => {
+    const result = await api<{ targets: BrowserCampaignTarget[]; emailAccounts: BrowserEmailAccount[] }>(
+      `/companies/${selectedCompanyId}/browser-targets`,
+    );
+    setBrowserTargets(result.targets);
+    setBrowserEmails(result.emailAccounts);
+  };
+
+  const createBrowserTarget = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!targetForm.automationId || !targetForm.emailAccountId) {
+      setNotice("Select an automation and a connected Company email.");
+      return;
+    }
+    setBrowserSaving(true);
+    try {
+      await api(`/companies/${selectedCompanyId}/browser-targets`, {
+        method: "POST",
+        body: JSON.stringify(targetForm),
+      });
+      setTargetForm((current) => ({ ...current, siteName: "", registrationUrl: "", publishUrl: "", articleTitle: "", articleBody: "" }));
+      await reloadBrowserTargets();
+      setNotice("Website added to the browser campaign queue.");
+    } catch (error: any) {
+      setNotice(error.message);
+    } finally {
+      setBrowserSaving(false);
+    }
+  };
+
+  const seedBrowserTargets = async () => {
+    setBrowserSaving(true);
+    try {
+      await api(`/companies/${selectedCompanyId}/browser-targets/seed-demo`, {
+        method: "POST",
+        body: JSON.stringify({ automationId: targetForm.automationId || null, emailAccountId: targetForm.emailAccountId || null }),
+      });
+      await reloadBrowserTargets();
+      setNotice("Two paused demo websites were added. Review them before activating.");
+    } catch (error: any) {
+      setNotice(error.message);
+    } finally {
+      setBrowserSaving(false);
+    }
+  };
+
+  const toggleBrowserTarget = async (target: BrowserCampaignTarget) => {
+    try {
+      const shouldActivate = target.status === "paused" || target.status === "failed" || target.status === "registered" || target.status === "published";
+      await api(`/companies/${selectedCompanyId}/browser-targets/${target.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: shouldActivate ? "pending" : "paused" }),
+      });
+      await reloadBrowserTargets();
+    } catch (error: any) {
+      setNotice(error.message);
+    }
+  };
+
+  const deleteBrowserTarget = async (target: BrowserCampaignTarget) => {
+    if (!(await confirmModal({ title: "Delete website", message: `Remove ${target.siteName} from the campaign?`, confirmText: "Delete", isDanger: true }))) return;
+    try {
+      await api(`/companies/${selectedCompanyId}/browser-targets/${target.id}`, { method: "DELETE" });
+      await reloadBrowserTargets();
+    } catch (error: any) {
+      setNotice(error.message);
+    }
+  };
+
+  const revealBrowserCredential = async (target: BrowserCampaignTarget) => {
+    if (!target.credentialId) return;
+    try {
+      const result = await api<{ fields: Record<string, string> }>(
+        `/companies/${selectedCompanyId}/browser-credentials/${target.credentialId}/reveal`, { method: "POST" },
+      );
+      setRevealedCredentials((current) => ({ ...current, [target.id]: result.fields }));
+      window.setTimeout(() => setRevealedCredentials((current) => {
+        const next = { ...current };
+        delete next[target.id];
+        return next;
+      }), 30_000);
+    } catch (error: any) {
+      setNotice(error.message);
     }
   };
 
@@ -753,6 +871,94 @@ export function AutomationsPage() {
           </table>
         </div>
       )}
+
+      <section style={{ marginTop: 32 }} aria-labelledby="browser-campaign-title">
+        <div className="inspector-header" style={{ marginBottom: 16 }}>
+          <div className="automations-header-top">
+            <div>
+              <p className="eyebrow">Browser agent campaign</p>
+              <h2 id="browser-campaign-title" style={{ margin: "4px 0" }}>Website registration and publishing</h2>
+              <p className="hero-copy">The active automation processes at most 10 pending websites per run. Passwords are generated automatically and kept encrypted.</p>
+            </div>
+            <button type="button" className="button-secondary" disabled={browserSaving || !targetForm.automationId || !targetForm.emailAccountId} onClick={seedBrowserTargets}>
+              Add 2 paused demo sites
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={createBrowserTarget} className="automations-table-container" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            <label>Site name
+              <input required value={targetForm.siteName} onChange={(event) => setTargetForm({ ...targetForm, siteName: event.target.value })} placeholder="Example directory" />
+            </label>
+            <label>Registration URL
+              <input required type="url" value={targetForm.registrationUrl} onChange={(event) => setTargetForm({ ...targetForm, registrationUrl: event.target.value })} placeholder="https://example.com/register" />
+            </label>
+            <label>Publishing URL
+              <input type="url" value={targetForm.publishUrl} onChange={(event) => setTargetForm({ ...targetForm, publishUrl: event.target.value })} placeholder="https://example.com/new-article" />
+            </label>
+            <label>Automation
+              <select required value={targetForm.automationId} onChange={(event) => setTargetForm({ ...targetForm, automationId: event.target.value })}>
+                <option value="">Select automation</option>
+                {automations.map((automation) => <option key={automation.id} value={automation.id}>{automation.name}</option>)}
+              </select>
+            </label>
+            <label>Company email
+              <select required value={targetForm.emailAccountId} onChange={(event) => setTargetForm({ ...targetForm, emailAccountId: event.target.value })}>
+                <option value="">Select connected email</option>
+                {browserEmails.map((account) => <option key={account.id} value={account.id}>{account.emailAddress} ({account.status})</option>)}
+              </select>
+            </label>
+            <label>Article title
+              <input value={targetForm.articleTitle} onChange={(event) => setTargetForm({ ...targetForm, articleTitle: event.target.value })} placeholder="Title to publish" />
+            </label>
+          </div>
+          <label style={{ display: "block", marginTop: 12 }}>Article body
+            <textarea rows={4} value={targetForm.articleBody} onChange={(event) => setTargetForm({ ...targetForm, articleBody: event.target.value })} placeholder="Article content. The agent also receives the linked Business and Company Knowledge context." />
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <button className="button-primary automations-action-primary" disabled={browserSaving || !automations.length || !browserEmails.length}>
+              {browserSaving ? "Saving…" : "Add website"}
+            </button>
+          </div>
+        </form>
+
+        <div className="automations-table-container">
+          <table className="automations-table">
+            <thead><tr>
+              <th>Status</th><th>Website</th><th>Email / automation</th><th>Result</th><th style={{ textAlign: "right" }}>Actions</th>
+            </tr></thead>
+            <tbody>
+              {!browserTargets.length ? <tr><td colSpan={5}>No websites yet. Add one above or load the paused demo rows.</td></tr> : browserTargets.map((target) => {
+                const account = browserEmails.find((item) => item.id === target.emailAccountId);
+                const automation = automations.find((item) => item.id === target.automationId);
+                return <tr key={target.id}>
+                  <td><strong>{target.status.replace("_", " ")}</strong><br /><small>Attempt {target.attempts}/3</small></td>
+                  <td className="automation-title-cell">
+                    <strong>{target.siteName}</strong>
+                    <p><a href={target.registrationUrl} target="_blank" rel="noreferrer">Registration</a>{target.publishUrl ? <> · <a href={target.publishUrl} target="_blank" rel="noreferrer">Publishing</a></> : null}</p>
+                    {target.credentialId ? <small>Credentials saved securely · <button type="button" className="company-doc-link" onClick={() => revealBrowserCredential(target)}>Reveal for 30 seconds</button></small> : <small>Credentials will be generated on first run</small>}
+                    {revealedCredentials[target.id] ? <div style={{ marginTop: 8, fontSize: 12 }}>
+                      {Object.entries(revealedCredentials[target.id] ?? {}).map(([name, value]) => <div key={name}><strong>{name}:</strong> <code>{value}</code></div>)}
+                    </div> : null}
+                  </td>
+                  <td>{account?.emailAddress || "Email not selected"}<br /><small>{automation?.name || "Automation not selected"}</small></td>
+                  <td>
+                    {target.resultUrl ? <a href={target.resultUrl} target="_blank" rel="noreferrer">Open result</a> : "—"}
+                    {target.errorMessage ? <p style={{ color: "var(--danger, #b42318)", maxWidth: 320 }}>{target.errorMessage}</p> : null}
+                  </td>
+                  <td><div className="automation-actions-cell" style={{ justifyContent: "flex-end" }}>
+                    {!['processing', 'waiting_email'].includes(target.status) && <button type="button" className="automation-action-btn" onClick={() => toggleBrowserTarget(target)}>
+                      {target.status === "pending" ? "Pause" : target.status === "paused" ? "Activate" : "Run again"}
+                    </button>}
+                    <button type="button" className="automation-action-btn danger" onClick={() => deleteBrowserTarget(target)}>Delete</button>
+                  </div></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Editor Drawer */}
       {drawerOpen && (

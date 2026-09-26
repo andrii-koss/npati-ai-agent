@@ -241,6 +241,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       industry: business.industry,
       description: business.description,
       productsServices: business.productsServicesSummary,
+      knowledge: business.logoFileId ? [{ attachmentId: business.logoFileId, kind: "image", name: "Company logo", source: "linked_business" }] : [],
       companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
       memory,
       languages: ["Ukrainian", "English"],

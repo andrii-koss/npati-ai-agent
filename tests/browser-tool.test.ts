@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserUseClient } from "../apps/agent-api/src/browser-tool";
 import { RiskApprovalService } from "../packages/shared/src/risk-approval";
+import { hasScopedBrowserAuthorization } from "../apps/agent-api/src/company-runtime";
 
 const context = { workspaceId: "workspace-a", userId: "user-a", permissions: ["business:manage"] } as any;
 const company = { id: "11111111-1111-4111-8111-111111111111", workspaceId: "workspace-a", userId: "user-a", name: "Acme" } as any;
@@ -70,6 +71,30 @@ describe("BrowserUseClient", () => {
     }, new AbortController().signal)).rejects.toThrow(/Raw credentials are forbidden/);
     expect(request).not.toHaveBeenCalled();
   });
+
+  it("binds campaign jobs to their approved domain and records verified completion", async () => {
+    const recordTargetResult = vi.fn(async () => undefined);
+    const credentials = {
+      getTarget: vi.fn(async () => ({ id: "target-1", allowedDomain: "example.com", publishUrl: "https://example.com/editor" })),
+      recordTargetResult,
+    } as any;
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      jobId: "job-2", status: "completed", result: { publishedUrl: "https://example.com/article/test" }, trace: [],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", request);
+    const client = new BrowserUseClient("http://worker:8765", "internal-token-with-sufficient-entropy", credentials);
+    await client.execute(context, company, "browser.browser_clicktype", {
+      operation: "task", url: "https://example.com/register", campaignTargetId: "target-1", task: "Publish the approved article",
+    }, new AbortController().signal);
+    expect(recordTargetResult).toHaveBeenCalledWith(context, company.id, "target-1", expect.objectContaining({
+      status: "published", resultUrl: "https://example.com/article/test",
+    }));
+
+    await expect(client.execute(context, company, "browser.browser_clicktype", {
+      operation: "task", url: "https://example.net/register", campaignTargetId: "target-1", task: "Leave the approved domain",
+    }, new AbortController().signal)).rejects.toThrow(/outside the campaign target domain/);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("browser approval policy", () => {
@@ -79,5 +104,24 @@ describe("browser approval policy", () => {
   });
   it("keeps read-only extraction below approval level", () => {
     expect(policy.requiresApproval("browser.browser_tab_control.extract")).toBe(false);
+  });
+
+  it("allows only domain-scoped browser writes from an activated automation", () => {
+    const automationContext = { ...context, permissions: [...context.permissions, "automation:execute_browser"] };
+    expect(hasScopedBrowserAuthorization(automationContext, "browser.browser_clicktype", "register_account", {
+      url: "https://portal.example.com/register", allowedDomains: ["example.com"],
+    })).toBe(true);
+    expect(hasScopedBrowserAuthorization(automationContext, "browser.browser_clicktype", "register_account", {
+      url: "https://attacker.example.net/register", allowedDomains: ["example.com"],
+    })).toBe(false);
+    expect(hasScopedBrowserAuthorization(context, "browser.browser_clicktype", "register_account", {
+      url: "https://example.com/register", allowedDomains: ["example.com"],
+    })).toBe(false);
+  });
+
+  it("allows an email-triggered continuation to resume only a referenced browser job", () => {
+    const emailContext = { ...context, permissions: [...context.permissions, "browser:resume_email"] };
+    expect(hasScopedBrowserAuthorization(emailContext, "browser.browser_tab_control", "resume", { jobId: "job-1" })).toBe(true);
+    expect(hasScopedBrowserAuthorization(emailContext, "browser.browser_tab_control", "resume", {})).toBe(false);
   });
 });

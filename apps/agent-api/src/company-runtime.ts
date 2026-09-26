@@ -76,6 +76,30 @@ function summary(input: Record<string, unknown>) {
       : typeof value === "number" || typeof value === "boolean" || value === null ? value : "[structured value]",
   ])));
 }
+export function hasScopedBrowserAuthorization(
+  ctx: AuthContext,
+  tool: string,
+  operation: string,
+  input: Record<string, unknown>,
+) {
+  if (ctx.permissions.includes("browser:resume_email") &&
+      tool === "browser.browser_tab_control" && operation === "resume") {
+    return typeof input.jobId === "string" && Boolean(input.jobId.trim());
+  }
+  if (!ctx.permissions.includes("automation:execute_browser") ||
+      tool !== "browser.browser_clicktype" ||
+      !["register_account", "task"].includes(operation)) return false;
+  const domains = Array.isArray(input.allowedDomains)
+    ? input.allowedDomains.map(String).map((item) => item.trim().toLowerCase()).filter(Boolean).slice(0, 50)
+    : [];
+  if (!domains.length || typeof input.url !== "string") return false;
+  try {
+    const hostname = new URL(input.url).hostname.toLowerCase();
+    return domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
 function json(value: unknown, max = 20_000) {
   try { return JSON.stringify(value).slice(0, max); } catch { return "[unserializable]"; }
 }
@@ -599,7 +623,8 @@ export class CompanyDelegationRuntime {
       // Risk & Human Approval Policy Check
       const operation=typeof plan.input.operation==="string"?plan.input.operation.trim().toLowerCase():"";
       const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
-      if (this.riskApprovalService.requiresApproval(toolToAssess)) {
+      const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
+      if (this.riskApprovalService.requiresApproval(toolToAssess) && !scopedBrowserAuthorization) {
         if(this.durableApprovals){
           if(!approvalId){
             const cleanPayload={...plan.input};delete cleanPayload._approvalToken;

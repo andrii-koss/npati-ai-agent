@@ -172,21 +172,24 @@ export class EmailInboxRepository {
     }
   }
 
-  async claimBrowserEmailWait(ctx: AuthContext, companyId: string, sender: string): Promise<{ browserJobId: string; runId: string; profileId: string } | null> {
+  async claimBrowserEmailWait(ctx: AuthContext, companyId: string, sender: string, emailAccountId?: string): Promise<{ browserJobId: string; runId: string; profileId: string; campaignTargetId?: string | null } | null> {
     if (!this.pool) return null;
     const normalizedSender = sender.trim().toLowerCase();
     const senderDomain = normalizedSender.split("@")[1] || normalizedSender;
-    const result = await this.pool.query<{ browserJobId: string; runId: string; profileId: string }>(`
+    const result = await this.pool.query<{ browserJobId: string; runId: string; profileId: string; campaignTargetId?: string | null }>(`
       WITH candidate AS (
-        SELECT id FROM company_browser_email_waits
-        WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND status='waiting_email'
-          AND (sender_hint IS NULL OR sender_hint='' OR sender_hint=$4 OR sender_hint=$5 OR $4 LIKE ('%@' || sender_hint))
-        ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED
+        SELECT w.id FROM company_browser_email_waits w
+        LEFT JOIN company_browser_campaign_targets t ON t.id=w.campaign_target_id
+        WHERE w.workspace_id=$1 AND w.company_id=$2 AND w.user_id=$3 AND w.status='waiting_email'
+          AND (w.sender_hint IS NULL OR w.sender_hint='' OR w.sender_hint=$4 OR w.sender_hint=$5 OR $4 LIKE ('%@' || w.sender_hint))
+          AND (w.campaign_target_id IS NULL OR t.email_account_id=$6)
+        ORDER BY w.created_at DESC LIMIT 1 FOR UPDATE OF w SKIP LOCKED
       )
       UPDATE company_browser_email_waits w SET status='consumed',consumed_at=now()
       FROM candidate c WHERE w.id=c.id
-      RETURNING w.browser_job_id AS "browserJobId",w.run_id::text AS "runId",w.profile_id AS "profileId"`,
-      [ctx.workspaceId,companyId,ctx.userId,normalizedSender,senderDomain]);
+      RETURNING w.browser_job_id AS "browserJobId",w.run_id::text AS "runId",w.profile_id AS "profileId",
+        w.campaign_target_id::text AS "campaignTargetId"`,
+      [ctx.workspaceId,companyId,ctx.userId,normalizedSender,senderDomain,emailAccountId || null]);
     return result.rows[0] ?? null;
   }
 
