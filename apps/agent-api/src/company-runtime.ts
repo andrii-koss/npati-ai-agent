@@ -47,6 +47,14 @@ const comboModel = (value: string | null | undefined) => value == null || value 
 function toolName(value: string) {
   const raw = value.trim().toLowerCase();
   const key = raw.replace(/[ _-]+/g, ".");
+  const displayKey = raw.replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "");
+  const browserDisplayAliases: Record<string, string> = {
+    "browser.navigation.jobs": "browser.browser_tab_control",
+    "browser.forms.autonomous.tasks": "browser.browser_clicktype",
+    "browser.screenshots": "browser.browser_screenshots",
+    "browser.file.transfer": "browser.browser_downloads",
+  };
+  if (browserDisplayAliases[displayKey]) return browserDisplayAliases[displayKey]!;
   const browserAliases: Record<string, string> = {
     "browser.browser.tab.control": "browser.browser_tab_control",
     "browser.browser.clicktype": "browser.browser_clicktype",
@@ -565,7 +573,7 @@ export class CompanyDelegationRuntime {
           auth: ctx,
           activeContext: { contextType: "company", companyId: company.id, businessId: null },
           company: { id: company.id, revision: company.revision },
-          agent: { id: agent.id, revision: agent.revision, tools: agent.tools },
+          agent: { id: agent.id, revision: agent.revision, tools: agent.tools.map(toolName) },
         }, tool);
         if (!check.allowed) {
           await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,

@@ -503,7 +503,10 @@ export function CompanyPage() {
     setSaving(true); setNotice("");
     try {
       const { parentAgentId, ...draft } = agentForm;
-      const payload = { ...draft, modelId: draft.modelId || undefined, fallbackModelId: draft.fallbackModelId || undefined,
+      const canonicalTools = [...new Set(draft.tools.map((value) =>
+        availableTools.find((tool) => tool.id === value || tool.name === value)?.id ?? value,
+      ))];
+      const payload = { ...draft, tools: canonicalTools, modelId: draft.modelId || undefined, fallbackModelId: draft.fallbackModelId || undefined,
         recommendedPrompts: draft.recommendedPrompts.split("\n").map((item) => item.trim()).filter(Boolean) };
       let saved: Agent;
       if (editingAgent) {
@@ -1279,12 +1282,12 @@ export function CompanyPage() {
                       type="checkbox"
                       checked={isChecked}
                       onChange={(event) => {
-                        const val = tool.name;
+                        const val = tool.id;
                         setAgentForm({
                           ...agentForm,
                           tools: event.target.checked
-                            ? [...agentForm.tools, val]
-                            : agentForm.tools.filter((item) => item !== val && item !== tool.id),
+                            ? [...agentForm.tools.filter((item) => item !== tool.name && item !== tool.id), val]
+                            : agentForm.tools.filter((item) => item !== tool.name && item !== tool.id),
                         });
                       }}
                     />
