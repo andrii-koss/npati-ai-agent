@@ -14530,6 +14530,19 @@ body:has(.npati-dialog-backdrop) .sidebar {
   font-size: 15px;
   line-height: 1;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--npati-red);
+}
+
+.email-folder-icon svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  color: var(--npati-red);
+  stroke: var(--npati-red);
+  flex-shrink: 0;
 }
 
 .email-folder-count {

@@ -1086,11 +1086,59 @@ export function EmailInboxPage() {
           <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {!sidebarCollapsed && <span className="email-inbox-label">{t("emailInbox.sidebar.foldersLabel")}</span>}
             {[
-              { id: "inbox", label: t("emailInbox.sidebar.folders.inbox"), icon: "📥" },
-              { id: "sent", label: t("emailInbox.sidebar.folders.sent"), icon: "📤" },
-              { id: "drafts", label: t("emailInbox.sidebar.folders.drafts"), icon: "📝" },
-              { id: "archived", label: t("emailInbox.sidebar.folders.archived"), icon: "📁" },
-              { id: "spam", label: t("emailInbox.sidebar.folders.spam"), icon: "🚫" },
+              {
+                id: "inbox",
+                label: t("emailInbox.sidebar.folders.inbox"),
+                icon: (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M3 14h5.5l1.5 2.5h4l1.5-2.5H21" />
+                  </svg>
+                ),
+              },
+              {
+                id: "sent",
+                label: t("emailInbox.sidebar.folders.sent"),
+                icon: (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 3l19 9-19 9 4-9-4-9z" />
+                    <path d="M6.5 12h8" />
+                  </svg>
+                ),
+              },
+              {
+                id: "drafts",
+                label: t("emailInbox.sidebar.folders.drafts"),
+                icon: (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                ),
+              },
+              {
+                id: "archived",
+                label: t("emailInbox.sidebar.folders.archived"),
+                icon: (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="21 8 21 20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8" />
+                    <rect x="3" y="3" width="18" height="5" rx="1" />
+                    <polyline points="9 13.5 12 16.5 15 13.5" />
+                    <line x1="12" y1="10.5" x2="12" y2="16.5" />
+                  </svg>
+                ),
+              },
+              {
+                id: "spam",
+                label: t("emailInbox.sidebar.folders.spam"),
+                icon: (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                ),
+              },
             ].map((f) => (
               <button
                 key={f.id}
