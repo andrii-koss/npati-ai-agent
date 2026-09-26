@@ -18,6 +18,7 @@ export interface ContentItem {
 
 const STORAGE_DELETED_KEY = "npati_content_deleted_ids_v1";
 const STORAGE_EDITS_KEY = "npati_content_edits_v1";
+const STORAGE_CONTENT_ITEMS_KEY = "npati_content_items_cache_v1";
 
 function getDeletedIds(): string[] {
   try {
@@ -35,6 +36,25 @@ function getEditsMap(): Record<string, Partial<ContentItem>> {
   } catch {
     return {};
   }
+}
+
+function getCachedContentItems(): ContentItem[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_CONTENT_ITEMS_KEY) || localStorage.getItem(STORAGE_CONTENT_ITEMS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function updateCachedContentItems(items: ContentItem[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
+    localStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
+  } catch {}
 }
 
 function parseChatContentTask(task: string): { title?: string; type?: ContentItem["type"]; task: string } {
@@ -61,11 +81,11 @@ function parseChatContentTask(task: string): { title?: string; type?: ContentIte
 export function ContentPage() {
   const { t, language } = useTranslation();
   const navigate = useNavigate();
-  const [items, setItems] = useState<ContentItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ContentItem[]>(getCachedContentItems);
+  const [loading, setLoading] = useState(() => getCachedContentItems().length === 0);
   const [search, setSearch] = useState("");
   const [selectedType, setSelectedType] = useState<"all" | "article" | "seo_structure" | "social_post" | "brief">("all");
-  const [selectedItem, setSelectedItem] = useState<ContentItem | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ContentItem | null>(() => getCachedContentItems()[0] || null);
   const [viewMode, setViewMode] = useState<"preview" | "raw">("preview");
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -86,7 +106,6 @@ export function ContentPage() {
       .then((res) => (res.ok ? res.json() : { companies: [] }))
       .then(async (data: { companies?: Array<{ id: string; name: string }> }) => {
         const companies = data.companies ?? [];
-        const contentRows: ContentItem[] = [];
         const deletedIds = new Set(getDeletedIds());
         const editsMap = getEditsMap();
         const overridesResponse = await fetch("/api/content/overrides", { headers });
@@ -94,12 +113,14 @@ export function ContentPage() {
           ? ((await overridesResponse.json()) as { overrides?: Record<string, { title?: string; type?: ContentItem["type"]; content?: string; deleted?: boolean }> }).overrides ?? {}
           : {};
 
-        for (const company of companies.slice(0, 5)) {
-          const runRes = await fetch(`/api/companies/${company.id}/runs?limit=20`, { headers });
-          if (runRes.ok) {
+        const runPromises = companies.slice(0, 5).map(async (company) => {
+          try {
+            const runRes = await fetch(`/api/companies/${company.id}/runs?limit=20`, { headers });
+            if (!runRes.ok) return [];
             const runData = (await runRes.json()) as {
               runs?: Array<{ id: string; task: string; result?: string; createdAt: string; status: string }>;
             };
+            const rows: ContentItem[] = [];
             for (const r of runData.runs ?? []) {
               if (r.result && r.status === "completed") {
                 if (deletedIds.has(r.id) || overrides[r.id]?.deleted) continue;
@@ -116,7 +137,7 @@ export function ContentPage() {
                 }
 
                 const edited = { ...editsMap[r.id], ...overrides[r.id] };
-                contentRows.push({
+                rows.push({
                   id: r.id,
                   title: edited?.title || chatContent.title || (chatContent.task.length > 70 ? `${chatContent.task.slice(0, 70)}…` : chatContent.task),
                   type: (edited?.type as ContentItem["type"]) || type,
@@ -128,13 +149,23 @@ export function ContentPage() {
                 });
               }
             }
+            return rows;
+          } catch {
+            return [];
           }
-        }
+        });
+
+        const allResults = await Promise.all(runPromises);
+        const contentRows = allResults.flat();
 
         setItems(contentRows);
-        if (contentRows.length > 0 && contentRows[0]) {
-          setSelectedItem(contentRows[0]);
-        }
+        updateCachedContentItems(contentRows);
+        setSelectedItem((prev) => {
+          if (prev && contentRows.some((c) => c.id === prev.id)) {
+            return contentRows.find((c) => c.id === prev.id) || prev;
+          }
+          return contentRows[0] || null;
+        });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -236,7 +267,11 @@ export function ContentPage() {
         body: JSON.stringify({ title: trimmedTitle, type: editType, content: editContent }),
       });
       if (!response.ok) throw new Error("Could not save content changes");
-      setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? updated : i)));
+      setItems((prev) => {
+        const next = prev.map((i) => (i.id === selectedItem.id ? updated : i));
+        updateCachedContentItems(next);
+        return next;
+      });
       setSelectedItem(updated);
       setIsEditing(false);
 
@@ -290,7 +325,11 @@ export function ContentPage() {
     delete edits[targetId];
     localStorage.setItem(STORAGE_EDITS_KEY, JSON.stringify(edits));
 
-    setItems((prev) => prev.filter((i) => i.id !== targetId));
+    setItems((prev) => {
+      const remaining = prev.filter((i) => i.id !== targetId);
+      updateCachedContentItems(remaining);
+      return remaining;
+    });
     if (selectedItem?.id === targetId) {
       const remaining = items.filter((i) => i.id !== targetId);
       setSelectedItem(remaining[0] || null);
@@ -443,7 +482,20 @@ export function ContentPage() {
         </div>
       </div>
 
-      {!loading && items.length === 0 && (
+      {items.length === 0 && loading ? (
+        <div className="content-studio-layout" style={{ minHeight: "766px", opacity: 0.6 }}>
+          <aside className="content-sidebar-list" aria-hidden="true">
+            <div className="content-cards-container">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="content-summary-card" style={{ pointerEvents: "none" }} />
+              ))}
+            </div>
+          </aside>
+          <section className="content-main-viewer" aria-hidden="true">
+            <div className="content-viewer-card" style={{ minHeight: "766px" }} />
+          </section>
+        </div>
+      ) : items.length === 0 ? (
         <div className="automations-empty-card content-empty-card">
           <div className="automations-empty-icon">📝</div>
           <h3>{t("contentPage.empty.readyTitle")}</h3>
@@ -472,9 +524,7 @@ export function ContentPage() {
             )}
           </div>
         </div>
-      )}
-
-      {!loading && items.length > 0 && filtered.length === 0 && (
+      ) : filtered.length === 0 ? (
         <div className="automations-empty-card content-empty-card">
           <div className="automations-empty-icon">🔍</div>
           <h3>{t("contentPage.empty.noMatchingTitle")}</h3>
@@ -490,9 +540,7 @@ export function ContentPage() {
             {t("contentPage.empty.resetFilters")}
           </button>
         </div>
-      )}
-
-      {!loading && filtered.length > 0 && (
+      ) : (
         <div className="content-studio-layout">
           {/* Left Column: Content Cards List (4 cards visible on first screen) */}
           <aside className="content-sidebar-list" aria-label={t("contentPage.cards.listAria")}>
