@@ -1037,16 +1037,17 @@ export function EmailSettingsPage() {
                   if (cachedAnal) setAnalytics(cachedAnal);
                 }}
                 className="email-scope-select"
+                title={selectedCompanyId === "personal" ? t("emailSettings.scope.personalScope") : (companies.find((c) => c.id === selectedCompanyId)?.name || selectedCompanyId)}
               >
                 <option value="personal">{t("emailSettings.scope.personalScope")}</option>
                 {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
-                  <option key={selectedCompanyId} value={selectedCompanyId}>
-                    {t("emailSettings.scope.companyScopePrefix")}{selectedCompanyId}
+                  <option key={selectedCompanyId} value={selectedCompanyId} title={selectedCompanyId}>
+                    {selectedCompanyId}
                   </option>
                 )}
                 {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {t("emailSettings.scope.companyScopePrefix")}{c.name}
+                  <option key={c.id} value={c.id} title={c.name}>
+                    {c.name}
                   </option>
                 ))}
               </select>
@@ -2048,11 +2049,11 @@ export function EmailSettingsPage() {
                   >
                     <option value="personal">{t("emailSettings.scope.personalScope")}</option>
                     {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((company) => company.id === selectedCompanyId) && (
-                      <option key={selectedCompanyId} value={selectedCompanyId}>
-                        {t("emailSettings.scope.companyScopePrefix")}{selectedCompanyId}
+                      <option key={selectedCompanyId} value={selectedCompanyId} title={selectedCompanyId}>
+                        {selectedCompanyId}
                       </option>
                     )}
-                    {companies.map((company) => <option key={company.id} value={company.id}>{t("emailSettings.scope.companyScopePrefix")}{company.name}</option>)}
+                    {companies.map((company) => <option key={company.id} value={company.id} title={company.name}>{company.name}</option>)}
                   </select>
                   <small style={{ color: "#64748b" }}>{t("emailSettings.accountDrawer.mailboxOwnerHint")}</small>
                 </label>
