@@ -980,7 +980,7 @@ export function EmailSettingsPage() {
           <div className="automations-header-actions">
             <Link
               to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox"}
-              className="button-secondary automations-action-primary"
+              className="button-secondary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
               {t("emailSettings.openInbox")}
