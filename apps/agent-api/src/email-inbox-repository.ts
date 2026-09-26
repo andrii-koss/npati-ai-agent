@@ -587,6 +587,7 @@ export class EmailInboxRepository {
               AND folder_message.company_id = company_email_threads.company_id
               AND folder_message.thread_id = company_email_threads.id
               AND folder_message.is_draft = true
+              AND folder_message.is_ai_generated = false
           )`);
         } else {
           params.push(filter.folder);
@@ -646,7 +647,7 @@ export class EmailInboxRepository {
     } else if (filter.folder === "drafts") {
       items = items.filter((thread) => Array.from(this.memoryMessages.values()).some((message) =>
         message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
-        message.threadId === thread.id && message.isDraft
+        message.threadId === thread.id && message.isDraft && !message.isAiGenerated
       ));
     } else if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
     if (filter.status) items = items.filter((t) => t.status === filter.status);
@@ -701,6 +702,7 @@ export class EmailInboxRepository {
               AND message.company_id = thread.company_id
               AND message.thread_id = thread.id
               AND message.is_draft = true
+              AND message.is_ai_generated = false
           )), 0) AS drafts,
           COUNT(*) FILTER (WHERE thread.folder = 'archived') AS archived,
           COUNT(*) FILTER (WHERE thread.folder = 'spam') AS spam
@@ -726,7 +728,8 @@ export class EmailInboxRepository {
         message.direction === "outbound" && !message.isDraft
       ).length, 0),
       drafts: allThreads.reduce((sum, thread) => sum + Array.from(this.memoryMessages.values()).filter((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id && message.isDraft
+        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id &&
+        message.isDraft && !message.isAiGenerated
       ).length, 0),
       archived: allThreads.filter((thread) => thread.folder === "archived").length,
       spam: allThreads.filter((thread) => thread.folder === "spam").length,
@@ -1184,6 +1187,29 @@ export class EmailInboxRepository {
     return Array.from(this.memoryMessages.values())
       .filter((m) => m.workspaceId === ctx.workspaceId && m.companyId === companyId && m.threadId === threadId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  async deletePendingAiDrafts(ctx: AuthContext, companyId: string, threadId: string): Promise<number> {
+    if (this.pool) {
+      const result = await this.pool.query(
+        `DELETE FROM company_email_messages
+         WHERE workspace_id = $1 AND company_id = $2 AND thread_id = $3
+           AND direction = 'outbound' AND is_draft = true AND is_ai_generated = true`,
+        [ctx.workspaceId, companyId, threadId]
+      );
+      return result.rowCount || 0;
+    }
+
+    let deleted = 0;
+    for (const [id, message] of this.memoryMessages) {
+      if (message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+          message.threadId === threadId && message.direction === "outbound" &&
+          message.isDraft && message.isAiGenerated) {
+        this.memoryMessages.delete(id);
+        deleted++;
+      }
+    }
+    return deleted;
   }
 
   async getMessage(ctx: AuthContext, companyId: string, messageId: string): Promise<CompanyEmailMessage | null> {
