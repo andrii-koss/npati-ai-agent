@@ -1642,7 +1642,7 @@ export const pl: TranslationSchema = {
       connectAccountFirst: "Najpierw połącz lub wybierz firmowe konto e-mail.",
       draftSaved: "Zapisano wersję roboczą.",
       testModeSent: "Tryb testowy: e-mail został zasymulowany i nie został wysłany na zewnątrz.",
-      queuedDelivery: "Wiadomość dodana do kolejki doręczeń SMTP.",
+      queuedDelivery: "Wiadomość wysłana pomyślnie (dodana do kolejki doręczeń SMTP).",
       attachmentNotAvailable: "Zawartość załącznika jest niedostępna do pobrania.",
       enterForwardRecipient: "Wprowadź co najmniej jednego odbiorcę do przekazania.",
       simulatedSuccess: "Zasymulowana wiadomość przychodząca przetworzona pomyślnie!",

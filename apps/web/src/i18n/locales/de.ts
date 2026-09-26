@@ -1642,7 +1642,7 @@ export const de: TranslationSchema = {
       connectAccountFirst: "Verbinden oder wählen Sie zuerst ein geschäftliches E-Mail-Konto.",
       draftSaved: "Entwurf gespeichert.",
       testModeSent: "Testmodus: E-Mail wurde simuliert und nicht extern versendet.",
-      queuedDelivery: "E-Mail für SMTP-Zustellung eingereiht.",
+      queuedDelivery: "E-Mail erfolgreich gesendet (für SMTP-Zustellung eingereiht).",
       attachmentNotAvailable: "Anhanginhalt ist nicht zum Download verfügbar.",
       enterForwardRecipient: "Geben Sie mindestens einen Weiterleitungsempfänger an.",
       simulatedSuccess: "Simulierte eingehende E-Mail erfolgreich verarbeitet!",

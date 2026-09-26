@@ -48,6 +48,10 @@ export class EmailInboxWorker {
     await this.activeTick;
   }
 
+  triggerTick(): void {
+    this.scheduleTick();
+  }
+
   private scheduleTick(): void {
     if (this.activeTick) return;
     this.activeTick = this.tick().catch(() => undefined).finally(() => {

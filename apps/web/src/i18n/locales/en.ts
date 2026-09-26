@@ -1642,7 +1642,7 @@ export const en: TranslationSchema = {
       connectAccountFirst: "Connect or select a company email account first.",
       draftSaved: "Draft saved.",
       testModeSent: "Test Mode: email was simulated and not sent externally.",
-      queuedDelivery: "Email queued for SMTP delivery.",
+      queuedDelivery: "Email sent successfully (queued for SMTP delivery).",
       attachmentNotAvailable: "Attachment content is not available for download.",
       enterForwardRecipient: "Enter at least one forwarding recipient.",
       simulatedSuccess: "Simulated inbound email processed successfully!",

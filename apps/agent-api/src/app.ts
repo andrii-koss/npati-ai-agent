@@ -1669,7 +1669,7 @@ ${localized.next}`;
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
-  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage });
+  registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage, worker: emailInboxWorker });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerMemoryDocumentRoutes(app,authProvider,memoryDocuments);

@@ -1811,7 +1811,7 @@ export const es: TranslationSchema = {
       connectAccountFirst: "Conecte o seleccione primero una cuenta de correo de empresa.",
       draftSaved: "Borrador guardado.",
       testModeSent: "Modo de prueba: el correo fue simulado y no enviado externamente.",
-      queuedDelivery: "Correo en cola para entrega SMTP.",
+      queuedDelivery: "Correo enviado con éxito (en cola para entrega SMTP).",
       attachmentNotAvailable: "El contenido del archivo adjunto no está disponible para su descarga.",
       enterForwardRecipient: "Ingrese al menos un destinatario para reenviar.",
       simulatedSuccess: "¡Correo entrante simulado procesado con éxito!",

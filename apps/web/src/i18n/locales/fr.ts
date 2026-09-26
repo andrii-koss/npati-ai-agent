@@ -1817,7 +1817,7 @@ export const fr: TranslationSchema = {
       connectAccountFirst: "Connectez ou sélectionnez d'abord un compte e-mail d'entreprise.",
       draftSaved: "Brouillon enregistré.",
       testModeSent: "Mode test : l'e-mail a été simulé et n'a pas été envoyé en externe.",
-      queuedDelivery: "E-mail mis en file d'attente pour livraison SMTP.",
+      queuedDelivery: "E-mail envoyé avec succès (mis en file d'attente pour livraison SMTP).",
       attachmentNotAvailable: "Le contenu de la pièce jointe n'est pas disponible au téléchargement.",
       enterForwardRecipient: "Indiquez au moins un destinataire pour le transfert.",
       simulatedSuccess: "E-mail entrant simulé traité avec succès !",
