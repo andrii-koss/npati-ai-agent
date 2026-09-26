@@ -722,17 +722,79 @@ export function MemoryPage() {
   );
 }
 
+const DEFAULT_SKILLS: Skill[] = [
+  {
+    id: "competitor-analysis",
+    name: "Competitor Analysis",
+    description: "Finds relevant competitors and compares public evidence with the current Business context.",
+    capabilities: ["competitors.discover", "competitors.compare", "web.search", "web.fetch", "web.crawl"],
+  },
+  {
+    id: "web-research",
+    name: "Web Research",
+    description: "Searches and reads public web sources through the protected NPATI Web Research boundary.",
+    capabilities: ["web.search", "web.fetch", "web.crawl"],
+  },
+  {
+    id: "business-startup",
+    name: "Business Startup",
+    description: "Shape a business idea, audience, offer, and first validation plan.",
+    capabilities: ["business-idea", "niche", "audience", "validation"],
+  },
+  {
+    id: "business-growth",
+    name: "Business Growth",
+    description: "Find practical acquisition, retention, positioning, and growth opportunities.",
+    capabilities: ["growth-plan", "customer-acquisition", "retention", "metrics"],
+  },
+  {
+    id: "sell-product",
+    name: "Sell Product",
+    description: "Turn a product or service into a clear offer and sales plan.",
+    capabilities: ["offer", "positioning", "pricing", "sales-channel"],
+  },
+];
+
+const STORAGE_SKILLS_KEY = "npati_skills_cache_v1";
+
+function getCachedSkills(): Skill[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_SKILLS_KEY) || localStorage.getItem(STORAGE_SKILLS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_SKILLS;
+}
+
+function updateCachedSkills(items: Skill[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(STORAGE_SKILLS_KEY, serialized);
+    localStorage.setItem(STORAGE_SKILLS_KEY, serialized);
+  } catch {}
+}
+
 export function SkillsPage() {
   const { t } = useTranslation();
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [skills, setSkills] = useState<Skill[]>(getCachedSkills);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     api<Skill[]>("/skills")
-      .then((data) => { setSkills(data); setError(""); })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : t("skillsPage.errorLoading")))
+      .then((data) => {
+        setSkills(data);
+        updateCachedSkills(data);
+        setError("");
+      })
+      .catch((reason) => {
+        if (skills.length === 0) {
+          setError(reason instanceof Error ? reason.message : t("skillsPage.errorLoading"));
+        }
+      })
       .finally(() => setLoading(false));
   }, [t]);
 
@@ -830,7 +892,7 @@ export function SkillsPage() {
         <div className="status-left"><span>{t("skillsPage.statusShowing.showing")} <strong>{filteredSkills.length}</strong> {t("skillsPage.statusShowing.of")} <strong>{skills.length}</strong> {t("skillsPage.statusShowing.skills")}</span></div>
       </div>
 
-      {error ? <div className="workspace-notice error">{error}</div> : !loading && filteredSkills.length === 0 ? (
+      {error ? <div className="workspace-notice error">{error}</div> : filteredSkills.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">⌕</div><h3>{t("skillsPage.empty.title")}</h3>
           <p>{t("skillsPage.empty.description")}</p>
