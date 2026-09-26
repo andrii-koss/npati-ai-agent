@@ -628,7 +628,7 @@ export function registerEmailInboxRoutes(
       if (!isDraft && account) {
         const rateLimit = await repo.reserveSendQuota(r.params.companyId, account, toAddresses[0] || thread.customerEmail);
         if (!rateLimit.allowed) {
-          throw new Error(`Rate limit exceeded: ${rateLimit.reason}`);
+          throw Object.assign(new Error(`Rate limit exceeded: ${rateLimit.reason}`), { status: 429 });
         }
       }
 

@@ -54,6 +54,7 @@ describe("Email / AI Inbox Module", () => {
     expect(supportAcc.id).toBeDefined();
     expect(supportAcc.emailAddress).toBe("support@company.com");
     expect(supportAcc.mode).toBe("approval");
+    expect(supportAcc.rateLimits.maxPerRecipientDaily).toBe(100);
 
     const billingAcc = await repo.createAccount(mockAuth, companyId, {
       emailAddress: "billing@company.com",
@@ -437,6 +438,67 @@ describe("Email / AI Inbox Module", () => {
     expect(createdTasks).toEqual([result.inboundMessage.id]);
   });
 
+  it("generates each AI draft for the latest inbound message with the full thread history as context", async () => {
+    const isolatedRepo = new EmailInboxRepository();
+    await isolatedRepo.createAccount(mockAuth, "latest-inbound-company", {
+      emailAddress: "support@latest.example", mode: "approval",
+      signatureConfig: {
+        greeting: "Hello,",
+        signature: "Best regards,\nCustomer Support",
+        footer: "Confidential",
+      },
+    });
+    const requests: any[] = [];
+    const processor = new EmailAIProcessor(isolatedRepo, undefined, {
+      chat: async (request: any) => {
+        requests.push(request);
+        return { content: `Generated reply ${requests.length}` };
+      },
+    } as any);
+
+    const first = await processor.processInbound(mockAuth, "latest-inbound-company", {
+      from: "client@example.com",
+      to: "support@latest.example",
+      subject: "Re: Project update",
+      body: "This is the first customer question.",
+      messageId: "<latest-inbound-1@example.com>",
+      threadKey: "latest-inbound-thread",
+    });
+    await isolatedRepo.createMessage(mockAuth, "latest-inbound-company", {
+      threadId: first.thread.id,
+      direction: "outbound",
+      fromAddress: "support@latest.example",
+      toAddresses: ["client@example.com"],
+      subject: "Re: Project update",
+      bodyText: "This is the manual company reply.",
+      isDraft: false,
+    });
+
+    const second = await processor.processInbound(mockAuth, "latest-inbound-company", {
+      from: "client@example.com",
+      to: "support@latest.example",
+      subject: "Re: Project update",
+      body: "This is the newest customer question.",
+      messageId: "<latest-inbound-2@example.com>",
+      threadKey: "latest-inbound-thread",
+    });
+
+    const latestPrompt = requests.at(-1)?.messages.at(-1)?.content;
+    const latestSystemPrompt = requests.at(-1)?.messages.at(0)?.content;
+    expect(latestPrompt).toEqual(expect.any(String));
+    expect(latestPrompt).toContain("This is the first customer question.");
+    expect(latestPrompt).toContain("This is the manual company reply.");
+    expect(latestPrompt).toContain("Conversation history (oldest to newest)");
+    expect(latestPrompt).toContain("LATEST INBOUND MESSAGE TO ANSWER:\nThis is the newest customer question.");
+    expect(latestSystemPrompt).toContain("Translate the configured greeting, closing signature, and footer into the reply language");
+    expect(latestSystemPrompt).toContain("Configured greeting source text: Hello,");
+    expect(latestSystemPrompt).toContain("Configured closing signature source text: Best regards,\nCustomer Support");
+    expect(latestSystemPrompt).toContain("Configured footer source text: Confidential");
+    expect(latestSystemPrompt).not.toContain("Required greeting:");
+    expect(second.aiMessage?.inReplyTo).toBe("<latest-inbound-2@example.com>");
+    expect(second.aiMessage?.bodyText).toBe("Generated reply 2");
+  });
+
   it("23. Matches a detected intent and renders the selected response template", async () => {
     const isolatedRepo = new EmailInboxRepository();
     const isolatedProcessor = new EmailAIProcessor(isolatedRepo);
@@ -543,8 +605,9 @@ describe("Email / AI Inbox Module", () => {
 
     await expect(isolatedRepo.reserveSendQuota("limited-company", first, "one@example.net"))
       .resolves.toEqual({ allowed: true });
-    await expect(isolatedRepo.reserveSendQuota("limited-company", second, "two@example.net"))
-      .resolves.toMatchObject({ allowed: false });
+    const denied = await isolatedRepo.reserveSendQuota("limited-company", second, "two@example.net");
+    expect(denied).toMatchObject({ allowed: false });
+    expect(denied.reason).toContain('Increase "Company / hour"');
   });
 
   it("27. Requires approval for private hosts and cross-domain redirect parameters", () => {

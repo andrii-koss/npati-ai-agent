@@ -300,7 +300,6 @@ export function EmailInboxPage() {
   const threadRequestIdRef = useRef(0);
   const deletedThreadIdsRef = useRef(new Set<string>());
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
-  const latestInboundMessageRef = useRef<HTMLDivElement | null>(null);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -421,27 +420,16 @@ export function EmailInboxPage() {
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const [composeSending, setComposeSending] = useState(false);
   const historyMessages = useMemo(() => messages.filter((message) => !message.isDraft), [messages]);
-  const latestInboundId = useMemo(
-    () => [...historyMessages].reverse().find((message) => message.direction === "inbound")?.id,
-    [historyMessages]
-  );
+  const latestHistoryMessageId = historyMessages.at(-1)?.id;
 
   useEffect(() => {
-    if (!latestInboundId) return;
+    if (!latestHistoryMessageId) return;
     const frame = window.requestAnimationFrame(() => {
       const container = messageScrollRef.current;
-      const latestInbound = latestInboundMessageRef.current;
-      if (container && latestInbound) {
-        const containerRect = container.getBoundingClientRect();
-        const messageRect = latestInbound.getBoundingClientRect();
-        container.scrollTo({
-          top: Math.max(0, container.scrollTop + messageRect.top - containerRect.top - 12),
-          behavior: "smooth",
-        });
-      }
+      if (container) container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [selectedThreadId, latestInboundId, threadOpenVersion]);
+  }, [selectedThreadId, latestHistoryMessageId, threadOpenVersion]);
 
   function openCompose() {
     setComposeAccountId(selectedAccountId !== "all" ? selectedAccountId : accounts[0]?.id || "");
@@ -691,7 +679,7 @@ export function EmailInboxPage() {
         setCustomerContext(res.customerContext || { previousThreads: [], tasks: [] });
         setAuditHistory(audit.logs);
 
-        const draft = res.messages.find((m) => m.isDraft);
+        const draft = [...res.messages].reverse().find((m) => m.isDraft);
         if (draft) {
           setDraftMessageId(draft.id);
           setDraftText(draft.bodyText);
@@ -1586,11 +1574,9 @@ export function EmailInboxPage() {
                   ) : (
                     historyMessages.map((m) => {
                       const isInbound = m.direction === "inbound";
-                      const isLatestInbound = isInbound && m.id === latestInboundId;
                       return (
                         <div
                           key={m.id}
-                          ref={isLatestInbound ? latestInboundMessageRef : undefined}
                           className={`email-inbox-message-bubble ${isInbound ? "inbound" : m.isAiGenerated ? "ai-generated" : "outbound"}`}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
