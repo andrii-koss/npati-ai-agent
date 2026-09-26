@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
+import {
+  chooseAvailableCompanyId,
+  readCachedCompanies,
+  writeActiveCompanyId,
+  writeCachedCompanies,
+} from "./active-company";
 
 interface ToolAuditItem {
   id: string;
@@ -75,12 +81,56 @@ function visibleRunTask(task: string): string {
   return task.replace(/^\[NPATI_CONTENT:(?:article|seo_blueprint|social_post|brief|strategy|other):[A-Za-z0-9_-]+\]\s*/, "");
 }
 
+const ACTIVITY_RUNS_CACHE_PREFIX = "npati_activity_runs_cache_v1_";
+const ACTIVITY_LATEST_RUNS_CACHE_KEY = "npati_activity_runs_latest_v1";
+
+function getCachedRuns(companyId?: string): CompanyRun[] {
+  try {
+    if (companyId) {
+      const raw = sessionStorage.getItem(ACTIVITY_RUNS_CACHE_PREFIX + companyId)
+        || localStorage.getItem(ACTIVITY_RUNS_CACHE_PREFIX + companyId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const latest = sessionStorage.getItem(ACTIVITY_LATEST_RUNS_CACHE_KEY)
+      || localStorage.getItem(ACTIVITY_LATEST_RUNS_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function updateCachedRuns(companyId: string, runs: CompanyRun[]) {
+  try {
+    const serialized = JSON.stringify(runs);
+    if (companyId) {
+      sessionStorage.setItem(ACTIVITY_RUNS_CACHE_PREFIX + companyId, serialized);
+      localStorage.setItem(ACTIVITY_RUNS_CACHE_PREFIX + companyId, serialized);
+    }
+    if (runs.length > 0) {
+      sessionStorage.setItem(ACTIVITY_LATEST_RUNS_CACHE_KEY, serialized);
+      localStorage.setItem(ACTIVITY_LATEST_RUNS_CACHE_KEY, serialized);
+    }
+  } catch {}
+}
+
 export function ActivityPage() {
   const { t } = useTranslation();
-  const [companies, setCompanies] = useState<CompanyItem[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
-  const [runs, setRuns] = useState<CompanyRun[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const initialCompanies = useMemo(() => readCachedCompanies<CompanyItem>(), []);
+  const initialCompanyId = useMemo(
+    () => chooseAvailableCompanyId(initialCompanies),
+    [initialCompanies]
+  );
+  const initialRuns = useMemo(() => getCachedRuns(initialCompanyId), [initialCompanyId]);
+
+  const [companies, setCompanies] = useState<CompanyItem[]>(initialCompanies);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
+  const [runs, setRuns] = useState<CompanyRun[]>(initialRuns);
+  const [selectedRunId, setSelectedRunId] = useState<string>(() => initialRuns[0]?.id ?? "");
   const [activeRunDetails, setActiveRunDetails] = useState<{
     run: CompanyRun;
     steps: RunStep[];
@@ -89,7 +139,7 @@ export function ActivityPage() {
     completionReport?: CompletionReport;
   } | null>(null);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => initialRuns.length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,6 +155,16 @@ export function ActivityPage() {
   const [dispatchNotice, setDispatchNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const handleCompanyChange = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+    writeActiveCompanyId(companyId);
+    const cachedForNewCompany = getCachedRuns(companyId);
+    if (cachedForNewCompany.length > 0) {
+      setRuns(cachedForNewCompany);
+      setSelectedRunId(cachedForNewCompany[0]?.id ?? "");
+    }
+  };
+
   // Fetch initial companies list
   useEffect(() => {
     const headers: HeadersInit = {};
@@ -116,8 +176,11 @@ export function ActivityPage() {
       .then((data: { companies?: CompanyItem[] }) => {
         const list = data.companies ?? [];
         setCompanies(list);
-        if (list.length > 0 && list[0]) {
-          setSelectedCompanyId(list[0].id);
+        writeCachedCompanies(list);
+        if (list.length > 0) {
+          const nextSelectedId = chooseAvailableCompanyId(list, { requested: selectedCompanyId });
+          setSelectedCompanyId(nextSelectedId);
+          writeActiveCompanyId(nextSelectedId);
         } else {
           setLoading(false);
         }
@@ -129,7 +192,7 @@ export function ActivityPage() {
   const loadRuns = async (companyId: string, isManualRefresh = false) => {
     if (!companyId) return;
     if (isManualRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (runs.length === 0) setLoading(true);
     setError(null);
 
     const headers: HeadersInit = {};
@@ -142,6 +205,7 @@ export function ActivityPage() {
       const data = (await res.json()) as { runs?: CompanyRun[] };
       const items = data.runs ?? [];
       setRuns(items);
+      updateCachedRuns(companyId, items);
 
       if (items.length > 0) {
         // If current selection is still in list keep it, otherwise pick first
@@ -353,7 +417,7 @@ export function ActivityPage() {
               <select
                 id="activity-company-select"
                 value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                onChange={(e) => handleCompanyChange(e.target.value)}
                 className="select-input activity-select"
               >
                 {companies.map((c) => (
@@ -423,6 +487,7 @@ export function ActivityPage() {
           <button
             type="button"
             className="activity-refresh-btn"
+            style={{ minWidth: "105px" }}
             onClick={() => selectedCompanyId && loadRuns(selectedCompanyId, true)}
             disabled={refreshing || loading}
             title={t("activity.controls.refreshTitle")}
@@ -539,7 +604,22 @@ export function ActivityPage() {
       </div>
       {error && <div className="workspace-notice error">{error}</div>}
 
-      {!loading && companies.length === 0 && (
+      {runs.length === 0 && loading ? (
+        <div className="activity-layout-wrapper" style={{ minHeight: "500px", opacity: 0.5 }}>
+          <div className="activity-layout">
+            <aside className="activity-runs-sidebar" style={{ pointerEvents: "none" }}>
+              <div className="activity-run-list">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="activity-run-item" style={{ minHeight: "85px" }} />
+                ))}
+              </div>
+            </aside>
+            <section className="activity-trace-detail">
+              <div className="trace-card" style={{ minHeight: "450px" }} />
+            </section>
+          </div>
+        </div>
+      ) : !loading && companies.length === 0 ? (
         <div className="activity-empty-state">
           <h2>{t("activity.empty.noCompaniesTitle")}</h2>
           <p>{t("activity.empty.noCompaniesCopy")}</p>
@@ -547,9 +627,7 @@ export function ActivityPage() {
             {t("activity.empty.createCompanyBtn")}
           </Link>
         </div>
-      )}
-
-      {!loading && companies.length > 0 && (runs.length === 0 || viewMode === "presets") && (
+      ) : (runs.length === 0 || viewMode === "presets") ? (
         <div className="activity-empty-state">
           <h2>{runs.length === 0 ? t("activity.empty.noRunsTitle") : t("activity.empty.presetsTitle")}</h2>
           <p>
@@ -585,9 +663,7 @@ export function ActivityPage() {
             </div>
           )}
         </div>
-      )}
-
-      {!loading && runs.length > 0 && viewMode === "trace" && (
+      ) : (
         <div className="activity-layout-wrapper">
           <div className="activity-layout">
             {/* Sidebar: Recent Runs List */}
