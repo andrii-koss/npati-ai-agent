@@ -1,4 +1,5 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
+import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -357,6 +358,8 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
   const key = "npati_chat_context:" + (userId ?? "anonymous");
   const readStoredSelection = () => {
     try {
+      const activeCompanyId = readActiveCompanyId();
+      if (activeCompanyId) return `company:${activeCompanyId}`;
       return sessionStorage.getItem(key) ?? localStorage.getItem(key);
     } catch {
       return null;
@@ -365,6 +368,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
   const persistSelection = (value: string) => {
     try { sessionStorage.setItem(key, value); } catch {}
     try { localStorage.setItem(key, value); } catch {}
+    writeActiveCompanyId(value.startsWith("company:") ? value.slice(8) : "");
   };
   const [selection, setSelection] = useState(() => {
     if (businessRoute) return "business";
@@ -398,7 +402,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
           persistSelection(stored);
           return stored;
         }
-        const fallback = value.companies[0] ? `company:${value.companies[0].id}` : "none";
+        const fallback = "none";
         persistSelection(fallback);
         return fallback;
       });

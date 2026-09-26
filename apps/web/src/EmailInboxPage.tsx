@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -533,8 +534,16 @@ export function EmailInboxPage() {
       .then((res) => {
         setCompanies(res.companies);
         const requested = searchParams.get("company");
-        const sel = requested === "personal" || (requested && res.companies.some((company) => company.id === requested)) ? requested : "personal";
+        const sel = requested === "personal"
+          ? "personal"
+          : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
         setSelectedCompanyId(sel);
+        writeActiveCompanyId(sel === "personal" ? "" : sel);
+        if (requested) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("company");
+          setSearchParams(next, { replace: true });
+        }
       })
       .catch((e) => setNotice(e.message));
   }, []);
@@ -556,7 +565,7 @@ export function EmailInboxPage() {
         if (initialAccount) setComposeAccountId(initialAccount);
         if (searchParams.get("compose") === "1") {
           setComposeOpen(true);
-          setSearchParams({ company: selectedCompanyId }, { replace: true });
+          setSearchParams({}, { replace: true });
         }
       })
       .catch(() => undefined);
@@ -927,7 +936,7 @@ export function EmailInboxPage() {
           </div>
           <div className="automations-header-actions">
             <Link
-              to={`/settings/email?company=${encodeURIComponent(selectedCompanyId)}`}
+              to="/settings/email"
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -964,8 +973,9 @@ export function EmailInboxPage() {
                 aria-label={t("emailInbox.scope.selectOwnerAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
-                  setSelectedCompanyId(e.target.value);
-                  setSearchParams({ company: e.target.value }, { replace: true });
+                  const companyId = e.target.value;
+                  setSelectedCompanyId(companyId);
+                  writeActiveCompanyId(companyId === "personal" ? "" : companyId);
                 }}
                 className="email-scope-select"
               >
