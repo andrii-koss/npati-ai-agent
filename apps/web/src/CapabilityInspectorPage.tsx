@@ -92,12 +92,46 @@ export function getCapabilityDisplayName(item: { capabilityId?: string; name: st
   return item.name;
 }
 
+const CAPABILITIES_CACHE_PREFIX = "npati_capabilities_cache_v1_";
+const CAPABILITIES_LATEST_CACHE_KEY = "npati_capabilities_cache_latest_v1";
+
+function getCachedReport(slice: InspectorSlice): InspectorReport | null {
+  try {
+    const raw = sessionStorage.getItem(CAPABILITIES_CACHE_PREFIX + slice)
+      || localStorage.getItem(CAPABILITIES_CACHE_PREFIX + slice);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) return parsed;
+    }
+    const latest = sessionStorage.getItem(CAPABILITIES_LATEST_CACHE_KEY)
+      || localStorage.getItem(CAPABILITIES_LATEST_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
+      if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+function updateCachedReport(slice: InspectorSlice, report: InspectorReport) {
+  try {
+    const serialized = JSON.stringify(report);
+    sessionStorage.setItem(CAPABILITIES_CACHE_PREFIX + slice, serialized);
+    localStorage.setItem(CAPABILITIES_CACHE_PREFIX + slice, serialized);
+    if (report && Array.isArray(report.items) && report.items.length > 0) {
+      sessionStorage.setItem(CAPABILITIES_LATEST_CACHE_KEY, serialized);
+      localStorage.setItem(CAPABILITIES_LATEST_CACHE_KEY, serialized);
+    }
+  } catch {}
+}
+
 export function CapabilityInspectorPage() {
   const { t } = useTranslation();
   const [slice, setSlice] = useState<InspectorSlice>("all");
   const [search, setSearch] = useState("");
-  const [report, setReport] = useState<InspectorReport | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialReport = useMemo(() => getCachedReport("all"), []);
+  const [report, setReport] = useState<InspectorReport | null>(initialReport);
+  const [loading, setLoading] = useState(() => initialReport === null);
   const [error, setError] = useState<string | null>(null);
 
   // Pagination & Sorting State
@@ -107,9 +141,20 @@ export function CapabilityInspectorPage() {
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const handleSliceChange = (newSlice: InspectorSlice) => {
+    setSlice(newSlice);
+    const cached = getCachedReport(newSlice);
+    if (cached) {
+      setReport(cached);
+    }
+  };
+
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    const cached = getCachedReport(slice);
+    if (!cached && !report) {
+      setLoading(true);
+    }
     setError(null);
 
     const headers: HeadersInit = {};
@@ -124,12 +169,15 @@ export function CapabilityInspectorPage() {
       .then((data) => {
         if (active) {
           setReport(data);
+          updateCachedReport(slice, data);
           setLoading(false);
         }
       })
       .catch((err) => {
         if (active) {
-          setError(err instanceof Error ? err.message : t("capabilityInspector.errorLoad"));
+          if (!report) {
+            setError(err instanceof Error ? err.message : t("capabilityInspector.errorLoad"));
+          }
           setLoading(false);
         }
       });
@@ -285,7 +333,7 @@ export function CapabilityInspectorPage() {
               role="tab"
               aria-selected={slice === tab.value}
               className={`inspector-tab ${slice === tab.value ? "active" : ""}`}
-              onClick={() => setSlice(tab.value)}
+              onClick={() => handleSliceChange(tab.value)}
             >
               <span>{tab.label}</span>
               {tab.count !== undefined && <small className="tab-count">{tab.count}</small>}
@@ -297,7 +345,9 @@ export function CapabilityInspectorPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            {t("capabilityInspector.controls.showing", { start: startIdx, end: endIdx, total: totalItems })}
+            {loading && !report
+              ? t("capabilityInspector.controls.showing", { start: 1, end: 25, total: 306 })
+              : t("capabilityInspector.controls.showing", { start: startIdx, end: endIdx, total: totalItems })}
             {search ? ` ${t("capabilityInspector.controls.matching", { term: search })}` : ""}
           </span>
           {copiedId && <span className="copy-notice">{t("capabilityInspector.controls.copied", { id: copiedId })}</span>}
@@ -320,7 +370,7 @@ export function CapabilityInspectorPage() {
       </div>
       {error && <div className="workspace-notice error">{error}</div>}
 
-      {!loading && !error && (
+      {!error && (
         <>
           <div className="inspector-table-container">
             <table className="inspector-table">
@@ -379,52 +429,83 @@ export function CapabilityInspectorPage() {
                 </tr>
               </thead>
               <tbody>
-                {pageItems.map((item) => {
-                  const st = formatStatus(item.status, t);
-                  return (
-                    <tr key={item.id}>
-                      <td style={{ textAlign: "center" }}>
-                        <span className="inventory-badge">#{item.id}</span>
+                {loading && !report ? (
+                  Array.from({ length: 10 }).map((_, idx) => (
+                    <tr key={`skeleton-${idx}`} style={{ opacity: 0.5 }}>
+                      <td style={{ textAlign: "center", padding: "12px 10px" }}>
+                        <span className="inventory-badge">#...</span>
                       </td>
-                      <td>
-                        <strong className="item-name">{getCapabilityDisplayName(item, t)}</strong>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "140px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <code
-                          className="canonical-code"
-                          onClick={() => copyCanonicalId(item.capabilityId)}
-                          title={t("capabilityInspector.table.copyTooltip")}
-                        >
-                          {item.capabilityId}
-                        </code>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "160px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <span className={`domain-badge domain-${item.domain}`}>{item.domain}</span>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "60px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <span className={`type-badge ${item.type}`}>{formatType(item.type, t)}</span>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "70px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <span className={`callable-badge ${item.agentCallable ? "yes" : "no"}`}>
-                          <span className="status-dot-sm" />
-                          {item.agentCallable ? t("capabilityInspector.callable.callable") : t("capabilityInspector.callable.internal")}
-                        </span>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "70px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <span className={`risk-badge ${item.risk}`}>
-                          {formatRisk(item.risk, t)}
-                        </span>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "50px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
-                      <td>
-                        <span className={`status-pill ${st.className}`}>
-                          {st.className === "verified" && "✓ "}
-                          {st.label}
-                        </span>
+                      <td style={{ padding: "12px 10px" }}>
+                        <span style={{ display: "inline-block", width: "70px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                       </td>
                     </tr>
-                  );
-                })}
-                {pageItems.length === 0 && (
+                  ))
+                ) : (
+                  pageItems.map((item) => {
+                    const st = formatStatus(item.status, t);
+                    return (
+                      <tr key={item.id}>
+                        <td style={{ textAlign: "center" }}>
+                          <span className="inventory-badge">#{item.id}</span>
+                        </td>
+                        <td>
+                          <strong className="item-name">{getCapabilityDisplayName(item, t)}</strong>
+                        </td>
+                        <td>
+                          <code
+                            className="canonical-code"
+                            onClick={() => copyCanonicalId(item.capabilityId)}
+                            title={t("capabilityInspector.table.copyTooltip")}
+                          >
+                            {item.capabilityId}
+                          </code>
+                        </td>
+                        <td>
+                          <span className={`domain-badge domain-${item.domain}`}>{item.domain}</span>
+                        </td>
+                        <td>
+                          <span className={`type-badge ${item.type}`}>{formatType(item.type, t)}</span>
+                        </td>
+                        <td>
+                          <span className={`callable-badge ${item.agentCallable ? "yes" : "no"}`}>
+                            <span className="status-dot-sm" />
+                            {item.agentCallable ? t("capabilityInspector.callable.callable") : t("capabilityInspector.callable.internal")}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`risk-badge ${item.risk}`}>
+                            {formatRisk(item.risk, t)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-pill ${st.className}`}>
+                            {st.className === "verified" && "✓ "}
+                            {st.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+                {!loading && pageItems.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
                       {t("capabilityInspector.table.empty")}
