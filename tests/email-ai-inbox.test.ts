@@ -464,6 +464,8 @@ describe("Email / AI Inbox Module", () => {
       messageId: "<latest-inbound-1@example.com>",
       threadKey: "latest-inbound-thread",
     });
+    expect(first.aiMessage?.isAiGenerated).toBe(true);
+    await expect(isolatedRepo.listThreads(mockAuth, "latest-inbound-company", { folder: "drafts" })).resolves.toEqual([]);
     await isolatedRepo.createMessage(mockAuth, "latest-inbound-company", {
       threadId: first.thread.id,
       direction: "outbound",
@@ -497,6 +499,26 @@ describe("Email / AI Inbox Module", () => {
     expect(latestSystemPrompt).not.toContain("Required greeting:");
     expect(second.aiMessage?.inReplyTo).toBe("<latest-inbound-2@example.com>");
     expect(second.aiMessage?.bodyText).toBe("Generated reply 2");
+    const messages = await isolatedRepo.listMessages(mockAuth, "latest-inbound-company", first.thread.id);
+    expect(messages.some((message) => message.id === first.aiMessage?.id)).toBe(false);
+    expect(messages.filter((message) => message.isDraft && message.isAiGenerated)).toEqual([
+      expect.objectContaining({ id: second.aiMessage?.id }),
+    ]);
+
+    await isolatedRepo.createMessage(mockAuth, "latest-inbound-company", {
+      threadId: first.thread.id,
+      direction: "outbound",
+      fromAddress: "support@latest.example",
+      toAddresses: ["client@example.com"],
+      subject: "Saved user draft",
+      bodyText: "Not sent yet",
+      isDraft: true,
+      isAiGenerated: false,
+    });
+    await expect(isolatedRepo.listThreads(mockAuth, "latest-inbound-company", { folder: "drafts" })).resolves.toEqual([
+      expect.objectContaining({ id: first.thread.id }),
+    ]);
+    await expect(isolatedRepo.getFolderCounts(mockAuth, "latest-inbound-company")).resolves.toMatchObject({ drafts: 1 });
   });
 
   it("23. Matches a detected intent and renders the selected response template", async () => {

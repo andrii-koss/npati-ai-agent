@@ -77,11 +77,18 @@ describe("Email transport", () => {
     expect(receivedData).toContain("Actual transport body");
   });
 
-  it("polls IMAP by UID and parses MIME attachments", async () => {
+  it("polls IMAP by UID and recursively parses nested MIME text and attachments", async () => {
     const raw = [
       "From: Client <client@example.net>", "To: support@example.com", "Subject: Invoice",
       "Message-ID: <imap-42@example.net>", "Content-Type: multipart/mixed; boundary=abc", "",
-      "--abc", "Content-Type: text/plain; charset=utf-8", "", "Please review the invoice.",
+      "--abc", "Content-Type: multipart/related; boundary=related", "",
+      "--related", "Content-Type: multipart/alternative; boundary=alternative", "",
+      "--alternative", "Content-Type: text/plain; charset=utf-8", "", "Please review the invoice and photo.",
+      "--alternative", "Content-Type: text/html; charset=utf-8", "", "<p>Please review the <b>invoice and photo</b>.</p>",
+      "--alternative--",
+      "--related", "Content-Type: image/jpeg; name=photo.jpg",
+      "Content-Disposition: inline; filename=photo.jpg", "Content-Transfer-Encoding: base64", "",
+      Buffer.from("fake photo content").toString("base64"), "--related--",
       "--abc", "Content-Type: application/pdf; name=invoice.pdf",
       "Content-Disposition: attachment; filename=invoice.pdf", "Content-Transfer-Encoding: base64", "",
       Buffer.from("fake pdf content").toString("base64"), "--abc--", "",
@@ -109,9 +116,13 @@ describe("Email transport", () => {
     const messages = await ImapEmailTransport.poll(mailAccount, 3_000);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.messageId).toBe("<imap-42@example.net>");
-    expect(messages[0]?.body).toContain("Please review the invoice");
-    expect(messages[0]?.attachments[0]).toMatchObject({ filename: "invoice.pdf", contentType: "application/pdf" });
-    expect(Buffer.from(messages[0]!.attachments[0]!.contentBase64!, "base64").toString()).toBe("fake pdf content");
+    expect(messages[0]?.body).toContain("Please review the invoice and photo");
+    expect(messages[0]?.bodyHtml).toContain("<b>invoice and photo</b>");
+    const photo = messages[0]?.attachments.find((attachment) => attachment.filename === "photo.jpg");
+    const invoice = messages[0]?.attachments.find((attachment) => attachment.filename === "invoice.pdf");
+    expect(photo).toMatchObject({ contentType: "image/jpeg" });
+    expect(invoice).toMatchObject({ contentType: "application/pdf" });
+    expect(Buffer.from(invoice!.contentBase64!, "base64").toString()).toBe("fake pdf content");
   });
 
   it("claims a durable send job and marks the message sent only after SMTP accepts it", async () => {

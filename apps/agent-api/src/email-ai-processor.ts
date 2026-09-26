@@ -329,6 +329,10 @@ export class EmailAIProcessor {
       attachments: storedAttachments,
       deliveryStatus: "delivered",
     });
+    // A generated reply is tied to the inbound message it answers. Once a
+    // newer customer message arrives, keep the conversation history but drop
+    // any stale, unsent AI reply before generating the replacement.
+    await this.repo.deletePendingAiDrafts(ctx, companyId, thread.id);
     const conversationHistory = (await this.repo.listMessages(ctx, companyId, thread.id))
       .filter((message) => !message.isDraft)
       .map((message) => {

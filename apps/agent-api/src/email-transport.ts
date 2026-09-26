@@ -284,6 +284,13 @@ function parseMimeContent(raw: string): { body: string; bodyHtml?: string; attac
     const filename = disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.slice(1).find(Boolean)
       || headerValue(partHeaders, "Content-Type").match(/name\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.slice(1).find(Boolean);
     const decoded = decodePartBody(partBody, headerValue(partHeaders, "Content-Transfer-Encoding").toLowerCase());
+    if (partType.startsWith("multipart/")) {
+      const nested = parseMimeContent(part);
+      if (!textBody && nested.body) textBody = nested.body;
+      if (!htmlBody && nested.bodyHtml) htmlBody = nested.bodyHtml;
+      attachments.push(...nested.attachments);
+      continue;
+    }
     if (filename || /attachment/i.test(disposition)) {
       attachments.push({
         filename: decodeMimeWord(filename || "attachment"), contentType: partType,
