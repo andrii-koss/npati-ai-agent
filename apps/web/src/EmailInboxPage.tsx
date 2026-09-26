@@ -972,16 +972,17 @@ export function EmailInboxPage() {
                   writeActiveCompanyId(companyId === "personal" ? "" : companyId);
                 }}
                 className="email-scope-select"
+                title={selectedCompanyId === "personal" ? t("emailInbox.scope.personalOption") : (companies.find((c) => c.id === selectedCompanyId)?.name || selectedCompanyId)}
               >
                 <option value="personal">{t("emailInbox.scope.personalOption")}</option>
                 {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
-                  <option key={selectedCompanyId} value={selectedCompanyId}>
-                    {t("emailInbox.scope.companyOptionPrefix")}{selectedCompanyId}
+                  <option key={selectedCompanyId} value={selectedCompanyId} title={selectedCompanyId}>
+                    {selectedCompanyId}
                   </option>
                 )}
                 {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {t("emailInbox.scope.companyOptionPrefix")}{c.name}
+                  <option key={c.id} value={c.id} title={c.name}>
+                    {c.name}
                   </option>
                 ))}
               </select>
