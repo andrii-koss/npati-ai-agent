@@ -45,7 +45,7 @@ import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
-import { AutomationScheduler } from "./automation-scheduler";
+import { AutomationScheduler, computeNextCronDate } from "./automation-scheduler";
 import { ContentLibraryStore } from "./content-library-store";
 import { registerContentLibraryRoutes } from "./content-library-routes";
 import { CompanyApprovalsRepository } from "./approvals-repository";
@@ -1083,10 +1083,30 @@ ${localized.next}`;
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
     const managementRequest = Boolean(requestMessage && (WorkspaceChatActions.isManagementRequest(requestMessage) || ((route?.selectedCompanyId || route?.selectedBusinessId) && WorkspaceChatActions.isPotentialMutationRequest(requestMessage))));
     if (!/```workspace-action/i.test(content) && !managementRequest) return { cleanText: content, workspaceAction: undefined, companyRunId: undefined };
-    const dependencies = {
+    const dependencies: import("./workspace-chat-actions").WorkspaceChatActionDependencies = {
       store: workspaceStore,
       automations: automationsRepo,
       content: contentLibrary,
+      browserTargets: browserCredentials,
+      email: emailInboxRepo,
+      runAutomation: async (context, automation) => {
+        await workspaceStore.getCompany(context, automation.companyId);
+        const current = await automationsRepo.get(context, automation.companyId, automation.id);
+        const runRecord = await automationsRepo.recordRunStart(current);
+        const startedAt = Date.now();
+        try {
+          const result = await runAutomation(current, "automation:chat:" + current.id + ":" + Date.now());
+          const durationMs = Date.now() - startedAt;
+          const nextRunAt = computeNextCronDate(current.cronExpression, new Date(), current.timezone).toISOString();
+          await automationsRepo.recordRunComplete(runRecord.id, current.id, nextRunAt, result.result, durationMs);
+          return { runId: runRecord.id, result: result.result, durationMs };
+        } catch (error) {
+          const durationMs = Date.now() - startedAt;
+          const nextRunAt = computeNextCronDate(current.cronExpression, new Date(), current.timezone).toISOString();
+          await automationsRepo.recordRunFail(runRecord.id, current.id, nextRunAt, error instanceof Error ? error.message : String(error), durationMs);
+          throw error;
+        }
+      },
       runCompany: (context: AuthContext, companyId: string, input: { task: string; mode?: "auto" | "single" | "pipeline" | "fusion" }, key: string) =>
         companyRuntime.execute(context, companyId, input, key, route?.signal),
       cancelCompanyRun: async (context: AuthContext, companyId: string, runId: string) => {
@@ -1273,7 +1293,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt);
     const result = await agent.handleBusinessMessage({
       message: safePrompt,
       context,
@@ -1286,11 +1306,12 @@ ${localized.next}`;
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
+    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt);
+    const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
       model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
     });
-    const companyAction = EmailChatActions.isManagementRequest(safePrompt)
+    const companyAction = EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
     const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
@@ -1381,8 +1402,9 @@ ${localized.next}`;
     const safePrompt=SecurityPolicyEngine.protectText(promptWithAttachmentContext).sanitized;
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
-    const emailSettingsRequest = EmailChatActions.isManagementRequest(safeUserRequest);
-    const companySettingsRequest = !emailSettingsRequest && (
+    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safeUserRequest);
+    const emailSettingsRequest = !workspaceSettingsRequest && EmailChatActions.isManagementRequest(safeUserRequest);
+    const companySettingsRequest = !emailSettingsRequest && !workspaceSettingsRequest && (
       CompanyChatActions.isManagementRequest(safeUserRequest)
       || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)))
     );
@@ -1575,7 +1597,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest);
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1698,11 +1720,11 @@ ${localized.next}`;
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
+    const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
     });
-    const companyAction = emailSettingsRequest
+    const companyAction = emailSettingsRequest || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     const workspaceAction = companySettingsRequest
