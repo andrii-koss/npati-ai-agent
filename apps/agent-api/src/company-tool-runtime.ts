@@ -7,6 +7,7 @@ import { McpScopeGuard } from "./mcp-scopes";
 import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
 import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
 import type { EmailAgentTools } from "./email-agent-tools";
+import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -53,6 +54,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly memoryRepository?: CompanyMemoryToolRepository,
     private readonly execSandbox?: IsolatedExecSandbox,
     private readonly emailAgentTools?: EmailAgentTools,
+    private readonly browserTool?: BrowserUseClient,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -155,6 +157,10 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         text(input.url, "URL to inspect", 2_000),
         typeof input.sender === "string" ? input.sender : undefined
       );
+    }
+    if (BROWSER_TOOL_IDS.has(tool)) {
+      if (!this.browserTool) throw new Error("Browser Use Worker is not configured");
+      return this.browserTool.execute(context, company, tool, input, signal);
     }
     throw new Error(`Tool "${tool}" has no runtime adapter`);
   }

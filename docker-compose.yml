@@ -63,6 +63,9 @@ services:
       NPATI_HUB_API_KEY: ${NPATI_HUB_API_KEY:-}
       CRAWL4AI_BASE_URL: http://crawler:11235
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-npati-local-internal-crawler-token}
+      BROWSER_USE_WORKER_URL: http://browser-use-worker:8765
+      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:-npati-local-browser-worker-token-change-before-production}
+      NPATI_BROWSER_UPLOAD_ROOT: /app/data/browser-uploads
       WEB_RESEARCH_MAX_SEARCH_RESULTS: ${WEB_RESEARCH_MAX_SEARCH_RESULTS:-10}
       WEB_RESEARCH_MAX_COMPETITORS: ${WEB_RESEARCH_MAX_COMPETITORS:-5}
       WEB_RESEARCH_MAX_PAGES_PER_SITE: ${WEB_RESEARCH_MAX_PAGES_PER_SITE:-10}
@@ -101,6 +104,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      browser-use-worker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -126,6 +131,8 @@ services:
       redis:
         condition: service_healthy
       crawler:
+        condition: service_healthy
+      browser-use-worker:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "import('redis').then(async({createClient})=>{const c=createClient({url:process.env.REDIS_URL});await c.connect();const v=await c.get('npati:company-worker:heartbeat');await c.quit();if(!v)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -160,6 +167,33 @@ services:
       timeout: 8s
       retries: 5
       start_period: 30s
+    networks: [npati-agent-network]
+
+  browser-use-worker:
+    container_name: npati-agent-browser-use-worker
+    build:
+      context: .
+      dockerfile: services/browser-use-worker/Dockerfile
+    restart: unless-stopped
+    shm_size: "2gb"
+    environment:
+      NPATI_ENV: ${NPATI_ENV:-development}
+      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:-npati-local-browser-worker-token-change-before-production}
+      NPATI_BROWSER_STATE_DIR: /state
+      NPATI_BROWSER_MAX_RETRIES: ${NPATI_BROWSER_MAX_RETRIES:-2}
+      BROWSER_USE_API_KEY: ${BROWSER_USE_API_KEY:-}
+      BROWSER_USE_MODEL: ${BROWSER_USE_MODEL:-bu-2-0}
+    volumes:
+      - browser-use-state:/state
+      - npati-agent-data:/app/data:ro
+    expose:
+      - "8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 45s
     networks: [npati-agent-network]
 
   omniroute:
@@ -289,3 +323,5 @@ volumes:
     name: npati-agent-minio-data
   qdrant-data:
     name: npati-agent-qdrant-data
+  browser-use-state:
+    name: npati-agent-browser-use-state

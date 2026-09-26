@@ -38,6 +38,9 @@ import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./
 import { createProductionResilientAIEngine, InferenceRouteFailure } from "./production-resilient-ai-engine";
 import { AdmissionError, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
+import { BrowserCredentialsRepository } from "./browser-credentials-repository";
+import { registerBrowserCredentialsRoutes } from "./browser-credentials-routes";
+import { BrowserUseClient } from "./browser-tool";
 import { registerMultimodalRoutes } from "./multimodal-routes";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
@@ -201,6 +204,8 @@ export interface AppConfig {
   webResearch?: WebResearchService;
   companyRunTimeoutMs?: number;
   redisUrl?: string;
+  browserUseWorkerUrl?: string;
+  browserUseInternalToken?: string;
   objectStorage?: ObjectStorage;
   fileMetadataRepository?: FileMetadataRepository;
   storageProtection?: StorageProtection;
@@ -622,8 +627,12 @@ export function buildApp(config: AppConfig = {}) {
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
   const emailAgentTools = new EmailAgentTools(emailInboxRepo);
+  const browserCredentials = config.databaseUrl ? new BrowserCredentialsRepository(config.databaseUrl) : undefined;
+  const browserTool = config.browserUseWorkerUrl && config.browserUseInternalToken
+    ? new BrowserUseClient(config.browserUseWorkerUrl, config.browserUseInternalToken, browserCredentials, undefined, chatFiles)
+    : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools);
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -664,6 +673,9 @@ export function buildApp(config: AppConfig = {}) {
       const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
         task: [
           `Continue Agent Task ${awaitingRunId} after receiving its awaited email reply.`,
+          typeof thread.metadata.awaitingBrowserJobId === "string"
+            ? `Resume Browser Job ${thread.metadata.awaitingBrowserJobId} with profile ${String(thread.metadata.awaitingBrowserProfileId || "default")} using browser.resume.`
+            : "",
           `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
           verification.verificationCode ? `Verification code: ${verification.verificationCode}.` : "",
           verification.token ? `Verification token: ${verification.token}.` : "",
@@ -1664,9 +1676,10 @@ ${localized.next}`;
   registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
   registerReliabilityAndOperationsRoutes(app, authProvider, workspaceStore);
   registerBrowserAutomationRoutes(app, authProvider);
+  if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await emailInboxRepo.encryptLegacyAccountCredentials();
