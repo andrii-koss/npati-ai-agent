@@ -228,7 +228,7 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 
 export function CompanyPage() {
   const { t } = useTranslation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
   const { overview } = useWorkspace();
   const cachedCompaniesRef = useRef(getCachedCompanies());
@@ -346,6 +346,13 @@ export function CompanyPage() {
     void initializeCompanies();
     void loadAddedModels();
   }, []);
+
+  useEffect(() => {
+    if (!requestedCompanyId) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("company");
+    setSearchParams(next, { replace: true });
+  }, [requestedCompanyId]);
 
   useEffect(() => {
     if (requestedCompanyId && companies.some((company) => company.id === requestedCompanyId)) setSelectedId(requestedCompanyId);

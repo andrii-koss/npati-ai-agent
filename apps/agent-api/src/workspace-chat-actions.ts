@@ -197,8 +197,8 @@ function finish(directive: WorkspaceDirective, card: string): string {
   return `${intro(directive)}\n\n${card}${followUp(directive) ? `\n\n${followUp(directive)}` : ""}`;
 }
 
-function automationSettingsUrl(companyId: string): string {
-  return `/settings/automations?company=${encodeURIComponent(companyId)}`;
+function automationSettingsUrl(_companyId: string): string {
+  return "/settings/automations";
 }
 
 function idempotency(auth: AuthContext, conversationId: string, requestMessage: string, action: string): string {

@@ -51,6 +51,7 @@ import { registerIntegrationsRoutes } from "./integrations-routes";
 import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
+import { EmailChatActions } from "./email-chat-actions";
 import { registerEmailInboxRoutes } from "./email-routes";
 import { EmailInboxWorker } from "./email-worker";
 import { EmailAgentTools } from "./email-agent-tools";
@@ -1031,6 +1032,37 @@ ${localized.next}`;
     });
   }
 
+  async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
+    const managementRequest = Boolean(requestMessage && EmailChatActions.isManagementRequest(requestMessage));
+    if (!/```email-action/i.test(content) && !managementRequest) return { cleanText: content, emailAction: undefined };
+    let actionText = content;
+    if (!/```email-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
+      try {
+        const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId);
+        const planned = await aiEngine.chat({
+          model: route?.model,
+          fallbackModel: route?.fallbackModel,
+          admission: admissionFor(auth),
+          timeoutMs: 90_000,
+          signal: route?.signal,
+          messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
+        });
+        actionText = planned.content;
+      } catch (error) {
+        app.log.warn({ err: error }, "Email action planning failed");
+      }
+    }
+    if (!/```email-action/i.test(actionText)) return {
+      cleanText: managementRequest ? EmailChatActions.noActionMessage() : content,
+      emailAction: undefined,
+    };
+    return EmailChatActions.extractAndExecute(auth, actionText, workspaceStore, emailInboxRepo, {
+      requestMessage,
+      selectedCompanyId: route?.selectedCompanyId,
+      onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Email action execution failed"),
+    });
+  }
+
   async function runBusinessMessage(
     auth: AuthContext,
     businessId: string,
@@ -1144,7 +1176,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safePrompt);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt) + chatLanguageInstruction(safePrompt);
     const result = await agent.handleBusinessMessage({
       message: safePrompt,
       context,
@@ -1157,12 +1189,15 @@ ${localized.next}`;
     });
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
+    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
+    const companyAction = EmailChatActions.isManagementRequest(safePrompt)
+      ? { cleanText: emailAction.cleanText, companyAction: undefined }
+      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
     const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
+    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
   async function runNeutralMessage(
@@ -1235,8 +1270,11 @@ ${localized.next}`;
     const safePrompt=SecurityPolicyEngine.protectText(promptWithAttachmentContext).sanitized;
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
-    const companySettingsRequest = CompanyChatActions.isManagementRequest(safeUserRequest)
-      || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)));
+    const emailSettingsRequest = EmailChatActions.isManagementRequest(safeUserRequest);
+    const companySettingsRequest = !emailSettingsRequest && (
+      CompanyChatActions.isManagementRequest(safeUserRequest)
+      || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)))
+    );
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
     }
@@ -1426,7 +1464,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + chatLanguageInstruction(safeUserRequest);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id) + chatLanguageInstruction(safeUserRequest);
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1549,7 +1587,10 @@ ${localized.next}`;
     }
 
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); });
-    const companyAction = await executeCompanyChatAction(auth, executedAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+    const emailAction = await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+    const companyAction = emailSettingsRequest
+      ? { cleanText: emailAction.cleanText, companyAction: undefined }
+      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     const workspaceAction = companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
@@ -1561,6 +1602,7 @@ ${localized.next}`;
       suggestedActions: [],
       businessAction: executedAction.businessAction,
       goalAction: executedAction.goalAction,
+      emailAction: emailAction.emailAction,
       companyAction: companyAction.companyAction,
       workspaceAction: workspaceAction.workspaceAction,
       companyRunId: workspaceAction.companyRunId,
@@ -1890,8 +1932,12 @@ ${localized.next}`;
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
         const company = resolved.company!;
-        if (prompt && (isShortAffirmativeReply(prompt) || requestsCompositeCompanyDeletionIntent(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt))) {
-          const result = await runNeutralMessage(auth, prompt, request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
+        const managementRequest = Boolean(prompt && (isShortAffirmativeReply(prompt) || requestsCompositeCompanyDeletionIntent(prompt) || EmailChatActions.isManagementRequest(prompt) || CompanyChatActions.isManagementRequest(prompt) || CompanyChatActions.isPotentialMutationRequest(prompt) || WorkspaceChatActions.isManagementRequest(prompt) || WorkspaceChatActions.isPotentialMutationRequest(prompt)));
+        const runnableMainAgent = company.mainAgentId
+          ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
+          : false;
+        if (managementRequest || !runnableMainAgent) {
+          const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
         }
@@ -2127,7 +2173,12 @@ ${localized.next}`;
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {
-          if (isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)) {
+          const company = resolved.company!;
+          const managementRequest = isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || EmailChatActions.isManagementRequest(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message);
+          const runnableMainAgent = company.mainAgentId
+            ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
+            : false;
+          if (managementRequest || !runnableMainAgent) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {

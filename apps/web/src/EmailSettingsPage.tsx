@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -150,7 +151,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export function EmailSettingsPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("personal");
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -277,11 +277,17 @@ export function EmailSettingsPage() {
     api<{ companies: Company[] }>("/companies")
       .then((res) => {
         setCompanies(res.companies);
-        const requested = searchParams.get("company");
-        const selected = requested === "personal" || (requested && res.companies.some((c) => c.id === requested))
-          ? requested
-          : "personal";
+        const currentUrl = new URL(window.location.href);
+        const requested = currentUrl.searchParams.get("company");
+        const selected = requested === "personal"
+          ? "personal"
+          : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
         setSelectedCompanyId(selected);
+        writeActiveCompanyId(selected === "personal" ? "" : selected);
+        if (requested) {
+          currentUrl.searchParams.delete("company");
+          window.history.replaceState(window.history.state, "", currentUrl.pathname + currentUrl.search + currentUrl.hash);
+        }
       })
       .catch((e) => setNotice(e.message))
       .finally(() => setLoading(false));
@@ -924,7 +930,7 @@ export function EmailSettingsPage() {
           </div>
           <div className="automations-header-actions">
             <Link
-              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}`}
+              to="/settings/email/inbox"
               className="button-secondary automations-action-primary"
               style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >
@@ -969,12 +975,13 @@ export function EmailSettingsPage() {
                 aria-label={t("emailSettings.scope.selectOwnerAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
-                  setSelectedCompanyId(e.target.value);
+                  const companyId = e.target.value;
+                  setSelectedCompanyId(companyId);
                   setAgentId("");
                   setRuleAgentId("");
                   setRuleWorkflowId("");
                   setRuleCreateTask(false);
-                  setSearchParams({ company: e.target.value }, { replace: true });
+                  writeActiveCompanyId(companyId === "personal" ? "" : companyId);
                 }}
                 className="email-scope-select"
               >
@@ -999,7 +1006,7 @@ export function EmailSettingsPage() {
 
         <div className="email-scope-right">
           <Link
-            to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1`}
+            to="/settings/email/inbox?compose=1"
             className="email-compose-btn"
             title={accounts.length ? t("emailSettings.scope.composeTitle") : t("emailSettings.scope.composeDisabledTitle")}
             aria-disabled={accounts.length === 0}
@@ -1516,7 +1523,7 @@ export function EmailSettingsPage() {
                         <td>
                           <div className="automation-actions-cell">
                             <Link
-                              to={`/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}&compose=1&account=${encodeURIComponent(acc.id)}`}
+                              to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}`}
                               className="automation-action-btn"
                               title={t("emailSettings.accountsTab.actionComposeTitle").replace("{{email}}", acc.emailAddress)}
                             >
@@ -1965,7 +1972,7 @@ export function EmailSettingsPage() {
                 </p>
                 <label>
                   <span>{t("emailSettings.accountDrawer.mailboxOwnerLabel")} <strong style={{ color: "#dc2626" }}>*</strong></span>
-                  <select value={selectedCompanyId} onChange={(e) => { setSelectedCompanyId(e.target.value); setAgentId(""); setRuleAgentId(""); setRuleWorkflowId(""); setRuleCreateTask(false); }}>
+                  <select value={selectedCompanyId} onChange={(e) => { const companyId = e.target.value; setSelectedCompanyId(companyId); writeActiveCompanyId(companyId === "personal" ? "" : companyId); setAgentId(""); setRuleAgentId(""); setRuleWorkflowId(""); setRuleCreateTask(false); }}>
                     <option value="personal">{t("emailSettings.scope.personalScope")}</option>
                     {companies.map((company) => <option key={company.id} value={company.id}>{t("emailSettings.scope.companyScopePrefix")}{company.name}</option>)}
                   </select>

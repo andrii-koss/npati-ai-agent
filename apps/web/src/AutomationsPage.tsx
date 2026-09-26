@@ -1,6 +1,7 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { chooseAvailableCompanyId, writeActiveCompanyId } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -103,12 +104,13 @@ export function AutomationsPage() {
       .then((res) => {
         setCompanies(res.companies);
         const requested = searchParams.get("company");
-        const selected = requested && res.companies.some((company) => company.id === requested)
-          ? requested
-          : res.companies[0]?.id ?? "";
+        const selected = chooseAvailableCompanyId(res.companies, { requested });
         setSelectedCompanyId(selected);
-        if (selected && selected !== requested) {
-          setSearchParams({ company: selected }, { replace: true });
+        if (selected) writeActiveCompanyId(selected);
+        if (requested) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("company");
+          setSearchParams(next, { replace: true });
         }
       })
       .catch((e) => setNotice(e.message))
@@ -341,8 +343,9 @@ export function AutomationsPage() {
                 aria-label={t("automations.selectCompanyAria")}
                 value={selectedCompanyId}
                 onChange={(e) => {
-                  setSelectedCompanyId(e.target.value);
-                  setSearchParams({ company: e.target.value }, { replace: true });
+                  const companyId = e.target.value;
+                  setSelectedCompanyId(companyId);
+                  writeActiveCompanyId(companyId);
                 }}
                 className="page-size-select"
               >
