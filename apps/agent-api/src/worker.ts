@@ -15,6 +15,11 @@ import {CompanyApprovalsRepository} from "./approvals-repository";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
 import {AuditRepository} from "./audit-repository";
+import {EmailInboxRepository} from "./email-inbox-repository";
+import {EmailAgentTools} from "./email-agent-tools";
+import {BrowserCredentialsRepository} from "./browser-credentials-repository";
+import {BrowserUseClient} from "./browser-tool";
+import {ChatFileService} from "./chat-file-service";
 const databaseUrl=process.env.DATABASE_URL,redisUrl=process.env.REDIS_URL;
 if(!databaseUrl||!redisUrl)throw new Error("DATABASE_URL and REDIS_URL are required by the Company worker");
 const ai=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL});
@@ -26,15 +31,20 @@ const storage=new MinioObjectStorage({endPoint:process.env.MINIO_ENDPOINT!,port:
 const files=new PostgresFileMetadataRepository(databaseUrl),knowledge=new CompanyKnowledgeRepository(databaseUrl);
 const approvals=new CompanyApprovalsRepository(databaseUrl),guardrails=new GuardrailPolicyRepository((store as any).pool);
 const audit=new AuditRepository(databaseUrl);
+const emailRepo=new EmailInboxRepository(databaseUrl),emailTools=new EmailAgentTools(emailRepo);
+const browserCredentials=new BrowserCredentialsRepository(databaseUrl);
+const chatFiles=new ChatFileService(storage,files,store,attachments);
+const browserTool=process.env.BROWSER_USE_WORKER_URL&&process.env.NPATI_BROWSER_INTERNAL_TOKEN
+  ?new BrowserUseClient(process.env.BROWSER_USE_WORKER_URL,process.env.NPATI_BROWSER_INTERNAL_TOKEN,browserCredentials,undefined,chatFiles):undefined;
 const qdrant=process.env.QDRANT_URL?new ProductionQdrantClient(process.env.QDRANT_URL,"npati_company_knowledge",process.env.QDRANT_INT8_ENABLED!=="false"):undefined;
 const memoryEngines=new ProductionMemoryEngineRegistry([
  ...(qdrant?[new QdrantMemoryEngineAdapter(qdrant)]:[]),
  ...(process.env.FTS5_DB_PATH?[new SqliteFts5MemoryEngine(process.env.FTS5_DB_PATH)]:[]),
 ]);
 const knowledgeProcessor=new CompanyKnowledgeProcessor(knowledge,files,storage,ai,memoryEngines);
-const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,undefined,knowledge,new WasmExecSandbox()),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
+const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,chatFiles,knowledge,new WasmExecSandbox(),emailTools,browserTool),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
 const runWorker=new CompanyRunQueueWorker(redisUrl,store,runtime,{concurrency:Number.parseInt(process.env.NPATI_COMPANY_WORKER_CONCURRENCY??"2",10),leaseMs:Number.parseInt(process.env.NPATI_COMPANY_RUN_LEASE_MS??"180000",10),recoveryMs:Number.parseInt(process.env.NPATI_COMPANY_RECOVERY_INTERVAL_MS??"30000",10)});
 const knowledgeWorker=new CompanyKnowledgeWorker(redisUrl,knowledge,knowledgeProcessor);
-for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close()]));
+for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close(),emailRepo.close(),browserCredentials.close(),chatFiles.close()]));
 console.info("[company-worker] Starting company run and knowledge workers");
 await Promise.all([runWorker.start(),knowledgeWorker.start()]);

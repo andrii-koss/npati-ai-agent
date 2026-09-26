@@ -42,6 +42,8 @@ const app = buildApp({
   crawlerBaseUrl: process.env.CRAWL4AI_BASE_URL,
   companyRunTimeoutMs: Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS ?? '120000', 10),
   redisUrl: process.env.REDIS_URL,
+  browserUseWorkerUrl: process.env.BROWSER_USE_WORKER_URL,
+  browserUseInternalToken: process.env.NPATI_BROWSER_INTERNAL_TOKEN,
   objectStorage,
   storageReconcilerOptions: {
     intervalMs: Number.parseInt(process.env.NPATI_STORAGE_RECONCILE_INTERVAL_MS ?? "21600000",10),

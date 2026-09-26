@@ -172,6 +172,24 @@ export class EmailInboxRepository {
     }
   }
 
+  async claimBrowserEmailWait(ctx: AuthContext, companyId: string, sender: string): Promise<{ browserJobId: string; runId: string; profileId: string } | null> {
+    if (!this.pool) return null;
+    const normalizedSender = sender.trim().toLowerCase();
+    const senderDomain = normalizedSender.split("@")[1] || normalizedSender;
+    const result = await this.pool.query<{ browserJobId: string; runId: string; profileId: string }>(`
+      WITH candidate AS (
+        SELECT id FROM company_browser_email_waits
+        WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND status='waiting_email'
+          AND (sender_hint IS NULL OR sender_hint='' OR sender_hint=$4 OR sender_hint=$5 OR $4 LIKE ('%@' || sender_hint))
+        ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED
+      )
+      UPDATE company_browser_email_waits w SET status='consumed',consumed_at=now()
+      FROM candidate c WHERE w.id=c.id
+      RETURNING w.browser_job_id AS "browserJobId",w.run_id::text AS "runId",w.profile_id AS "profileId"`,
+      [ctx.workspaceId,companyId,ctx.userId,normalizedSender,senderDomain]);
+    return result.rows[0] ?? null;
+  }
+
   async encryptLegacyAccountCredentials(): Promise<number> {
     if (!this.pool) {
       let changed = 0;

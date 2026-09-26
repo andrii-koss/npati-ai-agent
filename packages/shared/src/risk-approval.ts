@@ -51,7 +51,8 @@ export class RiskApprovalService {
     // High risk write / send / update operations
     if (
       /send|write|create|update|modify|patch|post|upload|publish|dispatch|trigger/i.test(key) ||
-      /files\.write|files\.upload|db\.mutate/i.test(key)
+      /files\.write|files\.upload|db\.mutate/i.test(key) ||
+      /browser\..*(?:clicktype|downloads|resume)/i.test(key)
     ) {
       return "high";
     }

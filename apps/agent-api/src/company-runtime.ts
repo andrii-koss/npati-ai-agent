@@ -47,6 +47,14 @@ const comboModel = (value: string | null | undefined) => value == null || value 
 function toolName(value: string) {
   const raw = value.trim().toLowerCase();
   const key = raw.replace(/[ _-]+/g, ".");
+  const browserAliases: Record<string, string> = {
+    "browser.browser.tab.control": "browser.browser_tab_control",
+    "browser.browser.clicktype": "browser.browser_clicktype",
+    "browser.browser.snapshots": "browser.browser_snapshots",
+    "browser.browser.screenshots": "browser.browser_screenshots",
+    "browser.browser.downloads": "browser.browser_downloads",
+  };
+  if (browserAliases[key]) return browserAliases[key]!;
   if (raw.startsWith("omniroute_") || key.startsWith("mcp.")) return "mcp";
   if (key.startsWith("files.")) return "files";
   return ({ "websearch": "web.search", "web.search": "web.search", "webfetch": "web.fetch", "web.fetch": "web.fetch",
@@ -320,6 +328,10 @@ export class CompanyDelegationRuntime {
             "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
+            'browser.browser_tab_control: {"operation":"navigate","url":"absolute public https URL","profileId":"optional stable profile"}, {"operation":"extract","url":"optional URL","selector":"CSS selector","mode":"text|attribute","attribute":"when needed"}, {"operation":"pause","jobId":"running browser job id","profileId":"same profile"}, or {"operation":"resume","jobId":"paused/waiting browser job id","profileId":"same profile","resumeInput":{"task":"continuation and verification code/link if available"}}.',
+            'browser.browser_clicktype for forms: {"operation":"fill_form","url":"optional URL","profileId":"profile","fields":[{"selector":"CSS selector","value":"non-secret value"},{"selector":"CSS selector","secretRef":"credentialAlias.field"}],"credentialRefs":[{"id":"vault credential id","alias":"credentialAlias"}],"submitSelector":"optional CSS selector"}. Never put passwords, tokens, OTPs or other secret values directly in tool input.',
+            'browser.browser_clicktype for registration/autonomy: {"operation":"register_account|task","url":"public URL","allowedDomains":["site.example"],"task":"concrete browser goal mentioning credential aliases only","profileId":"profile","credentialRefs":[{"id":"vault credential id","alias":"account"}],"files":["optional Company attachment UUID"],"maxSteps":50,"waitForEmail":true,"emailHint":"expected sender email/domain"}. Use waitForEmail only after a task expected to send a verification email.',
+            'browser.browser_downloads: {"operation":"upload","url":"optional URL","selector":"input[type=file]","files":["Company attachment UUID linked in Company Knowledge"],"profileId":"profile"}; browser.browser_screenshots: {"operation":"screenshot","url":"optional URL","fullPage":true}.',
             'exec (Code Mode): {"language":"javascript","code":"synchronous JavaScript","timeoutMs":2000}. Generate focused, self-contained code and use console.log for output. It is statically validated, has no filesystem, network, process, environment, require or imports, and always requires human approval.',
             options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
             "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
@@ -667,11 +679,34 @@ export class CompanyDelegationRuntime {
             ? (adapterInput.topic as string).trim()
             : company.name || "company information";
         }
-        if (tool === "email.send" || tool === "communications.email_send") adapterInput.__npatiTaskRunId = runId;
+        if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
           { agentId: agent.id, toolName: tool, decision: "allowed", status: "succeeded", inputSummary: summary(plan.input), latencyMs, sequenceNumber: sequenceNumber++ });
+        if (result && typeof result === "object" && (result as any)._npatiBrowserTrace === true && Array.isArray((result as any).trace)) {
+          for (const event of (result as any).trace.slice(0, 200)) {
+            const eventStatus = event?.status === "failed" ? "failed" : "succeeded";
+            const actionName = String(event?.action ?? "unknown").replace(/[^a-z0-9_.-]/gi, "_");
+            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
+              agentId: agent.id,
+              toolName: `browser.action.${actionName}`,
+              decision: "allowed",
+              status: eventStatus,
+              inputSummary: summary({ url: event?.url, detail: event?.detail, browserStatus: event?.status }),
+              errorMessage: eventStatus === "failed" ? String(event?.detail ?? "Browser action failed").slice(0, 500) : undefined,
+              reasonCode: ["waiting_email", "paused"].includes(event?.status) ? event.status : "browser_worker_trace",
+              sequenceNumber: sequenceNumber++,
+            });
+            await this.telemetry?.log(ctx, company.id, {
+              action: `browser.${actionName}`,
+              category: "automation",
+              resourceType: "browser_job",
+              resourceId: typeof (result as any).jobId === "string" ? (result as any).jobId : runId,
+              details: summary({ runId, agentId: agent.id, url: event?.url, detail: event?.detail, status: event?.status }),
+            }).catch(() => undefined);
+          }
+        }
         evidence.push(`${agent.name} / ${tool}: ${json(result)}`);
       } catch (error) {
         if (signal.aborted) throw error;
@@ -679,6 +714,10 @@ export class CompanyDelegationRuntime {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool,
           decision: "allowed", status: "failed", inputSummary: summary(plan.input), latencyMs, sequenceNumber: sequenceNumber++,
           errorMessage: (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI").slice(0, 500) });
+        if (tool.startsWith("browser.")) await this.telemetry?.log(ctx, company.id, {
+          action: "browser.failed", category: "automation", resourceType: "company_agent_run", resourceId: runId,
+          details: summary({ agentId: agent.id, tool, error: error instanceof Error ? error.message : String(error) }),
+        }).catch(() => undefined);
         evidence.push(`${agent.name} / ${tool} (failed): ${(error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI")}`);
       }
     }

@@ -1,0 +1,4 @@
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+playwright==1.55.0
+browser-use==0.13.10
