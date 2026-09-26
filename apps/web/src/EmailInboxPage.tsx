@@ -1894,25 +1894,43 @@ export function EmailInboxPage() {
           <aside className="company-drawer automations-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label={t("emailInbox.composeModal.title")}>
             <header>
               <div><span>{t("emailInbox.composeModal.kicker")}</span><h2>{t("emailInbox.composeModal.title")}</h2></div>
-              <button type="button" className="company-drawer-close" aria-label={t("emailInbox.composeModal.closeAria")} onClick={() => setComposeOpen(false)} disabled={composeSending}>×</button>
+              <button type="button" className="company-drawer-close" aria-label={t("emailInbox.composeModal.closeAria")} onClick={() => setComposeOpen(false)} disabled={composeSending}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
             </header>
             <form onSubmit={(event) => { event.preventDefault(); void submitCompose(false); }}>
               <section>
                 <h3>{t("emailInbox.composeModal.senderRecipients")}</h3>
-                <label>
-                  <span>{t("emailInbox.composeModal.fromLabel")}</span>
-                  <select value={composeAccountId} onChange={(event) => setComposeAccountId(event.target.value)} required>
-                    <option value="">{t("emailInbox.composeModal.selectAccountPlaceholder")}</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.displayName ? `${account.displayName} — ` : ""}{account.emailAddress}{account.testMode ? t("emailInbox.composeModal.testModeSuffix") : account.status && account.status !== "connected" ? ` (${account.status.replaceAll("_", " ")})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label><span>{t("emailInbox.composeModal.toLabel")}</span><input type="text" value={composeTo} onChange={(event) => setComposeTo(event.target.value)} placeholder={t("emailInbox.composeModal.toPlaceholder")} required /></label>
-                <label><span>{t("emailInbox.composeModal.ccLabel")}</span><input type="text" value={composeCc} onChange={(event) => setComposeCc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} /></label>
-                <label><span>{t("emailInbox.composeModal.bccLabel")}</span><input type="text" value={composeBcc} onChange={(event) => setComposeBcc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} /></label>
+                <div className="company-form-grid">
+                  <label>
+                    <span>{t("emailInbox.composeModal.fromLabel")}</span>
+                    <select value={composeAccountId} onChange={(event) => setComposeAccountId(event.target.value)} required>
+                      <option value="">{t("emailInbox.composeModal.selectAccountPlaceholder")}</option>
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.displayName ? `${account.displayName} — ` : ""}{account.emailAddress}{account.testMode ? t("emailInbox.composeModal.testModeSuffix") : account.status && account.status !== "connected" ? ` (${account.status.replaceAll("_", " ")})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>{t("emailInbox.composeModal.toLabel")}</span>
+                    <input type="text" value={composeTo} onChange={(event) => setComposeTo(event.target.value)} placeholder={t("emailInbox.composeModal.toPlaceholder")} required />
+                  </label>
+                </div>
+                <div className="company-form-grid">
+                  <label>
+                    <span>{t("emailInbox.composeModal.ccLabel")}</span>
+                    <input type="text" value={composeCc} onChange={(event) => setComposeCc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} />
+                  </label>
+                  <label>
+                    <span>{t("emailInbox.composeModal.bccLabel")}</span>
+                    <input type="text" value={composeBcc} onChange={(event) => setComposeBcc(event.target.value)} placeholder={t("emailInbox.composeModal.optionalCommaSeparated")} />
+                  </label>
+                </div>
               </section>
               <section>
                 <h3>{t("emailInbox.composeModal.messageHeading")}</h3>
