@@ -1215,12 +1215,12 @@ export function EmailInboxPage() {
           {/* Threads Scroll List */}
           <div className="email-inbox-threads-scroll">
             {threads.length === 0 ? (
-              <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+              <div style={{ padding: "40px 20px", textAlign: "center" }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-                <strong style={{ display: "block", marginBottom: 4 }}>
+                <strong style={{ display: "block", marginBottom: 4, color: "#1e293b" }}>
                   {t("emailInbox.threadsList.emptyFolderTitlePrefix")} {t(`emailInbox.sidebar.folders.${folder}` as any)}
                 </strong>
-                <small>{t(`emailInbox.threadsList.emptyFolderHints.${folder}` as any)}</small>
+                <small style={{ color: "#475569" }}>{t(`emailInbox.threadsList.emptyFolderHints.${folder}` as any)}</small>
               </div>
             ) : (
               threads.map((tItem) => {
@@ -1237,7 +1237,7 @@ export function EmailInboxPage() {
                         {tItem.isVip && <span style={{ color: "#eab308", marginRight: 4 }}>★</span>}
                         {tItem.customerName || tItem.customerEmail}
                       </span>
-                      <small style={{ fontSize: 11, color: "#64748b", flexShrink: 0 }}>
+                      <small style={{ fontSize: 11, color: "#475569", flexShrink: 0 }}>
                         {new Date(tItem.lastMessageAt).toLocaleDateString(language)}
                       </small>
                     </div>
@@ -1293,7 +1293,7 @@ export function EmailInboxPage() {
               <h3 style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 700, color: "#0f172a" }}>
                 {t("emailInbox.threadDetail.emptySelectTitle")}
               </h3>
-              <p style={{ margin: 0, fontSize: 13, maxWidth: 360, lineHeight: 1.5 }}>
+              <p style={{ margin: 0, fontSize: 13, maxWidth: 360, lineHeight: 1.5, color: "#475569" }}>
                 {t("emailInbox.threadDetail.emptySelectDesc")}
               </p>
             </div>
@@ -1626,10 +1626,10 @@ export function EmailInboxPage() {
                 {/* Messages Scroll Timeline */}
                 <div className="email-inbox-messages-scroll" ref={messageScrollRef}>
                   {historyMessages.length === 0 ? (
-                    <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+                    <div style={{ padding: "40px 20px", textAlign: "center" }}>
                       <div style={{ fontSize: 28, marginBottom: 8 }}>📬</div>
-                      <strong style={{ display: "block", marginBottom: 4 }}>{t("emailInbox.messagesTimeline.noMessagesTitle")}</strong>
-                      <small>{t("emailInbox.messagesTimeline.noMessagesDesc")}</small>
+                      <strong style={{ display: "block", marginBottom: 4, color: "#1e293b" }}>{t("emailInbox.messagesTimeline.noMessagesTitle")}</strong>
+                      <small style={{ color: "#475569" }}>{t("emailInbox.messagesTimeline.noMessagesDesc")}</small>
                     </div>
                   ) : (
                     historyMessages.map((m) => {
@@ -1643,7 +1643,7 @@ export function EmailInboxPage() {
                             <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
                               {isInbound ? m.fromName || m.fromAddress : m.isAiGenerated ? t("emailInbox.messagesTimeline.aiAssistant") : t("emailInbox.messagesTimeline.supportAgent")}
                             </div>
-                            <small style={{ fontSize: 11, color: "#64748b" }}>
+                            <small style={{ fontSize: 11, color: "#475569" }}>
                               {new Date(m.createdAt).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })}
                             </small>
                           </div>
@@ -1985,7 +1985,7 @@ export function EmailInboxPage() {
                   <div className="workspace-notice">{t("emailInbox.composeModal.testModeNotice")}</div>
                 )}
               </section>
-              <footer>
+              <footer style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="button-secondary" disabled={composeSending || !composeAccountId || !composeTo.trim() || !composeSubject.trim() || !composeBody.trim()} onClick={() => void submitCompose(true)}>
                   {t("emailInbox.composeModal.saveDraft")}
                 </button>
