@@ -1331,11 +1331,6 @@ export function EmailInboxPage() {
                         {activeThread.subject}
                       </strong>
 
-                      <span className={`email-status-pill status-${activeThread.status}`} style={{ flexShrink: 0 }}>
-                        <span className="email-status-dot" />
-                        {getStatusLabel(activeThread.status, t)}
-                      </span>
-
                       <span className="email-header-compact-sender">
                         {t("emailInbox.threadDetail.fromPrefix")}{activeThread.customerName || activeThread.customerEmail}
                       </span>
