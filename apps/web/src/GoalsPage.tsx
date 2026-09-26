@@ -71,13 +71,20 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const GOALS_CACHE_PREFIX = "npati_goals_cache_v1_";
+const GOALS_LATEST_CACHE_KEY = "npati_goals_cache_latest_v1";
 
 function getCachedGoals(businessId?: string): Goal[] {
-  if (!businessId) return [];
   try {
-    const raw = sessionStorage.getItem(GOALS_CACHE_PREFIX + businessId) || localStorage.getItem(GOALS_CACHE_PREFIX + businessId);
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    if (businessId) {
+      const raw = sessionStorage.getItem(GOALS_CACHE_PREFIX + businessId) || localStorage.getItem(GOALS_CACHE_PREFIX + businessId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const latest = sessionStorage.getItem(GOALS_LATEST_CACHE_KEY) || localStorage.getItem(GOALS_LATEST_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch { /* storage may be restricted */ }
@@ -87,19 +94,37 @@ function getCachedGoals(businessId?: string): Goal[] {
 function updateCachedGoals(businessId: string, items: Goal[]) {
   try {
     const serialized = JSON.stringify(items);
-    sessionStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
-    localStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
+    if (businessId) {
+      sessionStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
+      localStorage.setItem(GOALS_CACHE_PREFIX + businessId, serialized);
+    }
+    if (items.length > 0) {
+      sessionStorage.setItem(GOALS_LATEST_CACHE_KEY, serialized);
+      localStorage.setItem(GOALS_LATEST_CACHE_KEY, serialized);
+    }
   } catch { /* storage may be restricted */ }
+}
+
+function getInitialBusinessId(): string {
+  try {
+    const raw = sessionStorage.getItem("npati_workspace_overview_cache_v1")
+      || localStorage.getItem("npati_workspace_overview_cache_v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed?.currentBusiness?.id || parsed?.businesses?.[0]?.id || "";
+    }
+  } catch {}
+  return "";
 }
 
 export function GoalsPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
-  const businessId = business?.id;
+  const businessId = business?.id || getInitialBusinessId();
 
   const [goals, setGoals] = useState<Goal[]>(() => getCachedGoals(businessId));
-  const [loading, setLoading] = useState(() => getCachedGoals(businessId).length === 0);
+  const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Search & Filter State
@@ -115,10 +140,8 @@ export function GoalsPage() {
 
   const loadGoals = async () => {
     if (!businessId) {
-      setLoading(false);
       return;
     }
-    if (goals.length === 0) setLoading(true);
     try {
       const data = await api<Goal[]>(`/businesses/${businessId}/goals`);
       setGoals(data);
@@ -494,7 +517,9 @@ export function GoalsPage() {
       </div>
 
       {/* Main Content Area */}
-      {loading ? null : goals.length === 0 ? (
+      {goals.length === 0 && loading ? (
+        <div className="automations-table-container goals-table-container" style={{ minHeight: "220px" }} />
+      ) : goals.length === 0 ? (
         <div className="automations-empty-card goals-empty-card">
           <div className="automations-empty-icon">🎯</div>
           <h3>{t("goalsPage.empty.noGoalsTitle")}</h3>
