@@ -2553,6 +2553,7 @@ a {
 }
 
 .field input,
+.field select,
 .field textarea,
 .model-toolbar input {
   width: 100%;
@@ -2570,6 +2571,7 @@ a {
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus,
 .model-toolbar input:focus {
   border-color: var(--npati-red);
@@ -16164,17 +16166,3 @@ body:has(.npati-dialog-backdrop) .sidebar {
   color: #ffffff;
   background: #ef4444;
 }
-.integrations-page { padding-bottom: 72px; }
-.integration-config,.integration-connections { max-width: 1120px; margin: 28px auto 0; padding: 28px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 18px; background: var(--surface, #fff); }
-.integration-config { display: grid; grid-template-columns: minmax(240px,.8fr) minmax(320px,1.2fr); gap: 32px; }
-.integration-config h2,.integration-connections h2 { margin: 5px 0 8px; }
-.integration-config p { color: var(--text-secondary, #667085); line-height: 1.55; }
-.integration-form { display: grid; gap: 14px; }
-.integration-form label { display: grid; gap: 6px; color: var(--text-secondary, #667085); font-size: 13px; font-weight: 600; }
-.integration-form input,.integration-form select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--border-color, #d0d5dd); border-radius: 9px; background: var(--surface, #fff); color: inherit; }
-.pairing-callout { grid-column: 1/-1; padding: 18px; border-radius: 12px; background: #eff8ff; border: 1px solid #b2ddff; }
-.pairing-callout p { margin: 5px 0; }.pairing-callout code { display: inline-block; padding: 8px 12px; border-radius: 7px; background: #fff; font-size: 16px; }
-.integration-connections>article { display: grid; grid-template-columns: minmax(220px,1fr) auto auto auto; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--border-color, #e5e7eb); }
-.integration-connections>article>div { display: grid; gap: 4px; }.integration-connections>article>div span { color: var(--text-secondary, #667085); font-size: 13px; }
-.integration-status { text-transform: capitalize; font-size: 12px; font-weight: 700; padding: 5px 9px; border-radius: 999px; background: #f2f4f7; }.integration-status.connected { color: #027a48; background: #ecfdf3; }.integration-status.pending { color: #b54708; background: #fffaeb; }
-@media (max-width: 760px) { .integration-config { grid-template-columns: 1fr; }.integration-connections>article { grid-template-columns: 1fr auto; }.integration-connections>article button { width: 100%; } }
