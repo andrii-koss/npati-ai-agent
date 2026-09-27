@@ -18,7 +18,7 @@ describe("messaging migration",()=>{
     expect(sql).not.toMatch(/agent_id UUID REFERENCES company_agents\(id\)/);
   });
   it("adds account scope and makes the Company binding optional",async()=>{let sql="";await runMigration046({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("connection_scope");expect(sql).toContain("ALTER COLUMN company_id DROP NOT NULL");expect(sql).toContain("active_company_id TEXT");});
-  it("adds durable per-topic sessions and inbound deduplication",async()=>{let sql="";await runMigration047({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("CREATE TABLE IF NOT EXISTS messaging_sessions");expect(sql).toContain("UNIQUE(connection_id, external_chat_id, external_thread_id)");expect(sql).toContain("messaging_inbound_events");});
+  it("adds durable per-topic sessions and inbound deduplication with UUID-compatible connection keys",async()=>{let sql="";await runMigration047({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("CREATE TABLE IF NOT EXISTS messaging_sessions");expect(sql).toContain("connection_id UUID NOT NULL REFERENCES messaging_connections(id)");expect(sql).not.toContain("connection_id TEXT NOT NULL REFERENCES messaging_connections(id)");expect(sql).toContain("UNIQUE(connection_id, external_chat_id, external_thread_id)");expect(sql).toContain("messaging_inbound_events");});
 });
 
 describe("messaging integrations tenant binding",()=>{
