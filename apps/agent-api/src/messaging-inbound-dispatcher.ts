@@ -14,7 +14,8 @@ export class WhatsAppInboundDispatcher {
     const {repo,adapter,store}=this.deps,token=repo.resolveToken(connection),settings=connection.settings;
     if(!await repo.claimInbound(connection,message.eventId,message.messageId))return{status:"duplicate"};
     if(connection.status!=="connected")throw Object.assign(new Error("WhatsApp connection is not connected"),{status:403});
-    const group=message.chatType==="group",allowed=group?settings.groups.enabled&&settings.groups.allowedChatIds.includes(message.externalChatId):settings.access.allowedUserIds.includes(message.externalUserId)||settings.access.allowedUserIds.includes(message.externalChatId);
+    const group=message.chatType==="group",selfChat=message.isSelfChat===true&&connection.provider==="qr"&&settings.access.selfChat;
+    const allowed=selfChat|| (group?settings.groups.enabled&&settings.groups.allowedChatIds.includes(message.externalChatId):settings.access.allowedUserIds.includes(message.externalUserId)||settings.access.allowedUserIds.includes(message.externalChatId));
     if(!allowed)throw Object.assign(new Error("WhatsApp sender/chat is not on the connection allowlist"),{status:403,code:"WHATSAPP_ALLOWLIST_MISMATCH"});
     if(group&&settings.groups.mentionRequired){const own=connection.externalUserId?.split("@")[0]||"";if(!message.text.includes("@"+own)&&!message.text.startsWith("/"))return{status:"mention_required"};}
     const denied=message.attachments.find((item)=>(item.kind==="image"&&!settings.media.images)||((item.kind==="document"||item.kind==="file")&&!settings.media.documents)||(item.kind==="audio"&&!settings.media.audio));

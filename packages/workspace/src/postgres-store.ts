@@ -594,6 +594,19 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query('ROLLBACK'); throw error; }
       finally { client.release(); }
     }
+    const whatsappSelfChat = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='050_whatsapp_self_chat'");
+    if (!whatsappSelfChat.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration050 } = await import("./migration-050");
+        await runMigration050(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('050_whatsapp_self_chat') ON CONFLICT DO NOTHING");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
+
 
   }
 
