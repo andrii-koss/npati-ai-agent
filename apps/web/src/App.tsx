@@ -1235,7 +1235,7 @@ function SettingsPage() {
         </svg>
       ),
       title: "Integrations",
-      description: "Connect Telegram to Company Agents. Discord, Slack, WhatsApp and Email are coming soon.",
+      description: "Connect Telegram or WhatsApp to the shared NPATI Messaging Gateway.",
     },
     {
       to: "/settings/business",

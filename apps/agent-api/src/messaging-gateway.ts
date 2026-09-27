@@ -254,4 +254,5 @@ export class MessagingGateway {
   private readonly adapters = new Map<string, MessagingAdapter>();
   register(adapter: MessagingAdapter) { this.adapters.set(adapter.channel, adapter); return this; }
   adapter(channel: string) { const adapter=this.adapters.get(channel); if(!adapter)throw new Error(`Messaging adapter ${channel} is unavailable`); return adapter; }
+  optionalAdapter(channel:string){return this.adapters.get(channel);}
 }

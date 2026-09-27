@@ -16982,3 +16982,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   color: #ffffff;
   background: #ef4444;
 }
+/* WhatsApp uses the shared integration drawer while suppressing Telegram-only fallback panels. */
+.connect-body + .connect-body { display: none; }
+.connection-manager.whatsapp > .integration-settings-section + .integration-settings-section { display: none; }
+.connection-manager.whatsapp .integration-subform { display: none; }
+.whatsapp-qr { display:block; width:min(320px,100%); height:auto; margin:16px auto; border-radius:12px; background:#fff; padding:8px; }
