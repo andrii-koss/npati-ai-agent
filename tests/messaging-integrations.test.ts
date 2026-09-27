@@ -4,8 +4,17 @@ import { MessagingIntegrationsRepository } from "../apps/agent-api/src/messaging
 import { MessagingGateway, TelegramMessagingAdapter } from "../apps/agent-api/src/messaging-gateway";
 import Fastify from "fastify";
 import { registerMessagingIntegrationRoutes } from "../apps/agent-api/src/messaging-integrations-routes";
+import { runMigration045 } from "../packages/workspace/src/migration-045";
 
 const owner:AuthContext={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage","tools:execute"]};
+
+describe("messaging migration",()=>{
+  it("uses the existing TEXT identifier type for Company Agent foreign keys",async()=>{
+    let sql="";await runMigration045({query:async(statement:string)=>{sql=statement;return{};}} as any);
+    expect(sql).toMatch(/agent_id TEXT REFERENCES company_agents\(id\)/);
+    expect(sql).not.toMatch(/agent_id UUID REFERENCES company_agents\(id\)/);
+  });
+});
 
 describe("messaging integrations tenant binding",()=>{
   it("encrypts credentials, hides secrets and isolates users",async()=>{
