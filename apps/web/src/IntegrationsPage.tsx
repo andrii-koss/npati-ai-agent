@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { getChannelIcon } from "./integration-icons";
 
 type Company={id:string;name:string};
 type Agent={id:string;name:string;role:string;isActive:boolean};
@@ -16,7 +17,18 @@ async function api<T>(path:string,init?:RequestInit):Promise<T>{const headers=ne
 const initial=(name:string)=>name.trim().charAt(0).toUpperCase();
 const formatDate=(value?:string|null)=>value?new Date(value).toLocaleString():"Never";
 const scopeLabel=(scope:ConnectionScope)=>scope==="account"?"Entire NPATI Account":scope==="company"?"Specific Company":"Specific Agent";
-function ChannelIcon({channel,size}:{channel:Channel;size?:"small"|"large"}){return <span className={`provider-avatar${size?` ${size}`:""}`} aria-hidden="true"><span className="provider-initials">{initial(channel.name)}</span></span>;}
+function ChannelIcon({channel,size}:{channel:Channel;size?:"small"|"large"}){
+  const icon = getChannelIcon(channel.id);
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className={`provider-avatar${size?` ${size}`:""}`} aria-hidden="true">
+      <span className="provider-initials">{initial(channel.name)}</span>
+      {icon && !failed && (
+        <img src={icon} alt="" loading="lazy" onError={()=>setFailed(true)} />
+      )}
+    </span>
+  );
+}
 function Badge({children,tone="neutral"}:{children:React.ReactNode;tone?:string}){return <span className={`ai-badge ${tone}`}>{children}</span>;}
 function Toggle({checked,onChange,label,description,disabled=false}:{checked:boolean;onChange:(value:boolean)=>void;label:string;description?:string;disabled?:boolean}){return <label className={`integration-toggle${disabled?" disabled":""}`}><span><strong>{label}</strong>{description&&<small>{description}</small>}</span><input type="checkbox" checked={checked} disabled={disabled} onChange={(event)=>onChange(event.target.checked)}/><i aria-hidden="true"/></label>;}
 
