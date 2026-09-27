@@ -107,4 +107,25 @@ describe("Telegram ingress",()=>{
     expect((await send(1,setup.pairingCommand)).json().status).toBe("connected");expect((await send(2,"/status")).json().status).toBe("reported");expect((await send(3,"/new")).json().status).toBe("reset");expect(handleMessage).not.toHaveBeenCalled();
     expect((await send(4,"work until stopped")).json().status).toBe("accepted");await vi.waitFor(()=>expect(handleMessage).toHaveBeenCalledOnce());expect((await send(5,"/stop")).json().status).toBe("stopping");await vi.waitFor(()=>expect(sent.some((item)=>item.includes("Stopping"))).toBe(true));await app.close();
   });
+  it("supports reverse-proxied /v1/ webhook route, deep link start commands, and pending guidance",async()=>{
+    const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("proxy-test-master-key-that-is-long-enough-123")),sent:string[]=[];
+    const adapter={channel:"telegram",validateCredential:async()=>({externalName:"@npati_ai_bot"}),configureWebhook:async()=>undefined,parseInbound:async(payload:any)=>({externalUserId:String(payload.message.from.id),externalChatId:String(payload.message.chat.id),text:payload.message.text,attachments:[],messageId:String(payload.message.message_id),eventId:String(payload.update_id)}),sendText:async(_token:string,_chat:string,text:string)=>{sent.push(text);return[String(sent.length)];},sendTyping:async()=>undefined};
+    const gateway=new MessagingGateway().register(adapter);
+    const app=Fastify();
+    registerMessagingIntegrationRoutes(app,{auth:{authenticate:async()=>owner} as any,store:{} as any,repo,gateway,webhookBaseUrl:"https://ai.npati.com",handleMessage:async()=>({message:"ok"})});
+    const create=await app.inject({method:"POST",url:"/integrations/telegram",payload:{botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"}});
+    const setup=create.json(),secret=String(setup.webhookUrl).split("/").at(-1)!;
+    // 1. User presses /start before pairing: bot responds with guidance instead of 403 silence
+    const pendingStart=await app.inject({method:"POST",url:`/v1/integrations/telegram/${secret}`,headers:{"x-telegram-bot-api-secret-token":secret},payload:{update_id:1,message:{message_id:1,from:{id:77},chat:{id:88},text:"/start"}}});
+    expect(pendingStart.statusCode).toBe(200);
+    expect(pendingStart.json().status).toBe("pairing_required");
+    expect(sent.at(-1)).toContain("Welcome to NPATI");
+    // 2. User connects via deep link: /start connect_<pairingCode> on the proxied /v1/ path
+    const code=setup.pairingCode;
+    const proxiedConnect=await app.inject({method:"POST",url:`/v1/integrations/telegram/${secret}`,headers:{"x-telegram-bot-api-secret-token":secret},payload:{update_id:2,message:{message_id:2,from:{id:77},chat:{id:88},text:`/start connect_${code}`}}});
+    expect(proxiedConnect.statusCode).toBe(200);
+    expect(proxiedConnect.json().status).toBe("connected");
+    expect(sent.at(-1)).toContain("Telegram is connected to NPATI");
+    await app.close();
+  });
 });

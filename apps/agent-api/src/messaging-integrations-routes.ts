@@ -32,7 +32,20 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   app.get<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/manage",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"workspace:read"),connection=await repo.getOwned(ctx,r.params.connectionId);if(!connection)throw Object.assign(new Error("Connection not found"),{status:404});const{webhookSecret:_secret,encryptedCredential:_credential,pairingCodeHash:_pairing,...safe}=connection;return{connection:safe,sessions:await repo.listSessionsOwned(ctx,connection.id),commands:telegramCommands,transport:"webhook",capabilities:{typing:true,progressiveEditing:true,longMessageChunking:true,retryBackoff:true,deduplication:true,sessionPersistence:true,inboundMedia:["images","documents","audio","video"],outboundMedia:["images","documents"]}};}catch(e){return failure(reply,e);}});
   app.patch<{Params:{connectionId:string};Body:{displayName?:string;scope?:MessagingConnectionScope;companyId?:string|null;agentId?:string|null;settings?:MessagingConnectionSettings}}>("/integrations/messaging/:connectionId",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),current=await repo.getOwned(ctx,r.params.connectionId);if(!current)throw Object.assign(new Error("Connection not found"),{status:404});const scope=r.body?.scope||current.scope,companyId=scope==="account"?null:(r.body?.companyId??current.companyId??null),agentId=scope==="agent"?(r.body?.agentId??current.agentId??null):null;if(scope!=="account"&&!companyId)throw new Error("Company is required for this connection scope");if(scope==="agent"&&!agentId)throw new Error("Agent is required for Specific Agent scope");if(companyId)await store.getCompany(ctx,companyId);if(companyId&&agentId)await store.getCompanyAgent(ctx,companyId,agentId);const connection=await repo.updateOwned(ctx,current.id,{displayName:r.body?.displayName?.trim()||current.displayName,scope,companyId,agentId,settings:r.body?.settings||current.settings});return{connection};}catch(e){return failure(reply,e);}});
   app.post<{Params:{connectionId:string};Body:{botToken?:string}}>("/integrations/messaging/:connectionId/token",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});const token=r.body?.botToken?.trim();if(!token)throw new Error("Telegram bot token is required");const adapter=gateway.adapter("telegram"),bot=await adapter.validateCredential(token),base=deps.webhookBaseUrl?.replace(/\/+$/,'');if(!base)throw Object.assign(new Error("Telegram webhook URL is not configured"),{status:503});const pairing=await repo.replaceCredential(item,token,bot.externalName);await adapter.configureWebhook(token,`${base}/api/v1/integrations/telegram/${item.webhookSecret}`,item.webhookSecret);return{connection:(await repo.list(ctx)).find((entry)=>entry.id===item.id),...pairing};}catch(e){return failure(reply,e);}});
-  app.post<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/pairing",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});return await repo.issuePairing(item,true);}catch(e){return failure(reply,e);}});
+  app.post<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/pairing",async(r,reply)=>{
+    try{
+      const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);
+      if(!item)throw Object.assign(new Error("Connection not found"),{status:404});
+      const pairing=await repo.issuePairing(item,true);
+      const base=deps.webhookBaseUrl?.replace(/\/+$/,'');
+      if(base){
+        try{
+          await gateway.adapter(item.channel).configureWebhook(repo.resolveToken(item),`${base}/api/v1/integrations/telegram/${item.webhookSecret}`,item.webhookSecret);
+        }catch{}
+      }
+      return pairing;
+    }catch(e){return failure(reply,e);}
+  });
   app.post<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/revoke",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});await repo.setStatus(item,"pending");await repo.issuePairing(item,true);return{ok:true};}catch(e){return failure(reply,e);}});
   app.post<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/disconnect",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});await gateway.adapter(item.channel).disconnect?.(repo.resolveToken(item));await repo.setStatus(item,"paused");return{ok:true};}catch(e){return failure(reply,e);}});
   app.post<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/reconnect",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});const base=deps.webhookBaseUrl?.replace(/\/+$/,'');if(!base)throw Object.assign(new Error("Telegram webhook URL is not configured"),{status:503});await gateway.adapter(item.channel).configureWebhook(repo.resolveToken(item),`${base}/api/v1/integrations/telegram/${item.webhookSecret}`,item.webhookSecret);await repo.setStatus(item,item.externalUserId&&item.externalChatId?"connected":"pending");return{ok:true,status:item.status};}catch(e){return failure(reply,e);}});
@@ -73,7 +86,7 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   app.delete<{Params:{companyId:string;connectionId:string}}>("/companies/:companyId/integrations/messaging/:connectionId",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage");await store.getCompany(ctx,r.params.companyId);const item=await repo.get(ctx,r.params.companyId,r.params.connectionId);if(!item)return reply.code(404).send({error:{code:"NOT_FOUND",message:"Connection not found"}});const adapter=gateway.adapter(item.channel);if(adapter.disconnect)await adapter.disconnect(repo.resolveToken(item));await repo.delete(ctx,r.params.companyId,r.params.connectionId);return reply.code(204).send();}catch(e){return failure(reply,e);}});
   app.delete<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)return reply.code(404).send({error:{code:"NOT_FOUND",message:"Connection not found"}});const adapter=gateway.adapter(item.channel);if(adapter.disconnect)await adapter.disconnect(repo.resolveToken(item));await repo.deleteOwned(ctx,item.id);return reply.code(204).send();}catch(e){return failure(reply,e);}});
 
-  app.post<{Params:{secret:string};Body:unknown}>("/api/v1/integrations/telegram/:secret",async(r,reply)=>{
+  const telegramWebhookHandler = async (r: FastifyRequest<{Params:{secret:string};Body:unknown}>, reply: any) => {
     const connection=await repo.getByWebhookSecret(r.params.secret);
     if(!connection)return reply.code(404).send({error:{code:"INVALID_CONNECTION",message:"Telegram connection not found"}});
     if(!secureEqual(r.headers["x-telegram-bot-api-secret-token"],connection.webhookSecret))return reply.code(401).send({error:{code:"INVALID_WEBHOOK_SIGNATURE",message:"Invalid Telegram webhook signature"}});
@@ -81,8 +94,16 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
       const token=repo.resolveToken(connection),adapter=gateway.adapter("telegram");let message=await adapter.parseInbound(r.body,token,false);
       if(!message)return reply.code(202).send({status:"ignored"});
       if(!await repo.claimInbound(connection,message.eventId,message.messageId))return reply.code(200).send({status:"duplicate",messageId:message.messageId});
-      const pair=/^\/connect\s+(\d{6})$/i.exec(message.text);
-      if(pair){const bound=await repo.bind(connection,{pairingCode:pair[1]!,externalUserId:message.externalUserId,externalChatId:message.externalChatId,externalThreadId:message.externalThreadId});await adapter.sendText(token,message.externalChatId,bound?"Telegram is connected to NPATI. You can now use your NPATI account.":"The pairing code is invalid or expired.",message.externalThreadId);return reply.code(200).send({status:bound?"connected":"rejected"});}
+      const pair=/^\/(?:connect(?:@[A-Za-z0-9_]+)?\s+|start(?:@[A-Za-z0-9_]+)?\s+(?:connect[-_])?)(\d{6})\s*$/i.exec(message.text.trim());
+      if(pair){
+        const bound=await repo.bind(connection,{pairingCode:pair[1]!,externalUserId:message.externalUserId,externalChatId:message.externalChatId,externalThreadId:message.externalThreadId});
+        await adapter.sendText(token,message.externalChatId,bound?"Telegram is connected to NPATI. You can now use your NPATI account.":"The pairing code is invalid or expired. Please generate a new pairing command in NPATI settings.",message.externalThreadId);
+        return reply.code(200).send({status:bound?"connected":"rejected"});
+      }
+      if(connection.status==="pending"){
+        await adapter.sendText(token,message.externalChatId,"👋 Welcome to NPATI!\n\nTo link this Telegram account with NPATI, please generate a pairing command on your NPATI Integrations page and send it here:\n/connect 123456",message.externalThreadId);
+        return reply.code(200).send({status:"pairing_required"});
+      }
       const group=["group","supergroup"].includes(message.chatType||""),settings=connection.settings,allowedGroup=group&&settings.groups.enabled&&settings.groups.allowedChatIds.includes(message.externalChatId),authorizedChat=connection.externalChatId===message.externalChatId||allowedGroup;
       if(connection.status!=="connected"||connection.externalUserId!==message.externalUserId||!authorizedChat)return reply.code(403).send({error:{code:"TELEGRAM_BINDING_MISMATCH",message:"This Telegram user/chat is not allowed for the connection"}});
       if(group&&!settings.groups.enabled)return reply.code(202).send({status:"groups_disabled"});
@@ -116,5 +137,9 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
         .finally(()=>{clearInterval(typing);clearTimeout(progressTimer);if(activeRuns.get(key)===controller)activeRuns.delete(key);});
       return reply.code(202).send({status:"accepted",messageId:message.messageId});
     }catch(e){await repo.record(connection.id,"inbound",e instanceof Error?e.message:String(e)).catch(()=>undefined);return failure(reply,e);}
-  });
+  };
+
+  // Register on both /v1/* (when behind Nginx proxy stripping /api/) and /api/v1/* (direct or unstripped calls)
+  app.post<{Params:{secret:string};Body:unknown}>("/api/v1/integrations/telegram/:secret", telegramWebhookHandler);
+  app.post<{Params:{secret:string};Body:unknown}>("/v1/integrations/telegram/:secret", telegramWebhookHandler);
 }
