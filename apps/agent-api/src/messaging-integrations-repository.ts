@@ -12,13 +12,20 @@ export interface MessagingConnection {
   encryptedCredential:string; pairingCodeHash?:string|null; pairingExpiresAt?:string|null; lastInboundAt?:string|null;
   runtimeConversationId?:string|null; activeCompanyId?:string|null; activeAgentId?:string|null; lastOutboundAt?:string|null; lastError?:string|null; createdAt:string; updatedAt:string;
 }
+export interface MessagingSession {
+  id:string; connectionId:string; externalChatId:string; externalThreadId:string;
+  runtimeConversationId?:string|null; activeCompanyId?:string|null; activeAgentId?:string|null;
+  createdAt:string; updatedAt:string;
+}
 export type MessagingConnectionView=Omit<MessagingConnection,"webhookSecret"|"encryptedCredential"|"pairingCodeHash">;
 const columns=`id,workspace_id AS "workspaceId",user_id AS "userId",company_id AS "companyId",agent_id AS "agentId",connection_scope AS "scope",active_company_id AS "activeCompanyId",active_agent_id AS "activeAgentId",channel,display_name AS "displayName",status,bot_username AS "botUsername",external_user_id AS "externalUserId",external_chat_id AS "externalChatId",external_thread_id AS "externalThreadId",runtime_conversation_id AS "runtimeConversationId",permissions,webhook_secret AS "webhookSecret",encrypted_credential AS "encryptedCredential",pairing_code_hash AS "pairingCodeHash",pairing_expires_at::text AS "pairingExpiresAt",last_inbound_at::text AS "lastInboundAt",last_outbound_at::text AS "lastOutboundAt",last_error AS "lastError",created_at::text AS "createdAt",updated_at::text AS "updatedAt"`;
+const sessionColumns=`id,connection_id AS "connectionId",external_chat_id AS "externalChatId",external_thread_id AS "externalThreadId",runtime_conversation_id AS "runtimeConversationId",active_company_id AS "activeCompanyId",active_agent_id AS "activeAgentId",created_at::text AS "createdAt",updated_at::text AS "updatedAt"`;
 const hash=(value:string)=>createHash("sha256").update(value).digest("hex");
 function view(item:MessagingConnection):MessagingConnectionView{const{webhookSecret:_s,encryptedCredential:_c,pairingCodeHash:_p,...safe}=item;return safe;}
 
 export class MessagingIntegrationsRepository{
   private readonly pool?:Pool; private readonly memory=new Map<string,MessagingConnection>();
+  private readonly sessions=new Map<string,MessagingSession>(); private readonly inboundEvents=new Set<string>(); private lastInboundCleanupAt=0;
   constructor(databaseUrl?:string,pool?:Pool,private readonly vault=new CryptoVault()){this.pool=pool??(databaseUrl?.trim()?new Pool({connectionString:databaseUrl,max:5}):undefined);}
   async list(ctx:AuthContext,companyId?:string):Promise<MessagingConnectionView[]>{
     let rows:MessagingConnection[];
@@ -45,7 +52,34 @@ export class MessagingIntegrationsRepository{
     if(this.pool){const result=await this.pool.query<{runtimeConversationId:string}>(`UPDATE messaging_connections SET runtime_conversation_id=COALESCE(runtime_conversation_id,$2),updated_at=now() WHERE id=$1 RETURNING runtime_conversation_id AS "runtimeConversationId"`,[item.id,conversationId]);return result.rows[0]?.runtimeConversationId||conversationId;}
     item.runtimeConversationId ||= conversationId;item.updatedAt=new Date().toISOString();return item.runtimeConversationId;
   }
-  async setActiveContext(item:MessagingConnection,companyId:string|null,agentId:string|null):Promise<void>{
+  private sessionKey(connectionId:string,chatId:string,threadId?:string|null){return `${connectionId}:${chatId}:${threadId||""}`;}
+  async getOrCreateSession(item:MessagingConnection,chatId:string,threadId?:string|null):Promise<MessagingSession>{
+    const normalizedThread=threadId||"",legacyConversation=item.externalChatId===chatId&&(item.externalThreadId||"")===normalizedThread?item.runtimeConversationId||null:null;
+    if(this.pool){
+      const id=randomUUID();
+      const result=await this.pool.query<MessagingSession>(`INSERT INTO messaging_sessions(id,connection_id,external_chat_id,external_thread_id,runtime_conversation_id,active_company_id,active_agent_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT(connection_id,external_chat_id,external_thread_id) DO UPDATE SET updated_at=now()
+        RETURNING ${sessionColumns}`,[id,item.id,chatId,normalizedThread,legacyConversation,item.activeCompanyId||null,item.activeAgentId||null]);
+      return result.rows[0]!;
+    }
+    const key=this.sessionKey(item.id,chatId,normalizedThread),existing=this.sessions.get(key);if(existing){existing.updatedAt=new Date().toISOString();return existing;}
+    const now=new Date().toISOString(),created:MessagingSession={id:randomUUID(),connectionId:item.id,externalChatId:chatId,externalThreadId:normalizedThread,runtimeConversationId:legacyConversation,activeCompanyId:item.activeCompanyId||null,activeAgentId:item.activeAgentId||null,createdAt:now,updatedAt:now};this.sessions.set(key,created);return created;
+  }
+  async setSessionConversation(session:MessagingSession,conversationId:string|null):Promise<void>{
+    if(this.pool)await this.pool.query(`UPDATE messaging_sessions SET runtime_conversation_id=$2,updated_at=now() WHERE id=$1`,[session.id,conversationId]);
+    session.runtimeConversationId=conversationId;session.updatedAt=new Date().toISOString();
+  }
+  async claimInbound(item:MessagingConnection,eventId:string,messageId?:string):Promise<boolean>{
+    if(this.pool){if(Date.now()-this.lastInboundCleanupAt>3_600_000){this.lastInboundCleanupAt=Date.now();await this.pool.query(`DELETE FROM messaging_inbound_events WHERE received_at < now() - interval '30 days'`);}const result=await this.pool.query(`INSERT INTO messaging_inbound_events(connection_id,event_id,message_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[item.id,eventId,messageId||null]);return Boolean(result.rowCount);}
+    const key=`${item.id}:${eventId}`;if(this.inboundEvents.has(key))return false;this.inboundEvents.add(key);if(this.inboundEvents.size>10_000){for(const old of [...this.inboundEvents].slice(0,2_000))this.inboundEvents.delete(old);}return true;
+  }
+  async touchRoute(item:MessagingConnection,threadId?:string|null):Promise<void>{
+    if(this.pool)await this.pool.query(`UPDATE messaging_connections SET external_thread_id=$2,last_inbound_at=now(),updated_at=now() WHERE id=$1`,[item.id,threadId||null]);
+    item.externalThreadId=threadId||null;item.lastInboundAt=new Date().toISOString();item.updatedAt=new Date().toISOString();
+  }
+  async setActiveContext(item:MessagingConnection,companyId:string|null,agentId:string|null,session?:MessagingSession):Promise<void>{
+    if(session){if(this.pool)await this.pool.query(`UPDATE messaging_sessions SET active_company_id=$2,active_agent_id=$3,updated_at=now() WHERE id=$1`,[session.id,companyId,agentId]);session.activeCompanyId=companyId;session.activeAgentId=agentId;session.updatedAt=new Date().toISOString();return;}
     if(this.pool){await this.pool.query(`UPDATE messaging_connections SET active_company_id=$2,active_agent_id=$3,updated_at=now() WHERE id=$1`,[item.id,companyId,agentId]);}
     else{item.activeCompanyId=companyId;item.activeAgentId=agentId;item.updatedAt=new Date().toISOString();}
   }
