@@ -262,6 +262,11 @@ export function AutomationsPage() {
         setBrowserEmails(browserRes.emailAccounts);
         updateCachedAutomations(selectedCompanyId, autoRes.automations);
         updateCachedAgents(selectedCompanyId, agentsRes.agents);
+        setTargetForm((curr) => ({
+          ...curr,
+          automationId: curr.automationId || autoRes.automations[0]?.id || "",
+          emailAccountId: curr.emailAccountId || browserRes.emailAccounts[0]?.id || "",
+        }));
       })
       .catch((e) => {
         if (active) setNotice(e.message);
@@ -561,6 +566,14 @@ export function AutomationsPage() {
       setNotice(error.message);
     }
   };
+
+  const seedDemoTitle = !automations.length
+    ? "Create an automation above first"
+    : !browserEmails.length
+    ? "Connect an email in Email Settings first"
+    : !targetForm.automationId || !targetForm.emailAccountId
+    ? "Select an Automation and Company email to add demo sites"
+    : "Add 2 paused demo websites for testing";
 
   return (
     <main className="automations-container">
@@ -885,6 +898,7 @@ export function AutomationsPage() {
               className="button-secondary browser-demo-seed-btn"
               disabled={browserSaving || !targetForm.automationId || !targetForm.emailAccountId}
               onClick={seedBrowserTargets}
+              title={seedDemoTitle}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19" />
@@ -1001,10 +1015,15 @@ export function AutomationsPage() {
                       <p>Add a website above or load the paused demo rows to test automated directory registration and publishing.</p>
                       <button
                         type="button"
-                        className="button-secondary"
+                        className="button-secondary browser-demo-seed-btn"
                         disabled={browserSaving || !targetForm.automationId || !targetForm.emailAccountId}
                         onClick={seedBrowserTargets}
+                        title={seedDemoTitle}
                       >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
                         Add 2 paused demo sites
                       </button>
                     </div>
