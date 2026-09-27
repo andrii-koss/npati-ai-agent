@@ -835,7 +835,7 @@ export function buildApp(config: AppConfig = {}) {
   };
   const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
     const connections = await messagingIntegrationsRepo.listConnectedForCompany(automation.workspaceId, automation.userId, automation.companyId, automation.agentId);
-    await Promise.allSettled(connections.map(async (connection) => {
+    await Promise.allSettled(connections.filter((connection)=>connection.settings.notifications.automationResults).map(async (connection) => {
       if (!connection.externalChatId) return;
       try {
         await messagingGateway.adapter(connection.channel).sendText(

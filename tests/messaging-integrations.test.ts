@@ -7,6 +7,7 @@ import { registerMessagingIntegrationRoutes } from "../apps/agent-api/src/messag
 import { runMigration045 } from "../packages/workspace/src/migration-045";
 import { runMigration046 } from "../packages/workspace/src/migration-046";
 import { runMigration047 } from "../packages/workspace/src/migration-047";
+import { runMigration048 } from "../packages/workspace/src/migration-048";
 import { MessagingScopeRouter } from "../apps/agent-api/src/messaging-scope-router";
 
 const owner:AuthContext={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage","tools:execute"]};
@@ -19,6 +20,7 @@ describe("messaging migration",()=>{
   });
   it("adds account scope and makes the Company binding optional",async()=>{let sql="";await runMigration046({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("connection_scope");expect(sql).toContain("ALTER COLUMN company_id DROP NOT NULL");expect(sql).toContain("active_company_id TEXT");});
   it("adds durable per-topic sessions and inbound deduplication with UUID-compatible connection keys",async()=>{let sql="";await runMigration047({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("CREATE TABLE IF NOT EXISTS messaging_sessions");expect(sql).toContain("connection_id UUID NOT NULL REFERENCES messaging_connections(id)");expect(sql).not.toContain("connection_id TEXT NOT NULL REFERENCES messaging_connections(id)");expect(sql).toContain("UNIQUE(connection_id, external_chat_id, external_thread_id)");expect(sql).toContain("messaging_inbound_events");});
+  it("adds validated JSON settings for the connection management UI",async()=>{let sql="";await runMigration048({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("ADD COLUMN IF NOT EXISTS settings JSONB");expect(sql).toContain("jsonb_typeof(settings)='object'");});
 });
 
 describe("messaging integrations tenant binding",()=>{
@@ -38,6 +40,7 @@ describe("messaging integrations tenant binding",()=>{
   });
   it("supports an account-scoped connection with mutable active context",async()=>{const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("account-scope-master-key-that-is-long-enough-123"));const created=await repo.createTelegram(owner,null,{scope:"account",displayName:"Account Bot",botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"});const internal=await repo.getByWebhookSecret(created.webhookSecret);expect(internal).toMatchObject({scope:"account",companyId:null});await repo.setActiveContext(internal!,"company-b","agent-b");expect(internal).toMatchObject({activeCompanyId:"company-b",activeAgentId:"agent-b"});});
   it("isolates topic sessions and rejects duplicate Telegram updates",async()=>{const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("topic-scope-master-key-that-is-long-enough-123"));const created=await repo.createTelegram(owner,null,{scope:"account",displayName:"Topics",botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"});const connection=(await repo.getByWebhookSecret(created.webhookSecret))!;const first=await repo.getOrCreateSession(connection,"-100","10"),second=await repo.getOrCreateSession(connection,"-100","11");expect(first.id).not.toBe(second.id);await repo.setSessionConversation(first,"conversation-a");await repo.setActiveContext(connection,"company-a","agent-a",first);expect((await repo.getOrCreateSession(connection,"-100","10"))).toMatchObject({runtimeConversationId:"conversation-a",activeCompanyId:"company-a",activeAgentId:"agent-a"});expect(await repo.claimInbound(connection,"update-1","message-1")).toBe(true);expect(await repo.claimInbound(connection,"update-1","message-1")).toBe(false);});
+  it("updates connection scope and preferences without exposing another tenant",async()=>{const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("manage-scope-master-key-that-is-long-enough-123")),created=await repo.createTelegram(owner,null,{scope:"account",displayName:"Before",botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"}),connection=(await repo.getByWebhookSecret(created.webhookSecret))!,settings={...connection.settings,groups:{...connection.settings.groups,enabled:false,allowedChatIds:["-1001"]}};const updated=await repo.updateOwned(owner,connection.id,{displayName:"After",scope:"company",companyId:"company-a",agentId:null,settings});expect(updated).toMatchObject({displayName:"After",scope:"company",companyId:"company-a",settings:{groups:{enabled:false,allowedChatIds:["-1001"]}}});expect(await repo.getOwned({...owner,userId:"attacker"},connection.id)).toBeNull();});
 });
 
 describe("messaging scope router",()=>{
@@ -82,6 +85,8 @@ describe("Telegram ingress",()=>{
     const accountCreate=await app.inject({method:"POST",url:"/integrations/telegram",payload:{botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"}});
     expect(accountCreate.statusCode).toBe(201);
     expect(accountCreate.json().connection).toMatchObject({scope:"account",companyId:null});
+    const managed=await app.inject({method:"GET",url:`/integrations/messaging/${accountCreate.json().connection.id}/manage`});expect(managed.statusCode).toBe(200);expect(managed.json()).toMatchObject({transport:"webhook",capabilities:{deduplication:true}});expect(managed.json().commands).toContain("approvals");
+    const managedConnection=managed.json().connection;const updated=await app.inject({method:"PATCH",url:`/integrations/messaging/${managedConnection.id}`,payload:{displayName:"Managed bot",scope:"account",settings:{...managedConnection.settings,groups:{...managedConnection.settings.groups,enabled:false}}}});expect(updated.statusCode).toBe(200);expect(updated.json().connection).toMatchObject({displayName:"Managed bot",settings:{groups:{enabled:false}}});
     const create=await app.inject({method:"POST",url:"/companies/company-a/integrations/telegram",payload:{botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH",agentId:"agent-a"}});
     expect(create.statusCode).toBe(201);const setup=create.json();const secret=String(setup.webhookUrl).split("/").at(-1)!;
     const connect=await app.inject({method:"POST",url:`/api/v1/integrations/telegram/${secret}`,headers:{"x-telegram-bot-api-secret-token":secret},payload:{message:{message_id:1,from:{id:7},chat:{id:8},text:setup.pairingCommand}}});
