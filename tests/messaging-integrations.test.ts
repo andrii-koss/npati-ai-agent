@@ -5,6 +5,8 @@ import { MessagingGateway, TelegramMessagingAdapter } from "../apps/agent-api/sr
 import Fastify from "fastify";
 import { registerMessagingIntegrationRoutes } from "../apps/agent-api/src/messaging-integrations-routes";
 import { runMigration045 } from "../packages/workspace/src/migration-045";
+import { runMigration046 } from "../packages/workspace/src/migration-046";
+import { MessagingScopeRouter } from "../apps/agent-api/src/messaging-scope-router";
 
 const owner:AuthContext={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage","tools:execute"]};
 
@@ -14,6 +16,7 @@ describe("messaging migration",()=>{
     expect(sql).toMatch(/agent_id TEXT REFERENCES company_agents\(id\)/);
     expect(sql).not.toMatch(/agent_id UUID REFERENCES company_agents\(id\)/);
   });
+  it("adds account scope and makes the Company binding optional",async()=>{let sql="";await runMigration046({query:async(statement:string)=>{sql=statement;return{};}} as any);expect(sql).toContain("connection_scope");expect(sql).toContain("ALTER COLUMN company_id DROP NOT NULL");expect(sql).toContain("active_company_id TEXT");});
 });
 
 describe("messaging integrations tenant binding",()=>{
@@ -29,8 +32,13 @@ describe("messaging integrations tenant binding",()=>{
     expect(repo.resolveToken(internal!)).toBe("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH");
     expect(await repo.bind(internal!,{pairingCode:"000000",externalUserId:"7",externalChatId:"8"})).toBe(false);
     expect(await repo.bind(internal!,{pairingCode:created.pairingCode,externalUserId:"7",externalChatId:"8"})).toBe(true);
-    expect((await repo.listConnectedForCompany("workspace-a","company-a"))[0]?.externalChatId).toBe("8");
+    expect((await repo.listConnectedForCompany("workspace-a","user-a","company-a"))[0]?.externalChatId).toBe("8");
   });
+  it("supports an account-scoped connection with mutable active context",async()=>{const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("account-scope-master-key-that-is-long-enough-123"));const created=await repo.createTelegram(owner,null,{scope:"account",displayName:"Account Bot",botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"});const internal=await repo.getByWebhookSecret(created.webhookSecret);expect(internal).toMatchObject({scope:"account",companyId:null});await repo.setActiveContext(internal!,"company-b","agent-b");expect(internal).toMatchObject({activeCompanyId:"company-b",activeAgentId:"agent-b"});});
+});
+
+describe("messaging scope router",()=>{
+  it("switches account sessions between Company, Agent and account contexts",async()=>{const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("scope-router-master-key-that-is-long-enough-123"));const created=await repo.createTelegram(owner,null,{scope:"account",displayName:"Account Bot",botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"});const connection=(await repo.getByWebhookSecret(created.webhookSecret))!;const company={id:"company-a",name:"Acme",mainAgentId:"agent-a"};const agent={id:"agent-a",name:"Sales",role:"Sales",isActive:true};const store={listCompanies:async()=>({items:[company],nextCursor:null}),getCompany:async()=>company,listCompanyAgentsPage:async()=>({items:[agent],nextCursor:null}),getCompanyAgent:async()=>agent} as any;const router=new MessagingScopeRouter(store,repo);expect((await router.resolve(owner,connection,"/company Acme")).handled).toBe(true);expect(connection.activeCompanyId).toBe("company-a");expect((await router.resolve(owner,connection,"/agent Sales")).handled).toBe(true);expect(connection.activeAgentId).toBe("agent-a");const active=await router.resolve(owner,connection,"Create a task");expect(active).toMatchObject({handled:false,company:{id:"company-a"},agent:{id:"agent-a"}});await router.resolve(owner,connection,"/account");expect(connection.activeCompanyId).toBeNull();});
 });
 
 describe("Telegram messaging adapter",()=>{
@@ -64,6 +72,9 @@ describe("Telegram ingress",()=>{
     const handleMessage=vi.fn(async()=>({message:"Runtime result"}));
     const app=Fastify();
     registerMessagingIntegrationRoutes(app,{auth:{authenticate:async()=>owner} as any,store:{getCompany:async()=>({id:"company-a",name:"A"}),getCompanyAgent:async()=>({id:"agent-a",isActive:true})} as any,repo,gateway,webhookBaseUrl:"https://agent.example.com",handleMessage});
+    const accountCreate=await app.inject({method:"POST",url:"/integrations/telegram",payload:{botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH"}});
+    expect(accountCreate.statusCode).toBe(201);
+    expect(accountCreate.json().connection).toMatchObject({scope:"account",companyId:null});
     const create=await app.inject({method:"POST",url:"/companies/company-a/integrations/telegram",payload:{botToken:"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH",agentId:"agent-a"}});
     expect(create.statusCode).toBe(201);const setup=create.json();const secret=String(setup.webhookUrl).split("/").at(-1)!;
     const connect=await app.inject({method:"POST",url:`/api/v1/integrations/telegram/${secret}`,headers:{"x-telegram-bot-api-secret-token":secret},payload:{message:{message_id:1,from:{id:7},chat:{id:8},text:setup.pairingCommand}}});

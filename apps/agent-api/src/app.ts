@@ -55,6 +55,7 @@ import { registerIntegrationsRoutes } from "./integrations-routes";
 import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
 import { MessagingGateway, TelegramMessagingAdapter } from "./messaging-gateway";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
+import { MessagingScopeRouter } from "./messaging-scope-router";
 import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
@@ -755,6 +756,7 @@ export function buildApp(config: AppConfig = {}) {
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
   const messagingIntegrationsRepo = new MessagingIntegrationsRepository(config.databaseUrl);
   const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter());
+  const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
   const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
     const automationContext: AuthContext = {
       workspaceId: automation.workspaceId,
@@ -832,7 +834,7 @@ export function buildApp(config: AppConfig = {}) {
     return { result: details.run.result || `Company run ${details.run.id} completed.` };
   };
   const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
-    const connections = await messagingIntegrationsRepo.listConnectedForCompany(automation.workspaceId, automation.companyId, automation.agentId);
+    const connections = await messagingIntegrationsRepo.listConnectedForCompany(automation.workspaceId, automation.userId, automation.companyId, automation.agentId);
     await Promise.allSettled(connections.map(async (connection) => {
       if (!connection.externalChatId) return;
       try {
@@ -1889,13 +1891,22 @@ ${localized.next}`;
     auth: authProvider, store: workspaceStore, repo: messagingIntegrationsRepo, gateway: messagingGateway,
     webhookBaseUrl: config.messagingWebhookBaseUrl ?? (config.webOrigin?.startsWith("https://") ? config.webOrigin : undefined),
     handleMessage: async ({ context, connection, text, attachments, conversationId }) => {
-      const company = await workspaceStore.getCompany(context, connection.companyId);
       if (!conversationId) {
         const created = await workspaceStore.createNeutralConversation(context, `Telegram: ${connection.displayName}`);
         conversationId = await messagingIntegrationsRepo.setRuntimeConversationId(connection, created.id);
       }
+      const scope = await messagingScopeRouter.resolve(context, connection, text);
+      if (scope.handled) return { message: scope.message || "Telegram context updated." };
+      const company = scope.company;
       const managementRequest = Boolean(text && (isShortAffirmativeReply(text) || requestsCompositeCompanyDeletionIntent(text) || EmailChatActions.isManagementRequest(text) || CompanyChatActions.isManagementRequest(text) || CompanyChatActions.isPotentialMutationRequest(text) || WorkspaceChatActions.isManagementRequest(text) || WorkspaceChatActions.isPotentialMutationRequest(text)));
-      const targetAgent = connection.agentId ? await workspaceStore.getCompanyAgent(context, company.id, connection.agentId) : undefined;
+      if (!company) {
+        const result = await runNeutralMessage(context, text, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate());
+        if (connection.scope === "account" && result.companyAction?.companyId && result.companyAction.action !== "delete") {
+          await messagingIntegrationsRepo.setActiveContext(connection, result.companyAction.companyId, null);
+        }
+        return result;
+      }
+      const targetAgent = scope.agent;
       const runnableMainAgent = targetAgent?.isActive ?? (company.mainAgentId ? await workspaceStore.getCompanyAgent(context, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false) : false);
       if (managementRequest || !runnableMainAgent) return runNeutralMessage(context, text, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate(), undefined, undefined, { id: company.id, name: company.name });
       const task = targetAgent ? `Use the specifically bound Company Agent ${targetAgent.name} (id: ${targetAgent.id}) for this request.\n\n${text || "Analyze the attached files."}` : (text || "Analyze the attached files.");
