@@ -53,7 +53,7 @@ import { registerCompanyApprovalsRoutes } from "./approvals-routes";
 import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
 import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
-import { MessagingGateway, TelegramMessagingAdapter } from "./messaging-gateway";
+import { MessagingGateway, TelegramMessagingAdapter, type GatewayOutboundAttachment } from "./messaging-gateway";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { MessagingScopeRouter } from "./messaging-scope-router";
 import { AuditRepository } from "./audit-repository";
@@ -1887,33 +1887,54 @@ ${localized.next}`;
   if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
+  const telegramResultAttachments=async(auth:AuthContext,message:string):Promise<GatewayOutboundAttachment[]>=>{
+    if(!chatFiles)return[];const output:GatewayOutboundAttachment[]=[],seen=new Set<string>();
+    for(const match of message.matchAll(/\[\[npati-attachment:(image|document|file|audio):([0-9a-f-]{36}):([^\]]+)\]\]/gi)){
+      const id=match[2]!;if(seen.has(id))continue;seen.add(id);const opened=await chatFiles.open(auth,id);if(!opened)continue;
+      const chunks:Buffer[]=[];let size=0;for await(const chunk of opened.stream){const bytes=Buffer.from(chunk);size+=bytes.length;if(size>49*1024*1024)throw new Error(`Telegram output file ${opened.file.originalFilename} exceeds 49 MB`);chunks.push(bytes);}
+      output.push({kind:match[1]!.toLowerCase()==="image"?"image":match[1]!.toLowerCase()==="audio"?"audio":"document",name:decodeURIComponent(match[3]!),mimeType:opened.file.mimeType,dataBase64:Buffer.concat(chunks).toString("base64")});
+    }
+    return output;
+  };
+  const telegramResultText=(message:string)=>message.replace(/\[\[npati-attachment:(?:image|document|file|audio):[0-9a-f-]{36}:([^\]]+)\]\]/gi,(_all,name)=>`Attached file: ${decodeURIComponent(String(name))}`).trim()||"NPATI completed the request and attached the result.";
   registerMessagingIntegrationRoutes(app, {
     auth: authProvider, store: workspaceStore, repo: messagingIntegrationsRepo, gateway: messagingGateway,
     webhookBaseUrl: config.messagingWebhookBaseUrl ?? (config.webOrigin?.startsWith("https://") ? config.webOrigin : undefined),
-    handleMessage: async ({ context, connection, text, attachments, conversationId }) => {
-      if (!conversationId) {
-        const created = await workspaceStore.createNeutralConversation(context, `Telegram: ${connection.displayName}`);
-        conversationId = await messagingIntegrationsRepo.setRuntimeConversationId(connection, created.id);
-      }
-      const scope = await messagingScopeRouter.resolve(context, connection, text);
+    resetConversation:async({context,conversationId})=>{await workspaceStore.deleteNeutralConversation(context,conversationId);},
+    handleMessage: async ({ context, connection, session, text, attachments, conversationId, replyContext, signal, onDelta }) => {
+      const scope = await messagingScopeRouter.resolve(context, connection, text, session);
       if (scope.handled) return { message: scope.message || "Telegram context updated." };
       const company = scope.company;
+      if(/^\/(?:runs|tasks)$/iu.test(text)){
+        if(!company)return{message:"Select a Company with /company Company name before listing runs and Automations."};
+        const [runs,automations]=await Promise.all([companyRuntime.list(context,company.id,10),automationsRepo.list(context,company.id)]);
+        const runLines=runs.map((run)=>`• ${run.status} — ${run.task.slice(0,100)} (${run.id})`),automationLines=automations.slice(0,10).map((item)=>`• ${item.status} — ${item.name}; next ${item.nextRunAt}`);
+        return{message:[`Tasks and runs for ${company.name}:`,runLines.length?runLines.join("\n"):"No Company runs.","\nAutomations:",automationLines.length?automationLines.join("\n"):"No Automations."].join("\n")};
+      }
+      if(/^\/approvals$/iu.test(text)){
+        if(!company)return{message:"Select a Company before listing approvals."};if(!approvalsRepo)return{message:"Persistent approvals are unavailable because the database is not configured."};
+        const pending=await approvalsRepo.list(context,company.id,"pending");return{message:pending.length?`Pending approvals:\n${pending.map((item)=>`• ${item.id} — ${item.riskLevel}: ${item.actionSummary}`).join("\n")}\n\nUse /approve ID or /deny ID.`:"No pending approvals."};
+      }
+      if(/^\/(?:approve|deny)$/iu.test(text))return{message:"Usage: /approve APPROVAL_ID or /deny APPROVAL_ID. Use /approvals to list pending requests."};
+      const decision=/^\/(approve|deny)\s+([0-9a-f-]{8,})$/iu.exec(text);if(decision){if(!company)return{message:"Select a Company before deciding an approval."};if(!approvalsRepo)return{message:"Persistent approvals are unavailable because the database is not configured."};const approval=await approvalsRepo.decide(context,company.id,decision[2]!,decision[1]!.toLowerCase()==="approve"?"approved":"rejected","Decision submitted through an authorized Telegram connection");return{message:`Approval ${approval.id} is ${approval.status}.`};}
+      if (!conversationId) {const created = await workspaceStore.createNeutralConversation(context, `Telegram: ${connection.displayName}`);conversationId=created.id;await messagingIntegrationsRepo.setSessionConversation(session,created.id);}
+      const runtimeText=replyContext?.text?`${text}\n\nTelegram reply context (message ${replyContext.messageId}):\n${replyContext.text}`:text;
       const managementRequest = Boolean(text && (isShortAffirmativeReply(text) || requestsCompositeCompanyDeletionIntent(text) || EmailChatActions.isManagementRequest(text) || CompanyChatActions.isManagementRequest(text) || CompanyChatActions.isPotentialMutationRequest(text) || WorkspaceChatActions.isManagementRequest(text) || WorkspaceChatActions.isPotentialMutationRequest(text)));
       if (!company) {
-        const result = await runNeutralMessage(context, text, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate());
+        const result = await runNeutralMessage(context, runtimeText, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate(),onDelta,signal);
         if (connection.scope === "account" && result.companyAction?.companyId && result.companyAction.action !== "delete") {
-          await messagingIntegrationsRepo.setActiveContext(connection, result.companyAction.companyId, null);
+          await messagingIntegrationsRepo.setActiveContext(connection, result.companyAction.companyId, null,session);
         }
-        return result;
+        return {...result,message:telegramResultText(result.message),attachments:await telegramResultAttachments(context,result.message)};
       }
       const targetAgent = scope.agent;
       const runnableMainAgent = targetAgent?.isActive ?? (company.mainAgentId ? await workspaceStore.getCompanyAgent(context, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false) : false);
-      if (managementRequest || !runnableMainAgent) return runNeutralMessage(context, text, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate(), undefined, undefined, { id: company.id, name: company.name });
-      const task = targetAgent ? `Use the specifically bound Company Agent ${targetAgent.name} (id: ${targetAgent.id}) for this request.\n\n${text || "Analyze the attached files."}` : (text || "Analyze the attached files.");
-      const result = await companyRuntime.execute(context, company.id, { task, mode: targetAgent ? "single" : "auto", preferredAgentId: targetAgent?.id, memoryScope: { sessionId: conversationId } }, `telegram:${connection.id}:${Date.now()}`);
+      if (managementRequest || !runnableMainAgent){const result=await runNeutralMessage(context, runtimeText, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate(),onDelta,signal,{ id: company.id, name: company.name });return{...result,message:telegramResultText(result.message),attachments:await telegramResultAttachments(context,result.message)};}
+      const task = targetAgent ? `Use the specifically bound Company Agent ${targetAgent.name} (id: ${targetAgent.id}) for this request.\n\n${runtimeText || "Analyze the attached files."}` : (runtimeText || "Analyze the attached files.");
+      const result = await companyRuntime.execute(context, company.id, { task, mode: targetAgent ? "single" : "auto", preferredAgentId: targetAgent?.id, memoryScope: { sessionId: conversationId } }, `telegram:${connection.id}:${session.id}:${Date.now()}`,signal);
       if (result.run.errorCode === "SECURITY_GUARDRAIL_BLOCKED") throw Object.assign(new Error(result.run.errorMessage || "Request blocked by security guardrails"), { status: 400, code: result.run.errorCode });
       await persistAutomaticCompanyMemory(context, company.id, result.run.id, text, result.run.status, false);
-      return { message: publicCompanyRunMessage(result.run.result, result.run.errorMessage, text) };
+      const message=publicCompanyRunMessage(result.run.result, result.run.errorMessage, text);return { message:telegramResultText(message),attachments:await telegramResultAttachments(context,message) };
     },
   });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
