@@ -5,6 +5,7 @@ export type InboundGatewayMessage = {
   externalUserId: string; externalChatId: string; externalThreadId?: string; text: string;
   attachments: GatewayAttachment[]; messageId: string; eventId: string; chatType?: string;
   replyContext?: GatewayReplyContext; hasAttachments?: boolean;
+  isSelfChat?: boolean;
 };
 
 type TelegramFile = { file_id: string; file_name?: string; mime_type?: string };

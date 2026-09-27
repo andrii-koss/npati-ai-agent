@@ -7,14 +7,14 @@ export type MessagingConnectionStatus = "pending" | "connected" | "paused" | "er
 export type MessagingConnectionScope = "account" | "company" | "agent";
 export type WhatsAppProvider = "qr" | "cloud";
 export interface MessagingConnectionSettings {
-  access:{allowedUserIds:string[]};
+  access:{allowedUserIds:string[];selfChat:boolean};
   groups:{enabled:boolean;allowedChatIds:string[];mentionRequired:boolean;replyMode:"reply"|"plain"};
   notifications:{automationResults:boolean;backgroundResults:boolean;errors:boolean;status:boolean};
   media:{images:boolean;documents:boolean;audio:boolean;outbound:boolean};
   delivery:{typing:boolean;progressive:boolean};
 }
-export const defaultMessagingConnectionSettings=():MessagingConnectionSettings=>({access:{allowedUserIds:[]},groups:{enabled:true,allowedChatIds:[],mentionRequired:true,replyMode:"reply"},notifications:{automationResults:true,backgroundResults:true,errors:true,status:true},media:{images:true,documents:true,audio:true,outbound:true},delivery:{typing:true,progressive:true}});
-function normalizeSettings(value?:Partial<MessagingConnectionSettings>|null):MessagingConnectionSettings{const base=defaultMessagingConnectionSettings(),input=value||{};const clean=(values:string[]|undefined)=>[...new Set((values||[]).map(String).map((item)=>item.trim()).filter(Boolean))].slice(0,100);return{access:{allowedUserIds:clean(input.access?.allowedUserIds)},groups:{...base.groups,...input.groups,allowedChatIds:clean(input.groups?.allowedChatIds)},notifications:{...base.notifications,...input.notifications},media:{...base.media,...input.media},delivery:{...base.delivery,...input.delivery}};}
+export const defaultMessagingConnectionSettings=():MessagingConnectionSettings=>({access:{allowedUserIds:[],selfChat:false},groups:{enabled:true,allowedChatIds:[],mentionRequired:true,replyMode:"reply"},notifications:{automationResults:true,backgroundResults:true,errors:true,status:true},media:{images:true,documents:true,audio:true,outbound:true},delivery:{typing:true,progressive:true}});
+function normalizeSettings(value?:Partial<MessagingConnectionSettings>|null):MessagingConnectionSettings{const base=defaultMessagingConnectionSettings(),input=value||{};const clean=(values:string[]|undefined)=>[...new Set((values||[]).map(String).map((item)=>item.trim()).filter(Boolean))].slice(0,100);return{access:{...base.access,...input.access,allowedUserIds:clean(input.access?.allowedUserIds)},groups:{...base.groups,...input.groups,allowedChatIds:clean(input.groups?.allowedChatIds)},notifications:{...base.notifications,...input.notifications},media:{...base.media,...input.media},delivery:{...base.delivery,...input.delivery}};}
 export interface MessagingConnection {
   id:string; workspaceId:string; userId:string; companyId?:string|null; agentId?:string|null; scope:MessagingConnectionScope; channel:MessagingChannel;
   displayName:string; status:MessagingConnectionStatus; botUsername?:string|null; externalUserId?:string|null; provider?:WhatsAppProvider|null;
@@ -104,6 +104,7 @@ export class MessagingIntegrationsRepository{
     if(this.pool){if(Date.now()-this.lastInboundCleanupAt>3_600_000){this.lastInboundCleanupAt=Date.now();await this.pool.query(`DELETE FROM messaging_inbound_events WHERE received_at < now() - interval '30 days'`);}const result=await this.pool.query(`INSERT INTO messaging_inbound_events(connection_id,event_id,message_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[item.id,eventId,messageId||null]);return Boolean(result.rowCount);}
     const key=`${item.id}:${eventId}`;if(this.inboundEvents.has(key))return false;this.inboundEvents.add(key);if(this.inboundEvents.size>10_000){for(const old of [...this.inboundEvents].slice(0,2_000))this.inboundEvents.delete(old);}return true;
   }
+  async hasInboundEvent(item:MessagingConnection,eventId:string):Promise<boolean>{if(this.pool){const result=await this.pool.query(`SELECT 1 FROM messaging_inbound_events WHERE connection_id=$1 AND event_id=$2`,[item.id,eventId]);return Boolean(result.rowCount);}return this.inboundEvents.has(`${item.id}:${eventId}`);}
   async touchRoute(item:MessagingConnection,threadId?:string|null):Promise<void>{
     if(this.pool)await this.pool.query(`UPDATE messaging_connections SET external_thread_id=$2,last_inbound_at=now(),updated_at=now() WHERE id=$1`,[item.id,threadId||null]);
     item.externalThreadId=threadId||null;item.lastInboundAt=new Date().toISOString();item.updatedAt=new Date().toISOString();

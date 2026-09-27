@@ -16987,3 +16987,10 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .connection-manager.whatsapp > .integration-settings-section + .integration-settings-section { display: none; }
 .connection-manager.whatsapp .integration-subform { display: none; }
 .whatsapp-qr { display:block; width:min(320px,100%); height:auto; margin:16px auto; border-radius:12px; background:#fff; padding:8px; }
+.whatsapp-self-chat-setting {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border-color, rgba(127,127,127,.22));
+  border-radius: 12px;
+  background: var(--panel-bg, rgba(127,127,127,.05));
+}

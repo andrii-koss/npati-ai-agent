@@ -5,15 +5,19 @@ import { CryptoVault, type AuthContext } from "@npati/workspace";
 import { MessagingGateway } from "../apps/agent-api/src/messaging-gateway";
 import { MessagingIntegrationsRepository } from "../apps/agent-api/src/messaging-integrations-repository";
 import { registerMessagingIntegrationRoutes } from "../apps/agent-api/src/messaging-integrations-routes";
+import { WhatsAppInboundDispatcher } from "../apps/agent-api/src/messaging-inbound-dispatcher";
 import { WhatsAppMessagingAdapter } from "../apps/agent-api/src/whatsapp-messaging";
 import { runMigration049 } from "../packages/workspace/src/migration-049";
 
+import { runMigration050 } from "../packages/workspace/src/migration-050";
 const owner:AuthContext={workspaceId:"workspace-wa",userId:"owner-wa",permissions:["workspace:read","business:manage","tools:execute"]};
 
 describe("WhatsApp providers",()=>{
   it("migrates provider discrimination and keeps encrypted sessions tenant isolated",async()=>{
     let sql="";await runMigration049({query:async(value:string)=>{sql=value;return{};}} as any);
     expect(sql).toContain("provider IN ('qr','cloud')");expect(sql).toContain("idx_messaging_connections_whatsapp_restore");
+    let selfChatSql="";await runMigration050({query:async(value:string)=>{selfChatSql=value;return{};}} as any);
+    expect(selfChatSql).toContain('"selfChat":false');
     const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("whatsapp-repository-test-key-longer-than-32"));
     const created=await repo.createWhatsApp(owner,null,{displayName:"WA",provider:"cloud",scope:"account",credential:JSON.stringify({provider:"cloud",accessToken:"secret"})});
     expect(created.connection).toMatchObject({channel:"whatsapp",provider:"cloud",scope:"account"});
@@ -68,5 +72,62 @@ describe("WhatsApp providers",()=>{
     const duplicate=await app.inject({method:"POST",url:"/api/v1/integrations/whatsapp/cloud/"+secret,headers:{"x-hub-signature-256":signature,"content-type":"application/json"},payload:raw});
     expect(duplicate.json().status).toBe("duplicate");expect(handleMessage).toHaveBeenCalledOnce();
     await app.close();
+  });
+  it("runs QR connect -> Message yourself -> NPATI reply -> restart without replying to its own output",async()=>{
+    const makeFakeSocket=()=>{
+      const handlers=new Map<string,Array<(event:any)=>unknown>>();
+      const socket:any={
+        user:{id:"15550001:7@s.whatsapp.net",phoneNumber:"15550001@s.whatsapp.net"},
+        signalRepository:{lidMapping:{getPNForLID:vi.fn(async()=>null)}},
+        ev:{on:(name:string,handler:(event:any)=>unknown)=>{const list=handlers.get(name)||[];list.push(handler);handlers.set(name,list);}},
+        sendMessage:vi.fn(async(_chatId:string,_content:any,options:any)=>({key:{id:options?.messageId}})),
+        sendPresenceUpdate:vi.fn(async()=>undefined),logout:vi.fn(async()=>undefined),end:vi.fn()
+      };
+      return{socket,emit:async(name:string,event:any)=>{for(const handler of handlers.get(name)||[])await handler(event);}};
+    };
+    const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("whatsapp-self-chat-test-key-longer-than-32"));
+    const first=makeFakeSocket(),adapter=new WhatsAppMessagingAdapter(repo,fetch,(()=>first.socket) as any);
+    const created=await repo.createWhatsApp(owner,null,{displayName:"Personal WhatsApp",provider:"qr",scope:"account",credential:"{}"});
+    const connection=(await repo.getInternal(created.connection.id))!;
+    await repo.replaceEncryptedCredential(connection,adapter.createQrCredential(connection.id));
+    await repo.updateOwned(owner,connection.id,{displayName:connection.displayName,scope:"account",companyId:null,agentId:null,settings:{...connection.settings,access:{allowedUserIds:[],selfChat:true}}});
+    const inbound=vi.fn(async()=>undefined);adapter.setInboundHandler(inbound);
+    await adapter.startQr(connection);
+    await first.emit("connection.update",{connection:"open"});
+    expect(connection.status).toBe("connected");
+    await first.emit("messages.upsert",{type:"notify",messages:[{key:{id:"user-1",remoteJid:"15550001@s.whatsapp.net",fromMe:true},message:{conversation:"Run /status"}}]});
+    expect(inbound).toHaveBeenCalledWith(connection.id,expect.objectContaining({eventId:"user-1",isSelfChat:true,text:"Run /status"}));
+    const [replyId]=await adapter.sendText(repo.resolveToken(connection),"15550001@s.whatsapp.net","NPATI reply");
+    await first.emit("messages.upsert",{type:"notify",messages:[{key:{id:replyId,remoteJid:"15550001@s.whatsapp.net",fromMe:true},message:{conversation:"NPATI reply"}}]});
+    expect(inbound).toHaveBeenCalledTimes(1);
+    await adapter.shutdown();
+
+    const second=makeFakeSocket(),restored=new WhatsAppMessagingAdapter(repo,fetch,(()=>second.socket) as any),afterRestart=vi.fn(async()=>undefined);
+    restored.setInboundHandler(afterRestart);await restored.restore();
+    await second.emit("messages.upsert",{type:"notify",messages:[{key:{id:replyId,remoteJid:"15550001@s.whatsapp.net",fromMe:true},message:{conversation:"NPATI reply"}}]});
+    await second.emit("messages.upsert",{type:"notify",messages:[{key:{id:"user-2",remoteJid:"15550001@s.whatsapp.net",fromMe:true},message:{conversation:"continue"}}]});
+    await second.emit("messages.upsert",{type:"notify",messages:[{key:{id:"other-chat",remoteJid:"15550002@s.whatsapp.net",fromMe:true},message:{conversation:"not self"}}]});
+    expect(afterRestart).toHaveBeenCalledTimes(1);expect(afterRestart).toHaveBeenCalledWith(connection.id,expect.objectContaining({eventId:"user-2",isSelfChat:true}));
+    await repo.updateOwned(owner,connection.id,{displayName:connection.displayName,scope:"account",companyId:null,agentId:null,settings:{...connection.settings,access:{allowedUserIds:[],selfChat:false}}});
+    await second.emit("messages.upsert",{type:"notify",messages:[{key:{id:"user-3",remoteJid:"15550001@s.whatsapp.net",fromMe:true},message:{conversation:"disabled"}}]});
+    await second.emit("messages.upsert",{type:"notify",messages:[{key:{id:"normal-user",remoteJid:"15550002@s.whatsapp.net",fromMe:false},message:{conversation:"normal bot mode"}}]});
+    expect(afterRestart).toHaveBeenCalledTimes(2);expect(afterRestart).toHaveBeenLastCalledWith(connection.id,expect.objectContaining({eventId:"normal-user"}));expect(afterRestart.mock.calls.at(-1)?.[1]).not.toHaveProperty("isSelfChat");
+    await restored.shutdown();
+  });
+
+  it("bypasses only the DM allowlist for verified self-chat and retains the configured runtime scope",async()=>{
+    const repo=new MessagingIntegrationsRepository(undefined,undefined,new CryptoVault("whatsapp-self-dispatch-key-longer-than-32"));
+    const created=await repo.createWhatsApp(owner,"company-1",{displayName:"Scoped self chat",provider:"qr",scope:"agent",agentId:"agent-1",credential:"{}"});
+    const connection=(await repo.getInternal(created.connection.id))!;
+    connection.settings={...connection.settings,access:{allowedUserIds:[],selfChat:true},delivery:{typing:false,progressive:false},notifications:{...connection.settings.notifications,status:false}};
+    await repo.markConnected(connection,"15550001","15550001@s.whatsapp.net");
+    const sendText=vi.fn(async()=>["reply-1"]),handleMessage=vi.fn(async(input:any)=>({message:"Scoped runtime reply: "+input.connection.scope}));
+    const dispatcher=new WhatsAppInboundDispatcher({store:{getCompany:vi.fn(async()=>({})),getCompanyAgent:vi.fn(async()=>({}))} as any,repo,adapter:{channel:"whatsapp",validateCredential:vi.fn(),configureWebhook:vi.fn(),parseInbound:vi.fn(),sendText} as any,handleMessage});
+    const result=await dispatcher.dispatch(connection,{externalUserId:"15550001@s.whatsapp.net",externalChatId:"15550001@s.whatsapp.net",text:"hello",attachments:[],messageId:"self-runtime-1",eventId:"self-runtime-1",chatType:"private",isSelfChat:true});
+    expect(result.status).toBe("accepted");
+    await vi.waitFor(()=>expect(handleMessage).toHaveBeenCalledOnce());
+    expect(handleMessage.mock.calls[0]![0].connection).toMatchObject({scope:"agent",companyId:"company-1",agentId:"agent-1"});
+    await vi.waitFor(()=>expect(sendText).toHaveBeenCalledWith(expect.any(String),"15550001@s.whatsapp.net","Scoped runtime reply: agent",undefined,"self-runtime-1"));
+    await expect(dispatcher.dispatch(connection,{externalUserId:"15550002@s.whatsapp.net",externalChatId:"15550002@s.whatsapp.net",text:"blocked",attachments:[],messageId:"normal-1",eventId:"normal-1",chatType:"private"})).rejects.toMatchObject({code:"WHATSAPP_ALLOWLIST_MISMATCH"});
   });
 });
