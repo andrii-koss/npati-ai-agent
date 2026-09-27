@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 export async function runMigration045(client: PoolClient): Promise<void> { await client.query(`
   CREATE TABLE IF NOT EXISTS messaging_connections (
     id UUID PRIMARY KEY, workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    agent_id UUID REFERENCES company_agents(id) ON DELETE SET NULL, channel TEXT NOT NULL CHECK(channel IN ('telegram','discord','slack','whatsapp','email')),
+    agent_id TEXT REFERENCES company_agents(id) ON DELETE SET NULL, channel TEXT NOT NULL CHECK(channel IN ('telegram','discord','slack','whatsapp','email')),
     display_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','connected','paused','error')),
     bot_username TEXT, external_user_id TEXT, external_chat_id TEXT, external_thread_id TEXT, runtime_conversation_id TEXT, permissions TEXT[] NOT NULL DEFAULT '{}',
     webhook_secret TEXT NOT NULL UNIQUE, encrypted_credential TEXT NOT NULL, pairing_code_hash TEXT, pairing_expires_at TIMESTAMPTZ,
