@@ -2682,7 +2682,7 @@ a {
 
 .connection-manager {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .telegram-pairing-panel {
@@ -2754,35 +2754,13 @@ a {
   font-size: 10px;
 }
 
-.connection-section-tabs {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 2px 0 8px;
-  scrollbar-width: thin;
-}
-
-.connection-section-tabs button {
-  flex: 0 0 auto;
-  padding: 8px 10px;
-  color: var(--npati-black);
-  background: white;
-  border: 1px solid var(--npati-gray-200);
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.connection-section-tabs button.active {
-  color: white;
-  background: var(--npati-black);
-  border-color: var(--npati-black);
-}
-
 .integration-settings-section {
   display: grid;
-  gap: 12px;
+  gap: 14px;
+}
+
+.integration-settings-section > .field {
+  margin: 0;
 }
 
 .integration-settings-section h3,
@@ -2939,7 +2917,7 @@ a {
 }
 
 .connection-section-tabs {
-  margin: 18px 0 22px;
+  margin: 0;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
