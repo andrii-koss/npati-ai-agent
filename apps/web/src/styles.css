@@ -2038,6 +2038,11 @@ a {
   box-shadow: 0 0 0 4px rgb(53 185 113 / 12%);
 }
 
+.connection-light.pending {
+  background: #d99a20;
+  box-shadow: 0 0 0 4px rgb(217 154 32 / 14%);
+}
+
 .provider-badges {
   margin: 13px 0 0;
   display: flex;
@@ -2074,6 +2079,11 @@ a {
 .ai-badge.connected {
   color: #177746;
   background: #e4f7eb;
+}
+
+.ai-badge.pending {
+  color: #80580b;
+  background: #fff1cf;
 }
 
 .provider-description {
@@ -2673,6 +2683,53 @@ a {
 .connection-manager {
   display: grid;
   gap: 16px;
+}
+
+.telegram-pairing-panel {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  color: var(--npati-black);
+  background: #fffaf0;
+  border: 1px solid #ead39e;
+  border-radius: 12px;
+}
+
+.telegram-pairing-panel h4,
+.telegram-pairing-panel p,
+.telegram-pairing-panel ol {
+  margin: 0;
+}
+
+.telegram-pairing-panel ol {
+  padding-left: 20px;
+  color: var(--npati-gray-700);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.telegram-pairing-panel code {
+  padding: 13px 14px;
+  overflow-wrap: anywhere;
+  color: var(--npati-black);
+  background: white;
+  border: 1px solid var(--npati-gray-200);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.telegram-pairing-panel small {
+  color: var(--npati-gray-500);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.telegram-pairing-panel .button-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .connection-manager-head {
