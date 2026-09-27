@@ -124,10 +124,7 @@ export function registerIntegrationsRoutes(
   );
 
   // --- Public Webhook Ingress (OpenClaw Item 223 / P1) ---
-  app.post<{
-    Params: { secret: string };
-    Body: Record<string, unknown>;
-  }>("/api/v1/webhooks/:secret", async (r, reply) => {
+  const webhookHandler = async (r: any, reply: any) => {
     try {
       const webhook = await repo.getWebhookBySecret(r.params.secret);
       if (!webhook) {
@@ -157,7 +154,17 @@ export function registerIntegrationsRoutes(
     } catch (e) {
       return err(reply, e);
     }
-  });
+  };
+
+  app.post<{
+    Params: { secret: string };
+    Body: Record<string, unknown>;
+  }>("/api/v1/webhooks/:secret", webhookHandler);
+
+  app.post<{
+    Params: { secret: string };
+    Body: Record<string, unknown>;
+  }>("/v1/webhooks/:secret", webhookHandler);
 
   // --- MCP Client Registry (OpenClaw Item 214 / P1) ---
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/mcp/servers", async (r, reply) => {
