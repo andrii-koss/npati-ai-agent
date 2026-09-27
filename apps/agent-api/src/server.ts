@@ -34,6 +34,7 @@ const app = buildApp({
   npatiJwtSecret: process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET,
   strictAuth: process.env.NPATI_AUTH_STRICT !== "false",
   agentPublicDomain: process.env.NPATI_AGENT_PUBLIC_DOMAIN ?? process.env.NPATI_WEB_ORIGIN,
+  messagingWebhookBaseUrl: process.env.NPATI_MESSAGING_WEBHOOK_BASE_URL,
   agentVersion: process.env.NPATI_AGENT_VERSION ?? process.env.npm_package_version ?? "0.1.0",
   deploymentType: process.env.NPATI_DEPLOYMENT_TYPE === "npati_hosted" ? "npati_hosted" : "self_hosted",
   hostedRegistrationToken: process.env.NPATI_HOSTED_REGISTRATION_TOKEN,

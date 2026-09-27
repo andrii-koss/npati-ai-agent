@@ -228,13 +228,13 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto" }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, signal });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, signal });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; approvalId?:string;signal?:AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?:string;signal?:AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
@@ -373,6 +373,14 @@ export class CompanyDelegationRuntime {
       });
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
       const plan = parsePlan(planned.content, input.mode ?? "auto"), byId = new Map(candidates.map((agent) => [agent.id, agent]));
+      if (options.preferredAgentId) {
+        const preferred = byId.get(options.preferredAgentId);
+        if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
+        plan.mode = "single";
+        plan.agentIds = [preferred.id];
+        plan.reviewerAgentId = undefined;
+        plan.toolRequests = plan.toolRequests.filter((request) => request.agentId === preferred.id);
+      }
       let selected = plan.agentIds.map((id) => byId.get(id)).filter((agent): agent is CompanyAgent => Boolean(agent));
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);

@@ -52,6 +52,9 @@ import { CompanyApprovalsRepository } from "./approvals-repository";
 import { registerCompanyApprovalsRoutes } from "./approvals-routes";
 import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
+import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
+import { MessagingGateway, TelegramMessagingAdapter } from "./messaging-gateway";
+import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { AuditRepository } from "./audit-repository";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
@@ -195,6 +198,7 @@ export interface AppConfig {
   npatiJwtSecret?: string;
   strictAuth?: boolean;
   agentPublicDomain?: string;
+  messagingWebhookBaseUrl?: string;
   agentVersion?: string;
   deploymentType?: "self_hosted" | "npati_hosted";
   hostedRegistrationToken?: string;
@@ -749,7 +753,9 @@ export function buildApp(config: AppConfig = {}) {
   const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks, undefined, emailAttachmentStorage);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
-  const runAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
+  const messagingIntegrationsRepo = new MessagingIntegrationsRepository(config.databaseUrl);
+  const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter());
+  const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
     const automationContext: AuthContext = {
       workspaceId: automation.workspaceId,
       userId: automation.userId,
@@ -824,6 +830,31 @@ export function buildApp(config: AppConfig = {}) {
       throw new Error(details.run.errorMessage || `Company automation run ended with status ${details.run.status}`);
     }
     return { result: details.run.result || `Company run ${details.run.id} completed.` };
+  };
+  const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
+    const connections = await messagingIntegrationsRepo.listConnectedForCompany(automation.workspaceId, automation.companyId, automation.agentId);
+    await Promise.allSettled(connections.map(async (connection) => {
+      if (!connection.externalChatId) return;
+      try {
+        await messagingGateway.adapter(connection.channel).sendText(
+          messagingIntegrationsRepo.resolveToken(connection), connection.externalChatId,
+          `Automation ${status}: ${automation.name}\n\n${detail}`, connection.externalThreadId || undefined,
+        );
+        await messagingIntegrationsRepo.record(connection.id, "outbound");
+      } catch (error) {
+        await messagingIntegrationsRepo.record(connection.id, "outbound", error instanceof Error ? error.message : String(error));
+      }
+    }));
+  };
+  const runAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
+    try {
+      const result = await executeAutomation(automation, executionKey);
+      await notifyAutomation(automation, "completed", result.result);
+      return result;
+    } catch (error) {
+      await notifyAutomation(automation, "failed", error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
   const automationScheduler = new AutomationScheduler(
     automationsRepo,
@@ -1854,6 +1885,26 @@ ${localized.next}`;
   if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
+  registerMessagingIntegrationRoutes(app, {
+    auth: authProvider, store: workspaceStore, repo: messagingIntegrationsRepo, gateway: messagingGateway,
+    webhookBaseUrl: config.messagingWebhookBaseUrl ?? (config.webOrigin?.startsWith("https://") ? config.webOrigin : undefined),
+    handleMessage: async ({ context, connection, text, attachments, conversationId }) => {
+      const company = await workspaceStore.getCompany(context, connection.companyId);
+      if (!conversationId) {
+        const created = await workspaceStore.createNeutralConversation(context, `Telegram: ${connection.displayName}`);
+        conversationId = await messagingIntegrationsRepo.setRuntimeConversationId(connection, created.id);
+      }
+      const managementRequest = Boolean(text && (isShortAffirmativeReply(text) || requestsCompositeCompanyDeletionIntent(text) || EmailChatActions.isManagementRequest(text) || CompanyChatActions.isManagementRequest(text) || CompanyChatActions.isPotentialMutationRequest(text) || WorkspaceChatActions.isManagementRequest(text) || WorkspaceChatActions.isPotentialMutationRequest(text)));
+      const targetAgent = connection.agentId ? await workspaceStore.getCompanyAgent(context, company.id, connection.agentId) : undefined;
+      const runnableMainAgent = targetAgent?.isActive ?? (company.mainAgentId ? await workspaceStore.getCompanyAgent(context, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false) : false);
+      if (managementRequest || !runnableMainAgent) return runNeutralMessage(context, text, conversationId, attachments, undefined, PerRequestNoMemoryGate.evaluate(), undefined, undefined, { id: company.id, name: company.name });
+      const task = targetAgent ? `Use the specifically bound Company Agent ${targetAgent.name} (id: ${targetAgent.id}) for this request.\n\n${text || "Analyze the attached files."}` : (text || "Analyze the attached files.");
+      const result = await companyRuntime.execute(context, company.id, { task, mode: targetAgent ? "single" : "auto", preferredAgentId: targetAgent?.id, memoryScope: { sessionId: conversationId } }, `telegram:${connection.id}:${Date.now()}`);
+      if (result.run.errorCode === "SECURITY_GUARDRAIL_BLOCKED") throw Object.assign(new Error(result.run.errorMessage || "Request blocked by security guardrails"), { status: 400, code: result.run.errorCode });
+      await persistAutomaticCompanyMemory(context, company.id, result.run.id, text, result.run.status, false);
+      return { message: publicCompanyRunMessage(result.run.result, result.run.errorMessage, text) };
+    },
+  });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
   registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage, worker: emailInboxWorker });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
@@ -1865,7 +1916,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await emailInboxRepo.encryptLegacyAccountCredentials();

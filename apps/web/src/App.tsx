@@ -1205,6 +1205,7 @@ import { ConnectionsPage } from "./ConnectionsPage";
 import { ContentPage } from "./ContentPage";
 import { EmailSettingsPage } from "./EmailSettingsPage";
 import { EmailInboxPage } from "./EmailInboxPage";
+import { IntegrationsPage } from "./IntegrationsPage";
 
 function SettingsPage() {
   const { t } = useTranslation();
@@ -1225,6 +1226,16 @@ function SettingsPage() {
       ),
       title: t("settings.cards.aiProviders.title"),
       description: t("settings.cards.aiProviders.desc"),
+    },
+    {
+      to: "/settings/integrations",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 12h8M12 8v8" /><circle cx="5" cy="12" r="3" /><circle cx="19" cy="12" r="3" />
+        </svg>
+      ),
+      title: "Integrations",
+      description: "Connect Telegram to Company Agents. Discord, Slack, WhatsApp and Email are coming soon.",
     },
     {
       to: "/settings/business",
@@ -1421,6 +1432,7 @@ export function App() {
             <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/integrations" element={<Workspace><IntegrationsPage /></Workspace>} />
             <Route path="/settings/ai" element={<Workspace><AIProviderMarketplace /></Workspace>} />
             <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
             <Route path="*" element={<Navigate to="/" replace />} />
