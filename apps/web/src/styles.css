@@ -2670,10 +2670,6 @@ a {
   cursor: default;
 }
 
-.integration-manage-drawer {
-  width: min(760px, 100%);
-}
-
 .connection-manager {
   display: grid;
   gap: 16px;
