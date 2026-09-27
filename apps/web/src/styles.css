@@ -12296,6 +12296,424 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 /* ==========================================================================
+   Browser Agent Campaign Section (Website registration and publishing)
+   ========================================================================== */
+
+.browser-campaign-section {
+  margin-top: 40px;
+  padding-top: 36px;
+  border-top: 1px solid var(--npati-gray-100);
+}
+
+.browser-campaign-header {
+  margin-bottom: 22px;
+}
+
+.browser-campaign-header h2 {
+  margin: 0 0 6px !important;
+  font-size: clamp(20px, 2.2vw, 24px) !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+  color: var(--npati-black) !important;
+}
+
+.browser-campaign-header .hero-copy {
+  max-width: 760px;
+  margin: 0;
+  font-size: 13.5px;
+  color: #4b5563;
+  line-height: 1.55;
+}
+
+.browser-demo-seed-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.browser-campaign-card {
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+  margin-bottom: 22px;
+}
+
+.browser-campaign-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.browser-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.browser-card-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: var(--npati-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(225, 29, 46, 0.15);
+}
+
+.browser-card-title-group h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--npati-black);
+  letter-spacing: -0.02em;
+}
+
+.browser-card-title-group p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.browser-campaign-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.browser-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.browser-form-field span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2937;
+  letter-spacing: -0.01em;
+}
+
+.browser-form-field .required-star {
+  color: var(--npati-red);
+  font-style: normal;
+  margin-left: 2px;
+}
+
+.browser-form-field input,
+.browser-form-field select,
+.browser-form-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 13px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--npati-black);
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  border-radius: 9px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.browser-form-field select {
+  cursor: pointer;
+}
+
+.browser-form-field input:focus,
+.browser-form-field select:focus,
+.browser-form-field textarea:focus {
+  border-color: rgba(216, 52, 56, 0.55);
+  box-shadow: 0 0 0 3px rgba(216, 52, 56, 0.12);
+}
+
+.browser-form-field input::placeholder,
+.browser-form-field textarea::placeholder {
+  color: #64748b;
+}
+
+.browser-form-field-full {
+  grid-column: 1 / -1;
+}
+
+.browser-form-field textarea {
+  min-height: 84px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.browser-form-hint {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.browser-form-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--npati-gray-100);
+  flex-wrap: wrap;
+}
+
+.browser-form-footer-hint {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.browser-form-footer-hint .warning-text {
+  color: #b45309;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.browser-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+}
+
+/* Status variants for automation-status-btn */
+.automation-status-btn.pending {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.automation-status-btn.pending:hover {
+  background: #fde68a;
+}
+
+.automation-status-btn.processing {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.automation-status-btn.processing .automation-status-dot {
+  animation: statusPulse 1.5s infinite;
+}
+
+.automation-status-btn.failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(1.3);
+  }
+}
+
+.browser-target-attempt {
+  display: block;
+  font-size: 10.5px;
+  color: #64748b;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.browser-target-name {
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--npati-black);
+  margin-bottom: 4px;
+}
+
+.browser-target-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 6px;
+}
+
+.browser-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+  background: var(--npati-gray-50);
+  border: 1px solid var(--npati-gray-200);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: all 140ms ease;
+}
+
+.browser-link-pill:hover {
+  color: var(--npati-red);
+  border-color: rgba(216, 52, 56, 0.42);
+  background: #ffffff;
+}
+
+.browser-target-cred-row {
+  margin-top: 4px;
+}
+
+.browser-cred-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
+.browser-cred-badge .company-doc-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--npati-red);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 11px;
+}
+
+.browser-revealed-credentials {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 11.5px;
+  display: grid;
+  gap: 4px;
+}
+
+.browser-cred-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-cred-item span {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.browser-cred-item code {
+  font-family: monospace;
+  font-weight: 700;
+  background: white;
+  padding: 2px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  color: var(--npati-black);
+}
+
+.browser-email-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.browser-email-pill {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.browser-result-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: all 140ms ease;
+}
+
+.browser-result-badge:hover {
+  background: #dcfce7;
+  transform: translateY(-1px);
+}
+
+.browser-target-empty-dash {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.browser-target-error-msg {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  max-width: 320px;
+  line-height: 1.4;
+}
+
+.browser-table-empty-cell {
+  padding: 44px 20px !important;
+  text-align: center;
+}
+
+.browser-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.browser-empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: var(--npati-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  border: 1px solid rgba(225, 29, 46, 0.15);
+}
+
+.browser-empty-state h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+  color: var(--npati-black);
+}
+
+.browser-empty-state p {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* ==========================================================================
    Goals Page Styles (Scoped to .goals-*)
    ========================================================================== */
 
