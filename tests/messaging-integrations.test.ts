@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
 import { MessagingIntegrationsRepository } from "../apps/agent-api/src/messaging-integrations-repository";
-import { MessagingGateway, TelegramMessagingAdapter } from "../apps/agent-api/src/messaging-gateway";
+import { MessagingGateway, TelegramMessagingAdapter, formatTelegramCards, markdownToTelegramHtml, stripMarkdown } from "../apps/agent-api/src/messaging-gateway";
 import Fastify from "fastify";
 import { registerMessagingIntegrationRoutes } from "../apps/agent-api/src/messaging-integrations-routes";
 import { runMigration045 } from "../packages/workspace/src/migration-045";
@@ -68,7 +68,68 @@ describe("Telegram messaging adapter",()=>{
   it("keeps adapters replaceable",()=>{const gateway=new MessagingGateway().register(new TelegramMessagingAdapter(vi.fn() as any));expect(gateway.adapter("telegram").channel).toBe("telegram");expect(()=>gateway.adapter("slack")).toThrow(/unavailable/);});
   it("honors Telegram rate-limit retry_after without duplicating application logic",async()=>{let attempt=0;const sleeper=vi.fn(async()=>undefined);const fetcher=vi.fn(async()=>{attempt++;return attempt===1?new Response(JSON.stringify({ok:false,error_code:429,description:"Too Many Requests",parameters:{retry_after:0}}),{status:429}):new Response(JSON.stringify({ok:true,result:{username:"retry_bot",first_name:"Retry"}}),{status:200});});const adapter=new TelegramMessagingAdapter(fetcher as typeof fetch,sleeper);await expect(adapter.validateCredential("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH")).resolves.toEqual({externalName:"@retry_bot"});expect(fetcher).toHaveBeenCalledTimes(2);expect(sleeper).toHaveBeenCalledOnce();});
   it("preserves topic and reply context and chunks long responses",async()=>{const sent:string[]=[];const fetcher=vi.fn(async(url:string,init?:RequestInit)=>{if(url.endsWith("/sendMessage")){sent.push(JSON.parse(String(init?.body)).text);return new Response(JSON.stringify({ok:true,result:{message_id:sent.length}}),{status:200});}throw new Error(`Unexpected URL ${url}`);});const adapter=new TelegramMessagingAdapter(fetcher as typeof fetch);const inbound=await adapter.parseInbound({update_id:99,message:{message_id:7,message_thread_id:42,from:{id:11},chat:{id:-100,type:"supergroup"},text:"continue",reply_to_message:{message_id:6,text:"original request",from:{id:11}}}},"123456:abcdefghijklmnopqrstuvwxyzABCDEFGH");expect(inbound).toMatchObject({eventId:"99",externalThreadId:"42",chatType:"supergroup",replyContext:{messageId:"6",text:"original request"}});await adapter.sendText("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH","-100","x".repeat(8000),"42");expect(sent).toHaveLength(3);expect(sent.every((item)=>item.length<=3900)).toBe(true);});
-  it("sends typing state and native outbound documents to the same topic",async()=>{const calls:string[]=[];const fetcher=vi.fn(async(url:string,init?:RequestInit)=>{calls.push(url.split("/").at(-1)!);if(url.endsWith("/sendChatAction")){expect(JSON.parse(String(init?.body))).toMatchObject({chat_id:"-100",message_thread_id:42,action:"typing"});}if(url.endsWith("/sendDocument")){const form=init?.body as FormData;expect(form.get("chat_id")).toBe("-100");expect(form.get("message_thread_id")).toBe("42");expect((form.get("document") as File).name).toBe("result.pdf");}return new Response(JSON.stringify({ok:true,result:{message_id:1}}),{status:200});});const adapter=new TelegramMessagingAdapter(fetcher as typeof fetch);await adapter.sendTyping("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH","-100","42");await adapter.sendAttachment("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH","-100",{kind:"document",name:"result.pdf",mimeType:"application/pdf",dataBase64:Buffer.from("pdf").toString("base64")},"42");expect(calls).toEqual(["sendChatAction","sendDocument"]);});
+  it("converts markdown, headers, and custom NPATI card blocks to clean Telegram HTML without raw asterisks", () => {
+    const raw = `Готово, я створив компанію **Тестова компанія** і зберіг її в налаштуваннях.
+
+Ось що зараз налаштовано:
+
+\`\`\`card:Компанія: Тестова компанія
+**Назва:** Тестова компанія
+**Статус:** Активна
+**Галузь:** Тестування та автоматизація
+
+### Опис компанії
+Тестова компанія для перевірки роботи.
+
+### Команда агентів (3)
+1. **Координатор** - Керівник команди
+2. **Дослідник** - Аналітик
+
+[Відкрити компанію →](/settings/company)
+\`\`\``;
+
+    const formatted = markdownToTelegramHtml(formatTelegramCards(raw, "https://ai.npati.com"));
+
+    // Asterisks must be gone and converted to HTML bold tags
+    expect(formatted).not.toContain("**");
+    expect(formatted).not.toContain("```card:");
+    expect(formatted).toContain("<b>Тестова компанія</b>");
+    expect(formatted).toContain("<b>Назва:</b> Тестова компанія");
+    expect(formatted).toContain("<b>Опис компанії</b>");
+    expect(formatted).toContain("<b>Координатор</b>");
+    expect(formatted).toContain('<a href="https://ai.npati.com/settings/company">Відкрити компанію →</a>');
+  });
+
+  it("handles Telegram parse errors by falling back to stripped plain text", async () => {
+    let callCount = 0;
+    const sentBodies: any[] = [];
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      callCount++;
+      const body = JSON.parse(String(init?.body));
+      sentBodies.push(body);
+      if (callCount === 1) {
+        // Simulate Telegram 400 Bad Request: can't parse entities
+        return new Response(JSON.stringify({
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: can't parse entities: Unsupported start tag"
+        }), { status: 400 });
+      }
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 123 } }), { status: 200 });
+    });
+
+    const adapter = new TelegramMessagingAdapter(fetcher as typeof fetch);
+    const ids = await adapter.sendText("123456:abcdefghijklmnopqrstuvwxyzABCDEFGH", "100", "Привіт **Тестова компанія**");
+
+    expect(ids).toEqual(["123"]);
+    expect(callCount).toBe(2);
+    // First attempt used HTML parse_mode
+    expect(sentBodies[0].parse_mode).toBe("HTML");
+    // Fallback attempt had no HTML parse_mode and stripped the asterisks
+    expect(sentBodies[1].parse_mode).toBeUndefined();
+    expect(sentBodies[1].text).not.toContain("**");
+    expect(sentBodies[1].text).toContain("Привіт Тестова компанія");
+  });
 });
 
 describe("Telegram ingress",()=>{

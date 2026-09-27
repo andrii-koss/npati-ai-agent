@@ -53,7 +53,7 @@ import { registerCompanyApprovalsRoutes } from "./approvals-routes";
 import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
 import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
-import { MessagingGateway, TelegramMessagingAdapter, type GatewayOutboundAttachment } from "./messaging-gateway";
+import { MessagingGateway, TelegramMessagingAdapter, formatTelegramCards, type GatewayOutboundAttachment } from "./messaging-gateway";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { MessagingScopeRouter } from "./messaging-scope-router";
 import { AuditRepository } from "./audit-repository";
@@ -1896,7 +1896,11 @@ ${localized.next}`;
     }
     return output;
   };
-  const telegramResultText=(message:string)=>message.replace(/\[\[npati-attachment:(?:image|document|file|audio):[0-9a-f-]{36}:([^\]]+)\]\]/gi,(_all,name)=>`Attached file: ${decodeURIComponent(String(name))}`).trim()||"NPATI completed the request and attached the result.";
+  const telegramResultText = (message: string) => {
+    let text = message.replace(/\[\[npati-attachment:(?:image|document|file|audio):[0-9a-f-]{36}:([^\]]+)\]\]/gi, (_all, name) => `📎 Attached file: ${decodeURIComponent(String(name))}`).trim();
+    text = formatTelegramCards(text, config.webOrigin);
+    return text || "NPATI completed the request and attached the result.";
+  };
   registerMessagingIntegrationRoutes(app, {
     auth: authProvider, store: workspaceStore, repo: messagingIntegrationsRepo, gateway: messagingGateway,
     webhookBaseUrl: config.messagingWebhookBaseUrl ?? (config.webOrigin?.startsWith("https://") ? config.webOrigin : undefined),

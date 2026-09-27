@@ -31,6 +31,98 @@ export interface MessagingAdapter {
 
 type TelegramApiPayload<T>={ok:boolean;result?:T;description?:string;error_code?:number;parameters?:{retry_after?:number}};
 const delay=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function formatTelegramCards(text: string, webOrigin?: string): string {
+  if (!text) return "";
+  const origin = webOrigin?.replace(/\/+$/, "") || "";
+  let result = text.replace(/```card:([^\n]+)\n([\s\S]*?)(?:```|$)/g, (_match, rawTitle, body) => {
+    const title = rawTitle.trim();
+    let cleanBody = body.trim();
+    if (origin) {
+      cleanBody = cleanBody.replace(/\]\(\/([a-zA-Z0-9_\-\/?=&%#]+)\)/g, `](${origin}/$1)`);
+    }
+    return `📋 **${title}**\n\n${cleanBody}\n`;
+  });
+  if (origin) {
+    result = result.replace(/\]\(\/([a-zA-Z0-9_\-\/?=&%#]+)\)/g, `](${origin}/$1)`);
+  }
+  return result;
+}
+
+export function markdownToTelegramHtml(text: string): string {
+  if (!text) return "";
+  let formatted = formatTelegramCards(text);
+
+  // 1. Preserve code blocks: ```lang?\ncode\n```
+  const codeBlocks: string[] = [];
+  formatted = formatted.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
+    const escaped = escapeHtml(code.replace(/\n$/, ""));
+    const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : "";
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre><code${langAttr}>${escaped}</code></pre>`);
+    return `\x00CB_${idx}_\x00`;
+  });
+
+  // 2. Preserve inline code: `code`
+  const inlineCodes: string[] = [];
+  formatted = formatted.replace(/`([^`\n]+)`/g, (_match, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+    return `\x00IC_${idx}_\x00`;
+  });
+
+  // 3. Escape HTML entities in general text
+  formatted = escapeHtml(formatted);
+
+  // 4. Headers: # Header -> <b>Header</b>
+  formatted = formatted.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>");
+
+  // 5. Bold: **text** or __text__ -> <b>text</b>
+  formatted = formatted.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+  formatted = formatted.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
+
+  // 6. List bullets
+  formatted = formatted.replace(/^(\s*)[*+-]\s+/gm, "$1• ");
+
+  // 7. Italic: *text* (word-boundary safe) or _text_ (safe against snake_case)
+  formatted = formatted.replace(/(?<=^|\s)\*([^*\n\s](?:[^*\n]*?[^*\n\s])?)\*(?=\s|$|[.,!?:;])/g, "<i>$1</i>");
+  formatted = formatted.replace(/(?<=^|\s)_([^_\n\s](?:[^_\n]*?[^_\n\s])?)_(?=\s|$|[.,!?:;])/g, "<i>$1</i>");
+
+  // 8. Strikethrough: ~~text~~ -> <s>text</s>
+  formatted = formatted.replace(/~~([^~\n]+?)~~/g, "<s>$1</s>");
+
+  // 9. Links: [text](url) -> <a href="url">text</a>
+  formatted = formatted.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"']+)\)/g, '<a href="$2">$1</a>');
+
+  // 10. Restore inline code
+  formatted = formatted.replace(/\x00IC_(\d+)_\x00/g, (_match, idx) => inlineCodes[Number(idx)] || "");
+
+  // 11. Restore code blocks
+  formatted = formatted.replace(/\x00CB_(\d+)_\x00/g, (_match, idx) => codeBlocks[Number(idx)] || "");
+
+  return formatted;
+}
+
+export function stripMarkdown(text: string): string {
+  if (!text) return "";
+  return formatTelegramCards(text)
+    .replace(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/g, "$1")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/\*\*([^*\n]+?)\*\*/g, "$1")
+    .replace(/__([^_\n]+?)__/g, "$1")
+    .replace(/(?<=^|\s)[*_]([^*\n\s](?:[^*\n]*?[^*\n\s])?)[*_](?=\s|$|[.,!?:;])/g, "$1")
+    .replace(/~~([^~\n]+?)~~/g, "$1")
+    .replace(/^#{1,6}\s+(.+)$/gm, "$1")
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"']+)\)/g, "$1 ($2)");
+}
+
 function textChunks(text:string,limit=3900){
   if(!text)return[""];
   const chunks:string[]=[];let remaining=text;
@@ -92,10 +184,60 @@ export class TelegramMessagingAdapter implements MessagingAdapter {
   }
   async sendText(token: string, chatId: string, text: string, threadId?: string,replyToMessageId?:string) {
     const ids:string[]=[];
-    for (const chunk of textChunks(text)) {const result=await this.call<{message_id:number}>(token, "sendMessage", { chat_id: chatId, text: chunk, ...(threadId ? { message_thread_id: Number(threadId) } : {}),...(replyToMessageId?{reply_parameters:{message_id:Number(replyToMessageId)}}:{}) });ids.push(String(result.message_id));replyToMessageId=undefined;}
+    for (const chunk of textChunks(text)) {
+      const html = markdownToTelegramHtml(chunk);
+      try {
+        const result = await this.call<{message_id:number}>(token, "sendMessage", {
+          chat_id: chatId,
+          text: html,
+          parse_mode: "HTML",
+          ...(threadId ? { message_thread_id: Number(threadId) } : {}),
+          ...(replyToMessageId?{reply_parameters:{message_id:Number(replyToMessageId)}}:{})
+        });
+        ids.push(String(result.message_id));
+      } catch (err: any) {
+        const isParseError = err?.status === 400 || (typeof err?.message === "string" && /parse entities|can't parse/i.test(err.message));
+        if (isParseError) {
+          const plain = stripMarkdown(chunk) || chunk;
+          const result = await this.call<{message_id:number}>(token, "sendMessage", {
+            chat_id: chatId,
+            text: plain,
+            ...(threadId ? { message_thread_id: Number(threadId) } : {}),
+            ...(replyToMessageId?{reply_parameters:{message_id:Number(replyToMessageId)}}:{})
+          });
+          ids.push(String(result.message_id));
+        } else {
+          throw err;
+        }
+      }
+      replyToMessageId=undefined;
+    }
     return ids;
   }
-  async editText(token:string,chatId:string,messageId:string,text:string){await this.call(token,"editMessageText",{chat_id:chatId,message_id:Number(messageId),text:text.slice(0,3900)});}
+  async editText(token:string,chatId:string,messageId:string,text:string){
+    const trimmed = text.slice(0, 3900);
+    const html = markdownToTelegramHtml(trimmed);
+    try {
+      await this.call(token,"editMessageText",{
+        chat_id:chatId,
+        message_id:Number(messageId),
+        text:html,
+        parse_mode:"HTML",
+      });
+    } catch (err: any) {
+      const isParseError = err?.status === 400 || (typeof err?.message === "string" && /parse entities|can't parse/i.test(err.message));
+      if (isParseError) {
+        const plain = stripMarkdown(trimmed) || trimmed;
+        await this.call(token,"editMessageText",{
+          chat_id:chatId,
+          message_id:Number(messageId),
+          text:plain,
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
   async sendTyping(token:string,chatId:string,threadId?:string){await this.call(token,"sendChatAction",{chat_id:chatId,action:"typing",...(threadId?{message_thread_id:Number(threadId)}:{})});}
   async sendAttachment(token:string,chatId:string,attachment:GatewayOutboundAttachment,threadId?:string,replyToMessageId?:string){
     const bytes=Buffer.from(attachment.dataBase64,"base64"),nativePhoto=attachment.kind==="image"&&bytes.length<=10*1024*1024,method=nativePhoto?"sendPhoto":"sendDocument",field=nativePhoto?"photo":"document";
