@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:stability": "vitest run tests/multi-provider-company-stability.test.ts tests/scale-certification-production.test.ts tests/phase12-scale-criteria.test.ts tests/production-p03-reliability-scale.test.ts",
     "audit:capabilities": "node scripts/verify-capability-matrix.mjs",
     "benchmark:scale": "node scripts/scale-benchmark.mjs",
     "cert:scale": "docker compose -f docker-compose.yml -f docker-compose.scale.yml run --rm scale-certifier",
