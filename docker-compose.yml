@@ -156,6 +156,7 @@ services:
     environment:
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-npati-local-internal-crawler-token}
       SECRET_KEY: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}
+      REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}
       NPATI_CRAWLER_STATE_DIR: /app/npati-state
       NPATI_CRAWLER_PAGE_TIMEOUT_MS: ${NPATI_CRAWLER_PAGE_TIMEOUT_MS:-45000}
     volumes:
