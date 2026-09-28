@@ -107,6 +107,16 @@ export const uk: TranslationSchema = {
     regenerate: "Згенерувати знову",
     shareResponse: "Поділитися відповіддю",
   },
+  userMenu: {
+    emailInbox: "Поштова скринька",
+    aiProvider: "AI Провайдер",
+    company: "Компанія",
+    memory: "Пам'ять",
+    settings: "Налаштування",
+    signOut: "Вийти",
+    signOutIncompleteTitle: "Вихід не завершено",
+    signOutIncompleteDesc: "Не вдалося вийти з облікового запису npati.com.",
+  },
   settings: {
     title: "Налаштування",
     eyebrow: "Робочий простір NPATI",

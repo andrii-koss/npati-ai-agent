@@ -114,6 +114,16 @@ export const es: TranslationSchema = {
     regenerate: "Regenerar",
     shareResponse: "Compartir respuesta",
   },
+  userMenu: {
+    emailInbox: "Bandeja de entrada",
+    aiProvider: "Proveedor IA",
+    company: "Empresa",
+    memory: "Memoria",
+    settings: "Configuración",
+    signOut: "Cerrar sesión",
+    signOutIncompleteTitle: "Cierre de sesión incompleto",
+    signOutIncompleteDesc: "No se pudo cerrar la sesión en npati.com.",
+  },
   settings: {
     title: "Configuración",
     eyebrow: "Espacio de trabajo NPATI",

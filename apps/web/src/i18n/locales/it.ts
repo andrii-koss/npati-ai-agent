@@ -113,6 +113,16 @@ export const it: TranslationSchema = {
     regenerate: "Rigenera",
     shareResponse: "Condividi risposta",
   },
+  userMenu: {
+    emailInbox: "Casella email",
+    aiProvider: "Provider IA",
+    company: "Azienda",
+    memory: "Memoria",
+    settings: "Impostazioni",
+    signOut: "Esci",
+    signOutIncompleteTitle: "Disconnessione incompleta",
+    signOutIncompleteDesc: "Impossibile disconnettersi da npati.com.",
+  },
   settings: {
     title: "Impostazioni",
     eyebrow: "Area di lavoro NPATI",

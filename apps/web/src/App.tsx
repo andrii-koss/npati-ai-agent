@@ -72,6 +72,7 @@ function NpatiAgentLogo() {
 }
 
 function ChatUserMenu() {
+  const { t } = useTranslation();
   const location = useLocation();
   const { overview } = useWorkspace();
   const { user, signOutEverywhere } = useAuth();
@@ -130,23 +131,23 @@ function ChatUserMenu() {
           </div>
           <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
           <nav aria-label="Registered user links">
-            <Link to="/settings/email/inbox" onClick={closeMenu}>Email Inbox <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/settings/ai" onClick={closeMenu}>AI Provider <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/settings/company" onClick={closeMenu}>Company <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/settings/memory" onClick={closeMenu}>Memory <span aria-hidden="true">&rarr;</span></Link>
-            <Link to="/settings" onClick={closeMenu}>Settings <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/email/inbox" onClick={closeMenu}>{t("userMenu.emailInbox")} <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/ai" onClick={closeMenu}>{t("userMenu.aiProvider")} <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/company" onClick={closeMenu}>{t("userMenu.company")} <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/memory" onClick={closeMenu}>{t("userMenu.memory")} <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings" onClick={closeMenu}>{t("userMenu.settings")} <span aria-hidden="true">&rarr;</span></Link>
             <button
               type="button"
               className="chat-user-signout"
               onClick={() => {
                 closeMenu();
                 void signOutEverywhere().catch((cause) => alertModal({
-                  title: "Sign out incomplete",
-                  message: cause instanceof Error ? cause.message : "Could not sign out of npati.com.",
+                  title: t("userMenu.signOutIncompleteTitle"),
+                  message: cause instanceof Error ? cause.message : t("userMenu.signOutIncompleteDesc"),
                 }));
               }}
             >
-              Sign out <span aria-hidden="true">&rarr;</span>
+              {t("userMenu.signOut")} <span aria-hidden="true">&rarr;</span>
             </button>
           </nav>
         </aside>

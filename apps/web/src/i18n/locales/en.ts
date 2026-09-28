@@ -107,6 +107,16 @@ export const en: TranslationSchema = {
     regenerate: "Regenerate",
     shareResponse: "Share response",
   },
+  userMenu: {
+    emailInbox: "Email Inbox",
+    aiProvider: "AI Provider",
+    company: "Company",
+    memory: "Memory",
+    settings: "Settings",
+    signOut: "Sign out",
+    signOutIncompleteTitle: "Sign out incomplete",
+    signOutIncompleteDesc: "Could not sign out of npati.com.",
+  },
   settings: {
     title: "Settings",
     eyebrow: "NPATI workspace",

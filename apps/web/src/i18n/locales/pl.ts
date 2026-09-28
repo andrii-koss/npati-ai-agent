@@ -107,6 +107,16 @@ export const pl: TranslationSchema = {
     regenerate: "Generuj ponownie",
     shareResponse: "Udostępnij odpowiedź",
   },
+  userMenu: {
+    emailInbox: "Skrzynka pocztowa",
+    aiProvider: "Dostawca AI",
+    company: "Firma",
+    memory: "Pamięć",
+    settings: "Ustawienia",
+    signOut: "Wyloguj się",
+    signOutIncompleteTitle: "Wylogowanie niekompletne",
+    signOutIncompleteDesc: "Nie udało się wylogować z npati.com.",
+  },
   settings: {
     title: "Ustawienia",
     eyebrow: "Przestrzeń robocza NPATI",
