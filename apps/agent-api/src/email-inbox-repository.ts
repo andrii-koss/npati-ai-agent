@@ -561,8 +561,6 @@ export class EmailInboxRepository {
         [
           updated.displayName,
           updated.agentId,
-          updated.mode,
-          updated.status,
           updated.provider,
           updated.connectionScope,
           updated.senderPolicy,
@@ -570,6 +568,8 @@ export class EmailInboxRepository {
           updated.allowedDomains,
           updated.requireAuthenticatedSender,
           updated.outboundPolicy,
+          updated.mode,
+          updated.status,
           updated.testMode,
           updated.confidenceThreshold,
           updated.languageMode,

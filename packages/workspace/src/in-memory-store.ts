@@ -444,7 +444,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       run: structuredClone(run),
       steps: [...this.companyRunSteps.values()].filter((step) => step.runId === runId).sort((a, b) => a.stepOrder - b.stepOrder || a.lane - b.lane),
       toolAudit: [...this.companyToolAudit.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-      backgroundEvents: [...this.companyRunEvents.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
+      // Map iteration preserves append order. Do not use the random UUID as a
+      // tie-breaker: multiple lifecycle events can share the same millisecond.
+      backgroundEvents: [...this.companyRunEvents.values()].filter((entry) => entry.runId === runId),
       completionReport: completionStatus && run.completedAt ? { runId: run.id, companyId: run.companyId, status: completionStatus,
         result: run.result, errorCode: run.errorCode, errorMessage: run.errorMessage, workerId: run.workerId,
         attemptCount: run.attemptCount, totalCost: run.totalCost ?? 0, totalTokens: run.totalTokens ?? 0,

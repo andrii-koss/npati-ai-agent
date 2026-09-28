@@ -376,6 +376,35 @@ describe("Email / AI Inbox Module", () => {
     expect(stored.imapConfig.password).not.toContain("imap-secret");
   });
 
+  it("binds PostgreSQL email account fields in the same order as the UPDATE placeholders", async () => {
+    const existing = {
+      id: "account-pg-order", workspaceId: mockAuth.workspaceId, companyId, userId: mockAuth.userId,
+      emailAddress: "order@company.com", displayName: "Order", agentId: null,
+      provider: "imap_smtp", connectionScope: "company", senderPolicy: "allowlist",
+      allowedSenders: ["trusted@example.com"], allowedDomains: ["example.com"],
+      requireAuthenticatedSender: true, outboundPolicy: "approval_required",
+      mode: "approval", status: "connected", testMode: false, confidenceThreshold: 0.8,
+      languageMode: "auto", fallbackLanguage: "en", imapConfig: {}, smtpConfig: {},
+      rateLimits: {}, signatureConfig: {}, followupConfig: {},
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    let updateParameters: unknown[] = [];
+    const pool = {
+      query: async (sql: string, parameters: unknown[]) => {
+        if (sql.includes("UPDATE company_email_accounts")) updateParameters = parameters;
+        return { rows: [existing] };
+      },
+    };
+    const pgRepo = new EmailInboxRepository(undefined, pool as any);
+
+    await pgRepo.updateAccount(mockAuth, companyId, existing.id, { displayName: "Updated Order" });
+
+    expect(updateParameters.slice(0, 15)).toEqual([
+      "Updated Order", null, "imap_smtp", "company", "allowlist",
+      ["trusted@example.com"], ["example.com"], true, "approval_required",
+      "approval", "connected", false, 0.8, "auto", "en",
+    ]);
+  });
   it("20. Serializes concurrent processing of the same provider Message-ID", async () => {
     const payload = {
       from: "concurrent@client.org",
