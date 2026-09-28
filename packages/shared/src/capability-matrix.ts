@@ -712,7 +712,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/group-sessions-and-tool-policy.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 45,
@@ -747,7 +747,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/workspace-store.test.ts",
       "tests/production-p03-reliability-scale.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 47,
@@ -808,7 +808,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/omniroute-adapter.test.ts"
     ],
-    "status": "PARTIALLY_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 51,
@@ -883,7 +883,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/memory-md-quota-and-channel-auth.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 56,
@@ -2167,7 +2167,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/automation-flows-and-email.test.ts",
       "tests/production-p13-automations.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 137,
@@ -3545,7 +3545,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-docking-and-hooks.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 226,
@@ -3590,7 +3590,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/multi-user-dm-pairing-subagents.test.ts",
       "tests/telegram-ollama-tts.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 229,
@@ -3618,7 +3618,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/versioning-xsearch-channel-plugins.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 231,
@@ -3648,7 +3648,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
       "tests/channel-groups-and-mentions.test.ts",
       "tests/telegram-ollama-tts.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 233,
@@ -3662,7 +3662,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "testFiles": [
       "tests/channel-groups-and-mentions.test.ts"
     ],
-    "status": "NOT_IMPLEMENTED"
+    "status": "VERIFIED_EXISTING"
   },
   {
     "id": 234,
