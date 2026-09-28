@@ -55,6 +55,7 @@ import { registerIntegrationsRoutes } from "./integrations-routes";
 import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
 import { MessagingGateway, TelegramMessagingAdapter, formatTelegramCards, type GatewayOutboundAttachment } from "./messaging-gateway";
 import { WhatsAppMessagingAdapter } from "./whatsapp-messaging";
+import { DiscordMessagingAdapter } from "./discord-messaging";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { MessagingScopeRouter } from "./messaging-scope-router";
 import { AuditRepository } from "./audit-repository";
@@ -757,7 +758,8 @@ export function buildApp(config: AppConfig = {}) {
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
   const messagingIntegrationsRepo = new MessagingIntegrationsRepository(config.databaseUrl);
   const whatsappMessagingAdapter = new WhatsAppMessagingAdapter(messagingIntegrationsRepo);
-  const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter);
+  const discordMessagingAdapter = new DiscordMessagingAdapter(messagingIntegrationsRepo);
+  const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter);
   const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
   const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
     const automationContext: AuthContext = {
@@ -1894,7 +1896,7 @@ ${localized.next}`;
     if(!chatFiles)return[];const output:GatewayOutboundAttachment[]=[],seen=new Set<string>();
     for(const match of message.matchAll(/\[\[npati-attachment:(image|document|file|audio):([0-9a-f-]{36}):([^\]]+)\]\]/gi)){
       const id=match[2]!;if(seen.has(id))continue;seen.add(id);const opened=await chatFiles.open(auth,id);if(!opened)continue;
-      const chunks:Buffer[]=[];let size=0;for await(const chunk of opened.stream){const bytes=Buffer.from(chunk);size+=bytes.length;if(size>49*1024*1024)throw new Error(`Telegram output file ${opened.file.originalFilename} exceeds 49 MB`);chunks.push(bytes);}
+      const chunks:Buffer[]=[];let size=0;for await(const chunk of opened.stream){const bytes=Buffer.from(chunk);size+=bytes.length;if(size>49*1024*1024)throw new Error(`Messaging output file ${opened.file.originalFilename} exceeds 49 MB`);chunks.push(bytes);}
       output.push({kind:match[1]!.toLowerCase()==="image"?"image":match[1]!.toLowerCase()==="audio"?"audio":"document",name:decodeURIComponent(match[3]!),mimeType:opened.file.mimeType,dataBase64:Buffer.concat(chunks).toString("base64")});
     }
     return output;
@@ -1910,7 +1912,7 @@ ${localized.next}`;
     resetConversation:async({context,conversationId})=>{await workspaceStore.deleteNeutralConversation(context,conversationId);},
     handleMessage: async ({ context, connection, session, text, attachments, conversationId, replyContext, signal, onDelta }) => {
       const scope = await messagingScopeRouter.resolve(context, connection, text, session);
-      if (scope.handled) return { message: scope.message || "Telegram context updated." };
+      if (scope.handled) return { message: scope.message || "Messaging context updated." };
       const company = scope.company;
       if(/^\/(?:runs|tasks)$/iu.test(text)){
         if(!company)return{message:"Select a Company with /company Company name before listing runs and Automations."};
@@ -1923,7 +1925,7 @@ ${localized.next}`;
         const pending=await approvalsRepo.list(context,company.id,"pending");return{message:pending.length?`Pending approvals:\n${pending.map((item)=>`• ${item.id} — ${item.riskLevel}: ${item.actionSummary}`).join("\n")}\n\nUse /approve ID or /deny ID.`:"No pending approvals."};
       }
       if(/^\/(?:approve|deny)$/iu.test(text))return{message:"Usage: /approve APPROVAL_ID or /deny APPROVAL_ID. Use /approvals to list pending requests."};
-      const decision=/^\/(approve|deny)\s+([0-9a-f-]{8,})$/iu.exec(text);if(decision){if(!company)return{message:"Select a Company before deciding an approval."};if(!approvalsRepo)return{message:"Persistent approvals are unavailable because the database is not configured."};const approval=await approvalsRepo.decide(context,company.id,decision[2]!,decision[1]!.toLowerCase()==="approve"?"approved":"rejected","Decision submitted through an authorized Telegram connection");return{message:`Approval ${approval.id} is ${approval.status}.`};}
+      const decision=/^\/(approve|deny)\s+([0-9a-f-]{8,})$/iu.exec(text);if(decision){if(!company)return{message:"Select a Company before deciding an approval."};if(!approvalsRepo)return{message:"Persistent approvals are unavailable because the database is not configured."};const approval=await approvalsRepo.decide(context,company.id,decision[2]!,decision[1]!.toLowerCase()==="approve"?"approved":"rejected","Decision submitted through an authorized messaging connection");return{message:`Approval ${approval.id} is ${approval.status}.`};}
       if (!conversationId) {const created = await workspaceStore.createNeutralConversation(context, connection.channel+": "+connection.displayName);conversationId=created.id;await messagingIntegrationsRepo.setSessionConversation(session,created.id);}
       const runtimeText=replyContext?.text?text+"\n\n"+connection.channel+" reply context (message "+replyContext.messageId+"):\n"+replyContext.text:text;
       const managementRequest = Boolean(text && (isShortAffirmativeReply(text) || requestsCompositeCompanyDeletionIntent(text) || EmailChatActions.isManagementRequest(text) || CompanyChatActions.isManagementRequest(text) || CompanyChatActions.isPotentialMutationRequest(text) || WorkspaceChatActions.isManagementRequest(text) || WorkspaceChatActions.isPotentialMutationRequest(text)));
@@ -1955,10 +1957,11 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await whatsappMessagingAdapter.shutdown(); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();
+    await discordMessagingAdapter.restore();
     await emailInboxRepo.encryptLegacyAccountCredentials();
     await objectStorage?.initialize();
     if (chatFiles) { const legacy = await chatFiles.migrateLegacy(); if (legacy.failed) app.log.warn(legacy,"Some legacy attachments could not be migrated"); await chatFiles.cleanupPending(); }
