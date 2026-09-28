@@ -353,18 +353,18 @@ describe("Agent API", () => {
   });
 
   it("accepts a photo and voice message, transcribes audio, and keeps binary data out of history", async () => {
-    let lastChat: ChatRequest | undefined;
+    const aiRequests: ChatRequest[] = [];
     let transcriptionMimeType = "";
     const aiEngine: AIEngine = {
       chat: async (request) => {
-        lastChat = request;
+        aiRequests.push(request);
         return { content: "The image shows a product suitable for a furniture listing." };
       },
       transcribeAudio: async (input) => {
         transcriptionMimeType = input.mimeType;
         return { text: "I sell furniture in Lviv." };
       },
-      async *stream() { yield ""; }, listModels: async () => [], getModel: async () => undefined,
+      async *stream(request) { aiRequests.push(request); yield ""; }, listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "vision", "audio.transcription"], healthCheck: async () => ({ status: "ok" }),
     };
@@ -401,10 +401,11 @@ describe("Agent API", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('"type":"page_fetch_started"');
     expect(response.body).toContain('"title":"chair.png"');
-    expect(lastChat?.model).toBe("openai/gpt-5.6-luna");
-    expect(lastChat?.fallbackModel).toBeUndefined();
+    const multimodalRequest = aiRequests.find((request) => Array.isArray(request.messages.at(-1)?.content));
+    expect(multimodalRequest?.model).toBe("openai/gpt-5.6-luna");
+    expect(multimodalRequest?.fallbackModel).toBeUndefined();
     expect(transcriptionMimeType).toBe("audio/mp4");
-    const userContent = lastChat?.messages.at(-1)?.content;
+    const userContent = multimodalRequest?.messages.at(-1)?.content;
     expect(Array.isArray(userContent)).toBe(true);
     expect(JSON.stringify(userContent)).toContain("data:image/png;base64,iVBORw0KGgoAAA");
     expect(JSON.stringify(userContent)).toContain("I sell furniture in Lviv.");

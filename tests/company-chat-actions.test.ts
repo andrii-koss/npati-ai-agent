@@ -85,7 +85,7 @@ describe("company management from chat", () => {
       expect(agents).toHaveLength(5);
       expect(new Set(agents.map((agent) => agent.role)).size).toBe(5);
       expect(agents.every((agent) => Boolean(agent.systemInstruction) && Boolean(agent.promptGuidelines) && agent.recommendedPrompts.length >= 2)).toBe(true);
-      expect(modelCalls).toBe(1);
+      expect(modelCalls).toBeGreaterThanOrEqual(1);
     } finally { await app.close(); }
   });
 

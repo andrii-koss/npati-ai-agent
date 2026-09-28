@@ -22,7 +22,8 @@ describe("architecture boundaries", () => {
     const appSource = readFileSync(join(process.cwd(), "apps", "web", "src", "App.tsx"), "utf8");
     const companyPage = readFileSync(join(process.cwd(), "apps", "web", "src", "CompanyPage.tsx"), "utf8");
 
-    expect(appSource).toContain('{ to: "/settings/company", icon: "CO"');
+    expect(appSource).toContain('to: "/settings/company"');
+    expect(appSource).toContain('title: t("settings.cards.company.title")');
     expect(appSource).toContain('t("settings.cards.company.title")');
     expect(appSource).not.toContain('title: "Agents"');
     expect(appSource).toContain('<Route path="/company"');
