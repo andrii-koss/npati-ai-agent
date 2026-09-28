@@ -47,6 +47,13 @@ interface InspectorReport {
   activeSlice: InspectorSlice;
   items: CapabilityItem[];
 }
+interface IntegrationChannel {
+  id: string;
+  name: string;
+  available: boolean;
+  capabilities: string[];
+}
+
 
 type SortField = "id" | "name" | "capabilityId" | "domain" | "type" | "risk" | "status";
 
@@ -92,8 +99,8 @@ export function getCapabilityDisplayName(item: { capabilityId?: string; name: st
   return item.name;
 }
 
-const CAPABILITIES_CACHE_PREFIX = "npati_capabilities_cache_v1_";
-const CAPABILITIES_LATEST_CACHE_KEY = "npati_capabilities_cache_latest_v1";
+const CAPABILITIES_CACHE_PREFIX = "npati_capabilities_cache_v2_";
+const CAPABILITIES_LATEST_CACHE_KEY = "npati_capabilities_cache_latest_v2";
 
 function getCachedReport(slice: InspectorSlice): InspectorReport | null {
   try {
@@ -133,6 +140,8 @@ export function CapabilityInspectorPage() {
   const [report, setReport] = useState<InspectorReport | null>(initialReport);
   const [loading, setLoading] = useState(() => initialReport === null);
   const [error, setError] = useState<string | null>(null);
+  const [integrationChannels, setIntegrationChannels] = useState<IntegrationChannel[]>([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(true);
 
   // Pagination & Sorting State
   const [pageSize, setPageSize] = useState<number>(25);
@@ -186,6 +195,28 @@ export function CapabilityInspectorPage() {
       active = false;
     };
   }, [slice, t]);
+
+  useEffect(() => {
+    let active = true;
+    const headers: HeadersInit = {};
+    const token = getStoredAuthToken();
+    if (token) headers.authorization = `Bearer ${token}`;
+    fetch("/api/integrations/channels", { headers })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as { channels?: IntegrationChannel[] };
+      })
+      .then((data) => {
+        if (active) setIntegrationChannels((data.channels ?? []).filter((channel) => channel.available));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setIntegrationsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Reset page on filter or search change
   useEffect(() => {
@@ -299,6 +330,41 @@ export function CapabilityInspectorPage() {
           <span>{t("capabilityInspector.stats.requiresApprovalLabel")}</span>
           <small>{t("capabilityInspector.stats.requiresApprovalDesc")}</small>
         </div>
+      </section>
+
+      <section className="explore-section" aria-labelledby="implemented-integrations-title">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Verified product integrations</p>
+            <h2 id="implemented-integrations-title">Implemented messaging channels</h2>
+          </div>
+          <Link to="/settings/integrations" className="button-secondary">Manage integrations</Link>
+        </div>
+        {integrationsLoading ? (
+          <div className="loading-state">Loading integration status...</div>
+        ) : integrationChannels.length > 0 ? (
+          <div className="provider-grid">
+            {integrationChannels.map((channel) => (
+              <article className="provider-card is-connected" key={channel.id}>
+                <div className="provider-card-main">
+                  <span className="provider-title">
+                    <strong>{channel.name}</strong>
+                    <small>Shared NPATI Agent runtime</small>
+                  </span>
+                  <span className="connection-light on" aria-label="Implemented" />
+                </div>
+                <div className="provider-badges">
+                  <span className="status-pill verified">{t("capabilityInspector.statuses.verified")}</span>
+                </div>
+                <div className="capability-row">
+                  {channel.capabilities.map((capability) => <span key={capability}>{capability}</span>)}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="workspace-notice">Integration status is available when the Agent API is connected.</div>
+        )}
       </section>
 
       <div className="inspector-controls">
