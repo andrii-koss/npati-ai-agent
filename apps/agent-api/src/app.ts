@@ -1988,6 +1988,13 @@ ${localized.next}`;
     automationScheduler.start();
   });
 
+  // Container liveness must not depend on optional or remote services. Fastify
+  // exposes this route only after the onReady initialization above completes.
+  app.get("/health/live", async () => ({
+    status: "ok" as const,
+    timestamp: new Date().toISOString(),
+  }));
+
   app.get("/health", async (): Promise<HealthResponse> => {
     const [omniroute, hubHealth, databaseStatus, crawlerStatus, storageStatus] = await Promise.all([
       aiEngine.healthCheck(),

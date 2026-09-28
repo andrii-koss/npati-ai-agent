@@ -12,6 +12,9 @@ FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
+# npm may keep native workspace dependencies (notably better-sqlite3) under
+# the workspace instead of hoisting them to the repository root.
+COPY --from=build /app/apps/agent-api/node_modules ./node_modules
 
 COPY --from=build /app/apps/agent-api/dist ./dist
 RUN mkdir -p /app/data && chown node:node /app/data

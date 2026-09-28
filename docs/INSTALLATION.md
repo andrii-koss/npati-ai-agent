@@ -73,3 +73,24 @@ A platform is release-supported only after its matrix job passes for the release
 Docker runtime smoke tests that require external provider credentials remain deployment
 checks and are not implied by an image build.
 
+
+## Troubleshooting an unhealthy API container
+
+If Compose reports `dependency agent-api failed to start`, inspect the API process
+rather than the dependent web or worker container:
+
+```bash
+docker compose ps agent-api
+docker compose logs --tail=200 agent-api
+docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q agent-api)"
+```
+
+`/health/live` is the container liveness endpoint. The aggregate `/health` endpoint
+also probes configured external services and is intended for diagnostics, not for
+Docker lifecycle decisions.
+
+For `NPATI_ENV=production`, configure unique values of at least 32 characters for
+`NPATI_ENCRYPTION_KEY` and `NPATI_REMOTE_ACCESS_TOKEN_SECRET`; development defaults
+are intentionally rejected. If the log mentions a missing native SQLite binding,
+rebuild the API image without cache so the workspace-native dependency layer is
+included: `docker compose build --no-cache agent-api`.
