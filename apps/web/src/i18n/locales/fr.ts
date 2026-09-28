@@ -170,28 +170,30 @@ export const fr: TranslationSchema = {
     eyebrow: "Votre agent d'affaires IA",
     heading: "Que souhaitez-vous faire ?",
     subheading:
-      "Choisissez un point de départ. Nous utiliserons votre entreprise active, vos objectifs et votre mémoire pour la prochaine étape concrète.",
+      "Choisissez un point de départ. Nous utiliserons votre entreprise active, vos objectifs et le contexte enregistré pour vous aider à franchir la prochaine étape pratique.",
     signIn: "Connexion",
     createAccount: "Créer un compte",
     chatEmptyTitle: "Sur quoi souhaitez-vous travailler ?",
     chatEmptySubtitle:
       "Demandez n'importe quoi à NPATI Agent ou brainstormez des idées.",
+    footerPrefix: "NPATI Agent open source · Créé par",
+    footerLink: "NPATI",
     actions: {
       sellSomething: {
         title: "Vendre un produit",
-        desc: "Transformez une idée en offre claire et attractive",
+        desc: "Transformez un produit ou un service en une offre claire",
       },
       startBusiness: {
         title: "Créer une entreprise",
-        desc: "Précisez une idée pour un premier test concret",
+        desc: "Concrétisez une idée en un premier test pratique",
       },
       growBusiness: {
         title: "Développer l'activité",
-        desc: "Identifiez le prochain levier pratique de croissance",
+        desc: "Identifiez la prochaine opportunité pratique de croissance",
       },
       improveBusiness: {
         title: "Optimiser l'activité",
-        desc: "Analysez ce qui fonctionne et les points à perfectionner",
+        desc: "Passez en revue ce qui fonctionne, ce qui ne fonctionne pas et ce qu'il faut améliorer",
       },
       createContent: {
         title: "Créer du contenu",

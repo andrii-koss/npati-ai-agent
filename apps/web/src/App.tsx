@@ -205,8 +205,7 @@ function Home() {
           </div>
         ) : (
           <div className="home-auth-nav">
-            <button className="button-secondary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "login" })}>{t("home.signIn")}</button>
-            <button className="button-primary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "register" })}>{t("home.createAccount")}</button>
+            <button className="button-primary home-auth-btn" onClick={() => setAuthModal({ open: true, mode: "login" })}>{t("home.signIn")}</button>
           </div>
         )}
       </header>
@@ -228,9 +227,9 @@ function Home() {
         </div>
       </section>
       <footer className="home-footer">
-        Independent NPATI interface · Developed by the agent creators at{" "}
+        {t("home.footerPrefix")}{" "}
         <a href="https://www.npati.com/" target="_blank" rel="noreferrer">
-          npati.com
+          {t("home.footerLink")}
         </a>
       </footer>
       <AuthModal

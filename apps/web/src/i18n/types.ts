@@ -147,6 +147,8 @@ export interface TranslationSchema {
     createAccount: string;
     chatEmptyTitle: string;
     chatEmptySubtitle: string;
+    footerPrefix: string;
+    footerLink: string;
     actions: {
       sellSomething: { title: string; desc: string };
       startBusiness: { title: string; desc: string };
