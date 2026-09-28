@@ -967,6 +967,14 @@ export const fr: TranslationSchema = {
     },
     connectedServices: "Services connectés",
     errorLoad: "Échec du chargement des capacités",
+    integrations: {
+      kicker: "Intégrations de produits vérifiées",
+      title: "Canaux de messagerie implémentés",
+      manage: "Gérer les intégrations",
+      sharedRuntime: "Environnement d'exécution partagé NPATI Agent",
+      loading: "Chargement de l'état des intégrations...",
+      notice: "L'état de l'intégration est disponible lorsque l'API de l'agent est connectée.",
+    },
   },
   activity: {
     eyebrow: "Observabilité et audit",

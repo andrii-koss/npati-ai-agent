@@ -792,6 +792,14 @@ export const uk: TranslationSchema = {
     },
     connectedServices: "Підключені сервіси",
     errorLoad: "Не вдалося завантажити можливості",
+    integrations: {
+      kicker: "Перевірені інтеграції продукту",
+      title: "Реалізовані канали обміну повідомленнями",
+      manage: "Керування інтеграціями",
+      sharedRuntime: "Спільне середовище виконання NPATI Agent",
+      loading: "Завантаження статусу інтеграцій...",
+      notice: "Статус інтеграцій доступний, коли Agent API підключено.",
+    },
   },
   activity: {
     eyebrow: "Спостереження та аудит",
