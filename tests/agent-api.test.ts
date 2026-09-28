@@ -582,6 +582,9 @@ describe("Agent API", () => {
   it("starts and exposes aggregate health", async () => {
     const app = buildApp();
     apps.push(app);
+    const liveness = await app.inject({ method: "GET", url: "/health/live" });
+    expect(liveness.statusCode).toBe(200);
+    expect(liveness.json()).toMatchObject({ status: "ok" });
     const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({

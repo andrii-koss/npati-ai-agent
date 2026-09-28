@@ -18,6 +18,20 @@ describe("architecture boundaries", () => {
     expect(nginxConfig).toContain("proxy_pass http://agent_api/;");
   });
 
+  it("keeps native workspace dependencies and local liveness in the API image", () => {
+    const dockerfile = readFileSync(join(process.cwd(), "apps", "agent-api", "Dockerfile"), "utf8");
+    const compose = readFileSync(join(process.cwd(), "docker-compose.yml"), "utf8");
+    const dokployCompose = readFileSync(join(process.cwd(), "docker-compose.dokploy.yml"), "utf8");
+
+    expect(dockerfile).toContain(
+      "COPY --from=build /app/apps/agent-api/node_modules ./node_modules",
+    );
+    expect(compose).toContain("http://127.0.0.1:3001/health/live");
+    expect(compose).not.toContain("fetch('http://127.0.0.1:3001/health')");
+    expect(dokployCompose).toContain("http://127.0.0.1:3001/health/live");
+    expect(dokployCompose).not.toContain("fetch('http://127.0.0.1:3001/health')");
+  });
+
   it("keeps Company navigation distinct without a duplicate Agents entry", () => {
     const appSource = readFileSync(join(process.cwd(), "apps", "web", "src", "App.tsx"), "utf8");
     const companyPage = readFileSync(join(process.cwd(), "apps", "web", "src", "CompanyPage.tsx"), "utf8");
