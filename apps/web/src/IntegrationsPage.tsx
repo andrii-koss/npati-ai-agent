@@ -30,7 +30,7 @@ function ChannelIcon({channel,size}:{channel:Channel;size?:"small"|"large"}){
     <span className={`provider-avatar${size?` ${size}`:""}`} aria-hidden="true">
       <span className="provider-initials">{initial(channel.name)}</span>
       {icon && !failed && (
-        <img src={icon} alt="" loading="lazy" onError={()=>setFailed(true)} />
+        <img src={icon} alt="" onError={()=>setFailed(true)} />
       )}
     </span>
   );
@@ -122,17 +122,133 @@ function IntegrationDrawer({channel,connections,companies,initialConnectionId,on
     {mode==="connect"&&channel.available&&<div className="connect-body"><p className="auth-hint">Create a bot with BotFather and paste the token below. The token is encrypted and never sent through NPATI Chat.</p><form onSubmit={connect}><div className="field"><label>Connection scope</label><select value={scope} onChange={(event)=>setScope(event.target.value as ConnectionScope)}><option value="account">Entire NPATI Account</option><option value="company">Specific Company</option><option value="agent">Specific Agent</option></select></div>{scope!=="account"&&<div className="field"><label>Company</label><select value={companyId} onChange={(event)=>setCompanyId(event.target.value)} required>{companies.map((company)=><option key={company.id} value={company.id}>{company.name}</option>)}</select></div>}{scope==="agent"&&<div className="field"><label>Agent</label><select value={agentId} onChange={(event)=>setAgentId(event.target.value)} required><option value="">Select Agent</option>{agents.map((agent)=><option key={agent.id} value={agent.id}>{agent.name} — {agent.role}</option>)}</select></div>}<div className="field"><label>Connection name</label><input value={name} onChange={(event)=>setName(event.target.value)} required/></div><div className="field"><label>Bot token</label><input type="password" value={token} onChange={(event)=>setToken(event.target.value)} required/></div><button className="button-primary wide" disabled={!!busy||(scope!=="account"&&!companyId)||(scope==="agent"&&!agentId)}>{busy||"Connect Telegram"}</button></form>{pairing&&<div className="provider-setup-note"><strong>Finish pairing in {pairing.bot||"your bot"}</strong><code>{pairing.command}</code></div>}</div>}</aside></div>;
 }
 
+const DEFAULT_CHANNELS: Channel[] = [
+  { id: "telegram", name: "Telegram", available: true, capabilities: ["Chat", "Tasks", "Files", "Automations", "Company actions"] },
+  { id: "discord", name: "Discord", available: true, capabilities: ["DMs", "Servers", "Threads", "Files", "Commands", "Automations"] },
+  { id: "slack", name: "Slack", available: true, capabilities: ["DMs", "Channels", "Threads", "Files", "Commands", "Automations"] },
+  { id: "whatsapp", name: "WhatsApp", available: true, capabilities: ["Chat", "Tasks", "Files", "Voice", "Groups", "Automations"] },
+  { id: "email", name: "Email", available: true, capabilities: ["Chat Runtime", "Company Agents", "Threads", "Files", "Approvals", "Automations"] },
+];
+const STORAGE_CHANNELS_KEY = "npati_integrations_channels";
+const STORAGE_CONNECTIONS_KEY = "npati_integrations_connections";
+const STORAGE_COMPANIES_KEY = "npati_integrations_companies";
+
+function getCachedChannels(): Channel[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CHANNELS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_CHANNELS;
+}
+
+function getCachedConnections(): Connection[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CONNECTIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function getCachedCompanies(): Company[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_COMPANIES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
 export function IntegrationsPage(){
-  const [channels,setChannels]=useState<Channel[]>([]),[connections,setConnections]=useState<Connection[]>([]),[companies,setCompanies]=useState<Company[]>([]),[search,setSearch]=useState(""),[tab,setTab]=useState<"all"|"available"|"coming"|"connected">("all"),[selected,setSelected]=useState<Channel|null>(null),[selectedConnectionId,setSelectedConnectionId]=useState<string|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true);
-  const navigate=useNavigate();
-  const load=async()=>{try{const[catalog,companyResult]=await Promise.all([api<{channels:Channel[];connections:Connection[]}>("/integrations/channels"),api<{companies:Company[]}>("/companies")]);setChannels(catalog.channels);setConnections(catalog.connections);setCompanies(companyResult.companies);setError("");}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setLoading(false);}};useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),5000);return()=>window.clearInterval(timer);},[]);
-  const connectedChannels=new Set(connections.map((connection)=>connection.channel)),visible=useMemo(()=>channels.filter((channel)=>channel.name.toLowerCase().includes(search.trim().toLowerCase())&&(tab==="all"||(tab==="available"&&channel.available)||(tab==="coming"&&!channel.available)||(tab==="connected"&&connectedChannels.has(channel.id)))),[channels,search,tab,connections]),counts={all:channels.length,available:channels.filter((item)=>item.available).length,coming:channels.filter((item)=>!item.available).length,connected:channels.filter((item)=>connectedChannels.has(item.id)).length};
-  const open=(channel:Channel,connectionId?:string)=>{if(channel.id==="email"){navigate("/settings/email");return;}setSelectedConnectionId(connectionId||null);setSelected(channel);};
+  const [channels, setChannels] = useState<Channel[]>(getCachedChannels);
+  const [connections, setConnections] = useState<Connection[]>(getCachedConnections);
+  const [companies, setCompanies] = useState<Company[]>(getCachedCompanies);
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<"all"|"available"|"coming"|"connected">("all");
+  const [selected, setSelected] = useState<Channel|null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string|null>(null);
+  const [error, setError] = useState("");
+  const [hasLoaded, setHasLoaded] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem(STORAGE_CHANNELS_KEY));
+    } catch {
+      return false;
+    }
+  });
+  const [loading, setLoading] = useState<boolean>(() => !hasLoaded);
+  const navigate = useNavigate();
+
+  const load = async () => {
+    try {
+      const [catalog, companyResult] = await Promise.all([
+        api<{channels:Channel[];connections:Connection[]}>("/integrations/channels"),
+        api<{companies:Company[]}>("/companies")
+      ]);
+      setChannels((prev) => JSON.stringify(prev) === JSON.stringify(catalog.channels) ? prev : catalog.channels);
+      setConnections((prev) => JSON.stringify(prev) === JSON.stringify(catalog.connections) ? prev : catalog.connections);
+      setCompanies((prev) => JSON.stringify(prev) === JSON.stringify(companyResult.companies) ? prev : companyResult.companies);
+      try {
+        localStorage.setItem(STORAGE_CHANNELS_KEY, JSON.stringify(catalog.channels));
+        localStorage.setItem(STORAGE_CONNECTIONS_KEY, JSON.stringify(catalog.connections));
+        localStorage.setItem(STORAGE_COMPANIES_KEY, JSON.stringify(companyResult.companies));
+      } catch {}
+      setError("");
+      setHasLoaded(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const connectedChannels = useMemo(() => new Set(connections.map((connection) => connection.channel)), [connections]);
+  const visible = useMemo(
+    () => channels.filter(
+      (channel) => channel.name.toLowerCase().includes(search.trim().toLowerCase()) &&
+        (tab === "all" ||
+          (tab === "available" && channel.available) ||
+          (tab === "coming" && !channel.available) ||
+          (tab === "connected" && connectedChannels.has(channel.id)))
+    ),
+    [channels, search, tab, connectedChannels]
+  );
+  const counts = useMemo(
+    () => ({
+      all: channels.length,
+      available: channels.filter((item) => item.available).length,
+      coming: channels.filter((item) => !item.available).length,
+      connected: channels.filter((item) => connectedChannels.has(item.id)).length,
+    }),
+    [channels, connectedChannels]
+  );
+
+  const open = (channel: Channel, connectionId?: string) => {
+    if (channel.id === "email") {
+      navigate("/settings/email");
+      return;
+    }
+    setSelectedConnectionId(connectionId || null);
+    setSelected(channel);
+  };
+
   return <main className="ai-marketplace">
     <header className="marketplace-hero"><div><p className="eyebrow">Integrations</p><h1><Link to="/settings" className="marketplace-back-button" aria-label="Back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></Link><span>Messaging Integrations</span></h1><p>Connect external channels to the existing NPATI Chat and Company Runtime.</p></div></header>
     <section className="overview-grid"><div><strong>{channels.length||"—"}</strong><span>Channels available</span></div><div><strong>{counts.available}</strong><span>Ready to connect</span></div><div><strong>{counts.connected}</strong><span>Channels connected</span></div><div><strong>{connections.length}</strong><span>Connections added</span></div></section>
-    <section className="my-models"><div className="section-heading"><div><p className="section-kicker">Library</p><h2>My Connections</h2></div><span>{connections.length} added</span></div>{connections.length===0?<div className="empty-inline"><strong>No integrations added</strong><span>Connect Telegram below.</span></div>:<div className="my-model-list">{connections.map((connection)=>{const channel=channels.find((item)=>item.id===connection.channel)||{id:connection.channel,name:connection.channel,available:true,capabilities:[]};return <div className="my-model-row" key={connection.id}><ChannelIcon channel={channel} size="small"/><span><strong>{connection.displayName}</strong><small>via {channel.name} · {scopeLabel(connection.scope)}</small></span>{connection.status==="connected"?<Badge tone="connected">CONNECTED</Badge>:connection.status==="pending"?<Badge tone="pending">PENDING PAIRING</Badge>:<Badge>{connection.status.toUpperCase()}</Badge>}<button onClick={()=>open(channel,connection.id)}>Manage</button></div>;})}</div>}</section>
-    <section className="explore-section"><div className="section-heading"><div><p className="section-kicker">Discovery</p><h2>Explore Integrations</h2></div></div><div className="marketplace-controls"><div className="search-box"><span>⌕</span><input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Search integrations"/></div><div className="marketplace-tabs">{(["all","available","coming","connected"] as const).map((item)=><button key={item} className={tab===item?"active":""} onClick={()=>setTab(item)}><span>{item==="coming"?"Coming soon":item[0]!.toUpperCase()+item.slice(1)}</span><small>{counts[item]}</small></button>)}</div></div>{error?<div className="engine-error"><strong>Integrations unavailable</strong><p>{error}</p></div>:loading?<div className="loading-state">Loading integrations…</div>:<><p className="showing-copy">Showing {visible.length} of {channels.length} integrations</p><div className="provider-grid">{visible.map((channel)=>{const linked=connections.filter((item)=>item.channel===channel.id),hasConnection=linked.length>0,connected=linked.some((item)=>item.status==="connected"),pending=!connected&&linked.some((item)=>item.status==="pending"),openChannel=()=>open(channel,linked.length===1?linked[0]!.id:undefined);return <article className={`provider-card ${hasConnection?"is-connected":""}`} key={channel.id}><button className="provider-card-main" onClick={openChannel}><ChannelIcon channel={channel}/><span className="provider-title"><strong>{channel.name}</strong><small>{channel.available?"Messaging channel":"Planned adapter"}</small></span><span className={`connection-light ${connected?"on":pending?"pending":""}`}/></button><div className="provider-badges"><Badge>CHANNEL</Badge>{connected?<Badge tone="connected">CONNECTED</Badge>:pending&&<Badge tone="pending">PENDING PAIRING</Badge>}{channel.available?<Badge tone="red">RECOMMENDED</Badge>:<Badge>COMING SOON</Badge>}</div><p className="provider-description">{channel.available?"Message Agents, launch tasks, exchange files and receive Automation results.":`${channel.name} is prepared as a future adapter.`}</p><div className="capability-row">{channel.available?channel.capabilities.slice(0,4).map((item)=><span key={item}>{item}</span>):<span>Adapter ready</span>}</div><div className="provider-card-footer"><span><strong>{linked.length}</strong> connections</span><button className={hasConnection?"button-secondary":"button-primary"} onClick={openChannel}>{channel.available?(hasConnection?"Manage":"Connect"):"View"}</button></div></article>;})}</div></>}</section>
+    <section className="my-models"><div className="section-heading"><div><p className="section-kicker">Library</p><h2>My Connections</h2></div><span>{connections.length} added</span></div>{!hasLoaded && loading && connections.length === 0 ? <div className="empty-inline" style={{ minHeight: "84px", display: "grid", placeItems: "center" }}><span>Loading connections…</span></div> : connections.length === 0 ? <div className="empty-inline" style={{ minHeight: "84px" }}><strong>No integrations added</strong><span>Connect Telegram below.</span></div> : <div className="my-model-list">{connections.map((connection)=>{const channel=channels.find((item)=>item.id===connection.channel)||{id:connection.channel,name:connection.channel,available:true,capabilities:[]};return <div className="my-model-row" key={connection.id}><ChannelIcon channel={channel} size="small"/><span><strong>{connection.displayName}</strong><small>via {channel.name} · {scopeLabel(connection.scope)}</small></span>{connection.status==="connected"?<Badge tone="connected">CONNECTED</Badge>:connection.status==="pending"?<Badge tone="pending">PENDING PAIRING</Badge>:<Badge>{connection.status.toUpperCase()}</Badge>}<button onClick={()=>open(channel,connection.id)}>Manage</button></div>;})}</div>}</section>
+    <section className="explore-section"><div className="section-heading"><div><p className="section-kicker">Discovery</p><h2>Explore Integrations</h2></div></div><div className="marketplace-controls"><div className="search-box"><span>⌕</span><input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Search integrations"/></div><div className="marketplace-tabs">{(["all","available","coming","connected"] as const).map((item)=><button key={item} className={tab===item?"active":""} onClick={()=>setTab(item)}><span>{item==="coming"?"Coming soon":item[0]!.toUpperCase()+item.slice(1)}</span><small>{counts[item]}</small></button>)}</div></div>{error && channels.length === 0 ? <div className="engine-error"><strong>Integrations unavailable</strong><p>{error}</p></div> : loading && channels.length === 0 ? <div className="loading-state">Loading integrations…</div> : <><p className="showing-copy">Showing {visible.length} of {channels.length} integrations</p><div className="provider-grid">{visible.map((channel)=>{const linked=connections.filter((item)=>item.channel===channel.id),hasConnection=linked.length>0,connected=linked.some((item)=>item.status==="connected"),pending=!connected&&linked.some((item)=>item.status==="pending"),openChannel=()=>open(channel,linked.length===1?linked[0]!.id:undefined);return <article className={`provider-card ${hasConnection?"is-connected":""}`} key={channel.id}><button className="provider-card-main" onClick={openChannel}><ChannelIcon channel={channel}/><span className="provider-title"><strong>{channel.name}</strong><small>{channel.available?"Messaging channel":"Planned adapter"}</small></span><span className={`connection-light ${connected?"on":pending?"pending":""}`}/></button><div className="provider-badges"><Badge>CHANNEL</Badge>{connected?<Badge tone="connected">CONNECTED</Badge>:pending&&<Badge tone="pending">PENDING PAIRING</Badge>}{channel.available?<Badge tone="red">RECOMMENDED</Badge>:<Badge>COMING SOON</Badge>}</div><p className="provider-description">{channel.available?"Message Agents, launch tasks, exchange files and receive Automation results.":`${channel.name} is prepared as a future adapter.`}</p><div className="capability-row">{channel.available?channel.capabilities.slice(0,4).map((item)=><span key={item}>{item}</span>):<span>Adapter ready</span>}</div><div className="provider-card-footer"><span><strong>{linked.length}</strong> connections</span><button className={hasConnection?"button-secondary":"button-primary"} onClick={openChannel}>{channel.available?(hasConnection?"Manage":"Connect"):"View"}</button></div></article>;})}</div></>}</section>
     {selected&&<IntegrationDrawer key={`${selected.id}:${selectedConnectionId||"catalog"}`} channel={selected} connections={connections.filter((item)=>item.channel===selected.id)} companies={companies} initialConnectionId={selectedConnectionId} onClose={()=>{setSelected(null);setSelectedConnectionId(null);}} onChanged={load}/>}
   </main>;
 }
