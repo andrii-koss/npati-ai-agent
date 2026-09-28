@@ -1,8 +1,8 @@
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { GatewayAttachment, GatewayOutboundAttachment, InboundGatewayMessage, MessagingAdapter } from "./messaging-gateway";
-import type { MessagingConnection, MessagingIntegrationsRepository, MessagingSession } from "./messaging-integrations-repository";
+import type { DiscordChannelBinding, MessagingConnection, MessagingIntegrationsRepository, MessagingSession } from "./messaging-integrations-repository";
 
-export class WhatsAppInboundDispatcher {
+export class MessagingInboundDispatcher {
   private readonly active=new Map<string,AbortController>();
   constructor(private readonly deps:{
     store:WorkspaceStore;repo:MessagingIntegrationsRepository;adapter:MessagingAdapter;
@@ -10,36 +10,43 @@ export class WhatsAppInboundDispatcher {
     resetConversation?:(input:{context:AuthContext;conversationId:string})=>Promise<void>;
   }){}
   private context(connection:MessagingConnection):AuthContext{return{workspaceId:connection.workspaceId,userId:connection.userId,companyId:connection.companyId||connection.activeCompanyId||undefined,permissions:connection.permissions};}
+  private discordBinding(connection:MessagingConnection,message:InboundGatewayMessage):DiscordChannelBinding|undefined{return connection.settings.discord.channelBindings.find((item)=>item.guildId===message.externalGuildId&&(item.channelId===message.externalChatId||item.channelId===message.externalThreadId));}
+  private authorized(connection:MessagingConnection,message:InboundGatewayMessage){
+    const settings=connection.settings,group=message.chatType==="group";
+    if(connection.channel==="discord"){const discord=settings.discord;if(!group){if(discord.dmPolicy==="disabled")return false;if(discord.dmPolicy==="open")return true;return discord.allowedUserIds.includes(message.externalUserId)||connection.externalUserId===message.externalUserId;}if(!message.externalGuildId||!settings.groups.enabled||!discord.allowedGuildIds.includes(message.externalGuildId))return false;if(discord.allowedChannelIds.length&&!discord.allowedChannelIds.some((id)=>id===message.externalChatId||id===message.externalThreadId))return false;if(discord.allowedRoleIds.length&&!(message.roleIds||[]).some((id)=>discord.allowedRoleIds.includes(id)))return false;const binding=this.discordBinding(connection,message),mention=binding?.requireMention??discord.requireMention;return !mention||message.mentioned===true||message.text.startsWith("/");}
+    const selfChat=message.isSelfChat===true&&connection.provider==="qr"&&settings.access.selfChat,allowed=selfChat||(group?settings.groups.enabled&&settings.groups.allowedChatIds.includes(message.externalChatId):settings.access.allowedUserIds.includes(message.externalUserId)||settings.access.allowedUserIds.includes(message.externalChatId));if(!allowed)return false;if(group&&settings.groups.mentionRequired){const own=connection.externalUserId?.split("@")[0]||"";return message.text.includes("@"+own)||message.text.startsWith("/");}return true;
+  }
+  private effectiveConnection(connection:MessagingConnection,message:InboundGatewayMessage){if(connection.channel!=="discord")return connection;const binding=this.discordBinding(connection,message);if(!binding?.companyId&&!binding?.agentId&&!binding?.permissions.length)return connection;const permissions=binding.permissions.length?(binding.permissions.includes("*")?connection.permissions:connection.permissions.filter((item)=>binding.permissions.includes(item))):connection.permissions;return{...connection,scope:binding.agentId?"agent":binding.companyId?"company":connection.scope,companyId:binding.companyId||connection.companyId,agentId:binding.agentId||null,permissions};}
   async dispatch(connection:MessagingConnection,message:InboundGatewayMessage){
     const {repo,adapter,store}=this.deps,token=repo.resolveToken(connection),settings=connection.settings;
     if(!await repo.claimInbound(connection,message.eventId,message.messageId))return{status:"duplicate"};
-    if(connection.status!=="connected")throw Object.assign(new Error("WhatsApp connection is not connected"),{status:403});
-    const group=message.chatType==="group",selfChat=message.isSelfChat===true&&connection.provider==="qr"&&settings.access.selfChat;
-    const allowed=selfChat|| (group?settings.groups.enabled&&settings.groups.allowedChatIds.includes(message.externalChatId):settings.access.allowedUserIds.includes(message.externalUserId)||settings.access.allowedUserIds.includes(message.externalChatId));
-    if(!allowed)throw Object.assign(new Error("WhatsApp sender/chat is not on the connection allowlist"),{status:403,code:"WHATSAPP_ALLOWLIST_MISMATCH"});
-    if(group&&settings.groups.mentionRequired){const own=connection.externalUserId?.split("@")[0]||"";if(!message.text.includes("@"+own)&&!message.text.startsWith("/"))return{status:"mention_required"};}
+    if(connection.status!=="connected")throw Object.assign(new Error(connection.channel+" connection is not connected"),{status:403});
+    if(!this.authorized(connection,message))throw Object.assign(new Error(connection.channel+" sender/channel is not authorized"),{status:403,code:connection.channel.toUpperCase()+"_ALLOWLIST_MISMATCH"});
     const denied=message.attachments.find((item)=>(item.kind==="image"&&!settings.media.images)||((item.kind==="document"||item.kind==="file")&&!settings.media.documents)||(item.kind==="audio"&&!settings.media.audio));
     if(denied)throw Object.assign(new Error(denied.kind+" attachments are disabled"),{status:403});
     if(!message.text&&!message.attachments.length)return{status:"ignored"};
-    const session=await repo.getOrCreateSession(connection,message.externalChatId),ctx=this.context(connection);
-    const companyId=connection.scope==="account"?session.activeCompanyId:connection.companyId,agentId=connection.scope==="account"?session.activeAgentId:connection.agentId;
+    const effective=this.effectiveConnection(connection,message),session=await repo.getOrCreateSession(connection,message.externalChatId,message.externalThreadId),ctx=this.context(effective);
+    const companyId=effective.scope==="account"?session.activeCompanyId:effective.companyId,agentId=effective.scope==="account"?session.activeAgentId:effective.agentId;
     if(companyId){ctx.companyId=companyId;await store.getCompany(ctx,companyId);}if(companyId&&agentId)await store.getCompanyAgent(ctx,companyId,agentId);
-    await repo.touchRoute(connection);await repo.record(connection.id,"inbound");
-    const text=message.text.trim(),key=connection.id+":"+message.externalChatId,replyTo=settings.groups.replyMode==="reply"?message.messageId:undefined;
-    if(/^\/(?:new|reset)$/iu.test(text)){this.active.get(key)?.abort();if(/^\/reset$/iu.test(text)&&session.runtimeConversationId&&this.deps.resetConversation)await this.deps.resetConversation({context:ctx,conversationId:session.runtimeConversationId});await repo.setSessionConversation(session,null);await adapter.sendText(token,message.externalChatId,"A clean NPATI session is ready.",undefined,replyTo);return{status:"reset"};}
-    if(/^\/stop$/iu.test(text)){const running=this.active.get(key);running?.abort();await adapter.sendText(token,message.externalChatId,running?"Stopping the active NPATI request.":"There is no active request.",undefined,replyTo);return{status:running?"stopping":"idle"};}
-    if(/^\/status$/iu.test(text)){await adapter.sendText(token,message.externalChatId,"NPATI connection: "+connection.status+"\nScope: "+connection.scope+"\nSession: "+(session.runtimeConversationId?"persistent":"new")+"\nRequest: "+(this.active.has(key)?"running":"idle"),undefined,replyTo);return{status:"reported"};}
-    if(this.active.has(key)){await adapter.sendText(token,message.externalChatId,"A request is already running. Use /stop first.",undefined,replyTo);return{status:"busy"};}
+    await repo.touchRoute(connection,message.externalThreadId,message.externalChatId);await repo.record(connection.id,"inbound");
+    const text=message.text.trim(),key=connection.id+":"+message.externalChatId+":"+(message.externalThreadId||""),replyTo=settings.groups.replyMode==="reply"?message.messageId:undefined,thread=message.externalThreadId;
+    if(/^\/(?:new|reset)$/iu.test(text)){this.active.get(key)?.abort();if(/^\/reset$/iu.test(text)&&session.runtimeConversationId&&this.deps.resetConversation)await this.deps.resetConversation({context:ctx,conversationId:session.runtimeConversationId});await repo.setSessionConversation(session,null);await adapter.sendText(token,message.externalChatId,"A clean NPATI session is ready.",thread,replyTo);return{status:"reset"};}
+    if(/^\/stop$/iu.test(text)){const running=this.active.get(key);running?.abort();await adapter.sendText(token,message.externalChatId,running?"Stopping the active NPATI request.":"There is no active request.",thread,replyTo);return{status:running?"stopping":"idle"};}
+    if(/^\/status$/iu.test(text)){await adapter.sendText(token,message.externalChatId,"NPATI connection: "+connection.status+"\nScope: "+effective.scope+"\nSession: "+(session.runtimeConversationId?"persistent":"new")+"\nRequest: "+(this.active.has(key)?"running":"idle"),thread,replyTo);return{status:"reported"};}
+    if(this.active.has(key)){await adapter.sendText(token,message.externalChatId,"A request is already running. Use /stop first.",thread,replyTo);return{status:"busy"};}
     const controller=new AbortController();this.active.set(key,controller);
-    if(settings.delivery.typing)await adapter.sendTyping?.(token,message.externalChatId).catch(()=>undefined);
-    const typing=setInterval(()=>{if(settings.delivery.typing)void adapter.sendTyping?.(token,message.externalChatId).catch(()=>undefined);},4_000);typing.unref?.();
+    if(settings.delivery.typing)await adapter.sendTyping?.(token,message.externalChatId,thread).catch(()=>undefined);
+    const typing=setInterval(()=>{if(settings.delivery.typing)void adapter.sendTyping?.(token,message.externalChatId,thread).catch(()=>undefined);},4_000);typing.unref?.();
+    const limit=connection.channel==="discord"?1900:3900;
     let streamed="",previewId:string|undefined,last=0,delivery=Promise.resolve();
-    const onDelta=(chunk:string)=>{if(!settings.delivery.progressive)return;streamed+=chunk;if(streamed.length-last<160)return;last=streamed.length;const preview=streamed.slice(0,3900);delivery=delivery.then(async()=>{if(!previewId){const ids=await adapter.sendText(token,message.externalChatId,preview,undefined,replyTo);previewId=ids?.[0];}else await adapter.editText?.(token,message.externalChatId,previewId,preview);}).catch(()=>undefined);};
-    const progress=setTimeout(()=>{if(settings.delivery.progressive&&settings.notifications.status)delivery=delivery.then(async()=>{if(!previewId){const ids=await adapter.sendText(token,message.externalChatId,"NPATI is working on the request?",undefined,replyTo);previewId=ids?.[0];}}).catch(()=>undefined);},2_000);progress.unref?.();
-    void this.deps.handleMessage({context:ctx,connection,session,text,attachments:message.attachments,conversationId:session.runtimeConversationId||undefined,replyContext:message.replyContext,signal:controller.signal,onDelta})
-      .then(async(result)=>{await delivery;if(controller.signal.aborted)return;if(previewId&&adapter.editText){await adapter.editText(token,message.externalChatId,previewId,result.message.slice(0,3900));if(result.message.length>3900)await adapter.sendText(token,message.externalChatId,result.message.slice(3900));}else await adapter.sendText(token,message.externalChatId,result.message,undefined,replyTo);if(settings.media.outbound)for(const file of result.attachments||[])await adapter.sendAttachment?.(token,message.externalChatId,file,undefined,replyTo);await repo.record(connection.id,"outbound");})
-      .catch(async(error)=>{if(controller.signal.aborted)return;const detail=error instanceof Error?error.message:String(error);await repo.record(connection.id,"outbound",detail);if(settings.notifications.errors)await adapter.sendText(token,message.externalChatId,"NPATI could not complete the request: "+detail,undefined,replyTo).catch(()=>undefined);})
+    const onDelta=(chunk:string)=>{if(!settings.delivery.progressive)return;streamed+=chunk;if(streamed.length-last<160)return;last=streamed.length;const preview=streamed.slice(0,limit);delivery=delivery.then(async()=>{if(!previewId){const ids=await adapter.sendText(token,message.externalChatId,preview,thread,replyTo);previewId=ids?.[0];}else await adapter.editText?.(token,thread||message.externalChatId,previewId,preview);}).catch(()=>undefined);};
+    const progress=setTimeout(()=>{if(settings.delivery.progressive&&settings.notifications.status)delivery=delivery.then(async()=>{if(!previewId){const ids=await adapter.sendText(token,message.externalChatId,"NPATI is working on the request?",thread,replyTo);previewId=ids?.[0];}}).catch(()=>undefined);},2_000);progress.unref?.();
+    void this.deps.handleMessage({context:ctx,connection:effective,session,text,attachments:message.attachments,conversationId:session.runtimeConversationId||undefined,replyContext:message.replyContext,signal:controller.signal,onDelta})
+      .then(async(result)=>{await delivery;if(controller.signal.aborted)return;if(previewId&&adapter.editText){await adapter.editText(token,thread||message.externalChatId,previewId,result.message.slice(0,limit));if(result.message.length>limit)await adapter.sendText(token,message.externalChatId,result.message.slice(limit),thread);}else await adapter.sendText(token,message.externalChatId,result.message,thread,replyTo);if(settings.media.outbound)for(const file of result.attachments||[])await adapter.sendAttachment?.(token,message.externalChatId,file,thread,replyTo);await repo.record(connection.id,"outbound");})
+      .catch(async(error)=>{if(controller.signal.aborted)return;const detail=error instanceof Error?error.message:String(error);await repo.record(connection.id,"outbound",detail);if(settings.notifications.errors)await adapter.sendText(token,message.externalChatId,"NPATI could not complete the request: "+detail,thread,replyTo).catch(()=>undefined);})
       .finally(()=>{clearInterval(typing);clearTimeout(progress);if(this.active.get(key)===controller)this.active.delete(key);});
     return{status:"accepted"};
   }
 }
+
+export class WhatsAppInboundDispatcher extends MessagingInboundDispatcher{}

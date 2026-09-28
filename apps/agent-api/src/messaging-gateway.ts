@@ -1,9 +1,11 @@
+import { messagingCommandDefinitions } from "./messaging-commands";
 export type GatewayAttachment = { kind: "image" | "audio" | "document" | "file"; name: string; mimeType: string; dataBase64: string };
 export type GatewayOutboundAttachment = GatewayAttachment & { caption?: string };
 export type GatewayReplyContext = { messageId: string; text: string; externalUserId?: string };
 export type InboundGatewayMessage = {
   externalUserId: string; externalChatId: string; externalThreadId?: string; text: string;
   attachments: GatewayAttachment[]; messageId: string; eventId: string; chatType?: string;
+  externalGuildId?: string; roleIds?: string[]; mentioned?: boolean;
   replyContext?: GatewayReplyContext; hasAttachments?: boolean;
   isSelfChat?: boolean;
 };
@@ -154,11 +156,7 @@ export class TelegramMessagingAdapter implements MessagingAdapter {
   }
   async configureWebhook(token: string, webhookUrl: string, secretToken: string) {
     await this.call(token, "setWebhook", { url: webhookUrl, secret_token: secretToken, allowed_updates: ["message", "edited_message"], drop_pending_updates: false });
-    await this.call(token,"setMyCommands",{commands:[
-      {command:"new",description:"Start a new NPATI session"},{command:"reset",description:"Reset the current session"},{command:"stop",description:"Stop the active request"},{command:"status",description:"Show connection and request status"},
-      {command:"companies",description:"List Companies"},{command:"company",description:"Select a Company"},{command:"agents",description:"List active Agents"},{command:"agent",description:"Select an Agent"},{command:"context",description:"Show active context"},{command:"account",description:"Use the entire NPATI account"},
-      {command:"runs",description:"List tasks and Automation runs"},{command:"approvals",description:"List pending approvals"},{command:"approve",description:"Approve an action by ID"},{command:"deny",description:"Deny an action by ID"},
-    ]});
+    await this.call(token,"setMyCommands",{commands:messagingCommandDefinitions.map(({name,description})=>({command:name,description}))});
   }
   async disconnect(token: string) { await this.call(token, "deleteWebhook", { drop_pending_updates: true }); }
   private async download(token: string, file: TelegramFile, kind: GatewayAttachment["kind"], fallback: string): Promise<GatewayAttachment> {
