@@ -19,6 +19,10 @@ import type {
 const accountCols = `
   id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
   email_address AS "emailAddress", display_name AS "displayName", agent_id AS "agentId",
+  provider, connection_scope AS "connectionScope", sender_policy AS "senderPolicy",
+  allowed_senders AS "allowedSenders", allowed_domains AS "allowedDomains",
+  require_authenticated_sender AS "requireAuthenticatedSender",
+  outbound_policy AS "outboundPolicy",
   mode, status, test_mode AS "testMode", confidence_threshold AS "confidenceThreshold",
   language_mode AS "languageMode", fallback_language AS "fallbackLanguage",
   imap_config AS "imapConfig", smtp_config AS "smtpConfig", rate_limits AS "rateLimits",
@@ -326,6 +330,20 @@ export class EmailInboxRepository {
       .map((account) => this.decryptAccountSecrets(account));
   }
 
+  async listUserAccounts(ctx: AuthContext): Promise<CompanyEmailAccount[]> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailAccount>(
+        `SELECT ${accountCols} FROM company_email_accounts
+         WHERE workspace_id = $1 AND user_id = $2 AND deleted_at IS NULL ORDER BY created_at ASC`,
+        [ctx.workspaceId, ctx.userId]
+      );
+      return result.rows.map((account) => this.decryptAccountSecrets(account));
+    }
+    return [...this.memoryAccounts.values()]
+      .filter((account) => account.workspaceId === ctx.workspaceId && account.userId === ctx.userId)
+      .map((account) => this.decryptAccountSecrets(account));
+  }
+
   async getAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<CompanyEmailAccount | null> {
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailAccount>(
@@ -342,6 +360,18 @@ export class EmailInboxRepository {
       : null;
   }
 
+  async getAccountInternal(accountId: string): Promise<CompanyEmailAccount | null> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyEmailAccount>(
+        `SELECT ${accountCols} FROM company_email_accounts WHERE id = $1 AND deleted_at IS NULL`,
+        [accountId]
+      );
+      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
+    }
+    const account = this.memoryAccounts.get(accountId);
+    return account ? this.decryptAccountSecrets(account) : null;
+
+  }
   async findAccountByEmail(companyId: string, emailAddress: string): Promise<CompanyEmailAccount | null> {
     const normalized = emailAddress.trim().toLowerCase();
     if (this.pool) {
@@ -409,6 +439,13 @@ export class EmailInboxRepository {
       emailAddress: input.emailAddress.trim().toLowerCase(),
       displayName: input.displayName || null,
       agentId: input.agentId || null,
+      provider: input.provider || "imap_smtp",
+      connectionScope: input.connectionScope || (input.agentId ? "agent" : companyId.startsWith("personal:") ? "account" : "company"),
+      senderPolicy: input.senderPolicy || "allowlist",
+      allowedSenders: [...new Set((input.allowedSenders || []).map((value) => value.trim().toLowerCase()).filter(Boolean))],
+      allowedDomains: [...new Set((input.allowedDomains || []).map((value) => value.trim().toLowerCase().replace(/^\*?@/, "")).filter(Boolean))],
+      requireAuthenticatedSender: input.requireAuthenticatedSender ?? true,
+      outboundPolicy: input.outboundPolicy || "approval_required",
       mode: input.mode || "approval",
       status: input.status || "pending",
       testMode: input.testMode ?? false,
@@ -441,12 +478,14 @@ export class EmailInboxRepository {
       const result = await this.pool.query<CompanyEmailAccount>(
         `INSERT INTO company_email_accounts (
           id, workspace_id, company_id, user_id, email_address, display_name,
-          agent_id, mode, status, test_mode, confidence_threshold, language_mode,
+          agent_id, provider, connection_scope, sender_policy, allowed_senders,
+          allowed_domains, require_authenticated_sender, outbound_policy,
+          mode, status, test_mode, confidence_threshold, language_mode,
           fallback_language, imap_config, smtp_config, rate_limits,
           signature_config, followup_config, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-          $14, $15, $16, $17, $18, $19, $20
+          $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
         ) RETURNING ${accountCols}`,
         [
           account.id,
@@ -456,6 +495,13 @@ export class EmailInboxRepository {
           account.emailAddress,
           account.displayName,
           account.agentId,
+          account.provider,
+          account.connectionScope,
+          account.senderPolicy,
+          account.allowedSenders,
+          account.allowedDomains,
+          account.requireAuthenticatedSender,
+          account.outboundPolicy,
           account.mode,
           account.status,
           account.testMode,
@@ -503,18 +549,27 @@ export class EmailInboxRepository {
     if (this.pool) {
       const result = await this.pool.query<CompanyEmailAccount>(
         `UPDATE company_email_accounts SET
-          display_name = $1, agent_id = $2, mode = $3, status = $4,
-          test_mode = $5, confidence_threshold = $6, language_mode = $7,
-          fallback_language = $8, imap_config = $9, smtp_config = $10,
-          rate_limits = $11, signature_config = $12, followup_config = $13,
-          updated_at = $14
-        WHERE workspace_id = $15 AND company_id = $16 AND id = $17
+          display_name = $1, agent_id = $2, provider = $3, connection_scope = $4,
+          sender_policy = $5, allowed_senders = $6, allowed_domains = $7,
+          require_authenticated_sender = $8, outbound_policy = $9,
+          mode = $10, status = $11, test_mode = $12, confidence_threshold = $13,
+          language_mode = $14, fallback_language = $15, imap_config = $16, smtp_config = $17,
+          rate_limits = $18, signature_config = $19, followup_config = $20,
+          updated_at = $21
+        WHERE workspace_id = $22 AND company_id = $23 AND id = $24
         RETURNING ${accountCols}`,
         [
           updated.displayName,
           updated.agentId,
           updated.mode,
           updated.status,
+          updated.provider,
+          updated.connectionScope,
+          updated.senderPolicy,
+          updated.allowedSenders,
+          updated.allowedDomains,
+          updated.requireAuthenticatedSender,
+          updated.outboundPolicy,
           updated.testMode,
           updated.confidenceThreshold,
           updated.languageMode,

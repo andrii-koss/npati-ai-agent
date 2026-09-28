@@ -65,6 +65,7 @@ import { EmailInboxRepository } from "./email-inbox-repository";
 import { EmailChatActions } from "./email-chat-actions";
 import { registerEmailInboxRoutes } from "./email-routes";
 import { EmailInboxWorker } from "./email-worker";
+import { EmailMessagingAdapter, emailEnvelopeToGatewayMessage } from "./email-messaging-adapter";
 import { EmailAgentTools } from "./email-agent-tools";
 import { EmailAttachmentStorage } from "./email-attachment-storage";
 import { ApiKeysRepository } from "./api-keys-repository";
@@ -761,7 +762,8 @@ export function buildApp(config: AppConfig = {}) {
   const whatsappMessagingAdapter = new WhatsAppMessagingAdapter(messagingIntegrationsRepo);
   const discordMessagingAdapter = new DiscordMessagingAdapter(messagingIntegrationsRepo);
   const slackMessagingAdapter = new SlackMessagingAdapter(messagingIntegrationsRepo);
-  const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter).register(slackMessagingAdapter);
+  const emailMessagingAdapter = new EmailMessagingAdapter(emailInboxRepo, () => emailInboxWorker.triggerTick());
+  const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter).register(slackMessagingAdapter).register(emailMessagingAdapter);
   const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
   const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
     const automationContext: AuthContext = {
@@ -1908,8 +1910,9 @@ ${localized.next}`;
     text = formatTelegramCards(text, config.webOrigin);
     return text || "NPATI completed the request and attached the result.";
   };
-  registerMessagingIntegrationRoutes(app, {
+  const messagingRoutes = registerMessagingIntegrationRoutes(app, {
     auth: authProvider, store: workspaceStore, repo: messagingIntegrationsRepo, gateway: messagingGateway,
+    emailRepo: emailInboxRepo,
     webhookBaseUrl: config.messagingWebhookBaseUrl ?? (config.webOrigin?.startsWith("https://") ? config.webOrigin : undefined),
     resetConversation:async({context,conversationId})=>{await workspaceStore.deleteNeutralConversation(context,conversationId);},
     handleMessage: async ({ context, connection, session, text, attachments, conversationId, replyContext, signal, onDelta }) => {
@@ -1947,6 +1950,13 @@ ${localized.next}`;
       await persistAutomaticCompanyMemory(context, company.id, result.run.id, text, result.run.status, false);
       const message=publicCompanyRunMessage(result.run.result, result.run.errorMessage, text);return { message:messagingResultText(message),attachments:await messagingResultAttachments(context,message) };
     },
+  });
+  emailInboxWorker.setGatewayHook(async (input) => {
+    if (!messagingRoutes.dispatchEmail) return false;
+    const connection = await messagingIntegrationsRepo.ensureEmailConnection(input.account, input.ctx.permissions);
+    const message = emailEnvelopeToGatewayMessage(input);
+    const result = await messagingRoutes.dispatchEmail(connection, message);
+    return result.status !== "ignored";
   });
   if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
   registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage, worker: emailInboxWorker });

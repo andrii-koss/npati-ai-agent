@@ -10,13 +10,14 @@ import { SlackMessagingAdapter } from "./slack-messaging";
 import type { MessagingConnection, MessagingConnectionSettings, MessagingConnectionScope, MessagingIntegrationsRepository, MessagingSession } from "./messaging-integrations-repository";
 import { MessagingInboundDispatcher, WhatsAppInboundDispatcher } from "./messaging-inbound-dispatcher";
 import { messagingCommandNames } from "./messaging-commands";
+import type { EmailInboxRepository } from "./email-inbox-repository";
 
 const channels = [
   { id: "telegram", name: "Telegram", available: true, capabilities: ["Chat", "Tasks", "Files", "Automations", "Company actions"] },
   { id: "discord", name: "Discord", available: true, capabilities: ["DMs", "Servers", "Threads", "Files", "Commands", "Automations"] },
   { id: "slack", name: "Slack", available: true, capabilities: ["DMs", "Channels", "Threads", "Files", "Commands", "Automations"] },
   { id: "whatsapp", name: "WhatsApp", available: true, capabilities: ["Chat", "Tasks", "Files", "Voice", "Groups", "Automations"] },
-  { id: "email", name: "Email", available: false, capabilities: [] },
+  { id: "email", name: "Email", available: true, capabilities: ["Chat Runtime", "Company Agents", "Threads", "Files", "Approvals", "Automations"] },
 ];
 const telegramCommands=[...messagingCommandNames];
 function allowed(ctx: AuthContext, permission: string) { return ctx.permissions.some((p)=>["*","owner","admin:all",permission].includes(p)) || (permission === "business:manage" && ctx.permissions.includes("workspace:write")); }
@@ -29,6 +30,7 @@ function sessionKey(connection:MessagingConnection,session:MessagingSession){ret
 export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   auth:AuthProvider; store:WorkspaceStore; repo:MessagingIntegrationsRepository; gateway:MessagingGateway;
   webhookBaseUrl?:string;
+  emailRepo?:EmailInboxRepository;
   handleMessage:(input:{context:AuthContext;connection:MessagingConnection;session:MessagingSession;text:string;attachments:GatewayAttachment[];conversationId?:string;replyContext?:GatewayReplyContext;signal?:AbortSignal;onDelta?:(chunk:string)=>void})=>Promise<{message:string;attachments?:GatewayOutboundAttachment[]}>;
   resetConversation?:(input:{context:AuthContext;conversationId:string})=>Promise<void>;
 }){
@@ -43,10 +45,19 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   const discord=(gateway.optionalAdapter("discord") as DiscordMessagingAdapter|undefined)??new DiscordMessagingAdapter(repo);
   const discordDispatcher=new MessagingInboundDispatcher({store,repo,adapter:discord,handleMessage:deps.handleMessage,resetConversation:deps.resetConversation});
   discord.setInboundHandler(async(connectionId,message)=>{const connection=await repo.getInternal(connectionId);if(!connection)return;await discordDispatcher.dispatch(connection,message).catch(async(error)=>{await repo.record(connection.id,"inbound",error instanceof Error?error.message:String(error));});});
+  const email=gateway.optionalAdapter("email");
+  const emailDispatcher=email?new MessagingInboundDispatcher({store,repo,adapter:email,handleMessage:deps.handleMessage,resetConversation:deps.resetConversation}):undefined;
   if(!app.hasContentTypeParser("application/x-www-form-urlencoded"))app.addContentTypeParser("application/x-www-form-urlencoded",{parseAs:"string"},(_request,body,done)=>done(null,body));
   app.addHook("preParsing",async(request,_reply,payload)=>{if(!request.url.includes("/integrations/whatsapp/cloud/")&&!request.url.includes("/integrations/slack/http/"))return payload;const chunks:Buffer[]=[];for await(const chunk of payload)chunks.push(Buffer.from(chunk));const raw=Buffer.concat(chunks);(request as any).rawBody=raw;return Readable.from(raw);});
 
-  app.get("/integrations/channels",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"workspace:read");return {channels,connections:await repo.list(ctx)};}catch(e){return failure(reply,e);}});
+  app.get("/integrations/channels",async(r,reply)=>{try{
+    const ctx=await authenticate(auth,r,"workspace:read");
+    if(deps.emailRepo){
+      const accounts=await deps.emailRepo.listUserAccounts(ctx);
+      for(const account of accounts)await repo.ensureEmailConnection(account,ctx.permissions);
+    }
+    return {channels,connections:await repo.list(ctx)};
+  }catch(e){return failure(reply,e);}});
   app.get<{Params:{connectionId:string}}>("/integrations/messaging/:connectionId/manage",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"workspace:read"),connection=await repo.getOwned(ctx,r.params.connectionId);if(!connection)throw Object.assign(new Error("Connection not found"),{status:404});const{webhookSecret:_secret,encryptedCredential:_credential,pairingCodeHash:_pairing,...safe}=connection,discordCatalog=connection.channel==="discord"?await discord.catalog(repo.resolveToken(connection)).catch(()=>({guilds:[]})):undefined,slackCatalog=connection.channel==="slack"?await slack.catalog(repo.resolveToken(connection)).catch(()=>({workspaces:[]})):undefined,slackCredential=connection.channel==="slack"?slack.credential(repo.resolveToken(connection)):undefined;return{connection:safe,sessions:await repo.listSessionsOwned(ctx,connection.id),commands:telegramCommands,transport:connection.channel==="whatsapp"?connection.provider:connection.channel==="discord"?"gateway-websocket":connection.channel==="slack"?slackCredential?.method:"webhook",discordCatalog,slackCatalog,webhookUrl:connection.channel==="slack"&&slackCredential?.method==="http"&&deps.webhookBaseUrl?deps.webhookBaseUrl.replace(/\/+$/,"")+"/api/v1/integrations/slack/http/"+connection.webhookSecret:undefined,capabilities:{typing:connection.channel!=="slack",progressiveEditing:true,longMessageChunking:true,retryBackoff:true,deduplication:true,sessionPersistence:true,inboundMedia:["images","documents","audio","video"],outboundMedia:["images","documents"],reactions:connection.channel==="discord"||connection.channel==="slack",voiceChannel:false}};}catch(e){return failure(reply,e);}});
   app.patch<{Params:{connectionId:string};Body:{displayName?:string;scope?:MessagingConnectionScope;companyId?:string|null;agentId?:string|null;settings?:MessagingConnectionSettings}}>("/integrations/messaging/:connectionId",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),current=await repo.getOwned(ctx,r.params.connectionId);if(!current)throw Object.assign(new Error("Connection not found"),{status:404});const scope=r.body?.scope||current.scope,companyId=scope==="account"?null:(r.body?.companyId??current.companyId??null),agentId=scope==="agent"?(r.body?.agentId??current.agentId??null):null;if(scope!=="account"&&!companyId)throw new Error("Company is required for this connection scope");if(scope==="agent"&&!agentId)throw new Error("Agent is required for Specific Agent scope");if(companyId)await store.getCompany(ctx,companyId);if(companyId&&agentId)await store.getCompanyAgent(ctx,companyId,agentId);const connection=await repo.updateOwned(ctx,current.id,{displayName:r.body?.displayName?.trim()||current.displayName,scope,companyId,agentId,settings:r.body?.settings||current.settings});return{connection};}catch(e){return failure(reply,e);}});
   app.post<{Params:{connectionId:string};Body:{botToken?:string}}>("/integrations/messaging/:connectionId/token",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"business:manage"),item=await repo.getOwned(ctx,r.params.connectionId);if(!item)throw Object.assign(new Error("Connection not found"),{status:404});if(item.channel!=="telegram")throw new Error("Bot tokens apply only to Telegram connections");const token=r.body?.botToken?.trim();if(!token)throw new Error("Telegram bot token is required");const adapter=gateway.adapter("telegram"),bot=await adapter.validateCredential(token),base=deps.webhookBaseUrl?.replace(/\/+$/,'');if(!base)throw Object.assign(new Error("Telegram webhook URL is not configured"),{status:503});const pairing=await repo.replaceCredential(item,token,bot.externalName);await adapter.configureWebhook(token,`${base}/api/v1/integrations/telegram/${item.webhookSecret}`,item.webhookSecret);return{connection:(await repo.list(ctx)).find((entry)=>entry.id===item.id),...pairing};}catch(e){return failure(reply,e);}});
@@ -212,4 +223,7 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   // Register on both /v1/* (when behind Nginx proxy stripping /api/) and /api/v1/* (direct or unstripped calls)
   app.post<{Params:{secret:string};Body:unknown}>("/api/v1/integrations/telegram/:secret", telegramWebhookHandler);
   app.post<{Params:{secret:string};Body:unknown}>("/v1/integrations/telegram/:secret", telegramWebhookHandler);
+
+  return { dispatchEmail: emailDispatcher
+    ? (connection:MessagingConnection,message:InboundGatewayMessage)=>emailDispatcher.dispatch(connection,message) : undefined };
 }
