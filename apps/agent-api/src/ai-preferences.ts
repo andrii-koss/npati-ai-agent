@@ -23,7 +23,7 @@ export interface AIPreferences {
 }
 
 const SETTINGS_KEY = 'ai.preferences';
-const MAX_CONCURRENT_UPDATE_RETRIES = 8;
+const MAX_CONCURRENT_UPDATE_RETRIES = 64;
 
 function automaticModel(preferFree: boolean, balanceQualityCost: boolean) {
   if (preferFree) return 'auto/chat';
@@ -72,6 +72,7 @@ function normalize(value: unknown): AIPreferences {
 
 export class AIPreferencesStore {
   private readonly legacyFile?: string;
+  private readonly updateQueues = new Map<string, Promise<void>>();
 
   constructor(private readonly workspace: WorkspaceStore, legacyDataDirectory?: string) {
     this.legacyFile = legacyDataDirectory ? path.join(legacyDataDirectory, 'ai-preferences.json') : undefined;
@@ -103,7 +104,20 @@ export class AIPreferencesStore {
     return stored ? normalize(stored.value) : initialPreferences();
   }
 
-  private async update(scope: AuthContext, operation: (current: AIPreferences) => AIPreferences | Promise<AIPreferences>) {
+  private update(scope: AuthContext, operation: (current: AIPreferences) => AIPreferences | Promise<AIPreferences>) {
+    const queueKey = scope.workspaceId + ":" + scope.userId;
+    const previous = this.updateQueues.get(queueKey) ?? Promise.resolve();
+    const current = previous
+      .catch(() => undefined)
+      .then(() => this.updateWithRetry(scope, operation));
+    const tail = current.then(() => undefined, () => undefined);
+    this.updateQueues.set(queueKey, tail);
+    return current.finally(() => {
+      if (this.updateQueues.get(queueKey) === tail) this.updateQueues.delete(queueKey);
+    });
+  }
+
+  private async updateWithRetry(scope: AuthContext, operation: (current: AIPreferences) => AIPreferences | Promise<AIPreferences>) {
     for (let attempt = 0; attempt < MAX_CONCURRENT_UPDATE_RETRIES; attempt += 1) {
       let stored = await this.workspace.getUserSetting(scope, SETTINGS_KEY);
       if (!stored && scope.workspaceId === 'dev-workspace' && scope.userId === 'dev-user') {
@@ -115,6 +129,10 @@ export class AIPreferencesStore {
       const written = await this.workspace.setUserSetting(scope, SETTINGS_KEY, next, stored?.revision ?? 0);
       if (written) {
         return normalize(written.value);
+      }
+      if (attempt + 1 < MAX_CONCURRENT_UPDATE_RETRIES) {
+        const backoffMs = Math.min(2 ** attempt, 32) + Math.floor(Math.random() * 5);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     }
     throw new Error('AI preferences changed concurrently; retry the request');
