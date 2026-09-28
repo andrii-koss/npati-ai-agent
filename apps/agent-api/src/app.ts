@@ -136,9 +136,12 @@ function isShortAffirmativeReply(message: string): boolean {
 }
 
 function resolveContextualCompanyFollowUp(message: string, previousAssistant: string): string {
-  if (!isShortAffirmativeReply(message)) return message;
+  const normalizedReply = message.trim().toLocaleLowerCase().replace(/[\s,.!]+/gu, "");
+  const contextualAffirmative = isShortAffirmativeReply(message) || ["\u0442\u0430\u043a", "yes", "confirm"].includes(normalizedReply);
+
   const offeredAgentSetup = /(?:ролі[\s\S]{0,100}інструкці|инструкци[\s\S]{0,100}модел|roles?[\s\S]{0,100}instructions?[\s\S]{0,100}models?|rôles?[\s\S]{0,100}instructions?|rollen?[\s\S]{0,100}anweisungen?|roles?[\s\S]{0,100}instrucciones?|ruoli?[\s\S]{0,100}istruzioni?|role[\s\S]{0,100}instrukc|funções?[\s\S]{0,100}instruções?|rollen?[\s\S]{0,100}instructies?|roller[\s\S]{0,100}talimat|角色[\s\S]{0,50}指令|役割[\s\S]{0,50}指示|역할[\s\S]{0,50}지침|أدوار[\s\S]{0,80}تعليمات|भूमिकाएँ[\s\S]{0,80}निर्देश)/iu.test(previousAssistant);
-  if (!offeredAgentSetup) return message;
+  const linkedCompanyCard = /\/settings\/company\?company=[0-9a-f-]{36}/iu.test(previousAssistant);
+  if ((!contextualAffirmative && !(linkedCompanyCard && message.trim().length <= 16)) || (!offeredAgentSetup && !linkedCompanyCard)) return message;
   const language = detectCompanyChatLanguage(previousAssistant);
   const commands: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
     en: "Configure detailed roles, system instructions, prompt guidelines, and recommended prompts for every agent in this company.",
@@ -1475,9 +1478,11 @@ ${localized.next}`;
     const safePrompt=SecurityPolicyEngine.protectText(promptWithAttachmentContext).sanitized;
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
-    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safeUserRequest);
-    const emailSettingsRequest = !workspaceSettingsRequest && EmailChatActions.isManagementRequest(safeUserRequest);
+    const contextualCompanyRequest = effectiveMessage !== message;
+    const workspaceSettingsRequest = !contextualCompanyRequest && WorkspaceChatActions.isManagementRequest(safeUserRequest);
+    const emailSettingsRequest = !contextualCompanyRequest && !workspaceSettingsRequest && EmailChatActions.isManagementRequest(safeUserRequest);
     const companySettingsRequest = !emailSettingsRequest && !workspaceSettingsRequest && (
+      effectiveMessage !== message ||
       CompanyChatActions.isManagementRequest(safeUserRequest)
       || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)))
     );

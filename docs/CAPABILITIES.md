@@ -4,7 +4,7 @@ This document describes the capability inventory shipped in the current source t
 is based on `packages/shared/src/capability-matrix.ts`, the same source used by
 `GET /capabilities/inspect` and `/settings/capabilities`.
 
-Last reviewed: 2026-09-20.
+Last reviewed: 2026-09-28.
 
 ## Status meanings
 
@@ -23,18 +23,18 @@ and connection state for the current installation.
 | Domain | Verified | Partial | Not implemented | Total |
 | --- | ---: | ---: | ---: | ---: |
 | AI | 10 | 4 | 1 | 15 |
-| System | 53 | 30 | 40 | 123 |
+| System | 56 | 29 | 38 | 123 |
 | Orchestration | 13 | 2 | 18 | 33 |
 | Research | 7 | 2 | 1 | 10 |
-| Browser | 6 | 7 | 6 | 19 |
-| Communications | 4 | 3 | 15 | 22 |
+| Browser | 6 | 9 | 4 | 19 |
+| Communications | 13 | 3 | 6 | 22 |
 | Security | 30 | 3 | 1 | 34 |
 | Storage | 27 | 1 | 1 | 29 |
 | Business | 10 | 0 | 0 | 10 |
 | Files | 9 | 2 | 0 | 11 |
-| **Total** | **169** | **54** | **83** | **306** |
+| **Total** | **181** | **55** | **70** | **306** |
 
-There are 42 agent-callable catalog entries: 7 verified, 7 partial, and 28 not
+There are 42 agent-callable catalog entries: 11 verified, 11 partial, and 20 not
 implemented. The other 264 entries are internal runtime, configuration, orchestration,
 or security capabilities and are not directly exposed to a model.
 
@@ -47,6 +47,10 @@ or security capabilities and are not directly exposed to a model.
 | `system.text-to-speech` | Generate speech through a configured provider |
 | `system.speech-to-text` | Transcribe supported audio input |
 | `communications.audio_understanding` | Process audio in supported chat flows |
+| `system.ocr` | Extract text from supported images and documents |
+| `communications.imap_email_trigger` | Receive and route authenticated IMAP email |
+| `communications.image_understanding` | Process images in supported chat flows |
+| `communications.telegram` | Run Telegram messages through the shared Agent runtime |
 | `storage.company_memory` | Read and write tenant-scoped Company memory |
 | `storage.agent_knowledge_retrieval` | Retrieve authorized Company knowledge for an agent |
 
@@ -56,9 +60,13 @@ or security capabilities and are not directly exposed to a model.
 | --- | --- |
 | `system.image_generation` | Depends on provider/runtime support and is not complete for every route |
 | `files.document_inputoutput` | Supported document flows exist; format coverage is incomplete |
+| `system.one-shot_reminders` | Reminder flow exists but scheduling coverage is incomplete |
 | `browser.browser_tab_control` | Managed-browser coverage is incomplete |
+| `communications.image_generationediting` | Provider-dependent image flows are incomplete |
 | `browser.browser_clicktype` | Interaction support exists but is not a complete autonomous browser |
 | `browser.browser_downloads` | Download handling exists for supported managed-browser flows |
+| `browser.browser_screenshots` | Supported managed-browser paths only |
+| `browser.browser_pdf_capture` | Supported managed-browser paths only |
 | `system.video_generation` | Provider-dependent and incomplete |
 | `communications.mobile_voice` | Mobile voice path is incomplete |
 
@@ -81,9 +89,9 @@ or security capabilities and are not directly exposed to a model.
 ## Not implemented
 
 The inspector intentionally lists reserved capabilities that do not work yet. Examples
-include OCR, Telegram, X search, realtime calls, camera/location/device commands, native
-Codex/ACP editor integrations, nested agents, Swarm, standing orders, and several advanced
-routing/compression strategies.
+include X search, realtime calls, camera/location/device commands, native Codex/ACP editor
+integrations, nested agents, Swarm, standing orders, and several advanced routing or
+compression strategies.
 
 Use the **Not implemented** status in `/settings/capabilities` as authoritative; do not
 infer availability from the presence of a name in the catalog.

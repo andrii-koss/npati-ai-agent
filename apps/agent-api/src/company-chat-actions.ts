@@ -236,7 +236,7 @@ function companyResultMessage(action: CompanyOperation, company: Company, agents
   const agentLines = agents.length
     ? agents.map((agent, index) => `${index + 1}. **${safeMarkdown(agent.name)}** - ${safeMarkdown(agent.role)}${agent.id === mainAgent?.id ? ` (${labels.mainAgent})` : ""}${agent.description ? `\n   ${safeMarkdown(agent.description)}` : ""}`).join("\n")
     : labels.noAgents;
-  const companyUrl = "/settings/company";
+  const companyUrl = `/settings/company?company=${encodeURIComponent(company.id)}`;
   const intro = action === "create"
     ? insertCompanyName(labels.created, companyName)
     : insertCompanyName(labels.updated, companyName);

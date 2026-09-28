@@ -96,7 +96,9 @@ Generated test evidence belongs in `artifacts/`, which is gitignored.
 
 ## Documentation
 
+- [Release readiness](docs/RELEASE_READINESS.md)
 - [Capabilities](docs/CAPABILITIES.md)
+- [Installation and platform support](docs/INSTALLATION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Dokploy production deployment](docs/DOKPLOY_DEPLOYMENT.md)
 - [AI Provider Marketplace](docs/AI_PROVIDER_MARKETPLACE.md)
