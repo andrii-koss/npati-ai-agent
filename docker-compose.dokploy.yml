@@ -189,33 +189,6 @@ services:
       start_period: 30s
     networks: [npati-agent]
 
-  omniroute-db-init:
-    image: docker.io/diegosouzapw/omniroute:3.8.50
-    restart: "no"
-    entrypoint: ["node", "-e"]
-    command:
-      - |
-        const Database = require("better-sqlite3");
-        const db = new Database("/app/data/storage.sqlite");
-        db.exec(`CREATE TABLE IF NOT EXISTS compression_run_telemetry (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          timestamp INTEGER NOT NULL,
-          request_id TEXT,
-          model TEXT,
-          provider TEXT,
-          source TEXT,
-          tokens_before INTEGER NOT NULL,
-          tokens_after INTEGER NOT NULL,
-          ratio REAL,
-          cost_delta REAL,
-          output_styles TEXT,
-          output_style_bypass TEXT,
-          output_tokens INTEGER
-        )`);
-        db.close();
-    volumes:
-      - omniroute-data:/app/data
-    networks: [npati-agent]
   omniroute:
     image: docker.io/diegosouzapw/omniroute:3.8.50
     restart: unless-stopped
@@ -243,8 +216,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      omniroute-db-init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "healthcheck.mjs"]
       interval: 15s
