@@ -308,17 +308,17 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
   return <section className="routing-panel ai-policy-panel">
     <div className="routing-panel-head"><div><p className="section-kicker">{t("aiMarketplace.routing.kicker")}</p><h2>{SHOW_AUTOMATIC_AI_ROUTE && activeRouting.mode !== "manual" ? t("aiMarketplace.routing.autoTitle") : t("aiMarketplace.routing.manualTitle")}</h2><p>{SHOW_AUTOMATIC_AI_ROUTE && activeRouting.mode !== "manual" ? t("aiMarketplace.routing.autoDesc", { route: activeRouting.automaticModel ?? "auto" }) : t("aiMarketplace.routing.manualDesc")}</p></div>
       <div className="mode-switch" aria-label="AI mode">
-        {SHOW_AUTOMATIC_AI_ROUTE && (
+        {SHOW_AUTOMATIC_AI_ROUTE ? (
           <button className={activeRouting.mode !== "manual" ? "active" : ""} disabled={saving} onClick={() => save({ mode: "automatic" })}>{t("aiMarketplace.routing.automatic")} <small>{t("aiMarketplace.routing.recommended")}</small></button>
+        ) : (
+          <div aria-hidden="true" style={{ visibility: "hidden" }} />
         )}
-        <button className={!SHOW_AUTOMATIC_AI_ROUTE || activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.length ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
+        <button style={{ gridColumn: 2 }} className={!SHOW_AUTOMATIC_AI_ROUTE || activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.length ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
       </div>
     </div>
     <div className="ai-policy-grid">
       <div className="ai-policy-options">
-        {SHOW_AUTOMATIC_AI_ROUTE && (
-          <label><input type="checkbox" checked={activeRouting.preferFree} disabled={saving} onChange={(event) => save({ preferFree: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.preferFreeTitle")}</strong><small>{t("aiMarketplace.routing.preferFreeDesc")}</small></span></label>
-        )}
+        <label><input type="checkbox" checked={activeRouting.preferFree} disabled={saving} onChange={(event) => save({ preferFree: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.preferFreeTitle")}</strong><small>{t("aiMarketplace.routing.preferFreeDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.fallbackOnFailure} disabled={saving} onChange={(event) => save({ fallbackOnFailure: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.fallbackTitle")}</strong><small>{t("aiMarketplace.routing.fallbackDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.balanceQualityCost} disabled={saving} onChange={(event) => save({ balanceQualityCost: event.target.checked })} /><span><strong>{t("aiMarketplace.routing.balanceTitle")}</strong><small>{t("aiMarketplace.routing.balanceDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>{t("aiMarketplace.routing.compressionTitle")}</strong><small>{t("aiMarketplace.routing.compressionDesc")}</small></span></label>
