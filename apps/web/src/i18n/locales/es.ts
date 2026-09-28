@@ -91,7 +91,11 @@ export const es: TranslationSchema = {
       "¿Reiniciar la configuración del negocio? El borrador y el historial del chat se eliminarán de forma permanente.",
   },
   chat: {
+    emptyTitle: "¿En qué desea trabajar hoy?",
+    emptySubtitle: "Pregunte cualquier cosa a NPATI Agent o explore nuevas ideas.",
     placeholder: "Pregunta lo que quieras a NPATI Agent…",
+    businessEmptySubtitle: "Usaré el contexto de {{name}} y no inventaré datos faltantes.",
+    businessPlaceholder: "Pregunte sobre su negocio, metas, audiencia o siguiente paso…",
     noCompany: "Sin empresa",
     stopGenerating: "Detener generación",
     showHistory: "Mostrar historial de análisis",

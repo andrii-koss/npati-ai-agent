@@ -84,7 +84,11 @@ export const uk: TranslationSchema = {
     restartSetupMessage: "Почати налаштування бізнесу спочатку? Поточну чернетку та історію чату буде видалено безповоротно.",
   },
   chat: {
+    emptyTitle: "Над чим попрацюємо?",
+    emptySubtitle: "Запитайте що завгодно в NPATI Agent або шукайте ідеї.",
     placeholder: "Запитайте що завгодно в NPATI Agent…",
+    businessEmptySubtitle: "Я використаю контекст компанії {{name}} і не вигадуватиму фактів.",
+    businessPlaceholder: "Запитайте про ваш бізнес, цілі, аудиторію або наступний крок…",
     noCompany: "Без компанії",
     stopGenerating: "Зупинити генерацію",
     showHistory: "Показати історію аналізу",

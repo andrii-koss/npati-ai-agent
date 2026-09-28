@@ -90,7 +90,11 @@ export const it: TranslationSchema = {
       "Ricominciare la configurazione dell'attività? La bozza attuale e la cronologia chat verranno eliminate definitivamente.",
   },
   chat: {
+    emptyTitle: "Su cosa vorresti lavorare oggi?",
+    emptySubtitle: "Chiedi qualunque cosa a NPATI Agent o sviluppa nuove idee.",
     placeholder: "Chiedi qualsiasi cosa a NPATI Agent…",
+    businessEmptySubtitle: "Utilizzerò il contesto per {{name}} senza inventare informazioni mancanti.",
+    businessPlaceholder: "Chiedi informazioni sulla tua attività, obiettivi, pubblico o prossimi passi…",
     noCompany: "Nessuna azienda",
     stopGenerating: "Interrompi generazione",
     showHistory: "Mostra cronologia analisi",

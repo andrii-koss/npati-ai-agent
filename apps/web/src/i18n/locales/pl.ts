@@ -84,7 +84,11 @@ export const pl: TranslationSchema = {
     restartSetupMessage: "Rozpocząć konfigurację biznesu od początku? Bieżący szkic i historia czatu zostaną bezpowrotnie usunięte.",
   },
   chat: {
+    emptyTitle: "Nad czym chcesz popracować?",
+    emptySubtitle: "Zapytaj NPATI Agent o cokolwiek lub rozwijaj nowe pomysły.",
     placeholder: "Zapytaj NPATI Agent o cokolwiek…",
+    businessEmptySubtitle: "Użyję kontekstu firmy {{name}} i nie będę zmyślać faktów.",
+    businessPlaceholder: "Zapytaj o swój biznes, cele, odbiorców lub kolejny krok…",
     noCompany: "Brak firmy",
     stopGenerating: "Zatrzymaj generowanie",
     showHistory: "Pokaż historię analizy",

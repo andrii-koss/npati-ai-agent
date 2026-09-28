@@ -101,7 +101,11 @@ export interface TranslationSchema {
     restartSetupMessage: string;
   };
   chat: {
+    emptyTitle: string;
+    emptySubtitle: string;
     placeholder: string;
+    businessEmptySubtitle: string;
+    businessPlaceholder: string;
     noCompany: string;
     stopGenerating: string;
     showHistory: string;

@@ -1,4 +1,5 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
+import { useTranslation } from "./i18n";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, useRef, useState } from "react";
@@ -41,6 +42,7 @@ function isResearchRequest(message?: string) {
 }
 
 function BusinessConversation({ initialPrompt = "", initialConversationId, businessSetup = false, businessId }: { initialPrompt?: string; initialConversationId?: string; businessSetup?: boolean; businessRoute?: boolean; businessId?: string }) {
+  const { t } = useTranslation();
   const { overview, refresh } = useWorkspace();
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
@@ -203,8 +205,8 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
       <div className="onboarding-live-chat standard-live-chat onboarding-empty-chat">
         <div className="message-stream">
           <div className="chat-welcome">
-            <h2>What should we work on?</h2>
-            <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
+            <h2>{t("chat.emptyTitle")}</h2>
+            <p>{t("chat.emptySubtitle")}</p>
           </div>
           {messages.map((message, index) => (
             <article
@@ -276,8 +278,8 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
         <div className="message-stream">
           {messages.length === 0 && !session?.conversationId && (
             <div className="chat-welcome">
-              <h2>What should we work on?</h2>
-              <p>Ask NPATI Agent anything, or brainstorm ideas.</p>
+              <h2>{t("chat.emptyTitle")}</h2>
+              <p>{t("chat.emptySubtitle")}</p>
             </div>
           )}
           {messages.map((message, index) => (
