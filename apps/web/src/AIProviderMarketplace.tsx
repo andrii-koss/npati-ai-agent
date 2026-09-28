@@ -307,13 +307,15 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
 
   return <section className="routing-panel ai-policy-panel">
     <div className="routing-panel-head"><div><p className="section-kicker">{t("aiMarketplace.routing.kicker")}</p><h2>{SHOW_AUTOMATIC_AI_ROUTE && activeRouting.mode !== "manual" ? t("aiMarketplace.routing.autoTitle") : t("aiMarketplace.routing.manualTitle")}</h2><p>{SHOW_AUTOMATIC_AI_ROUTE && activeRouting.mode !== "manual" ? t("aiMarketplace.routing.autoDesc", { route: activeRouting.automaticModel ?? "auto" }) : t("aiMarketplace.routing.manualDesc")}</p></div>
-      <div className="mode-switch" aria-label="AI mode">
-        {SHOW_AUTOMATIC_AI_ROUTE ? (
+      <div
+        className="mode-switch"
+        aria-label="AI mode"
+        style={SHOW_AUTOMATIC_AI_ROUTE ? undefined : { display: "flex", background: "transparent", padding: 0 }}
+      >
+        {SHOW_AUTOMATIC_AI_ROUTE && (
           <button className={activeRouting.mode !== "manual" ? "active" : ""} disabled={saving} onClick={() => save({ mode: "automatic" })}>{t("aiMarketplace.routing.automatic")} <small>{t("aiMarketplace.routing.recommended")}</small></button>
-        ) : (
-          <div aria-hidden="true" style={{ visibility: "hidden" }} />
         )}
-        <button style={{ gridColumn: 2 }} className={!SHOW_AUTOMATIC_AI_ROUTE || activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.length ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
+        <button className={!SHOW_AUTOMATIC_AI_ROUTE || activeRouting.mode === "manual" ? "active" : ""} disabled={saving || models.length === 0} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.length ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
       </div>
     </div>
     <div className="ai-policy-grid">
