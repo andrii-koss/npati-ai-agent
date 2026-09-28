@@ -16986,7 +16986,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .connect-body + .connect-body { display: none; }
 .connection-manager.whatsapp > .integration-settings-section + .integration-settings-section { display: none; }
 .connection-manager.whatsapp .integration-subform,
-.connection-manager.discord .integration-subform { display: none; }
+.connection-manager.discord .integration-subform,
+.connection-manager.slack .integration-subform { display: none; }
 .whatsapp-qr { display:block; width:min(320px,100%); height:auto; margin:16px auto; border-radius:12px; background:#fff; padding:8px; }
 .whatsapp-self-chat-setting {
   margin: 16px 0;
@@ -16996,7 +16997,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   background: var(--panel-bg, rgba(127,127,127,.05));
 }
 
-.connection-manager.discord > .integration-settings-section + .integration-settings-section { display: none; }
+.connection-manager.discord > .integration-settings-section + .integration-settings-section,
+.connection-manager.slack > .integration-settings-section + .integration-settings-section { display: none; }
 .discord-guild-card { margin: 14px 0; padding: 14px; border: 1px solid var(--border-color, rgba(127,127,127,.22)); border-radius: 12px; }
 .discord-guild-head { display:flex; align-items:center; gap:10px; }
 .discord-guild-head code { margin-left:auto; opacity:.7; }
@@ -17006,3 +17008,5 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .discord-channel-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(160px,1fr); gap:8px; padding:10px; border-radius:8px; background:rgba(127,127,127,.06); }
 .discord-channel-row > input:last-child { grid-column:1 / -1; }
 @media (max-width:760px){.discord-channel-row{grid-template-columns:1fr;}.discord-channel-row > input:last-child{grid-column:auto;}}
+
+.slack-channel-row { grid-template-columns:minmax(180px,1fr) minmax(160px,1fr); }

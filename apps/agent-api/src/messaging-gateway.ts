@@ -5,7 +5,7 @@ export type GatewayReplyContext = { messageId: string; text: string; externalUse
 export type InboundGatewayMessage = {
   externalUserId: string; externalChatId: string; externalThreadId?: string; text: string;
   attachments: GatewayAttachment[]; messageId: string; eventId: string; chatType?: string;
-  externalGuildId?: string; roleIds?: string[]; mentioned?: boolean;
+  externalGuildId?: string; externalWorkspaceId?: string; roleIds?: string[]; mentioned?: boolean;
   replyContext?: GatewayReplyContext; hasAttachments?: boolean;
   isSelfChat?: boolean;
 };
