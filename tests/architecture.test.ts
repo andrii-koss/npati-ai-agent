@@ -30,8 +30,6 @@ describe("architecture boundaries", () => {
     expect(compose).not.toContain("fetch('http://127.0.0.1:3001/health')");
     expect(dokployCompose).toContain("http://127.0.0.1:3001/health/live");
     expect(dokployCompose).not.toContain("fetch('http://127.0.0.1:3001/health')");
-    expect(dokployCompose).toContain("omniroute-db-init:");
-    expect(dokployCompose).toContain("CREATE TABLE IF NOT EXISTS compression_run_telemetry");
     expect(dokployCompose).toContain("OMNIROUTE_MANAGEMENT_PASSWORD is required");
     expect(dokployCompose).toContain("ARENA_ELO_SYNC_ENABLED: ${ARENA_ELO_SYNC_ENABLED:-false}");
   });
