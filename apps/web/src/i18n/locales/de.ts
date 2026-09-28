@@ -792,6 +792,14 @@ export const de: TranslationSchema = {
     },
     connectedServices: "Verbundene Dienste",
     errorLoad: "Fähigkeiten konnten nicht geladen werden",
+    integrations: {
+      kicker: "Verifizierte Produktintegrationen",
+      title: "Implementierte Messaging-Kanäle",
+      manage: "Integrationen verwalten",
+      sharedRuntime: "Gemeinsame NPATI Agent-Laufzeitumgebung",
+      loading: "Integrationsstatus wird geladen...",
+      notice: "Der Integrationsstatus ist verfügbar, wenn die Agent-API verbunden ist.",
+    },
   },
   activity: {
     eyebrow: "Beobachtbarkeit & Audit",

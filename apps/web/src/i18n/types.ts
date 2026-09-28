@@ -852,6 +852,14 @@ export interface TranslationSchema {
     };
     connectedServices: string;
     errorLoad: string;
+    integrations: {
+      kicker: string;
+      title: string;
+      manage: string;
+      sharedRuntime: string;
+      loading: string;
+      notice: string;
+    };
   };
   activity: {
     eyebrow: string;

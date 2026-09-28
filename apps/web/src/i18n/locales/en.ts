@@ -792,6 +792,14 @@ export const en: TranslationSchema = {
     },
     connectedServices: "Connected Services",
     errorLoad: "Failed to load capabilities",
+    integrations: {
+      kicker: "Verified product integrations",
+      title: "Implemented messaging channels",
+      manage: "Manage integrations",
+      sharedRuntime: "Shared NPATI Agent runtime",
+      loading: "Loading integration status...",
+      notice: "Integration status is available when the Agent API is connected.",
+    },
   },
   activity: {
     eyebrow: "Observability & Audit",

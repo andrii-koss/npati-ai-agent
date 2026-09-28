@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { getChannelIcon } from "./integration-icons";
 import { useTranslation } from "./i18n";
 
 type InspectorSlice =
@@ -52,6 +53,70 @@ interface IntegrationChannel {
   name: string;
   available: boolean;
   capabilities: string[];
+}
+
+const DEFAULT_INTEGRATION_CHANNELS: IntegrationChannel[] = [
+  { id: "telegram", name: "Telegram", available: true, capabilities: ["Chat", "Tasks", "Files", "Automations", "Company actions"] },
+  { id: "discord", name: "Discord", available: true, capabilities: ["DMs", "Servers", "Threads", "Files", "Commands", "Automations"] },
+  { id: "slack", name: "Slack", available: true, capabilities: ["DMs", "Channels", "Threads", "Files", "Commands", "Automations"] },
+  { id: "whatsapp", name: "WhatsApp", available: true, capabilities: ["Chat", "Tasks", "Files", "Voice", "Groups", "Automations"] },
+  { id: "email", name: "Email", available: true, capabilities: ["Chat Runtime", "Company Agents", "Threads", "Files", "Approvals", "Automations"] },
+];
+const STORAGE_CHANNELS_KEY = "npati_integrations_channels";
+
+function getCachedIntegrationChannels(): IntegrationChannel[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CHANNELS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((c: any) => c && c.available);
+      }
+    }
+  } catch {}
+  return DEFAULT_INTEGRATION_CHANNELS;
+}
+
+const capabilityKeyMap: Record<string, string> = {
+  "Chat": "chat",
+  "Tasks": "tasks",
+  "Files": "files",
+  "Automations": "automations",
+  "Company actions": "companyActions",
+  "DMs": "dms",
+  "Servers": "servers",
+  "Threads": "threads",
+  "Commands": "commands",
+  "Channels": "channels",
+  "Voice": "voice",
+  "Groups": "groups",
+  "Chat Runtime": "chatRuntime",
+  "Company Agents": "companyAgents",
+  "Approvals": "approvals",
+};
+
+function getCapabilityLabel(capability: string, t: (key: string) => string): string {
+  const key = capabilityKeyMap[capability];
+  if (key) {
+    const fullKey = `integrationsPage.capabilities.${key}`;
+    const translated = t(fullKey);
+    if (translated && translated !== fullKey) return translated;
+  }
+  return capability;
+}
+
+function ChannelIcon({ channel, size }: { channel: IntegrationChannel; size?: "small" | "large" }) {
+  const icon = getChannelIcon(channel.id);
+  const [failed, setFailed] = useState(false);
+  const initialLetter = channel.name.trim().charAt(0).toUpperCase();
+  return (
+    <span className={`provider-avatar${size ? ` ${size}` : ""}`} aria-hidden="true">
+      <span className="provider-initials">{initialLetter}</span>
+      {icon && !failed && (
+        <img src={icon} alt="" onError={() => setFailed(true)} />
+      )}
+    </span>
+  );
 }
 
 
@@ -140,8 +205,8 @@ export function CapabilityInspectorPage() {
   const [report, setReport] = useState<InspectorReport | null>(initialReport);
   const [loading, setLoading] = useState(() => initialReport === null);
   const [error, setError] = useState<string | null>(null);
-  const [integrationChannels, setIntegrationChannels] = useState<IntegrationChannel[]>([]);
-  const [integrationsLoading, setIntegrationsLoading] = useState(true);
+  const [integrationChannels, setIntegrationChannels] = useState<IntegrationChannel[]>(getCachedIntegrationChannels);
+  const [integrationsLoading, setIntegrationsLoading] = useState(() => getCachedIntegrationChannels().length === 0);
 
   // Pagination & Sorting State
   const [pageSize, setPageSize] = useState<number>(25);
@@ -207,7 +272,14 @@ export function CapabilityInspectorPage() {
         return (await res.json()) as { channels?: IntegrationChannel[] };
       })
       .then((data) => {
-        if (active) setIntegrationChannels((data.channels ?? []).filter((channel) => channel.available));
+        if (!active) return;
+        const available = (data.channels ?? []).filter((channel) => channel.available);
+        if (available.length > 0) {
+          setIntegrationChannels((prev) => (JSON.stringify(prev) === JSON.stringify(available) ? prev : available));
+          try {
+            localStorage.setItem(STORAGE_CHANNELS_KEY, JSON.stringify(data.channels));
+          } catch {}
+        }
       })
       .catch(() => undefined)
       .finally(() => {
@@ -335,35 +407,44 @@ export function CapabilityInspectorPage() {
       <section className="explore-section" aria-labelledby="implemented-integrations-title">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Verified product integrations</p>
-            <h2 id="implemented-integrations-title">Implemented messaging channels</h2>
+            <p className="section-kicker">{t("capabilityInspector.integrations.kicker")}</p>
+            <h2 id="implemented-integrations-title">{t("capabilityInspector.integrations.title")}</h2>
           </div>
-          <Link to="/settings/integrations" className="button-secondary">Manage integrations</Link>
+          <Link to="/settings/integrations" className="button-secondary">
+            {t("capabilityInspector.integrations.manage")}
+          </Link>
         </div>
-        {integrationsLoading ? (
-          <div className="loading-state">Loading integration status...</div>
+        {integrationsLoading && integrationChannels.length === 0 ? (
+          <div className="loading-state">{t("capabilityInspector.integrations.loading")}</div>
         ) : integrationChannels.length > 0 ? (
           <div className="provider-grid">
             {integrationChannels.map((channel) => (
               <article className="provider-card is-connected" key={channel.id}>
-                <div className="provider-card-main">
+                <div className="provider-card-main" style={{ cursor: "default" }}>
+                  <ChannelIcon channel={channel} />
                   <span className="provider-title">
                     <strong>{channel.name}</strong>
-                    <small>Shared NPATI Agent runtime</small>
+                    <small>{t("capabilityInspector.integrations.sharedRuntime")}</small>
                   </span>
-                  <span className="connection-light on" aria-label="Implemented" />
+                  <span
+                    className="connection-light on"
+                    aria-label={t("capabilityInspector.statuses.verified")}
+                    style={{ marginLeft: "auto", justifySelf: "end" }}
+                  />
                 </div>
-                <div className="provider-badges">
+                <div className="provider-badges" style={{ margin: "12px 0 8px" }}>
                   <span className="status-pill verified">{t("capabilityInspector.statuses.verified")}</span>
                 </div>
-                <div className="capability-row">
-                  {channel.capabilities.map((capability) => <span key={capability}>{capability}</span>)}
+                <div className="capability-row" style={{ marginTop: 0, gap: 6 }}>
+                  {channel.capabilities.map((capability) => (
+                    <span key={capability}>{getCapabilityLabel(capability, t)}</span>
+                  ))}
                 </div>
               </article>
             ))}
           </div>
         ) : (
-          <div className="workspace-notice">Integration status is available when the Agent API is connected.</div>
+          <div className="workspace-notice">{t("capabilityInspector.integrations.notice")}</div>
         )}
       </section>
 

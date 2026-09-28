@@ -792,6 +792,14 @@ export const pl: TranslationSchema = {
     },
     connectedServices: "Połączone usługi",
     errorLoad: "Nie udało się załadować możliwości",
+    integrations: {
+      kicker: "Zweryfikowane integracje produktu",
+      title: "Wdrożone kanały komunikacji",
+      manage: "Zarządzaj integracjami",
+      sharedRuntime: "Wspólne środowisko uruchomieniowe NPATI Agent",
+      loading: "Ładowanie statusu integracji...",
+      notice: "Status integracji jest dostępny, gdy Agent API jest podłączony.",
+    },
   },
   activity: {
     eyebrow: "Obserwowalność i audyt",
