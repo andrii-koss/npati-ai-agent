@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,7 +37,7 @@ jobs:
 
   docker:
     name: Docker / Ubuntu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - run: cp .env.example .env
@@ -47,7 +47,7 @@ jobs:
 
   release-gate:
     name: Release gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [platform, docker]
     steps:
       - uses: actions/checkout@v7

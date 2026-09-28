@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
+
+afterEach(() => vi.useRealTimers());
 
 describe("durable background run audit and completion reporting", () => {
   const context: AuthContext = { workspaceId: "background-ws", userId: "background-user", permissions: ["workspace:read", "business:manage"] };
 
   it("keeps an idempotent lifecycle and derives a terminal completion report", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-28T17:27:42.000Z"));
     const store = new InMemoryWorkspaceStore();
     await store.initialize(context);
     const company = await store.createCompany(context, { name: "Background Audit Co" }, "background-company");
