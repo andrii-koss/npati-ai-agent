@@ -41,6 +41,7 @@ describe("architecture boundaries", () => {
 
     expect(compose).toContain("REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}");
     expect(dokployCompose).toContain("REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:?CRAWL4AI_SECRET_KEY is required}");
+    expect(dokployCompose).toContain("image: npati-agent-crawler:${CRAWL4AI_VERSION:-0.9.2}");
     expect(supervisor).toMatch(/^user=root$/m);
   });
   it("keeps Company navigation distinct without a duplicate Agents entry", () => {
