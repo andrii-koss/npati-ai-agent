@@ -84,7 +84,11 @@ export const de: TranslationSchema = {
     restartSetupMessage: "Geschäftseinrichtung neu starten? Der aktuelle Entwurf und der Chatverlauf werden unwiderruflich gelöscht.",
   },
   chat: {
+    emptyTitle: "Woran möchten Sie arbeiten?",
+    emptySubtitle: "Fragen Sie NPATI Agent alles oder sammeln Sie Ideen.",
     placeholder: "Fragen Sie NPATI Agent alles…",
+    businessEmptySubtitle: "Ich nutze den Kontext für {{name}} und erfinde keine fehlenden Fakten.",
+    businessPlaceholder: "Fragen Sie nach Ihrem Geschäft, Zielen, Zielgruppe oder nächsten Schritten…",
     noCompany: "Kein Unternehmen",
     stopGenerating: "Generierung stoppen",
     showHistory: "Rechercheverlauf anzeigen",

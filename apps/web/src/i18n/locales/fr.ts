@@ -91,7 +91,11 @@ export const fr: TranslationSchema = {
       "Recommencer la configuration de l'entreprise ? Le brouillon et l'historique de discussion seront définitivement supprimés.",
   },
   chat: {
+    emptyTitle: "Sur quoi souhaitez-vous travailler ?",
+    emptySubtitle: "Demandez n'importe quoi à NPATI Agent ou brainstormez des idées.",
     placeholder: "Demandez n'importe quoi à NPATI Agent…",
+    businessEmptySubtitle: "J'utiliserai le contexte pour {{name}} sans inventer de faits manquants.",
+    businessPlaceholder: "Posez des questions sur votre entreprise, vos objectifs, votre public ou la suite…",
     noCompany: "Sans société",
     stopGenerating: "Arrêter la génération",
     showHistory: "Afficher l'historique",

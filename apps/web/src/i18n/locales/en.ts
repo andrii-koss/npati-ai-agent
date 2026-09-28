@@ -84,7 +84,11 @@ export const en: TranslationSchema = {
     restartSetupMessage: "Start business setup over? The current draft and its chat history will be deleted. This cannot be undone.",
   },
   chat: {
+    emptyTitle: "What should we work on?",
+    emptySubtitle: "Ask NPATI Agent anything, or brainstorm ideas.",
     placeholder: "Ask NPATI Agent anything…",
+    businessEmptySubtitle: "I’ll use the context for {{name}} and won’t invent missing facts.",
+    businessPlaceholder: "Ask about your business, goals, audience, or next move…",
     noCompany: "No company",
     stopGenerating: "Stop generating",
     showHistory: "Show analysis history",

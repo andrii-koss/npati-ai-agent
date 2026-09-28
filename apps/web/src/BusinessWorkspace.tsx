@@ -1076,6 +1076,7 @@ function AssistantMessageToolbar({
 }
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
+  const { t } = useTranslation();
   const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
@@ -1641,8 +1642,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         <div className="message-stream" ref={messageStreamRef}>
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
-              <h2>What should we work on?</h2>
-              <p>{business ? `I’ll use the context for ${business.name} and won’t invent missing facts.` : "Ask NPATI Agent anything, or brainstorm ideas."}</p>
+              <h2>{t("chat.emptyTitle")}</h2>
+              <p>{business ? t("chat.businessEmptySubtitle", { name: business.name }) : t("chat.emptySubtitle")}</p>
             </div>
           )}
           {messages.map((message, index) => {
@@ -1733,7 +1734,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             onGenerateSpeech={generateSpeechForInput}
             isGeneratingSpeech={isGeneratingSpeech}
           />
-          <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? "Ask about your business, goals, audience, or next move…" : "Ask NPATI Agent anything…"} />
+          <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")} />
           <div>
             {sending ? (
               <button
