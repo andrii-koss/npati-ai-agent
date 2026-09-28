@@ -33,6 +33,7 @@ describe("architecture boundaries", () => {
     expect(dokployCompose).toContain("omniroute-db-init:");
     expect(dokployCompose).toContain("CREATE TABLE IF NOT EXISTS compression_run_telemetry");
     expect(dokployCompose).toContain("OMNIROUTE_MANAGEMENT_PASSWORD is required");
+    expect(dokployCompose).toContain("ARENA_ELO_SYNC_ENABLED: ${ARENA_ELO_SYNC_ENABLED:-false}");
   });
 
   it("keeps Company navigation distinct without a duplicate Agents entry", () => {
