@@ -124,6 +124,16 @@ export interface TranslationSchema {
     regenerate: string;
     shareResponse: string;
   };
+  userMenu: {
+    emailInbox: string;
+    aiProvider: string;
+    company: string;
+    memory: string;
+    settings: string;
+    signOut: string;
+    signOutIncompleteTitle: string;
+    signOutIncompleteDesc: string;
+  };
   settings: {
     title: string;
     eyebrow: string;

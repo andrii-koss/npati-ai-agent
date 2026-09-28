@@ -107,6 +107,16 @@ export const de: TranslationSchema = {
     regenerate: "Erneut generieren",
     shareResponse: "Antwort teilen",
   },
+  userMenu: {
+    emailInbox: "E-Mail-Postfach",
+    aiProvider: "KI-Anbieter",
+    company: "Unternehmen",
+    memory: "Gedächtnis",
+    settings: "Einstellungen",
+    signOut: "Abmelden",
+    signOutIncompleteTitle: "Abmeldung unvollständig",
+    signOutIncompleteDesc: "Abmeldung von npati.com fehlgeschlagen.",
+  },
   settings: {
     title: "Einstellungen",
     eyebrow: "NPATI Arbeitsbereich",
