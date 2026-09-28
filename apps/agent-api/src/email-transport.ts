@@ -243,6 +243,8 @@ export interface PolledImapMessage {
   messageId?: string;
   inReplyTo?: string;
   references?: string;
+  headers: Record<string, string>;
+  authenticationResults?: string;
   attachments: EmailAttachment[];
 }
 
@@ -309,12 +311,18 @@ export class ImapEmailTransport {
     if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
       throw new Error(config.authType === "oauth2" ? "IMAP OAuth access token is required" : "IMAP password is required");
     }
-    const socket: MailSocket = config.secure !== false
+    let socket: MailSocket = config.secure !== false
       ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
       : net.createConnection({ host: config.host, port: config.port });
     await waitForSocket(socket, config.secure !== false ? "secureConnect" : "connect", timeoutMs);
-    const session = new ImapSession(socket, timeoutMs);
+    let session = new ImapSession(socket, timeoutMs);
     await session.readUntil(/(?:^|\r\n)\* (?:OK|PREAUTH)[^\r\n]*\r\n/i);
+    if (config.secure === false && config.tls === true) {
+      await session.command("STARTTLS");
+      socket = tls.connect({ socket, servername: config.host, rejectUnauthorized: true });
+      await waitForSocket(socket, "secureConnect", timeoutMs);
+      session = new ImapSession(socket, timeoutMs);
+    }
     if (config.authType === "oauth2") {
       const auth = Buffer.from(`user=${config.username}\u0001auth=Bearer ${config.accessToken}\u0001\u0001`).toString("base64");
       await session.command(`AUTHENTICATE XOAUTH2 ${auth}`);
@@ -332,12 +340,18 @@ export class ImapEmailTransport {
     if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
       throw new Error(config.authType === "oauth2" ? "IMAP OAuth access token is required" : "IMAP password is required");
     }
-    const socket: MailSocket = config.secure !== false
+    let socket: MailSocket = config.secure !== false
       ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
       : net.createConnection({ host: config.host, port: config.port });
     await waitForSocket(socket, config.secure !== false ? "secureConnect" : "connect", timeoutMs);
-    const session = new ImapSession(socket, timeoutMs);
+    let session = new ImapSession(socket, timeoutMs);
     await session.readUntil(/(?:^|\r\n)\* (?:OK|PREAUTH)[^\r\n]*\r\n/i);
+    if (config.secure === false && config.tls === true) {
+      await session.command("STARTTLS");
+      socket = tls.connect({ socket, servername: config.host, rejectUnauthorized: true });
+      await waitForSocket(socket, "secureConnect", timeoutMs);
+      session = new ImapSession(socket, timeoutMs);
+    }
     if (config.authType === "oauth2") {
       const auth = Buffer.from(`user=${config.username}\u0001auth=Bearer ${config.accessToken}\u0001\u0001`).toString("base64");
       await session.command(`AUTHENTICATE XOAUTH2 ${auth}`);
@@ -371,6 +385,14 @@ export class ImapEmailTransport {
         messageId: headerValue(headers, "Message-ID") || undefined,
         inReplyTo: headerValue(headers, "In-Reply-To") || undefined,
         references: headerValue(headers, "References") || undefined,
+        headers: {
+          "auto-submitted": headerValue(headers, "Auto-Submitted"),
+          precedence: headerValue(headers, "Precedence"),
+          "list-unsubscribe": headerValue(headers, "List-Unsubscribe"),
+          "authentication-results": headerValue(headers, "Authentication-Results"),
+          "return-path": headerValue(headers, "Return-Path"),
+        },
+        authenticationResults: headerValue(headers, "Authentication-Results") || undefined,
         attachments: mime.attachments,
       });
     }

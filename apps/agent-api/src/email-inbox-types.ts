@@ -1,4 +1,8 @@
 export type EmailAccountMode = "manual" | "approval" | "autopilot";
+export type EmailProvider = "gmail" | "microsoft" | "imap_smtp";
+export type EmailConnectionScope = "account" | "company" | "agent";
+export type EmailSenderPolicy = "pairing" | "allowlist" | "open" | "disabled";
+export type EmailOutboundPolicy = "draft_only" | "approval_required" | "auto_send";
 export type EmailAccountStatus =
   | "connected"
   | "pending"
@@ -77,6 +81,13 @@ export interface CompanyEmailAccount {
   userId: string;
   emailAddress: string;
   displayName?: string | null;
+  provider: EmailProvider;
+  connectionScope: EmailConnectionScope;
+  senderPolicy: EmailSenderPolicy;
+  allowedSenders: string[];
+  allowedDomains: string[];
+  requireAuthenticatedSender: boolean;
+  outboundPolicy: EmailOutboundPolicy;
   agentId?: string | null;
   mode: EmailAccountMode;
   status: EmailAccountStatus;

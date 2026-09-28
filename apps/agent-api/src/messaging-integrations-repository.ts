@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
+import type { CompanyEmailAccount } from "./email-inbox-types";
 
 export type MessagingChannel = "telegram" | "discord" | "slack" | "whatsapp" | "email";
 export type MessagingConnectionStatus = "pending" | "connected" | "paused" | "error";
@@ -77,6 +78,34 @@ export class MessagingIntegrationsRepository{
     const item:MessagingConnection={id,workspaceId:ctx.workspaceId,userId:ctx.userId,companyId,agentId:input.agentId||null,scope,activeCompanyId:scope==="account"?null:companyId,activeAgentId:scope==="agent"?input.agentId||null:null,channel:"whatsapp",provider:input.provider,displayName:input.displayName.trim(),status:"pending",permissions:[...new Set(ctx.permissions)],settings:defaultMessagingConnectionSettings(),webhookSecret:randomBytes(32).toString("hex"),encryptedCredential:this.vault.encrypt(input.credential),createdAt:now,updatedAt:now};
     if(this.pool){const result=await this.pool.query<MessagingConnection>(`INSERT INTO messaging_connections(id,workspace_id,user_id,company_id,agent_id,connection_scope,active_company_id,active_agent_id,channel,provider,display_name,status,permissions,settings,webhook_secret,encrypted_credential) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16) RETURNING ${columns}`,[id,item.workspaceId,item.userId,item.companyId,item.agentId,item.scope,item.activeCompanyId,item.activeAgentId,item.channel,item.provider,item.displayName,item.status,item.permissions,JSON.stringify(item.settings),item.webhookSecret,item.encryptedCredential]);return{connection:view(result.rows[0]!),webhookSecret:result.rows[0]!.webhookSecret};}
     this.memory.set(id,item);return{connection:view(item),webhookSecret:item.webhookSecret};
+  }
+  async ensureEmailConnection(account:CompanyEmailAccount,permissions:string[]):Promise<MessagingConnection>{
+    const existing=await this.getInternal(account.id),now=new Date().toISOString();
+    const scope:MessagingConnectionScope=account.connectionScope;
+    const companyId=scope==="account"?null:account.companyId;
+    const status:MessagingConnectionStatus=account.status==="connected"?"connected":account.status==="pending"?"pending":account.status==="disabled"?"paused":"error";
+    const settings=defaultMessagingConnectionSettings();
+    settings.access.allowedUserIds=[...account.allowedSenders,...account.allowedDomains.map((domain)=>`*@${domain}`)];
+    settings.delivery.typing=false;
+    settings.delivery.progressive=false;
+    const item:MessagingConnection=existing?Object.assign(existing,{
+      companyId,agentId:scope==="agent"?account.agentId||null:null,scope,
+      activeCompanyId:scope==="account"?null:companyId,activeAgentId:scope==="agent"?account.agentId||null:null,
+      displayName:account.displayName||account.emailAddress,status,permissions:[...new Set(permissions)],settings,updatedAt:now,
+    }):{
+      id:account.id,workspaceId:account.workspaceId,userId:account.userId,companyId,
+      agentId:scope==="agent"?account.agentId||null:null,scope,channel:"email",provider:null,
+      activeCompanyId:scope==="account"?null:companyId,activeAgentId:scope==="agent"?account.agentId||null:null,
+      displayName:account.displayName||account.emailAddress,status,botUsername:account.emailAddress,
+      permissions:[...new Set(permissions)],settings,webhookSecret:randomBytes(32).toString("hex"),
+      encryptedCredential:this.vault.encrypt(account.id),createdAt:now,updatedAt:now,
+    };
+    if(this.pool){const result=await this.pool.query<MessagingConnection>(`INSERT INTO messaging_connections
+      (id,workspace_id,user_id,company_id,agent_id,connection_scope,active_company_id,active_agent_id,channel,provider,display_name,status,bot_username,permissions,settings,webhook_secret,encrypted_credential)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'email',NULL,$9,$10,$11,$12,$13::jsonb,$14,$15)
+      ON CONFLICT(id) DO UPDATE SET company_id=EXCLUDED.company_id,agent_id=EXCLUDED.agent_id,connection_scope=EXCLUDED.connection_scope,active_company_id=EXCLUDED.active_company_id,active_agent_id=EXCLUDED.active_agent_id,display_name=EXCLUDED.display_name,status=EXCLUDED.status,bot_username=EXCLUDED.bot_username,permissions=EXCLUDED.permissions,settings=EXCLUDED.settings,updated_at=now()
+      RETURNING ${columns}`,[item.id,item.workspaceId,item.userId,item.companyId,item.agentId,item.scope,item.activeCompanyId,item.activeAgentId,item.displayName,item.status,item.botUsername,item.permissions,JSON.stringify(item.settings),item.webhookSecret,item.encryptedCredential]);return result.rows[0]!;}
+    this.memory.set(item.id,item);return item;
   }
   async get(ctx:AuthContext,companyId:string,id:string):Promise<MessagingConnection|null>{if(this.pool){const result=await this.pool.query<MessagingConnection>(`SELECT ${columns} FROM messaging_connections WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND company_id=$4`,[id,ctx.workspaceId,ctx.userId,companyId]);return result.rows[0]??null;}const item=this.memory.get(id);return item?.workspaceId===ctx.workspaceId&&item.userId===ctx.userId&&item.companyId===companyId?item:null;}
   async getOwned(ctx:AuthContext,id:string):Promise<MessagingConnection|null>{if(this.pool){const result=await this.pool.query<MessagingConnection>(`SELECT ${columns} FROM messaging_connections WHERE id=$1 AND workspace_id=$2 AND user_id=$3`,[id,ctx.workspaceId,ctx.userId]);return result.rows[0]??null;}const item=this.memory.get(id);return item?.workspaceId===ctx.workspaceId&&item.userId===ctx.userId?item:null;}

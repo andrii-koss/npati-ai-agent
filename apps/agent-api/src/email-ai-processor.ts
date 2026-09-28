@@ -47,6 +47,32 @@ function matchesAttachmentType(attachment: EmailAttachment, rawPattern: string):
   return new RegExp(`^${escaped}$`, "i").test(contentType);
 }
 
+export interface EmailInboundTrust {
+  authorized: boolean;
+  authenticated: boolean;
+  automated: boolean;
+  reason?: string;
+}
+
+function evaluateInboundTrust(account: CompanyEmailAccount, payload: InboundEmailPayload, sender: string): EmailInboundTrust {
+  const normalized = sender.trim().toLowerCase();
+  if (!payload.headers && !payload.authenticationResults) return { authorized: true, authenticated: true, automated: false };
+  const domain = normalized.split("@")[1] || "";
+  const headers = Object.fromEntries(Object.entries(payload.headers || {}).map(([key, value]) => [key.toLowerCase(), String(value || "").toLowerCase()]));
+  const automated = /auto-replied|auto-generated/.test(headers["auto-submitted"] || "")
+    || /bulk|list|junk/.test(headers.precedence || "") || Boolean(headers["list-unsubscribe"])
+    || /^(?:mailer-daemon|postmaster|no-?reply)@/.test(normalized);
+  if (automated) return { authorized: false, authenticated: false, automated: true, reason: "automated_email" };
+  if (normalized === account.emailAddress.toLowerCase()) return { authorized: false, authenticated: false, automated: false, reason: "self_message" };
+  const authentication = (payload.authenticationResults || headers["authentication-results"] || "").toLowerCase();
+  const authenticated = /\b(?:spf|dkim|dmarc)=pass\b/.test(authentication);
+  if (account.senderPolicy === "disabled") return { authorized: false, authenticated, automated: false, reason: "sender_policy_disabled" };
+  const exact = account.allowedSenders.includes(normalized);
+  const domainAllowed = account.allowedDomains.includes(domain);
+  const authorized = account.senderPolicy === "open" || exact || (account.senderPolicy === "allowlist" && domainAllowed);
+  return { authorized, authenticated, automated: false, reason: authorized ? undefined : "sender_not_allowed" };
+}
+
 export interface InboundEmailPayload {
   from: string;
   to?: string;
@@ -58,13 +84,15 @@ export interface InboundEmailPayload {
   messageId?: string;
   inReplyTo?: string;
   references?: string;
+  headers?: Record<string, string | undefined>;
+  authenticationResults?: string;
 }
 
 export interface InboundProcessingResult {
   thread: CompanyEmailThread;
   inboundMessage: CompanyEmailMessage;
   aiMessage?: CompanyEmailMessage | null;
-  actionTaken: "manual_recorded" | "draft_created" | "autopilot_queued" | "test_mode_simulated" | "blacklisted_ignored" | "rule_spam_filtered" | "collision_hold" | "rate_limited_draft" | "duplicate_ignored";
+  actionTaken: "manual_recorded" | "draft_created" | "autopilot_queued" | "test_mode_simulated" | "blacklisted_ignored" | "rule_spam_filtered" | "collision_hold" | "rate_limited_draft" | "duplicate_ignored" | "gateway_dispatched" | "sender_rejected";
   confidenceScore: number;
   priority: EmailPriority;
   detectedLanguage: string;
@@ -99,6 +127,15 @@ export interface EmailAutomationHooks {
     thread: CompanyEmailThread;
     attachments: EmailAttachment[];
   }) => Promise<EmailAttachment[]>;
+  routeThroughGateway?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    account: CompanyEmailAccount;
+    thread: CompanyEmailThread;
+    inboundMessage: CompanyEmailMessage;
+    payload: InboundEmailPayload;
+    trust: EmailInboundTrust;
+  }) => Promise<boolean>;
 }
 
 export class EmailAIProcessor {
@@ -108,6 +145,10 @@ export class EmailAIProcessor {
     private readonly aiEngine?: AIEngine,
     private readonly hooks: EmailAutomationHooks = {}
   ) { }
+
+  setGatewayHook(hook: NonNullable<EmailAutomationHooks["routeThroughGateway"]>): void {
+    this.hooks.routeThroughGateway = hook;
+  }
 
   /**
    * Process inbound email through AI Inbox pipeline
@@ -135,7 +176,7 @@ export class EmailAIProcessor {
 
     // 1. Sanitize text
     const cleanBody = CredentialMasker.mask(rawBody);
-    PromptInjectionGuard.assertSafe(cleanBody);
+    const injectionAnalysis = PromptInjectionGuard.analyze(cleanBody);
 
     // 2. Parse email with existing ImapEmailTrigger (#136)
     const parsed = ImapEmailTrigger.parseEmail({
@@ -169,6 +210,13 @@ export class EmailAIProcessor {
       mode: "approval",
       status: "connected",
       testMode: false,
+      provider: "imap_smtp",
+      connectionScope: companyId.startsWith("personal:") ? "account" : "company",
+      senderPolicy: "open",
+      allowedSenders: [],
+      allowedDomains: [],
+      requireAuthenticatedSender: false,
+      outboundPolicy: "approval_required",
       confidenceThreshold: 0.8,
       languageMode: "auto",
       fallbackLanguage: "en",
@@ -370,6 +418,50 @@ export class EmailAIProcessor {
       };
     }
 
+    if (!injectionAnalysis.safe) {
+      thread = await this.repo.updateThread(ctx, companyId, thread.id, {
+        status: "waiting_human",
+        metadata: { ...thread.metadata, externalUntrustedContent: true, promptInjectionRisk: injectionAnalysis.riskScore },
+      });
+      if (this.auditRepo) await this.auditRepo.log(ctx, companyId, {
+        action: "email.prompt_injection_blocked", category: "security", resourceType: "company_email_thread", resourceId: thread.id,
+        details: { messageId: inboundMessage.id, from: parsed.from, riskScore: injectionAnalysis.riskScore, matchedPatterns: injectionAnalysis.matchedPatterns },
+      }).catch(() => undefined);
+      return {
+        thread,
+        inboundMessage,
+        aiMessage: null,
+        actionTaken: "sender_rejected",
+        confidenceScore: 1,
+        priority,
+        detectedLanguage,
+      };
+    }
+
+    const trust = evaluateInboundTrust(effectiveAccount, payload, parsed.from);
+    const authenticatedEnough = !effectiveAccount.requireAuthenticatedSender || trust.authenticated;
+    if (!trust.authorized || !authenticatedEnough) {
+      const reason = trust.reason || "sender_authentication_required";
+      thread = await this.repo.updateThread(ctx, companyId, thread.id, {
+        status: "waiting_human",
+        folder: trust.automated ? "archived" : "inbox",
+        metadata: { ...thread.metadata, inboundRejectedReason: reason, senderAuthenticated: trust.authenticated },
+      });
+      if (this.auditRepo) await this.auditRepo.log(ctx, companyId, {
+        action: "email.sender_rejected", category: "security", resourceType: "company_email_thread", resourceId: thread.id,
+        details: { messageId: inboundMessage.id, from: parsed.from, reason, authenticated: trust.authenticated },
+      }).catch(() => undefined);
+      return {
+        thread,
+        inboundMessage,
+        aiMessage: null,
+        actionTaken: "sender_rejected",
+        confidenceScore: 1,
+        priority,
+        detectedLanguage,
+      };
+    }
+
     if (priority === "urgent") {
       await this.repo.createNotification(ctx, companyId, {
         userId: thread.assignedUserId, threadId: thread.id, notificationType: "urgent_email",
@@ -538,6 +630,24 @@ export class EmailAIProcessor {
       };
     }
 
+
+    if (this.hooks.routeThroughGateway) {
+      const routed = await this.hooks.routeThroughGateway({
+        ctx, companyId, account: effectiveAccount, thread, inboundMessage, payload, trust,
+      });
+      if (routed) {
+        thread = await this.repo.updateThread(ctx, companyId, thread.id, { status: "ai_processing", priority, assignedAgentId: overrideAgentId });
+        return {
+          thread,
+          inboundMessage,
+          aiMessage: null,
+          actionTaken: "gateway_dispatched",
+          confidenceScore: 1,
+          priority,
+          detectedLanguage,
+        };
+      }
+    }
     // If mode is manual, do not generate draft or auto-reply
     if (effectiveMode === "manual") {
       thread = await this.repo.updateThread(ctx, companyId, thread.id, {

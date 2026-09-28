@@ -26,6 +26,13 @@ interface CompanyAutomation {
 interface EmailAccount {
   id: string;
   emailAddress: string;
+  provider: "gmail" | "microsoft" | "imap_smtp";
+  connectionScope: "account" | "company" | "agent";
+  senderPolicy: "pairing" | "allowlist" | "open" | "disabled";
+  allowedSenders: string[];
+  allowedDomains: string[];
+  requireAuthenticatedSender: boolean;
+  outboundPolicy: "draft_only" | "approval_required" | "auto_send";
   displayName?: string | null;
   agentId?: string | null;
   mode: "manual" | "approval" | "autopilot";
@@ -34,7 +41,7 @@ interface EmailAccount {
   confidenceThreshold: number;
   languageMode: string;
   fallbackLanguage: string;
-  imapConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; lastError?: string | null };
+  imapConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; tls?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; lastError?: string | null };
   smtpConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; fromName?: string; replyTo?: string; lastError?: string | null };
   rateLimits: { maxPerHour: number; maxPerDay: number; maxPerRecipientDaily: number; maxFollowups: number; maxCompanyPerHour?: number; maxCompanyPerDay?: number };
   followupConfig: { enabled: boolean; delayDays: number; maxFollowups: number; action: "draft" | "auto_send" | "create_task" | "notify_user" };
@@ -206,6 +213,13 @@ export function EmailSettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [agentId, setAgentId] = useState("");
   const [mode, setMode] = useState<"manual" | "approval" | "autopilot">("approval");
+  const [provider, setProvider] = useState<EmailAccount["provider"]>("imap_smtp");
+  const [senderPolicy, setSenderPolicy] = useState<EmailAccount["senderPolicy"]>("allowlist");
+  const [allowedSenders, setAllowedSenders] = useState("");
+  const [allowedDomains, setAllowedDomains] = useState("");
+  const [requireAuthenticatedSender, setRequireAuthenticatedSender] = useState(true);
+  const [outboundPolicy, setOutboundPolicy] = useState<EmailAccount["outboundPolicy"]>("approval_required");
+  const connectionScope: EmailAccount["connectionScope"] = agentId ? "agent" : selectedCompanyId === "personal" ? "account" : "company";
   const [testMode, setTestMode] = useState(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.8);
   const [languageMode, setLanguageMode] = useState("auto");
@@ -436,6 +450,12 @@ export function EmailSettingsPage() {
     setAccountFieldErrors({});
     setMode("approval");
     setTestMode(false);
+    setProvider("imap_smtp");
+    setSenderPolicy("allowlist");
+    setAllowedSenders("");
+    setAllowedDomains("");
+    setRequireAuthenticatedSender(true);
+    setOutboundPolicy("approval_required");
     setConfidenceThreshold(0.8);
     setLanguageMode("auto");
     setMailAuthType("password");
@@ -477,6 +497,12 @@ export function EmailSettingsPage() {
     setMode(account.mode);
     setTestMode(account.testMode);
     setConfidenceThreshold(account.confidenceThreshold);
+    setProvider(account.provider || "imap_smtp");
+    setSenderPolicy(account.senderPolicy || "allowlist");
+    setAllowedSenders((account.allowedSenders || []).join("\n"));
+    setAllowedDomains((account.allowedDomains || []).join("\n"));
+    setRequireAuthenticatedSender(account.requireAuthenticatedSender ?? true);
+    setOutboundPolicy(account.outboundPolicy || "approval_required");
     setLanguageMode(account.languageMode || "auto");
     setMailAuthType(account.imapConfig.authType || account.smtpConfig.authType || "password");
     setOauthAccessToken("");
@@ -549,11 +575,19 @@ export function EmailSettingsPage() {
         testMode,
         confidenceThreshold,
         languageMode,
+        provider,
+        connectionScope,
+        senderPolicy,
+        allowedSenders: allowedSenders.split(/[\n,]+/).map((value) => value.trim().toLowerCase()).filter(Boolean),
+        allowedDomains: allowedDomains.split(/[\n,]+/).map((value) => value.trim().toLowerCase().replace(/^\*?@/, "")).filter(Boolean),
+        requireAuthenticatedSender,
+        outboundPolicy,
         imapConfig: {
           authType: mailAuthType,
           host: imapHost,
           port: imapPort,
           secure: imapSecure,
+          tls: !imapSecure,
           username: imapUser,
           ...(imapPass ? { password: imapPass } : {}),
           ...(oauthAccessToken ? { accessToken: oauthAccessToken } : {}),
@@ -2095,6 +2129,27 @@ export function EmailSettingsPage() {
               <section>
                 <h3>{t("emailSettings.accountDrawer.sectionMode")}</h3>
                 <label>
+                  <span>Connection method</span>
+                  <select value={provider} onChange={(e) => {
+                    const next=e.target.value as EmailAccount["provider"];setProvider(next);
+                    if(next==="gmail"){setMailAuthType("oauth2");setImapHost("imap.gmail.com");setImapPort(993);setImapSecure(true);setSmtpHost("smtp.gmail.com");setSmtpPort(465);setSmtpSecure(true);setOauthAuthorizationUrl("https://accounts.google.com/o/oauth2/v2/auth");setOauthTokenUrl("https://oauth2.googleapis.com/token");setOauthScopes("openid email https://mail.google.com/");}
+                    if(next==="microsoft"){setMailAuthType("oauth2");setImapHost("outlook.office365.com");setImapPort(993);setImapSecure(true);setSmtpHost("smtp.office365.com");setSmtpPort(587);setSmtpSecure(false);setOauthAuthorizationUrl("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");setOauthTokenUrl("https://login.microsoftonline.com/common/oauth2/v2.0/token");setOauthScopes("openid email offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send");}
+                  }}>
+                    <option value="gmail">Gmail</option>
+                    <option value="microsoft">Microsoft 365 / Outlook</option>
+                    <option value="imap_smtp">IMAP / SMTP</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Outbound policy</span>
+                  <select value={outboundPolicy} onChange={(e) => setOutboundPolicy(e.target.value as EmailAccount["outboundPolicy"])}>
+                    <option value="draft_only">Draft only</option>
+                    <option value="approval_required">Approval required (default)</option>
+                    <option value="auto_send">Auto send</option>
+                  </select>
+                  <small style={{ color: "#64748b" }}>New recipients require a draft or approval unless Auto send is explicitly enabled.</small>
+                </label>
+                <label>
                   <span>{t("emailSettings.accountDrawer.autoLevelLabel")}</span>
                   <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
                     <option value="approval">{t("emailSettings.accountDrawer.modeApproval")}</option>
@@ -2281,6 +2336,33 @@ export function EmailSettingsPage() {
 
               <section>
                 <h3>{t("emailSettings.accountDrawer.sectionSafety")}</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label><span>Sender policy</span><select value={senderPolicy} onChange={(e) => setSenderPolicy(e.target.value as EmailAccount["senderPolicy"])}>
+                    <option value="pairing">Pairing</option>
+                    <option value="allowlist">Allowlist (recommended)</option>
+                    <option value="open">Open</option>
+                    <option value="disabled">Disabled</option>
+                  </select></label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 22 }}>
+                    <input type="checkbox" checked={requireAuthenticatedSender} onChange={(e) => setRequireAuthenticatedSender(e.target.checked)} />
+                    <span>Require authenticated sender (SPF / DKIM / DMARC)</span>
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label>
+                    <span>Allowed senders</span>
+                    <textarea rows={3} value={allowedSenders} onChange={(e) => setAllowedSenders(e.target.value)} placeholder="andrii@example.com&#10;employee@company.com" />
+                  </label>
+                  <label>
+                    <span>Allowed domains</span>
+                    <textarea rows={3} value={allowedDomains} onChange={(e) => setAllowedDomains(e.target.value)} placeholder="company.com" />
+                    <small style={{ color: "#64748b" }}>Domain rules are active only when explicitly listed.</small>
+                  </label>
+                </div>
+                <div className="provider-setup-note">
+                  <strong>Connection scope: {connectionScope === "account" ? "Entire NPATI Account" : connectionScope === "agent" ? "Specific Agent" : "Specific Company"}</strong>
+                  <p>Email content and attachments are treated as external untrusted content. Credentials never enter the Agent context.</p>
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                   <label><span>{t("emailSettings.accountDrawer.emailsPerHour")}</span><input type="number" min="1" value={maxPerHour} onChange={(e) => setMaxPerHour(Number(e.target.value))} /></label>
                   <label><span>{t("emailSettings.accountDrawer.emailsPerDay")}</span><input type="number" min="1" value={maxPerDay} onChange={(e) => setMaxPerDay(Number(e.target.value))} /></label>

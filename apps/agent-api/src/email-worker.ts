@@ -29,7 +29,7 @@ export class EmailInboxWorker {
     aiEngine?: AIEngine,
     private readonly auditRepo?: AuditRepository,
     private readonly automationHooks: EmailAutomationHooks = {},
-    private readonly pollIntervalMs = Math.max(10_000, Number(process.env.EMAIL_POLL_INTERVAL_MS || 30_000)),
+    private readonly pollIntervalMs = Math.max(10_000, Number(process.env.EMAIL_POLL_INTERVAL_MS || 15_000)),
     private readonly attachmentStorage?: EmailAttachmentStorage,
   ) {
     this.processor = new EmailAIProcessor(repo, auditRepo, aiEngine, automationHooks);
@@ -50,6 +50,10 @@ export class EmailInboxWorker {
 
   triggerTick(): void {
     this.scheduleTick();
+  }
+
+  setGatewayHook(hook: NonNullable<EmailAutomationHooks["routeThroughGateway"]>): void {
+    this.processor.setGatewayHook(hook);
   }
 
   private scheduleTick(): void {
@@ -217,6 +221,7 @@ export class EmailInboxWorker {
             from: message.from, to: message.to, subject: message.subject, body: message.body,
             bodyHtml: message.bodyHtml, messageId: message.messageId || `imap:${account.id}:${message.uid}`,
             inReplyTo: message.inReplyTo, references: message.references, attachments: message.attachments,
+            headers: message.headers, authenticationResults: message.authenticationResults,
           });
           lastUid = Math.max(lastUid, message.uid);
         }

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { getChannelIcon } from "./integration-icons";
 
@@ -124,9 +124,10 @@ function IntegrationDrawer({channel,connections,companies,initialConnectionId,on
 
 export function IntegrationsPage(){
   const [channels,setChannels]=useState<Channel[]>([]),[connections,setConnections]=useState<Connection[]>([]),[companies,setCompanies]=useState<Company[]>([]),[search,setSearch]=useState(""),[tab,setTab]=useState<"all"|"available"|"coming"|"connected">("all"),[selected,setSelected]=useState<Channel|null>(null),[selectedConnectionId,setSelectedConnectionId]=useState<string|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true);
+  const navigate=useNavigate();
   const load=async()=>{try{const[catalog,companyResult]=await Promise.all([api<{channels:Channel[];connections:Connection[]}>("/integrations/channels"),api<{companies:Company[]}>("/companies")]);setChannels(catalog.channels);setConnections(catalog.connections);setCompanies(companyResult.companies);setError("");}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setLoading(false);}};useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),5000);return()=>window.clearInterval(timer);},[]);
   const connectedChannels=new Set(connections.map((connection)=>connection.channel)),visible=useMemo(()=>channels.filter((channel)=>channel.name.toLowerCase().includes(search.trim().toLowerCase())&&(tab==="all"||(tab==="available"&&channel.available)||(tab==="coming"&&!channel.available)||(tab==="connected"&&connectedChannels.has(channel.id)))),[channels,search,tab,connections]),counts={all:channels.length,available:channels.filter((item)=>item.available).length,coming:channels.filter((item)=>!item.available).length,connected:channels.filter((item)=>connectedChannels.has(item.id)).length};
-  const open=(channel:Channel,connectionId?:string)=>{setSelectedConnectionId(connectionId||null);setSelected(channel);};
+  const open=(channel:Channel,connectionId?:string)=>{if(channel.id==="email"){navigate("/settings/email");return;}setSelectedConnectionId(connectionId||null);setSelected(channel);};
   return <main className="ai-marketplace">
     <header className="marketplace-hero"><div><p className="eyebrow">Integrations</p><h1><Link to="/settings" className="marketplace-back-button" aria-label="Back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></Link><span>Messaging Integrations</span></h1><p>Connect external channels to the existing NPATI Chat and Company Runtime.</p></div></header>
     <section className="overview-grid"><div><strong>{channels.length||"—"}</strong><span>Channels available</span></div><div><strong>{counts.available}</strong><span>Ready to connect</span></div><div><strong>{counts.connected}</strong><span>Channels connected</span></div><div><strong>{connections.length}</strong><span>Connections added</span></div></section>

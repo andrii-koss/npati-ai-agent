@@ -8,6 +8,9 @@ export type InboundGatewayMessage = {
   externalGuildId?: string; externalWorkspaceId?: string; roleIds?: string[]; mentioned?: boolean;
   replyContext?: GatewayReplyContext; hasAttachments?: boolean;
   isSelfChat?: boolean;
+  senderAuthorized?: boolean;
+  authenticatedSender?: boolean;
+  externalUntrustedContent?: boolean;
 };
 
 type TelegramFile = { file_id: string; file_name?: string; mime_type?: string };
