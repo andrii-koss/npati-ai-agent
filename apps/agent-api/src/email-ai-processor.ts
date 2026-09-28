@@ -139,12 +139,34 @@ export interface EmailAutomationHooks {
 }
 
 export class EmailAIProcessor {
+  private activeAiRequests = 0;
+  private readonly aiWaiters: Array<() => void> = [];
+  private readonly maxAiConcurrency = Math.max(1, Math.min(64, Number(process.env.EMAIL_AI_MAX_CONCURRENCY) || 8));
+
   constructor(
     private readonly repo: EmailInboxRepository,
     private readonly auditRepo?: AuditRepository,
     private readonly aiEngine?: AIEngine,
     private readonly hooks: EmailAutomationHooks = {}
   ) { }
+
+  private async withAiSlot<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.activeAiRequests >= this.maxAiConcurrency) {
+      await new Promise<void>((resolve) => this.aiWaiters.push(resolve));
+    } else {
+      this.activeAiRequests += 1;
+    }
+    try {
+      return await operation();
+    } finally {
+      const next = this.aiWaiters.shift();
+      if (next) {
+        next();
+      } else {
+        this.activeAiRequests -= 1;
+      }
+    }
+  }
 
   setGatewayHook(hook: NonNullable<EmailAutomationHooks["routeThroughGateway"]>): void {
     this.hooks.routeThroughGateway = hook;
@@ -158,6 +180,22 @@ export class EmailAIProcessor {
     companyId: string,
     payload: InboundEmailPayload
   ): Promise<InboundProcessingResult> {
+    const attachments = payload.attachments || [];
+    const bodyBytes = Buffer.byteLength(payload.body || "", "utf8");
+    const attachmentSizes = attachments.map((attachment) => Math.max(
+      Number(attachment.sizeBytes || 0),
+      attachment.contentBase64 ? Buffer.byteLength(attachment.contentBase64, "base64") : 0,
+    ));
+    const totalAttachmentBytes = attachmentSizes.reduce((sum, size) => sum + size, 0);
+    if ((payload.subject || "").length > 998 || bodyBytes > 2 * 1024 * 1024) {
+      throw Object.assign(new Error("Email subject or body exceeds safe processing limits"), { status: 413 });
+    }
+    if (attachments.length > 20
+      || attachmentSizes.some((size) => size > 10 * 1024 * 1024)
+      || totalAttachmentBytes > 25 * 1024 * 1024) {
+      throw Object.assign(new Error("Email attachments exceed safe processing limits"), { status: 413 });
+    }
+
     const externalMessageId = payload.messageId?.trim();
     if (!externalMessageId) return this.processInboundUnlocked(ctx, companyId, payload);
     return this.repo.withInboundMessageLock(ctx.workspaceId, companyId, externalMessageId, () =>
@@ -742,8 +780,8 @@ export class EmailAIProcessor {
         const userContent: string | ChatContentPart[] = imageParts.length
           ? [{ type: "text", text: userPrompt }, ...imageParts]
           : userPrompt;
-        const generated = await this.aiEngine.chat({
-          idempotencyKey: `email-draft:${thread.id}:${externalMessageId || inboundMessage.id}`,
+        const generated = await this.withAiSlot(() => this.aiEngine!.chat({
+          idempotencyKey: `email-draft:${inboundMessage.threadId}:${externalMessageId || inboundMessage.id}`,
           admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
           timeoutMs: 45_000,
           messages: [
@@ -767,7 +805,7 @@ export class EmailAIProcessor {
               content: userContent,
             },
           ],
-        });
+        }));
         if (generated.content.trim()) {
           responseContent = generated.content.trim();
           attachmentAnalysisPerformed = attachmentAnalysisPerformed || imageParts.length > 0;

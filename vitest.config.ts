@@ -16,6 +16,6 @@ export default defineConfig({
     testTimeout: 10_000,
     // Bound parallel transforms and app instances so CI runners do not exhaust
     // memory or starve HTTP integration tests on high-core hosts.
-    maxWorkers: 8,
+    maxWorkers: 4,
   },
 });
