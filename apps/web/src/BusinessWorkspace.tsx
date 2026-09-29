@@ -1421,6 +1421,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   async function submit(event: FormEvent) {
     event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
     const requestMessage = expandDeleteConfirmationReply(message, messages);
+    const conversationAtSubmit = selected;
     // An earlier history request must not replace the optimistic turn after it starts.
     historyLoadVersionRef.current += 1;
     const privateRequest = noMemory;
@@ -1577,7 +1578,20 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         } else if (window.location.pathname.startsWith("/b/")) {
           navigate(`/c/${result.conversationId}`, { replace: true });
         }
-        window.dispatchEvent(new Event("npati:conversations-changed"));
+        const firstAttachmentName = sentAttachments[0]?.name;
+        const titleSource = message || firstAttachmentName || "New conversation";
+        const title = Array.from(titleSource.replace(/[\n\r\t]+/g, " ").replace(/\s+/g, " ").trim()).slice(0, 72).join("") || "New conversation";
+        window.dispatchEvent(new CustomEvent("npati:conversations-changed", {
+          detail: conversationAtSubmit ? undefined : {
+            conversation: {
+              id: result.conversationId,
+              title,
+              updatedAt: new Date().toISOString(),
+              businessId: business?.id ?? null,
+              businessName: business?.name ?? "",
+            },
+          },
+        }));
       }
       progressCompleteRef.current = true;
       setProgressComplete(true);
