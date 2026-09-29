@@ -87,7 +87,10 @@ docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q agent-a
 
 `/health/live` is the container liveness endpoint. The aggregate `/health` endpoint
 also probes configured external services and is intended for diagnostics, not for
-Docker lifecycle decisions.
+Docker lifecycle decisions. It includes a real Redis `PING` and a reachability probe
+for `NPATI_BACKEND_URL`. The Connections page refreshes this aggregate status every
+30 seconds, accepts cached results for at most 60 seconds, and marks services
+unavailable when the health request itself fails.
 
 For `NPATI_ENV=production`, configure unique values of at least 32 characters for
 `NPATI_ENCRYPTION_KEY` and `NPATI_REMOTE_ACCESS_TOKEN_SECRET`; development defaults
