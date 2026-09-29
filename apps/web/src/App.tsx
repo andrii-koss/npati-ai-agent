@@ -340,9 +340,9 @@ function areSidebarConversationsEqual(a: SidebarConversation[], b: SidebarConver
 }
 
 async function fetchAllSidebarConversations(businesses: Array<{ id: string; name: string }>): Promise<SidebarConversation[]> {
-  const neutralRequest = authFetch("/api/conversations");
+  const neutralRequest = authFetch("/api/conversations", { cache: "no-store" });
   const businessRequests = businesses.map(async (business) => {
-    const response = await authFetch(`/api/businesses/${business.id}/conversations`);
+    const response = await authFetch(`/api/businesses/${business.id}/conversations`, { cache: "no-store" });
     if (!response.ok) return [] as SidebarConversation[];
     return (await response.json() as Omit<SidebarConversation, "businessId" | "businessName">[])
       .map((conversation) => ({ ...conversation, businessId: business.id, businessName: business.name }));
@@ -462,6 +462,7 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
   const [businessOpen, setBusinessOpen] = useState(cachedBusinessOpen);
   const [conversations, setConversations] = useState<SidebarConversation[]>(getInitialSidebarConversations);
   const [hasLoaded, setHasLoaded] = useState(() => isSidebarConversationsLoaded || cachedSidebarConversations !== null);
+  const conversationLoadVersionRef = useRef(0);
   const initialBusinesses = useRef(getInitialSidebarBusinesses());
   const drafts = overview?.onboardings ?? cachedSidebarDrafts ?? initialBusinesses.current.drafts;
   const businesses = overview?.businesses ?? cachedSidebarBusinesses ?? initialBusinesses.current.businesses;
@@ -595,36 +596,49 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     }
   }, [overview]);
 
-  async function loadConversations(force = false) {
+  async function loadConversations(force = false, optimisticConversation?: SidebarConversation) {
+    const loadVersion = ++conversationLoadVersionRef.current;
     const businesses = overview?.businesses ?? [];
     try {
       if (!activeSidebarConversationsFetch || force) {
-        activeSidebarConversationsFetch = fetchAllSidebarConversations(businesses)
-          .finally(() => {
-            activeSidebarConversationsFetch = null;
-          });
+        const request = fetchAllSidebarConversations(businesses);
+        const trackedRequest = request.finally(() => {
+          if (activeSidebarConversationsFetch === trackedRequest) activeSidebarConversationsFetch = null;
+        });
+        activeSidebarConversationsFetch = trackedRequest;
       }
-      const nextRows = await activeSidebarConversationsFetch;
+      let nextRows = await activeSidebarConversationsFetch;
+      if (loadVersion !== conversationLoadVersionRef.current) return;
+      // Keep the just-created chat visible if a replica briefly returns the
+      // conversation list from immediately before the stream committed.
+      if (optimisticConversation && !nextRows.some((item) => item.id === optimisticConversation.id)) {
+        nextRows = [optimisticConversation, ...nextRows];
+      }
       updateCachedSidebarConversations(nextRows);
       setHasLoaded(true);
       setConversations((prev) => {
-        if (areSidebarConversationsEqual(prev, nextRows)) {
-          return prev;
-        }
+        if (areSidebarConversationsEqual(prev, nextRows)) return prev;
         return nextRows;
       });
     } catch {
       setHasLoaded(true);
-      if (cachedSidebarConversations === null) {
-        setConversations([]);
-      }
+      if (cachedSidebarConversations === null) setConversations([]);
     }
   }
   useEffect(() => {
     clearLegacyLocalChatsOnce();
     void loadConversations();
-    const reload = () => {
-      void loadConversations(true);
+    const reload = (event: Event) => {
+      const optimisticConversation = (event as CustomEvent<{ conversation?: SidebarConversation }>).detail?.conversation;
+      if (optimisticConversation) {
+        setConversations((current) => {
+          const nextRows = [optimisticConversation, ...current.filter((item) => item.id !== optimisticConversation.id)]
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          updateCachedSidebarConversations(nextRows);
+          return nextRows;
+        });
+      }
+      void loadConversations(true, optimisticConversation);
     };
     window.addEventListener("npati:conversations-changed", reload);
     window.addEventListener("npati:saved-chats-changed", reload);

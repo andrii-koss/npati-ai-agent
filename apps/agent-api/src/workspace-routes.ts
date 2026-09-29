@@ -219,13 +219,13 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   });
 
   app.get("/conversations", async (request, reply) => {
-    try { return await store.listNeutralConversations(await auth.authenticate(request)); } catch (error) { return errorReply(reply, error); }
+    try { reply.header("cache-control", "private, no-store"); return await store.listNeutralConversations(await auth.authenticate(request)); } catch (error) { return errorReply(reply, error); }
   });
   app.post<{ Body: { title?: string } }>("/conversations", async (request, reply) => {
     try { return reply.code(201).send(await store.createNeutralConversation(await auth.authenticate(request), request.body?.title ?? "New conversation")); } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { conversationId: string } }>("/conversations/:conversationId", async (request, reply) => {
-    try { return await store.getNeutralConversation(await auth.authenticate(request), request.params.conversationId); } catch (error) { return errorReply(reply, error); }
+    try { reply.header("cache-control", "private, no-store"); return await store.getNeutralConversation(await auth.authenticate(request), request.params.conversationId); } catch (error) { return errorReply(reply, error); }
   });
   app.patch<{ Params: { conversationId: string }; Body: { title?: string } }>("/conversations/:conversationId", async (request, reply) => {
     try { return await store.updateNeutralConversation(await auth.authenticate(request), request.params.conversationId, request.body.title ?? "New conversation"); } catch (error) { return errorReply(reply, error); }
@@ -243,13 +243,13 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   });
 
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/conversations", async (request, reply) => {
-    try { return await store.listConversations(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }
+    try { reply.header("cache-control", "private, no-store"); return await store.listConversations(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }
   });
   app.post<{ Params: { businessId: string }; Body: { title?: string } }>("/businesses/:businessId/conversations", async (request, reply) => {
     try { return reply.code(201).send(await store.createConversation(await auth.authenticate(request), request.params.businessId, request.body.title ?? "New conversation")); } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { businessId: string; conversationId: string } }>("/businesses/:businessId/conversations/:conversationId", async (request, reply) => {
-    try { return await store.getConversation(await auth.authenticate(request), request.params.businessId, request.params.conversationId); } catch (error) { return errorReply(reply, error); }
+    try { reply.header("cache-control", "private, no-store"); return await store.getConversation(await auth.authenticate(request), request.params.businessId, request.params.conversationId); } catch (error) { return errorReply(reply, error); }
   });
   app.patch<{ Params: { businessId: string; conversationId: string }; Body: { title?: string } }>("/businesses/:businessId/conversations/:conversationId", async (request, reply) => {
     try { return await store.updateConversation(await auth.authenticate(request), request.params.businessId, request.params.conversationId, request.body.title ?? "New conversation"); } catch (error) { return errorReply(reply, error); }
