@@ -12,8 +12,8 @@ const URL_OR_DOMAIN_REGEX = new RegExp(
 );
 
 const URL_PATTERN = /https?:\/\/[^\s<>()]+/i;
-const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|web research|research online|search the web|find companies|who sells|analy[sz]e|scan|browse|google|website|internet)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|\u0434\u043e\u0441\u043b\u0456\u0434|\u0430\u043d\u0430\u043b\u0456\u0437|\u0437\u043d\u0430\u0439\u0434\u0438|\u0441\u043a\u0430\u043d\u0443|\u0456\u043d\u0442\u0435\u0440\u043d\u0435\u0442|\u0441\u0430\u0439\u0442|\u043f\u043e\u0448\u0443\u043a|\u043f\u0435\u0440\u0435\u0432\u0456\u0440|\u043f\u043e\u0434\u0438\u0432/iu;
-const COMPETITOR_PATTERN = /\b(competitor|competitors|competition|find companies|who sells)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442/iu;
+const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|web research|research online|search the web|search the internet|find companies|who sells|analy[sz]e|scan|browse|google|website|internet|pesquise|pesquisa|concorrentes?|busca|buscar|competidores?|competencia|recherche|rechercher|concurrents?|suche|recherchiere|konkurrenten?|mitbewerber|cerca|ricerca|concorrenti?|szukaj|wyszukaj|konkurencj[aęi]|zoek|onderzoek|concurrenten?|ara|araştır|rakipler?)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|\u0434\u043e\u0441\u043b\u0456\u0434|\u0430\u043d\u0430\u043b\u0456\u0437|\u0437\u043d\u0430\u0439\u0434\u0438|\u0441\u043a\u0430\u043d\u0443|\u0456\u043d\u0442\u0435\u0440\u043d\u0435\u0442|\u0441\u0430\u0439\u0442|\u043f\u043e\u0448\u0443\u043a|\u043f\u0435\u0440\u0435\u0432\u0456\u0440|\u043f\u043e\u0434\u0438\u0432|\u0438\u0449\u0438|\u043f\u043e\u0438\u0441\u043a|搜索|调研|竞争对手|検索|調べて|競合|검색|조사|경쟁사|ابحث|بحث|منافس|खोजें|अनुसंधान|प्रतिस्पर्धी/iu;
+const COMPETITOR_PATTERN = /\b(competitor|competitors|competition|find companies|who sells|concorrentes?|competidores?|competencia|concurrents?|konkurrenten?|mitbewerber|concorrenti?|konkurencj[aęi]|concurrenten?|rakipler?)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|竞争对手|競合|경쟁사|منافس|प्रतिस्पर्धी/iu;
 const LIGHT_FETCH_PATTERN = /\b(read|open|fetch|summarize this page)\b|\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439|\u0432\u0456\u0434\u043a\u0440\u0438\u0439|\u043a\u043e\u0440\u043e\u0442\u043a\u043e/iu;
 
 export function extractTargetUrlOrDomain(message: string): string | null {
@@ -46,9 +46,18 @@ export function extractSiteEntity(message: string): string | null {
 
   const trimmed = message.trim();
 
+  // If the query is an internal company creation / management command without explicit web browsing/search verbs,
+  // do not treat the company name as a site to crawl or search.
+  const isInternalCreation = /(?:створ|созда|create|cr[eé]e|erstelle|crea|utwórz|stwórz|crie|maak|oluştur|创建|作成|만들|أنشئ|बना)\p{L}*\s+(?:(?:a|an|the|my|new|нову|новий|нові|uma|una|ein|een|bir|一家|ひとつ)?\s+)?(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(trimmed);
+  const explicitlyWeb = /(?:site|website|веб[- ]?сайт|сайт|інтернет|internet|google|crawl|scan|проскануй|скануй|online|url|http)/iu.test(trimmed);
+  if (isInternalCreation && !explicitlyWeb) {
+    return null;
+  }
+
   // Pattern 1: Site/website/brand keyword followed by target name:
   // e.g., "Analyze site hostkoss", "проаналізуй сайт hostkoss", "Проаналізуй бренд Hostkoss і сайти, які до нього належать"
-  const sitePrefixRegex = /(?:analyze|analyse|scan|check|review|audit|inspect|test|проаналізуй|аналізуй|аналіз|проскануй|скануй|перевір|досліди|подивись|оглянь|знайди|пошукай)?\s*(?:site|website|web\s*site|webpage|page|веб[- ]?сайт|сайт|сатй|сторінку|домен|бренд|brand|компанію|компанія|сервіс|platform|платформа)\s*[:\-–—]?\s*([a-zA-Z0-9\u0400-\u04FF_-]{2,50})/iu;
+  // Note: 'компанія' and 'company' are intentionally excluded because creating or managing companies is an internal action.
+  const sitePrefixRegex = /(?:analyze|analyse|scan|check|review|audit|inspect|test|проаналізуй|аналізуй|аналіз|проскануй|скануй|перевір|досліди|подивись|оглянь|знайди|пошукай)\s*(?:site|website|web\s*site|webpage|page|веб[- ]?сайт|сайт|сатй|сторінку|домен|бренд|brand|сервіс|platform|платформа)\s*[:\-–—]?\s*([a-zA-Z0-9\u0400-\u04FF_-]{2,50})/iu;
   const matchSite = trimmed.match(sitePrefixRegex);
   if (matchSite && matchSite[1]) {
     const candidate = matchSite[1].trim();

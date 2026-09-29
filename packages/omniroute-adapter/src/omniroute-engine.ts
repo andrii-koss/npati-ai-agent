@@ -1,5 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
-import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
+import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -26,6 +26,30 @@ function responsesText(payload: {
     .filter((item) => item.type === "output_text" && typeof item.text === "string")
     .map((item) => item.text)
     .join("") ?? "";
+}
+
+function responseInputMessage(message: ChatMessage): any {
+  if (message.role === "tool") {
+    return { type: "function_call_output", call_id: message.tool_call_id, output: typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? "") };
+  }
+  if (message.role === "assistant" && message.tool_calls?.length) {
+    return [
+      ...(message.content ? [{ role: "assistant", content: message.content }] : []),
+      ...message.tool_calls.map((call) => ({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments })),
+    ];
+  }
+  const content = Array.isArray(message.content)
+    ? message.content.map((part) => part.type === "text"
+      ? { type: "input_text", text: part.text }
+      : { type: "input_image", image_url: part.image_url.url, detail: part.image_url.detail ?? "auto" })
+    : message.content ?? "";
+  return { role: message.role, content };
+}
+
+function responseToolCalls(payload: { output?: Array<Record<string, any>> }): ChatToolCall[] {
+  return (payload.output ?? []).flatMap((item) => item.type === "function_call" && typeof item.name === "string"
+    ? [{ id: String(item.call_id ?? item.id ?? crypto.randomUUID()), type: "function" as const, function: { name: item.name, arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}) } }]
+    : []);
 }
 
 function* boundedTextChunks(value: string, maxCharacters = 2_048) {
@@ -149,6 +173,8 @@ export class OmniRouteEngine implements AIEngine {
     };
   }
 
+  supportsNativeTools() { return true; }
+
   async chat(request: ChatRequest): Promise<ChatResult> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const models = [request.model ?? "auto", request.fallbackModel]
@@ -159,18 +185,21 @@ export class OmniRouteEngine implements AIEngine {
     for (const [index, model] of models.entries()) {
       const useResponses = requiresResponsesApi(model);
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
-      const responseContent = (content: string | ChatContentPart[]) => Array.isArray(content)
-        ? content.map((part) => part.type === "text"
-          ? { type: "input_text", text: part.text }
-          : { type: "input_image", image_url: part.image_url.url, detail: part.image_url.detail ?? "auto" })
-        : content;
+      const responseTools = request.tools?.map((tool) => ({ type: "function", ...tool.function }));
       const body = useResponses
         ? {
             model,
-            input: request.messages.map(({ role, content }) => ({ role, content: responseContent(content) })),
+            input: request.messages.flatMap<any>((message) => responseInputMessage(message)),
             stream: false,
+            ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+            ...(responseTools?.length ? { tools: responseTools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           }
-        : { model, messages: request.messages };
+        : {
+            model,
+            messages: request.messages,
+            ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+            ...(request.tools?.length ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
+          };
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: this.headers(request.compression, request.idempotencyKey),
@@ -197,12 +226,15 @@ export class OmniRouteEngine implements AIEngine {
         provider?: string;
         usage?: Record<string, unknown>;
         usageMetadata?: Record<string, unknown>;
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{ finish_reason?: string; message?: { content?: string | null; tool_calls?: ChatToolCall[] } }>;
         output_text?: string;
-        output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+        output?: Array<Record<string, any>>;
       };
+      const toolCalls = useResponses ? responseToolCalls(payload) : payload.choices?.[0]?.message?.tool_calls ?? [];
       return {
         content: useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "",
+        ...(toolCalls.length ? { toolCalls } : {}),
+        finishReason: useResponses ? (toolCalls.length ? "tool_calls" : "stop") : payload.choices?.[0]?.finish_reason,
         model: payload.model ?? model,
         usage: chatUsage(payload),
         telemetry: {
@@ -235,8 +267,8 @@ export class OmniRouteEngine implements AIEngine {
           : { type: "input_image", image_url: part.image_url.url, detail: part.image_url.detail ?? "auto" })
         : content;
       const body = useResponses
-        ? { model, input: request.messages.map(({ role, content }) => ({ role, content: responseContent(content) })), stream: true }
-        : { model, messages: request.messages, stream: true };
+        ? { model, input: request.messages.map(({ role, content }) => ({ role, content: responseContent(content ?? "") })), stream: true, ...(request.temperature !== undefined ? { temperature: request.temperature } : {}) }
+        : { model, messages: request.messages, stream: true, ...(request.temperature !== undefined ? { temperature: request.temperature } : {}) };
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST", headers: this.headers(request.compression, request.idempotencyKey), body: JSON.stringify(body),
         signal: requestSignal(request.signal, request.timeoutMs ?? 180_000),
