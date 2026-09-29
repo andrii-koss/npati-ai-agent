@@ -1969,6 +1969,9 @@ export interface TranslationSchema {
     refreshStatus: string;
     checkingStatus: string;
     refreshTitle: string;
+    lastSuccessfulCheck: string;
+    noSuccessfulCheck: string;
+    checkFailed: string;
     searchPlaceholder: string;
     searchAria: string;
     clearSearch: string;

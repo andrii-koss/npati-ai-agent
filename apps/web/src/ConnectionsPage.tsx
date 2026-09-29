@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
+import type { HealthResponse } from "@npati/shared";
 
 type ServiceId = "omniroute" | "postgres" | "redis" | "minio" | "crawler" | "core-backend" | "cloud-hub";
 
@@ -20,156 +21,200 @@ interface ServiceStatus extends RawServiceStatus {
   details: string;
 }
 
+const SERVICE_ICONS: Record<ServiceId, string> = {
+  omniroute: "\u26A1",
+  postgres: "\u{1F418}",
+  redis: "\u{1F9E0}",
+  minio: "\u{1F5C4}\uFE0F",
+  crawler: "\u{1F577}\uFE0F",
+  "core-backend": "\u2699\uFE0F",
+  "cloud-hub": "\u2601\uFE0F",
+};
+
 const DEFAULT_SERVICES: RawServiceStatus[] = [
   {
     id: "omniroute",
-    icon: "⚡",
+    icon: SERVICE_ICONS.omniroute,
     category: "internal",
-    status: "ok",
+    status: "error",
     endpoint: "http://omniroute:20128",
   },
   {
     id: "postgres",
-    icon: "🐘",
+    icon: SERVICE_ICONS.postgres,
     category: "storage",
-    status: "ok",
+    status: "error",
     endpoint: "postgresql://postgres:5432/npati_agent",
   },
   {
     id: "redis",
-    icon: "🧠",
+    icon: SERVICE_ICONS.redis,
     category: "internal",
-    status: "ok",
+    status: "error",
     endpoint: "redis://redis:6379",
   },
   {
     id: "minio",
-    icon: "🗄️",
+    icon: SERVICE_ICONS.minio,
     category: "storage",
-    status: "ok",
+    status: "error",
     endpoint: "http://minio:9000",
   },
   {
     id: "crawler",
-    icon: "🕷️",
+    icon: SERVICE_ICONS.crawler,
     category: "internal",
-    status: "ok",
+    status: "error",
     endpoint: "http://crawler:11235",
   },
   {
     id: "core-backend",
-    icon: "⚙️",
+    icon: SERVICE_ICONS["core-backend"],
     category: "internal",
-    status: "ok",
-    endpoint: "http://localhost:4000",
+    status: "error",
+    endpoint: "NPATI_BACKEND_URL",
   },
   {
     id: "cloud-hub",
-    icon: "☁️",
+    icon: SERVICE_ICONS["cloud-hub"],
     category: "provider",
     status: "not_configured",
     endpoint: "https://hub.npati.io",
   },
 ];
 
-const STORAGE_CONNECTIONS_KEY = "npati_connections_cache_v1";
+const STORAGE_CONNECTIONS_KEY = "npati_connections_cache_v2";
+const CONNECTION_CACHE_TTL_MS = 60_000;
+const CONNECTION_REFRESH_INTERVAL_MS = 30_000;
 
-function getCachedConnections(): RawServiceStatus[] {
+interface CachedConnections {
+  checkedAt: string;
+  items: RawServiceStatus[];
+}
+
+function unavailableServices(): RawServiceStatus[] {
+  return DEFAULT_SERVICES.map((service) => ({ ...service, status: "error" }));
+}
+
+function getCachedConnections(): { items: RawServiceStatus[]; checkedAt: string | null } {
   try {
     const raw = sessionStorage.getItem(STORAGE_CONNECTIONS_KEY) || localStorage.getItem(STORAGE_CONNECTIONS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const parsed = JSON.parse(raw) as Partial<CachedConnections>;
+      const checkedAtMs = typeof parsed.checkedAt === "string" ? Date.parse(parsed.checkedAt) : Number.NaN;
+      const fresh = Number.isFinite(checkedAtMs) && Date.now() - checkedAtMs >= 0 && Date.now() - checkedAtMs <= CONNECTION_CACHE_TTL_MS;
+      if (fresh && Array.isArray(parsed.items) && parsed.items.length > 0) {
+        return { items: parsed.items, checkedAt: parsed.checkedAt! };
+      }
     }
   } catch {}
-  return DEFAULT_SERVICES;
+  return { items: unavailableServices(), checkedAt: null };
 }
 
-function updateCachedConnections(items: RawServiceStatus[]) {
+function updateCachedConnections(items: RawServiceStatus[], checkedAt: string) {
   try {
-    const serialized = JSON.stringify(items);
+    const serialized = JSON.stringify({ items, checkedAt } satisfies CachedConnections);
     sessionStorage.setItem(STORAGE_CONNECTIONS_KEY, serialized);
     localStorage.setItem(STORAGE_CONNECTIONS_KEY, serialized);
   } catch {}
 }
 
+function clearCachedConnections() {
+  try {
+    sessionStorage.removeItem(STORAGE_CONNECTIONS_KEY);
+    localStorage.removeItem(STORAGE_CONNECTIONS_KEY);
+  } catch {}
+}
+
+function displayStatus(status: unknown): RawServiceStatus["status"] {
+  if (status === "ok" || status === "degraded" || status === "not_configured") return status;
+  return "error";
+}
+
 export function ConnectionsPage() {
   const { t } = useTranslation();
-  const [rawServices, setRawServices] = useState<RawServiceStatus[]>(getCachedConnections);
-  const [checking, setChecking] = useState(false);
+  const [initialConnections] = useState(getCachedConnections);
+  const [rawServices, setRawServices] = useState<RawServiceStatus[]>(initialConnections.items);
+  const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<string | null>(initialConnections.checkedAt);
+  const [lastCheckFailed, setLastCheckFailed] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
 
   async function checkConnections(isManual = false) {
-    if (isManual) {
-      setChecking(true);
-    }
+    if (isManual) setChecking(true);
     try {
       const headers: HeadersInit = {};
       const token = getStoredAuthToken();
       if (token) headers["authorization"] = `Bearer ${token}`;
 
-      const res = await fetch("/api/health", { headers });
-      const data = res.ok ? await res.json() : null;
+      const res = await fetch("/api/health", { headers, signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(`Health endpoint returned HTTP ${res.status}`);
+      const data = await res.json() as HealthResponse;
+      const checkedAt = Number.isFinite(Date.parse(data.timestamp)) ? data.timestamp : new Date().toISOString();
 
       const items: RawServiceStatus[] = [
         {
           id: "omniroute",
-          icon: "⚡",
+          icon: SERVICE_ICONS.omniroute,
           category: "internal",
-          status: data?.services?.omniroute === "ok" ? "ok" : "error",
+          status: displayStatus(data.services.omniroute),
           endpoint: "http://omniroute:20128",
-          customVersion: data?.details?.omniroute?.version,
+          customVersion: data.details.omniroute?.version,
         },
         {
           id: "postgres",
-          icon: "🐘",
+          icon: SERVICE_ICONS.postgres,
           category: "storage",
-          status: data?.services?.database === "ok" ? "ok" : "error",
+          status: displayStatus(data.services.database),
           endpoint: "postgresql://postgres:5432/npati_agent",
         },
         {
           id: "redis",
-          icon: "🧠",
+          icon: SERVICE_ICONS.redis,
           category: "internal",
-          status: "ok",
+          status: displayStatus(data.services.redis),
           endpoint: "redis://redis:6379",
         },
         {
           id: "minio",
-          icon: "🗄️",
+          icon: SERVICE_ICONS.minio,
           category: "storage",
-          status: data?.services?.storage === "ok" ? "ok" : "error",
+          status: displayStatus(data.services.storage),
           endpoint: "http://minio:9000",
         },
         {
           id: "crawler",
-          icon: "🕷️",
+          icon: SERVICE_ICONS.crawler,
           category: "internal",
-          status: data?.services?.crawler === "ok" ? "ok" : "degraded",
+          status: displayStatus(data.services.crawler),
           endpoint: "http://crawler:11235",
         },
         {
           id: "core-backend",
-          icon: "⚙️",
+          icon: SERVICE_ICONS["core-backend"],
           category: "internal",
-          status: "ok",
-          endpoint: "http://localhost:4000",
+          status: displayStatus(data.services.coreBackend),
+          endpoint: data.details.coreBackend?.endpoint || "NPATI_BACKEND_URL",
         },
         {
           id: "cloud-hub",
-          icon: "☁️",
+          icon: SERVICE_ICONS["cloud-hub"],
           category: "provider",
-          status: data?.services?.hub === "ok" ? "ok" : "not_configured",
+          status: displayStatus(data.services.hub),
           endpoint: "https://hub.npati.io",
         },
       ];
 
       setRawServices(items);
-      updateCachedConnections(items);
+      setLastSuccessfulCheckAt(checkedAt);
+      setLastCheckFailed(false);
+      updateCachedConnections(items, checkedAt);
     } catch {
-      // Fallback handled gracefully
+      setRawServices(unavailableServices());
+      setLastCheckFailed(true);
+      clearCachedConnections();
     } finally {
       setChecking(false);
     }
@@ -177,6 +222,8 @@ export function ConnectionsPage() {
 
   useEffect(() => {
     void checkConnections(false);
+    const timer = window.setInterval(() => void checkConnections(false), CONNECTION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, []);
 
   const services = useMemo<ServiceStatus[]>(() => {
@@ -360,6 +407,15 @@ export function ConnectionsPage() {
             >
               {checking ? t("connectionsPage.checkingStatus") : t("connectionsPage.refreshStatus")}
             </button>
+            <small role="status" style={{ display: "block", marginTop: "8px", textAlign: "right" }}>
+              {lastCheckFailed ? t("connectionsPage.checkFailed") : null}
+              {lastCheckFailed && lastSuccessfulCheckAt ? <br /> : null}
+              {lastSuccessfulCheckAt
+                ? t("connectionsPage.lastSuccessfulCheck", { time: new Date(lastSuccessfulCheckAt).toLocaleString() })
+                : !lastCheckFailed
+                  ? t("connectionsPage.noSuccessfulCheck")
+                  : null}
+            </small>
           </div>
         </div>
       </header>

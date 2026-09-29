@@ -4,7 +4,8 @@ import { createHubClient } from "@npati/hub-connector";
 import { InMemoryProvider } from "@npati/memory";
 import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService, extractTargetUrlOrDomain } from "@npati/web-research";
-import type { AgentReply, HealthResponse } from "@npati/shared";
+import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
+import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError } from "@npati/workspace";
@@ -217,6 +218,8 @@ export interface AppConfig {
   webResearch?: WebResearchService;
   companyRunTimeoutMs?: number;
   redisUrl?: string;
+  redisHealthCheck?: () => Promise<ServiceHealth>;
+  coreBackendHealthCheck?: () => Promise<ServiceHealth>;
   browserUseWorkerUrl?: string;
   browserUseInternalToken?: string;
   objectStorage?: ObjectStorage;
@@ -580,11 +583,93 @@ async function prepareChatAttachments(
   return { prompt, display, images, decoded, transcripts, extractedDocs };
 }
 
+function publicServiceEndpoint(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const endpoint = new URL(value);
+    endpoint.username = "";
+    endpoint.password = "";
+    return endpoint.toString().replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function coreBackendProbeUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, "");
+  if (base.endsWith("/api/v1")) return `${base}/auth/me`;
+  if (base.endsWith("/api")) return `${base}/v1/auth/me`;
+  return `${base}/api/v1/auth/me`;
+}
+
+async function defaultCoreBackendHealthCheck(baseUrl: string | undefined): Promise<ServiceHealth> {
+  const endpoint = publicServiceEndpoint(baseUrl);
+  if (!baseUrl) return { status: "not_configured", detail: "NPATI Core Backend URL is not configured" };
+  try {
+    const response = await fetch(coreBackendProbeUrl(baseUrl), {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(4_000),
+    });
+    // Authentication endpoints normally answer 401 without a token. A 404 can
+    // mean that NPATI_BACKEND_URL points at a reachable host but not the Core API.
+    if (response.status === 404 || response.status === 429 || response.status >= 500) {
+      return { status: "degraded", detail: `Core API returned HTTP ${response.status}`, endpoint };
+    }
+    return { status: "ok", detail: `Core API reachable (HTTP ${response.status})`, endpoint };
+  } catch (error) {
+    return { status: "unavailable", detail: error instanceof Error ? error.message : "Core API request failed", endpoint };
+  }
+}
+
+async function withHealthTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error("Health check timed out")), timeoutMs); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
   const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
   const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
-  app.addHook("onClose", async () => { await activeSessionRegistry.close(); });
+  let redisHealthClient: ReturnType<typeof createClient> | undefined;
+  let redisHealthConnecting: Promise<ReturnType<typeof createClient>> | undefined;
+  const getRedisHealthClient = async () => {
+    if (redisHealthClient?.isReady) return redisHealthClient;
+    if (!config.redisUrl) throw new Error("Redis URL is not configured");
+    if (!redisHealthConnecting) redisHealthConnecting = (async () => {
+      const client = createClient({ url: config.redisUrl, socket: { connectTimeout: 2_500 } });
+      client.on("error", () => undefined);
+      redisHealthClient = client;
+      await client.connect();
+      return client;
+    })().finally(() => { redisHealthConnecting = undefined; });
+    return redisHealthConnecting;
+  };
+  const defaultRedisHealthCheck = async (): Promise<ServiceHealth> => {
+    if (!config.redisUrl) return { status: "not_configured", detail: "Redis URL is not configured" };
+    try {
+      const client = await withHealthTimeout(getRedisHealthClient(), 4_000);
+      const pong = await withHealthTimeout(client.ping(), 2_000);
+      return pong === "PONG"
+        ? { status: "ok", detail: "Redis PING succeeded" }
+        : { status: "degraded", detail: `Unexpected Redis response: ${pong}` };
+    } catch (error) {
+      if (redisHealthClient?.isOpen) redisHealthClient.destroy();
+      redisHealthClient = undefined;
+      return { status: "unavailable", detail: error instanceof Error ? error.message : "Redis PING failed" };
+    }
+  };
+  const redisHealthCheck = config.redisHealthCheck ?? defaultRedisHealthCheck;
+  app.addHook("onClose", async () => {
+    await activeSessionRegistry.close();
+    if (redisHealthClient?.isOpen) await redisHealthClient.quit().catch(() => redisHealthClient?.destroy());
+  });
   const baseAiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
@@ -644,6 +729,18 @@ export function buildApp(config: AppConfig = {}) {
   };
   const storageReconciler = config.databaseUrl && objectStorage ? new StorageReconciler(objectStorage,fileRepository,storageProtection,{...config.storageReconcilerOptions,onResult:(summary)=>app.log.info(summary,"Storage reconciliation completed"),onError:(error)=>app.log.error(error,"Storage reconciliation failed")}) : undefined;
   const npatiBackendUrl = config.npatiBackendUrl ?? process.env.NPATI_BACKEND_URL;
+  let coreBackendHealthCache: { value: ServiceHealth; expiresAt: number } | undefined;
+  let coreBackendHealthPending: Promise<ServiceHealth> | undefined;
+  const coreBackendHealthCheck = config.coreBackendHealthCheck ?? (async () => {
+    if (coreBackendHealthCache && coreBackendHealthCache.expiresAt > Date.now()) return coreBackendHealthCache.value;
+    if (!coreBackendHealthPending) coreBackendHealthPending = defaultCoreBackendHealthCheck(npatiBackendUrl)
+      .then((value) => {
+        coreBackendHealthCache = { value, expiresAt: Date.now() + 15_000 };
+        return value;
+      })
+      .finally(() => { coreBackendHealthPending = undefined; });
+    return coreBackendHealthPending;
+  });
   const npatiJwtSecret = config.npatiJwtSecret ?? process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET;
   const authClient = config.authClient ?? (npatiBackendUrl ? createNpatiAuthClient(npatiBackendUrl) : undefined);
   const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
@@ -1996,18 +2093,46 @@ ${localized.next}`;
   }));
 
   app.get("/health", async (): Promise<HealthResponse> => {
-    const [omniroute, hubHealth, databaseStatus, crawlerStatus, storageStatus] = await Promise.all([
+    const [omniroute, hubHealth, databaseStatus, crawlerStatus, storageStatus, redisHealth, coreBackendHealth] = await Promise.all([
       aiEngine.healthCheck(),
       hub.healthCheck(),
       workspaceStore.health(),
       researchBundle?.crawler.healthCheck() ?? Promise.resolve("not_configured" as const),
       objectStorage?.health() ?? Promise.resolve("not_configured" as const),
+      redisHealthCheck(),
+      coreBackendHealthCheck(),
     ]);
+    const requiredStatuses: ServiceStatus[] = [
+      omniroute.status,
+      databaseStatus,
+      crawlerStatus,
+      storageStatus,
+      redisHealth.status,
+      coreBackendHealth.status,
+    ];
+    const degraded = requiredStatuses.some((status) => status === "degraded" || status === "unavailable");
     return {
-      status: omniroute.status === "unavailable" ? "degraded" : "ok",
+      status: degraded ? "degraded" : "ok",
       timestamp: new Date().toISOString(),
-      services: { agent: "ok", database: databaseStatus, omniroute: omniroute.status, crawler: crawlerStatus, hub: hubHealth.status, storage: storageStatus },
-      details: { omniroute, crawler: { status: crawlerStatus }, database: { status: databaseStatus }, hub: hubHealth, storage: { status: storageStatus } },
+      services: {
+        agent: "ok",
+        database: databaseStatus,
+        omniroute: omniroute.status,
+        redis: redisHealth.status,
+        crawler: crawlerStatus,
+        hub: hubHealth.status,
+        storage: storageStatus,
+        coreBackend: coreBackendHealth.status,
+      },
+      details: {
+        omniroute,
+        redis: redisHealth,
+        crawler: { status: crawlerStatus },
+        database: { status: databaseStatus },
+        hub: hubHealth,
+        storage: { status: storageStatus },
+        coreBackend: coreBackendHealth,
+      },
     };
   });
 

@@ -4,6 +4,7 @@ export interface ServiceHealth {
   status: ServiceStatus;
   detail?: string;
   version?: string;
+  endpoint?: string;
 }
 
 export interface HealthResponse {
@@ -13,16 +14,20 @@ export interface HealthResponse {
     agent: ServiceStatus;
     database: ServiceStatus;
     omniroute: ServiceStatus;
+    redis: ServiceStatus;
     crawler: ServiceStatus;
     hub: ServiceStatus;
     storage?: ServiceStatus;
+    coreBackend: ServiceStatus;
   };
   details: {
     omniroute: ServiceHealth;
+    redis: ServiceHealth;
     crawler?: ServiceHealth;
     database?: ServiceHealth;
     hub: ServiceHealth;
     storage?: ServiceHealth;
+    coreBackend: ServiceHealth;
   };
 }
 

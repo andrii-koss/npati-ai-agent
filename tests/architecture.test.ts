@@ -44,6 +44,18 @@ describe("architecture boundaries", () => {
     expect(dokployCompose).toContain("image: npati-agent-crawler:${CRAWL4AI_VERSION:-0.9.2}");
     expect(supervisor).toMatch(/^user=root$/m);
   });
+  it("derives connection cards from expiring live health checks", () => {
+    const source = readFileSync(join(process.cwd(), "apps", "web", "src", "ConnectionsPage.tsx"), "utf8");
+
+    expect(source).toContain('npati_connections_cache_v2');
+    expect(source).toContain('CONNECTION_CACHE_TTL_MS = 60_000');
+    expect(source).toContain('CONNECTION_REFRESH_INTERVAL_MS = 30_000');
+    expect(source).toContain('displayStatus(data.services.redis)');
+    expect(source).toContain('displayStatus(data.services.coreBackend)');
+    expect(source).toContain('setRawServices(unavailableServices())');
+    expect(source).not.toContain('endpoint: "http://localhost:4000"');
+  });
+
   it("keeps Company navigation distinct without a duplicate Agents entry", () => {
     const appSource = readFileSync(join(process.cwd(), "apps", "web", "src", "App.tsx"), "utf8");
     const companyPage = readFileSync(join(process.cwd(), "apps", "web", "src", "CompanyPage.tsx"), "utf8");

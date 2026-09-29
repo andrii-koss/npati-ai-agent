@@ -593,6 +593,34 @@ describe("Agent API", () => {
     });
   });
 
+  it("reports probed Redis and NPATI Core Backend health instead of static operational values", async () => {
+    const app = buildApp({
+      redisHealthCheck: async () => ({ status: "ok", detail: "Redis PING succeeded" }),
+      coreBackendHealthCheck: async () => ({
+        status: "unavailable",
+        detail: "connection refused",
+        endpoint: "https://api.npati.test",
+      }),
+    });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "degraded",
+      services: { redis: "ok", coreBackend: "unavailable" },
+      details: {
+        redis: { status: "ok", detail: "Redis PING succeeded" },
+        coreBackend: {
+          status: "unavailable",
+          detail: "connection refused",
+          endpoint: "https://api.npati.test",
+        },
+      },
+    });
+  });
+
   it("requires an AI provider but does not require a Business before opening Chat", async () => {
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 0 } }) } as unknown as OmniRouteMarketplace;
     const app = buildApp({ marketplace });
