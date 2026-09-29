@@ -4,10 +4,42 @@ export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
 
+export interface ChatToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    strict?: boolean;
+  };
+}
+
+export interface ChatToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | ChatContentPart[] | null;
+  tool_call_id?: string;
+  name?: string;
+  tool_calls?: ChatToolCall[];
+}
+
+export type ChatToolChoice = "auto" | "none" | "required" | {
+  type: "function";
+  function: { name: string };
+};
+
 export interface ChatRequest {
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string | ChatContentPart[] }>;
+  messages: ChatMessage[];
   model?: string;
   fallbackModel?: string;
+  tools?: ChatToolDefinition[];
+  toolChoice?: ChatToolChoice;
+  temperature?: number;
   compression?: "off" | "default" | "engine:rtk";
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -107,6 +139,8 @@ export interface RerankResult { model: string; results: Array<{ index: number; r
 
 export interface ChatResult {
   content: string;
+  toolCalls?: ChatToolCall[];
+  finishReason?: string;
   model?: string;
   usage?: {
     promptTokens: number;
@@ -200,6 +234,7 @@ export interface WebPageResult {
 }
 
 export interface AIEngine {
+  supportsNativeTools?(model?: string): boolean;
   chat(request: ChatRequest): Promise<ChatResult>;
   stream(request: ChatRequest): AsyncIterable<string>;
   listModels(): Promise<ModelInfo[]>;

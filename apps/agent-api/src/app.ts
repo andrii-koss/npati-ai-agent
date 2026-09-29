@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { createHubClient } from "@npati/hub-connector";
 import { InMemoryProvider } from "@npati/memory";
-import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart } from "@npati/omniroute-adapter";
+import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart, type ChatToolCall, type ChatToolDefinition } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService, extractTargetUrlOrDomain } from "@npati/web-research";
 import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
 import { createClient } from "redis";
@@ -16,6 +16,7 @@ import { ActiveContextResolver } from "./active-context-resolver";
 import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
+import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, runChatToolLoop, type ChatToolExecutionResult } from "./chat-tool-orchestrator";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
@@ -456,7 +457,7 @@ export function isSpreadsheetEditRequest(message: string): boolean {
 
 function explicitlyRequestsWebResearch(message: string): boolean {
   return Boolean(extractTargetUrlOrDomain(message))
-    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|інтернет|веб|сайт|пошук|пошукай|проскануй\s+(?:сайт|веб)|интернет|сайт|поиск|найди\s+в\s+интернете|recherche\s+(?:web|internet)|im\s+internet|sitio\s+web|cerca\s+online|pesquise\s+na\s+internet|zoek\s+online|internette\s+ara|网络|网站|互联网|ウェブ|サイト|인터넷|웹사이트|الإنترنت|موقع|इंटरनेट|वेबसाइट)/iu.test(message);
+    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|\bcompetitors?\b|\bcompetition\b|інтернет|веб|сайт|пошук|пошукай|конкурент|конкурентів|проскануй|интернет|сайт|поиск|найди\s+в\s+интернете|concurrents?|mitbewerber|wettbewerb|competidores?|concorrenti?|głównych\s+konkurentów|rakipler?|竞争对手|競合|경쟁사|المنافسين|प्रतिस्पर्धियों)/iu.test(message);
 }
 
 const spreadsheetEditedCopies: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
@@ -1208,7 +1209,7 @@ ${localized.next}`;
     };
   }
 
-  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string }) {
+  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; researchContext?: string }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     const aiRefinement = Boolean(requestMessage && CompanyChatActions.isDetailedAgentRefinementRequest(requestMessage));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
@@ -1222,7 +1223,7 @@ ${localized.next}`;
       : content;
     if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
-        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement);
+        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement, route?.researchContext);
         const planned = await aiEngine.chat({
           model: route?.model,
           fallbackModel: route?.fallbackModel,
@@ -1248,6 +1249,74 @@ ${localized.next}`;
       preserveResponseText: aiRefinement,
       onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Company action execution failed"),
     });
+  }
+
+  function availableCoreChatTools(auth: AuthContext): ChatToolDefinition[] {
+    return CORE_CHAT_TOOLS.filter((tool) => {
+      if (tool.function.name === "npati_company_action") return auth.permissions.includes("business:manage");
+      if (tool.function.name === "web_search" || tool.function.name === "web_fetch") return Boolean(webResearch);
+      return false;
+    });
+  }
+
+  function logToolSelectionConfiguration(request: ChatRequest, tools: ChatToolDefinition[], context: Record<string, unknown>) {
+    if (process.env.NPATI_TOOL_SELECTION_DIAGNOSTICS !== "true") return;
+    app.log.info({
+      ...context,
+      model: request.model,
+      temperature: request.temperature,
+      toolChoice: "auto",
+      tools,
+      systemMessages: request.messages.filter((message) => message.role === "system").map((message) => message.content),
+    }, "Chat tool-selection diagnostic configuration");
+  }
+
+  function logToolSelectionTrace(trace: { step: number; toolName: string; callId: string; status: string; error?: string }, context: Record<string, unknown>, message: string) {
+    app.log.info({ ...context, toolSelection: trace }, message);
+  }
+
+  async function executeCoreChatTool(input: {
+    auth: AuthContext;
+    call: ChatToolCall;
+    args: Record<string, unknown>;
+    requestMessage: string;
+    conversationId?: string;
+    selectedCompanyId?: string;
+    model?: string;
+    fallbackModel?: string;
+    signal?: AbortSignal;
+    progress?: ResearchProgressListener;
+  }): Promise<ChatToolExecutionResult> {
+    if (input.call.function.name === "npati_company_action") {
+      if (!input.auth.permissions.includes("business:manage")) throw new Error("Company management permission is required");
+      const directive = `\`\`\`company-action\n${JSON.stringify(input.args)}\n\`\`\``;
+      const executed = await executeCompanyChatAction(input.auth, directive, input.conversationId, input.requestMessage, {
+        model: input.model,
+        fallbackModel: input.fallbackModel,
+        signal: input.signal,
+        selectedCompanyId: input.selectedCompanyId,
+      });
+      return {
+        output: { message: executed.cleanText, companyAction: executed.companyAction ?? null },
+        metadata: { kind: "company", companyAction: executed.companyAction, cleanText: executed.cleanText },
+      };
+    }
+
+    if (input.call.function.name === "web_search" || input.call.function.name === "web_fetch") {
+      if (!webResearch) throw new Error("Web research is not configured");
+      const query = input.call.function.name === "web_fetch"
+        ? [String(input.args.url ?? "").trim(), String(input.args.goal ?? input.requestMessage).trim()].filter(Boolean).join(" ")
+        : String(input.args.query ?? "").trim();
+      if (!query) throw new Error(`${input.call.function.name} requires a non-empty ${input.call.function.name === "web_fetch" ? "url" : "query"}`);
+      const outcome = await webResearch.run(query, {}, false, input.progress);
+      if (!outcome) throw new Error("Web research returned no evidence");
+      return {
+        output: { kind: outcome.kind, evidence: outcome.context, sources: outcome.sources, degraded: outcome.degraded },
+        metadata: { kind: "research", research: outcome },
+      };
+    }
+
+    throw new Error(`Unknown chat tool: ${input.call.function.name}`);
   }
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
@@ -1410,10 +1479,11 @@ ${localized.next}`;
         throw error;
       }
     }
-    let research;
+    const nativeToolCalling = aiEngine.supportsNativeTools?.(context.ai.model) === true;
+    let research: ResearchOutcome | undefined;
     let researchJob;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
-    const imageResearchRequested = !hasAttachedEvidence || explicitlyRequestsWebResearch(message);
+    const imageResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message));
     if (imageResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };
       try {
@@ -1463,7 +1533,33 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
+    let nativeCompanyCleanText = "";
+    const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
+      try {
+        logToolSelectionConfiguration(request, availableCoreChatTools(auth), { conversationId: conversation?.id, contextType: "business" });
+        const loop = await runChatToolLoop({
+          ai: aiEngine,
+          request,
+          tools: () => availableCoreChatTools(auth),
+          execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
+            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress }),
+          onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
+        });
+        for (const item of loop.metadata) {
+          if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
+          if (item.kind === "company" && item.companyAction) {
+            nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
+            nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
+          }
+        }
+        return loop.result;
+      } catch (error) {
+        app.log.warn({ err: error, model: context.ai.model }, "Business native tool loop failed; using prompt-compatible fallback");
+        return aiEngine.chat(request);
+      }
+    } : undefined;
     const result = await agent.handleBusinessMessage({
       message: safePrompt,
       context,
@@ -1473,7 +1569,9 @@ ${localized.next}`;
       images: media.images,
       businessActionInstruction,
       signal,
+      chat: nativeChat,
     });
+    if (nativeToolCalling && research?.sources.length) result.message = attachResearchSources(result.message, research);
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
@@ -1484,7 +1582,9 @@ ${localized.next}`;
       model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
     });
-    const companyAction = EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
+    const companyAction = nativeCompanyAction
+      ? { cleanText: result.message || nativeCompanyCleanText, companyAction: nativeCompanyAction }
+      : EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
     const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
@@ -1522,7 +1622,7 @@ ${localized.next}`;
       };
     }
     let effectiveManagementCompany = managementCompany;
-    if (!effectiveManagementCompany && effectiveMessage !== message) {
+    if (!effectiveManagementCompany) {
       const linkedCompanyId = /\/settings\/company\?company=([0-9a-f-]{36})/iu.exec(previousAssistant)?.[1];
       if (linkedCompanyId) {
         const linkedCompany = await workspaceStore.getCompany(auth, linkedCompanyId).catch(() => undefined);
@@ -1637,10 +1737,13 @@ ${localized.next}`;
       ai.model = visionModel;
       ai.fallbackModel = undefined;
     }
+    const nativeToolCalling = aiEngine.supportsNativeTools?.(ai.model) === true;
     let research: ResearchOutcome | undefined;
     let researchJob;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
-    const webResearchRequested = !companySettingsRequest && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message));
+    const webResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
+      !companySettingsRequest || explicitlyRequestsWebResearch(message)
+    );
     if (webResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
       try {
@@ -1772,7 +1875,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest);
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1788,7 +1891,35 @@ ${localized.next}`;
     };
     let content="";
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
-    if (!companySettingsRequest) {
+    let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
+    let nativeCompanyCleanText = "";
+    if (nativeToolCalling) {
+      try {
+        logToolSelectionConfiguration(chatRequest, availableCoreChatTools(auth), { conversationId: conversation?.id, contextType: "none" });
+        const loop = await runChatToolLoop({
+          ai: aiEngine,
+          request: chatRequest,
+          tools: () => availableCoreChatTools(auth),
+          execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
+            conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
+            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress }),
+          onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
+        });
+        chatResult = loop.result;
+        content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
+        for (const item of loop.metadata) {
+          if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
+          if (item.kind === "company" && item.companyAction) {
+            nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
+            nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
+          }
+        }
+        if (content && !emailSettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta?.(content);
+      } catch (error) {
+        app.log.warn({ err: error, model: ai.model }, "Native chat tool loop failed; using prompt-compatible fallback");
+      }
+    }
+    if (!content && !nativeCompanyAction && !companySettingsRequest) {
       if(onDelta){
         for await(const chunk of aiEngine.stream(chatRequest)){
           if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
@@ -1902,13 +2033,24 @@ ${localized.next}`;
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
     });
-    const companyAction = emailSettingsRequest || workspaceSettingsRequest
+    const companyAction = nativeCompanyAction
+      ? { cleanText: content || nativeCompanyCleanText, companyAction: nativeCompanyAction }
+      : emailSettingsRequest || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
-      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, {
+          model: ai.model,
+          fallbackModel: ai.fallbackModel,
+          signal,
+          selectedCompanyId: effectiveManagementCompany?.id,
+          researchContext: research?.context,
+        });
     const workspaceAction = companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     content = workspaceAction.cleanText;
+    if (research?.sources.length && !content.includes("### Джерела") && !content.includes("### Sources") && !content.includes(research.sources[0]?.url ?? "")) {
+      content = attachResearchSources(content, research);
+    }
 
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
     return {

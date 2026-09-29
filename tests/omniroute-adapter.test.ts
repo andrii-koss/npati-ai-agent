@@ -104,6 +104,61 @@ describe("OmniRoute adapter", () => {
     );
   });
 
+  it("serializes native tools and parses chat-completions tool calls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt-4o",
+      choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{
+        id: "call-company", type: "function",
+        function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create" }) },
+      }] } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    const tools = [{ type: "function" as const, function: { name: "npati_company_action", description: "Manage an NPATI company", parameters: { type: "object" } } }];
+
+    await expect(engine.chat({ model: "openai/gpt-4o", messages: [{ role: "user", content: "Create it" }], tools, toolChoice: "auto" })).resolves.toMatchObject({
+      content: "", finishReason: "tool_calls",
+      toolCalls: [{ id: "call-company", function: { name: "npati_company_action" } }],
+    });
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body).toMatchObject({ model: "openai/gpt-4o", tools, tool_choice: "auto", parallel_tool_calls: false });
+  });
+
+  it("round-trips function calls and outputs through the Responses API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt-5.6-luna",
+      output: [{ type: "function_call", call_id: "call-web", name: "web_search", arguments: JSON.stringify({ query: "current market" }) }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    const tools = [{ type: "function" as const, function: { name: "web_search", description: "Search public sources", parameters: { type: "object" } } }];
+
+    await expect(engine.chat({
+      model: "openai/gpt-5.6-luna",
+      temperature: 0,
+      tools,
+      toolChoice: "auto",
+      messages: [
+        { role: "user", content: "Research the market" },
+        { role: "assistant", content: null, tool_calls: [{ id: "previous", type: "function", function: { name: "web_search", arguments: JSON.stringify({ query: "market" }) } }] },
+        { role: "tool", tool_call_id: "previous", name: "web_search", content: JSON.stringify({ result: "evidence" }) },
+      ],
+    })).resolves.toMatchObject({
+      toolCalls: [{ id: "call-web", function: { name: "web_search", arguments: JSON.stringify({ query: "current market" }) } }],
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body).toMatchObject({
+      model: "openai/gpt-5.6-luna",
+      temperature: 0,
+      tool_choice: "auto",
+      parallel_tool_calls: false,
+      tools: [{ type: "function", name: "web_search" }],
+    });
+    expect(body.input).toContainEqual({ type: "function_call", call_id: "previous", name: "web_search", arguments: JSON.stringify({ query: "market" }) });
+    expect(body.input).toContainEqual({ type: "function_call_output", call_id: "previous", output: JSON.stringify({ result: "evidence" }) });
+  });
+
   it("normalizes live usage, routing, cost, cache, and failover telemetry", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       model: "openai/gpt-4o",

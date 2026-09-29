@@ -219,11 +219,14 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "research",
     "name": "Web search",
-    "description": "Твій search уже є; додати provider scoring/fallback/quality.",
+    "description": "Search the live public web for current external events, market research, external competitors, facts, or public entities.",
     "useWhen": [
-      "User asks to execute or inspect Web search"
+      "User asks to search online or research external information, market trends, or competitors",
+      "Fact-checking or looking up current live external websites or external company details"
     ],
     "doNotUseWhen": [
+      "Creating, updating, or deleting internal NPATI companies or agents (use internal NPATI management tools)",
+      "Answering internal capability questions, general knowledge, or informational inquiries",
       "Context does not permit access or unauthorized for this tenant"
     ],
     "agentCallable": true,
@@ -244,11 +247,13 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "type": "tool",
     "domain": "browser",
     "name": "Web fetch",
-    "description": "Тримати як швидкий шлях; Crawl4AI для складніших сторінок.",
+    "description": "Fetch, scan, and parse the content of a specific public website URL or webpage.",
     "useWhen": [
-      "User asks to execute or inspect Web fetch"
+      "User provides a URL (http/https) and asks to scan, fetch, read, or analyze that website"
     ],
     "doNotUseWhen": [
+      "General search queries without a URL",
+      "Internal NPATI workspace or company operations",
       "Context does not permit access or unauthorized for this tenant"
     ],
     "agentCallable": true,
