@@ -3,7 +3,7 @@ import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omnirou
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { WebResearchService } from "@npati/web-research";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +19,7 @@ function chatContentText(content: ChatRequest["messages"][number]["content"] | u
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
   await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  vi.unstubAllGlobals();
 });
 
 describe("Agent API", () => {
@@ -621,6 +622,32 @@ describe("Agent API", () => {
     });
   });
 
+  it("probes the real NPATI current-user route and treats an unauthenticated response as reachable", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = buildApp({
+      npatiBackendUrl: "https://www.npati.test",
+      redisHealthCheck: async () => ({ status: "not_configured" }),
+    });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://www.npati.test/api/v1/users/me",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(response.json()).toMatchObject({
+      services: { coreBackend: "ok" },
+      details: {
+        coreBackend: {
+          status: "ok",
+          detail: "Core API reachable (HTTP 401)",
+          endpoint: "https://www.npati.test",
+        },
+      },
+    });
+  });
   it("requires an AI provider but does not require a Business before opening Chat", async () => {
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 0 } }) } as unknown as OmniRouteMarketplace;
     const app = buildApp({ marketplace });
