@@ -13,6 +13,7 @@ interface RawServiceStatus {
   endpoint: string;
   icon: string;
   customVersion?: string;
+  healthDetail?: string;
 }
 
 interface ServiceStatus extends RawServiceStatus {
@@ -197,6 +198,7 @@ export function ConnectionsPage() {
           category: "internal",
           status: displayStatus(data.services.coreBackend),
           endpoint: data.details.coreBackend?.endpoint || "NPATI_BACKEND_URL",
+          healthDetail: data.details.coreBackend?.detail,
         },
         {
           id: "cloud-hub",
@@ -263,7 +265,7 @@ export function ConnectionsPage() {
         case "core-backend":
           name = t("connectionsPage.services.coreBackend.name");
           description = t("connectionsPage.services.coreBackend.desc");
-          details = t("connectionsPage.services.coreBackend.details");
+          details = s.healthDetail || t("connectionsPage.services.coreBackend.details");
           break;
         case "cloud-hub":
           name = t("connectionsPage.services.cloudHub.name");

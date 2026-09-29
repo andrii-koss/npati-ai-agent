@@ -597,9 +597,9 @@ function publicServiceEndpoint(value: string | undefined): string | undefined {
 
 function coreBackendProbeUrl(baseUrl: string): string {
   const base = baseUrl.replace(/\/+$/, "");
-  if (base.endsWith("/api/v1")) return `${base}/auth/me`;
-  if (base.endsWith("/api")) return `${base}/v1/auth/me`;
-  return `${base}/api/v1/auth/me`;
+  if (base.endsWith("/api/v1")) return `${base}/users/me`;
+  if (base.endsWith("/api")) return `${base}/v1/users/me`;
+  return `${base}/api/v1/users/me`;
 }
 
 async function defaultCoreBackendHealthCheck(baseUrl: string | undefined): Promise<ServiceHealth> {
