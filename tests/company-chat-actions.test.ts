@@ -816,6 +816,22 @@ describe("company management from chat", () => {
       const response = await app.inject({ method: "POST", url: "/chat", payload: { message: "ти працюєш??", contextType: "company", companyId: company.id } });
       expect(response.statusCode).toBe(200);
       expect(response.json().message).toContain("тимчасову недоступність вибраної AI-моделі");
+      const conversationId = response.json().conversationId as string;
+      expect(conversationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect((await store.getNeutralConversation(alice, conversationId)).messages.map((item) => item.role)).toEqual(["user", "assistant"]);
+
+      const streamed = await app.inject({
+        method: "POST",
+        url: "/chat/stream",
+        headers: { "idempotency-key": "failure-company-stream" },
+        payload: { message: "are you working in stream?", contextType: "company", companyId: company.id },
+      });
+      expect(streamed.statusCode).toBe(200);
+      const streamConversationId = /"conversationId":"([0-9a-f-]{36})"/.exec(streamed.body)?.[1];
+      expect(streamConversationId).toBeTruthy();
+      expect((await store.getNeutralConversation(alice, streamConversationId!)).messages.map((item) => item.role)).toEqual(["user", "assistant"]);
+      expect(await store.listNeutralConversations(alice)).toHaveLength(2);
+
       expect(response.body).not.toContain("ollama-cloud");
       expect(response.body).not.toContain("diagnostics");
       expect(response.body).not.toContain("HTTP 402");

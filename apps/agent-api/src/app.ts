@@ -2385,10 +2385,16 @@ ${localized.next}`;
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
         }
+        const conversation = memoryPolicy.writeAllowed
+          ? request.body.conversationId
+            ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+            : await workspaceStore.createNeutralConversation(auth, conversationTitle(prompt || "Analyze company state"))
+          : undefined;
+        if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", prompt || "Analyze company state");
         const runResult = await companyRuntime.execute(
           auth,
           company.id,
-          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
+          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id} },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
         for (const [name, value] of Object.entries(companyRunTelemetryHeaders(runResult))) reply.header(name, value);
@@ -2403,9 +2409,12 @@ ${localized.next}`;
           memoryPolicy.noMemoryActive,
         );
 
+        const responseMessage = publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, prompt || "");
+        if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
         return {
-          message: publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, prompt || ""),
+          message: responseMessage,
           suggestedActions: [],
+          conversationId: conversation?.id,
           activeContext: resolved.context,
           companyRunId: runResult.run.id,
           automaticMemory,
@@ -2626,11 +2635,17 @@ ${localized.next}`;
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {
+          const conversation = memoryPolicy.writeAllowed
+            ? request.body.conversationId
+              ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+              : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
+            : undefined;
+          if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(
             auth,
             resolved.company!.id,
-            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:request.body.conversationId} },
+            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id} },
             (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`,
             streamController.signal,
           );
@@ -2647,10 +2662,12 @@ ${localized.next}`;
               memoryPolicy.noMemoryActive,
             );
             const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message);
+            if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
             for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
             send("result", {
               message: responseMessage,
               suggestedActions: [],
+              conversationId: conversation?.id,
               activeContext: resolved.context,
               companyRunId: runResult.run.id,
               telemetry: companyRunTelemetryHeaders(runResult),
