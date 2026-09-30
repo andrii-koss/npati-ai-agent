@@ -1,5 +1,6 @@
 import type { CompanyChatLanguage } from "./company-chat-i18n";
-import type { executeBusinessProfileTool } from "./business-profile-native";
+import { profileFields, type executeBusinessProfileTool } from "./business-profile-native";
+import { businessProfileCardLabels } from "./business-profile-card-i18n";
 
 type Outcome = Awaited<ReturnType<typeof executeBusinessProfileTool>>;
 type Copy = { created: string; existing: string; updated: string; goal: string; memory: string; logo: string; incomplete: string; open: string };
@@ -24,17 +25,25 @@ const copy: Record<CompanyChatLanguage, Copy> = {
 
 export function businessProfileChatMessage(outcome: Outcome, language: CompanyChatLanguage, createdThisTurn: boolean, missingPlannedFields: string[] = []): string {
   const t = copy[language] ?? copy.en;
-  const state = createdThisTurn ? t.created : outcome.action === "create" && outcome.alreadyExisted ? t.existing : t.updated;
-  const lines = [state.replace("{name}", outcome.businessName)];
-  if (outcome.goalIds.length) lines.push(`${t.goal}: ${outcome.goalIds.length}.`);
-  if (outcome.memoryIds.length) lines.push(`${t.memory}: ${outcome.memoryIds.length}.`);
-  if (outcome.logoFileId) lines.push(`${t.logo}.`);
   const missing = [...new Set([...outcome.missingFields, ...outcome.missingGoals, ...outcome.missingMemories, ...missingPlannedFields])];
-  if (!outcome.complete || missing.length) lines.push(`${t.incomplete}: ${missing.join(", ") || "verification"}.`);
-  lines.push(`[${t.open}](/settings/business)`);
-  return lines.join("\n\n");
+  const complete = outcome.complete && missing.length === 0;
+  const state = createdThisTurn ? t.created : outcome.action === "create" && outcome.alreadyExisted ? t.existing : t.updated;
+  const label = businessProfileCardLabels(language);
+  const escape = (value: string) => value.replace(/```/g, "'''").trim();
+  const lines = ["```card:" + label.title + ": " + escape(outcome.businessName)];
+  if (complete) lines.push(state.replace("{name}", escape(outcome.businessName)), "");
+  for (const field of profileFields) {
+    if (missing.includes(field)) continue;
+    const value = outcome.savedFields[field];
+    if (value) lines.push(`**${label.fields[field]}:** ${escape(value)}`);
+  }
+  if (outcome.goalIds.length) lines.push("", `**${t.goal}:** ${outcome.goalTitles.map(escape).join("; ") || outcome.goalIds.length}`);
+  if (outcome.memoryIds.length) lines.push(`**${t.memory}:** ${outcome.memoryFacts.map(escape).join("; ") || outcome.memoryIds.length}`);
+  if (outcome.logoFileId) lines.push(`**${t.logo}**`);
+  if (!complete) { const unresolved = missing.map((item) => item in label.fields ? label.fields[item as keyof typeof label.fields] : item === "goal" ? t.goal : item === "memory" ? t.memory : item); lines.push("", `**${t.incomplete}**${unresolved.length ? `: ${unresolved.join(", ")}` : ""}`); }
+  lines.push("", `[${t.open}](/settings/business/${encodeURIComponent(outcome.businessId)})`, "```");
+  return lines.join("\n");
 }
-
 export function summarizeBusinessProfileChat(metadata: Record<string, unknown>[], language: CompanyChatLanguage, plan?: { provided_fields: Record<string, string>; secondary_actions: string[] }) {
   const outcomes = metadata.filter((item) => item.kind === "business_profile" && item.outcome).map((item) => item.outcome as Outcome);
   const latest = outcomes.at(-1);
@@ -43,7 +52,7 @@ export function summarizeBusinessProfileChat(metadata: Record<string, unknown>[]
   const savedFields = Object.assign({}, ...related.map((item) => item.savedFields)) as Record<string, string>;
   const goalIds = [...new Set(related.flatMap((item) => item.goalIds))];
   const memoryIds = [...new Set(related.flatMap((item) => item.memoryIds))];
-  const outcome = { ...latest, savedFields, goalIds, memoryIds };
+  const outcome = { ...latest, savedFields, goalIds, memoryIds, goalTitles: [...new Set(related.flatMap((item) => item.goalTitles))], memoryFacts: [...new Set(related.flatMap((item) => item.memoryFacts))] };
   const missing = Object.keys(plan?.provided_fields ?? {}).filter((key) => savedFields[key] === undefined);
   const actions = (plan?.secondary_actions ?? []).join(" ").toLowerCase();
   if (/goal/.test(actions) && !goalIds.length) missing.push("goal");

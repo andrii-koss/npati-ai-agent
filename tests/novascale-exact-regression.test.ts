@@ -1,4 +1,4 @@
-﻿import { readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -127,8 +127,52 @@ describe("exact NovaScale Labs production chat regression", () => {
       expect(response.body).not.toContain("NPATI Agent could not complete this message");
       const result = resultEvent(response.body);
       expect(result.message).toContain("NovaScale Labs");
-      expect(result.message).toContain("registrationDetails");
+      expect(result.message).toContain("Registration details");
       expect(await store.listUserBusinesses(auth)).toHaveLength(1);
+    } finally { await app.close(); }
+  });
+  it("recreates a deleted business in a new chat despite a stale model update ID and uses the existing card renderer", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let staleId = "deleted-profile-id";
+    const nativeChoices: unknown[] = [];
+    const ai: AIEngine = {
+      supportsNativeTools: () => true,
+      async chat(request) {
+        if (!request.tools?.length) return { content: JSON.stringify({ primary_action: "create_business_profile", entity: "NovaScale Labs", provided_fields: rawPlanFields, secondary_actions: ["resolve_goal", "resolve_memory"], dependencies: [], completion_criteria: ["profile saved"] }) };
+        nativeChoices.push(request.toolChoice);
+        if (request.messages.at(-1)?.role === "tool") return { content: "Done." };
+        const partial = { ...fields } as Partial<typeof fields>;
+        delete partial.contactEmail;
+        delete partial.description;
+        return { content: "", toolCalls: [{ id: "stale-business-update", type: "function", function: { name: "npati_business_profile", arguments: JSON.stringify({ ...args, action: "update", businessId: staleId, profile: partial }) } }] };
+      },
+      async *stream() { throw new Error("Native chat must not fall back to streaming"); },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+      searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const first = resultEvent((await app.inject({ method: "POST", url: "/chat/stream", payload: { message: prompt, contextType: "none" } })).body);
+      expect(first.message).toContain("```card:Business Profile: NovaScale Labs");
+      expect(nativeChoices[0]).toEqual({ type: "function", function: { name: "npati_business_profile" } });
+      expect(first.message).toContain("**Contact email:** hello@novascalelabs.example");
+      expect(first.message).toContain("**What the business does:**");
+      expect(first.message).not.toContain("Some requested details could not be verified");
+      const original = (await store.listUserBusinesses(auth))[0]!;
+      staleId = original.id;
+      const deleted = await app.inject({ method: "DELETE", url: `/businesses/${original.id}` });
+      expect(deleted.statusCode).toBe(204);
+      expect(await store.listUserBusinesses(auth)).toHaveLength(0);
+      const second = resultEvent((await app.inject({ method: "POST", url: "/chat/stream", payload: { message: prompt, contextType: "none" } })).body);
+      expect(second.message).toContain("```card:Business Profile: NovaScale Labs");
+      expect(second.message).toContain("was created and verified");
+      const businesses = await store.listUserBusinesses(auth);
+      expect(businesses).toHaveLength(1);
+      expect(businesses[0]!.id).not.toBe(original.id);
+      expect(businesses[0]).toMatchObject(fields);
+      expect(await store.listGoals(auth, businesses[0]!.id)).toHaveLength(1);
+      expect(await store.listMemory(auth, businesses[0]!.id)).toHaveLength(1);
     } finally { await app.close(); }
   });
 });

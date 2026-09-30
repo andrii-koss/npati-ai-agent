@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { collectSourceTitles, isSourceCitationLine, stripInternalChatActions, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ChatMessageContent, collectSourceTitles, isSourceCitationLine, stripInternalChatActions, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
 
 describe("chat source links", () => {
   it("uses the real source-list title for a generic inline citation", () => {
@@ -29,6 +31,15 @@ describe("chat source links", () => {
   });
 });
 
+describe("business result cards", () => {
+  it("renders the existing editable card component for a saved Business Profile", () => {
+    const content = ["```card:Business Profile: NovaScale Labs", "**Business name:** NovaScale Labs", "**Contact email:** hello@novascalelabs.example", "```"].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMessageContent, { content }));
+    expect(html).toContain("editable-content-card");
+    expect(html).toContain("Business Profile: NovaScale Labs");
+    expect(html).toContain("hello@novascalelabs.example");
+  });
+});
 describe("streamed chat actions", () => {
   it("never exposes a partial business deletion directive", () => {
     const prefix = "I deleted the test business idea.\n\n";
