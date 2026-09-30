@@ -18,7 +18,7 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
     type: "function",
     function: {
       name: "npati_company_action",
-      description: "Create, update, or delete AI Companies and their agents stored inside NPATI. Use for explicit company/agent management. Business Profiles with stage, audience, registration, goals, and memory use npati_business_profile. Do not use for explanations, capability questions, or public research.",
+      description: "Create, update, or delete AI Companies and their agents stored inside NPATI. When the primary request creates a company with named AI agents, use this tool for the entire company and every agent in one operation. Preserve each supplied agent name, role, responsibility, hierarchy, shared behavior rule, and main-agent selection. A long structured prompt with agent sections is one company-creation request; do not replace it with a memory or Business Profile action. Business Profiles with stage, audience, registration, goals, and memory use npati_business_profile. Do not use for explanations, capability questions, or public research.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -27,8 +27,8 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
           action: { type: "string", enum: ["create", "update", "delete"], description: "The requested NPATI company operation." },
           companyId: { type: "string", description: "Existing owned company UUID. Omit when creating." },
           companyName: { type: "string", description: "Exact existing company name when no companyId is available." },
-          fields: { type: "object", description: "Company fields to create or change. For creation, name is required." },
-          agents: { type: "array", description: "Agent create, update, or delete operations for this company.", items: { type: "object" } },
+          fields: { type: "object", description: "Company fields to create or change: name, industry, description, website, productsServices, languages, brandTone, companyInstructions, status. Preserve every supplied applicable value. For creation, name is required." },
+          agents: { type: "array", description: "Agent create, update, or delete operations for this company. Include every named agent exactly once. Each item should include action=create, fields with exact name and role, description and systemInstruction containing all supplied responsibilities, main=true for the lead agent, and parentAgentName for specialists when a hierarchy is supplied.", items: { type: "object" } },
           mainAgentId: { type: ["string", "null"], description: "Existing agent UUID to make the main agent." },
           mainAgentName: { type: ["string", "null"], description: "Exact agent name to make the main agent." },
         },
@@ -124,6 +124,7 @@ export async function runChatToolLoop(input: {
   onTrace?: (trace: ChatToolTrace) => void;
   onModelStep?: (event: ChatToolModelStep) => void;
   primaryOutcomeComplete?: (metadata: Record<string, unknown>[]) => boolean;
+  recoveryCall?: ChatToolCall;
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
   const traces: ChatToolTrace[] = [];
@@ -131,6 +132,34 @@ export async function runChatToolLoop(input: {
   const maxSteps = Math.max(1, Math.min(input.maxSteps ?? 8, 16));
   let result: ChatResult = { content: "" };
   let completionReminders = 0;
+  const hasPersistedPrimary = () => metadata.some((item) =>
+    item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId
+    || item.kind === "company" && (item.companyAction as { companyId?: string } | undefined)?.companyId);
+  let recoveryAttempted = false;
+  const recoverPrimary = async (): Promise<ChatToolLoopResult | undefined> => {
+    const call = input.recoveryCall;
+    if (!call || recoveryAttempted) return undefined;
+    recoveryAttempted = true;
+    const requested: ChatToolTrace = { step: maxSteps, toolName: call.function.name, callId: call.id, status: "requested" };
+    try {
+      const args = toolArguments(call);
+      requested.arguments = args;
+      traces.push(requested);
+      input.onTrace?.(requested);
+      const executed = await input.execute(call, args);
+      if (executed.metadata) metadata.push(executed.metadata);
+      const succeeded: ChatToolTrace = { ...requested, status: "succeeded" };
+      traces.push(succeeded);
+      input.onTrace?.(succeeded);
+      messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: toolOutput(executed.output) });
+      if (hasPersistedPrimary()) return { result: { content: "" }, messages, traces, metadata, completionFallback: input.primaryOutcomeComplete?.(metadata) ? "model_error" : "plan_incomplete" };
+    } catch (error) {
+      const failed: ChatToolTrace = { ...requested, status: "failed", error: error instanceof Error ? error.message : String(error) };
+      traces.push(failed);
+      input.onTrace?.(failed);
+    }
+    return undefined;
+  };
 
   for (let step = 0; step < maxSteps; step += 1) {
     const tools = input.tools ? await input.tools() : CORE_CHAT_TOOLS;
@@ -140,16 +169,23 @@ export async function runChatToolLoop(input: {
     try {
       result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
     } catch (error) {
-      if (metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+      if (hasPersistedPrimary() && (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata))) {
         return { result: { content: "" }, messages, traces, metadata, completionFallback: "model_error" };
       }
+      const recovered = await recoverPrimary();
+      if (recovered) return recovered;
+      if (hasPersistedPrimary()) return { result: { content: "" }, messages, traces, metadata, completionFallback: "plan_incomplete" };
       throw error;
     }
     input.onModelStep?.({ step, tools, toolChoice, result });
     if (!result.toolCalls?.length) {
       if (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata)) return { result, messages, traces, metadata };
       completionReminders += 1;
-      if (completionReminders >= 2 && metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+      if (completionReminders >= 2) {
+        const recovered = await recoverPrimary();
+        if (recovered) return recovered;
+      }
+      if (completionReminders >= 2 && hasPersistedPrimary()) {
         return { result: { content: "" }, messages, traces, metadata, completionFallback: "plan_incomplete" };
       }
       messages.push({ role: "system", content: "The original primary requested outcome has not been verified. Continue the remaining required tool steps using the complete original user request. Do not claim completion or stop after a secondary action." });
@@ -180,7 +216,9 @@ export async function runChatToolLoop(input: {
     }
   }
 
-  if (metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+  const recovered = await recoverPrimary();
+  if (recovered) return recovered;
+  if (hasPersistedPrimary()) {
     return { result: { content: "" }, messages, traces, metadata, completionFallback: "plan_incomplete" };
   }
   throw Object.assign(new Error(`Tool loop exceeded ${maxSteps} model iterations`), { code: input.primaryOutcomeComplete ? "TOOL_PRIMARY_INCOMPLETE" : "TOOL_LOOP_LIMIT" });
