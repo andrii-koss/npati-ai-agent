@@ -1268,20 +1268,28 @@ ${localized.next}`;
     const semanticExternalIntent = Boolean(webResearch?.shouldResearch(message));
     const internalManagementIntent = CompanyChatActions.isManagementRequest(message);
     const explicitWebIntent = explicitlyRequestsWebResearch(message);
-    const explicitExternalIntent = Boolean(directUrl)
-      || explicitWebIntent
-      || (!internalManagementIntent && !hasAttachedEvidence && semanticExternalIntent);
+    const primaryInstruction = message.split(String.fromCharCode(10)).map((line) => line.trim()).filter(Boolean).slice(0, 3).join(" ");
+    const primaryExplicitWebIntent = explicitlyRequestsWebResearch(primaryInstruction);
+    const explicitExternalIntent = Boolean(directUrl) || (
+      internalManagementIntent
+        ? primaryExplicitWebIntent
+        : explicitWebIntent || (!hasAttachedEvidence && semanticExternalIntent)
+    );
     let toolChoice: ChatRequest["toolChoice"] = tools.length ? "auto" : "none";
     if (explicitExternalIntent && directUrl && availableToolNames.includes("web_fetch")) {
       toolChoice = { type: "function", function: { name: "web_fetch" } };
     } else if (explicitExternalIntent && availableToolNames.includes("web_search")) {
       toolChoice = { type: "function", function: { name: "web_search" } };
+    } else if (internalManagementIntent && availableToolNames.includes("npati_company_action")) {
+      toolChoice = { type: "function", function: { name: "npati_company_action" } };
     }
     return {
       directUrl,
       semanticExternalIntent,
       internalManagementIntent,
       explicitWebIntent,
+      primaryInstruction,
+      primaryExplicitWebIntent,
       explicitExternalIntent,
       hasAttachedEvidence,
       availableToolNames,
@@ -2843,10 +2851,11 @@ ${localized.next}`;
         } else if (resolved.context.contextType === "company") {
           const company = resolved.company!;
           const managementRequest = isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || EmailChatActions.isManagementRequest(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message);
+          const explicitCoreWebRequest = explicitlyRequestsWebResearch(message);
           const runnableMainAgent = company.mainAgentId
             ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
             : false;
-          if (managementRequest || !runnableMainAgent) {
+          if (managementRequest || explicitCoreWebRequest || !runnableMainAgent) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {

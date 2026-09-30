@@ -20,6 +20,12 @@ function latestUser(request: ChatRequest) {
   return typeof message?.content === "string" ? message.content : "";
 }
 
+function streamResult(body: string): Record<string, any> {
+  const block = body.split(String.fromCharCode(10, 10)).find((item) => item.includes("event: result"));
+  const data = block?.split(String.fromCharCode(10)).find((line) => line.startsWith("data: "));
+  return data ? JSON.parse(data.slice(6)) : {};
+}
+
 function productionPathEngine(requests: ChatRequest[]): AIEngine {
   let sequence = 0;
   return {
@@ -67,6 +73,29 @@ function productionPathEngine(requests: ChatRequest[]): AIEngine {
           action: "create", fields: { name: "Test Company" },
         })] };
       }
+      if (/Create a complete AI-powered business company called NovaScale Labs/iu.test(user)) {
+        const agents = [
+          ["Alex Morgan", "Chief Strategy Agent"],
+          ["Maya Chen", "Market Research Agent"],
+          ["Daniel Brooks", "Sales Agent"],
+          ["Sophie Taylor", "Customer Support Agent"],
+          ["Emma Wilson", "Marketing & Content Agent"],
+          ["Ryan Cooper", "Business Operations Agent"],
+        ].map(([name, role], index) => ({
+          action: "create",
+          fields: { name, role, description: "Specialized NovaScale Labs agent", systemInstruction: "Stay focused on the assigned role and report completed work." },
+          ...(index === 0 ? { main: true } : { parentAgentName: "Alex Morgan" }),
+        }));
+        return { content: "", toolCalls: [call("create-novascale-" + (++sequence), "npati_company_action", {
+          action: "create",
+          fields: {
+            name: "NovaScale Labs",
+            industry: "Digital Products & AI Automation",
+            description: "AI-powered workflows for small and medium-sized businesses.",
+          },
+          agents,
+        })] };
+      }
       if (/Crie uma empresa chamada Test Portugal/iu.test(user)) {
         return { content: "", toolCalls: [call("create-" + (++sequence), "npati_company_action", {
           action: "create", fields: { name: "Test Portugal", languages: ["Portuguese"] },
@@ -100,6 +129,56 @@ function researchService() {
 }
 
 describe("production chat endpoint tool execution", () => {
+  it("creates the full NovaScale company, then scans a URL in the same company chat", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const requests: ChatRequest[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine(requests), marketplace, webResearch });
+    const creationPrompt = [
+      "Create a complete AI-powered business company called NovaScale Labs.",
+      "Company Details",
+      "Name: NovaScale Labs",
+      "Industry: Digital Products & AI Automation",
+      "Create the company with 6 specialized AI agents.",
+      "1. Alex Morgan - Role: Chief Strategy Agent",
+      "2. Maya Chen - Role: Market Research Agent - Research markets and analyze competitors",
+      "3. Daniel Brooks - Role: Sales Agent",
+      "4. Sophie Taylor - Role: Customer Support Agent",
+      "5. Emma Wilson - Role: Marketing & Content Agent - Research relevant topics",
+      "6. Ryan Cooper - Role: Business Operations Agent",
+      "Create the company and all six agents with their respective roles, responsibilities, and collaboration structure.",
+    ].join(String.fromCharCode(10));
+    try {
+      const created = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: creationPrompt, contextType: "none" } });
+      const company = (await store.listCompanies(auth)).items.find((item) => item.name === "NovaScale Labs");
+      expect(created.statusCode).toBe(200);
+      expect(company).toBeDefined();
+      expect(await store.listCompanyAgents(auth, company!.id)).toHaveLength(6);
+      expect(webResearch.run).not.toHaveBeenCalled();
+      expect(requests[0]?.toolChoice).toEqual({ type: "function", function: { name: "npati_company_action" } });
+      expect(requests[0]?.messages.find((item) => item.role === "system")?.content).toContain("English (en)");
+      const conversationId = String(streamResult(created.body).conversationId ?? "");
+      expect(conversationId).not.toBe("");
+
+      requests.length = 0;
+      const scanned = await app.inject({ method: "POST", url: "/chat/stream", payload: {
+        message: "Проскануй сайт [**npati.com**](https://npati.com/?utm_source=NPATI_Agent)",
+        conversationId,
+        contextType: "company",
+        companyId: company!.id,
+      } });
+
+      expect(scanned.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(requests[0]?.toolChoice).toEqual({ type: "function", function: { name: "web_fetch" } });
+      expect(requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", name: "web_fetch" });
+      expect(scanned.body).toContain("Сайт фактично відкрито");
+      expect(scanned.body).not.toContain("тимчасову недоступність вибраної AI-моделі");
+    } finally {
+      await app.close();
+    }
+  });
+
   it.each([
     ["English", "Open and analyze https://npati.com", "English (en)"],
     ["Ukrainian", "Проскануй сайт https://npati.com", "Ukrainian (uk)"],
@@ -136,7 +215,7 @@ describe("production chat endpoint tool execution", () => {
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "none" } });
       expect(response.statusCode).toBe(200);
       expect(webResearch.run).not.toHaveBeenCalled();
-      expect(requests[0]?.toolChoice).toBe("auto");
+      expect(requests[0]?.toolChoice).toEqual({ type: "function", function: { name: "npati_company_action" } });
       expect(requests.flatMap((request) => request.messages).filter((item) => item.role === "tool").map((item) => item.name)).toEqual(["npati_company_action"]);
       expect((await store.listCompanies(auth)).items.map((company) => company.name)).toEqual([companyName]);
       expect(response.body).toMatch(responsePattern);

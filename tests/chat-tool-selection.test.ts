@@ -68,7 +68,9 @@ describe("native chat tool selection", () => {
     const ai = engine(async (request) => {
       modelCalls += 1;
       expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch"]);
-      expect(request.toolChoice).toBe("auto");
+      expect(request.toolChoice).toEqual(modelCalls === 1
+        ? { type: "function", function: { name: "npati_company_action" } }
+        : "auto");
       if (modelCalls === 1) return { content: "", toolCalls: [toolCall("create-company", "npati_company_action", {
         action: "create",
         fields: { name: "NovaScale Labs", industry: "AI automation", languages: ["English"] },
