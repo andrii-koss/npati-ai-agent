@@ -525,7 +525,9 @@ For update, include only fields that should change. To change only agents, use a
         operation.fields = patch;
       }
       const key = createHash("sha256").update(`${auth.workspaceId}:${auth.userId}:${conversationId}:${options.requestMessage ?? match[0]}`).digest("hex");
-      let company: Company;
+      let company: Company | undefined;
+      let actualAction = directive.action;
+      let alreadyExisted = false;
       if (directive.action === "create") {
         if (!String(companyPatch.name ?? "").trim()) {
           const language = detectCompanyChatLanguage(options.requestMessage ?? "");
@@ -535,26 +537,27 @@ For update, include only fields that should change. To change only agents, use a
         }
         const targetName = String(companyPatch.name ?? "").trim().toLocaleLowerCase();
         if (targetName) {
-          const existingList = (await store.listCompanies(auth, 100)).items;
-          const duplicate = existingList.find((c) => c.name.trim().toLocaleLowerCase() === targetName);
+          let cursor: string | undefined;
+          let duplicate: Company | undefined;
+          do {
+            const page = await store.listCompanies(auth, 100, cursor);
+            duplicate = page.items.find((item) => item.name.trim().toLocaleLowerCase() === targetName);
+            cursor = page.nextCursor ?? undefined;
+          } while (!duplicate && cursor);
           if (duplicate) {
-            const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
-            const dupAgents = await store.listCompanyAgents(auth, duplicate.id);
-            const companyUrl = `/settings/company?company=${encodeURIComponent(duplicate.id)}`;
-            const notice = insertCompanyName(labels.alreadyExists, safeMarkdown(duplicate.name));
-            return {
-              cleanText: `${notice}\n\n[${labels.openSettings}](${companyUrl})`,
-              companyAction: {
-                action: "update",
-                companyId: duplicate.id,
-                companyName: duplicate.name,
-                agentCount: dupAgents.length,
-              },
-            };
+            company = duplicate;
+            actualAction = "update";
+            alreadyExisted = true;
+            if (Object.entries(companyPatch).some(([field, value]) => JSON.stringify((duplicate as unknown as Record<string, unknown>)[field]) !== JSON.stringify(value))) {
+              company = await store.updateCompany(auth, duplicate.id, companyPatch, duplicate.revision);
+              changed = true;
+            }
           }
         }
-        company = await store.createCompany(auth, companyPatch as CompanyInput, `chat-company:${key}`);
-        changed = true;
+        if (!company) {
+          company = await store.createCompany(auth, companyPatch as CompanyInput, `chat-company:${key}`);
+          changed = true;
+        }
       } else {
         company = await ownedCompany(store, auth, directive, options.selectedCompanyId);
         if (directive.action === "delete") {
@@ -570,6 +573,7 @@ For update, include only fields that should change. To change only agents, use a
         }
       }
 
+      if (!company) throw new Error("Company creation did not return a company");
       let agents = await store.listCompanyAgents(auth, company.id);
       let requestedMain: CompanyAgent | undefined;
       const parentChanges: Array<{ childId: string; parentId?: string | null; parentName?: string | null }> = [];
@@ -584,9 +588,14 @@ For update, include only fields that should change. To change only agents, use a
       for (const [index, operation] of operations.entries()) {
         const patch = fields(operation.fields, agentFields, "agent") as Partial<CompanyAgentInput>;
         if (operation.action === "create") {
-          const agent = await store.createCompanyAgent(auth, company.id, patch as CompanyAgentInput, `chat-agent:${key}:${index}`);
-          if (!agents.some((item) => item.id === agent.id)) agents.push(agent);
-          changed = true;
+          const prior = agents.find((item) => item.name.trim().toLocaleLowerCase() === String(patch.name ?? "").trim().toLocaleLowerCase());
+          const needsUpdate = prior && Object.entries(patch).some(([field, value]) => JSON.stringify((prior as unknown as Record<string, unknown>)[field]) !== JSON.stringify(value));
+          const agent = prior
+            ? needsUpdate ? await store.updateCompanyAgent(auth, company.id, prior.id, patch, prior.revision) : prior
+            : await store.createCompanyAgent(auth, company.id, patch as CompanyAgentInput, `chat-agent:${key}:${index}`);
+          if (prior) agents = agents.map((item) => item.id === agent.id ? agent : item);
+          else agents.push(agent);
+          if (!prior || needsUpdate) changed = true;
           if (operation.main) requestedMain = agent;
           if (operation.parentAgentId !== undefined || operation.parentAgentName !== undefined) parentChanges.push({ childId: agent.id, parentId: operation.parentAgentId, parentName: operation.parentAgentName });
         } else {
@@ -622,8 +631,8 @@ For update, include only fields that should change. To change only agents, use a
       const aiResponse = text.replace(/```company-action\s*[\s\S]*?```/gi, "").trim();
       const cleanText = options.preserveResponseText && aiResponse
         ? aiResponse
-        : companyResultMessage(directive.action, company, agents, options.requestMessage, options.responseLanguage);
-      return { cleanText, companyAction: { action: directive.action, companyId: company.id, companyName: company.name, agentCount: agents.length } };
+        : (alreadyExisted ? insertCompanyName(labels.alreadyExists, safeMarkdown(company.name)) + "\n\n" : "") + companyResultMessage(actualAction, company, agents, options.requestMessage, options.responseLanguage);
+      return { cleanText, companyAction: { action: actualAction, companyId: company.id, companyName: company.name, agentCount: agents.length } };
     } catch (error) {
       options.onError?.(error);
       const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
