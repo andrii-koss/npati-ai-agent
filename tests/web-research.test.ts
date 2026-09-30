@@ -75,6 +75,30 @@ describe("OmniRoute web normalization", () => {
     expect(result).toMatchObject({ title: "Example", markdown: "# Example", provider: "jina-reader" });
   });
 
+  it("opens a URL through OmniRoute when Crawl4AI is not configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      provider: "jina-reader",
+      url: "https://93.184.216.34/",
+      content: "Verified public page body",
+      links: ["https://93.184.216.34/pricing"],
+      metadata: { title: "Public page" },
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    const provider = new DefaultWebResearchProvider(
+      new OmniRouteSearchProvider(engine),
+      new OmniRouteFetchProvider(engine, new SafeUrlValidator()),
+      undefined,
+      limits,
+    );
+
+    const result = await provider.crawl({ url: "https://93.184.216.34/", deep: true });
+
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]).toMatchObject({ title: "Public page", markdown: "Verified public page body", depth: 0 });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v1/web/fetch");
+  });
+
   it("surfaces normalized upstream errors without stack traces", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "No credentials configured" } }), { status: 400 })));
     await expect(new OmniRouteEngine({ baseUrl: "http://omniroute:20128" }).webSearch({ query: "test" })).rejects.toThrow("No credentials configured");

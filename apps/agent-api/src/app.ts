@@ -682,7 +682,7 @@ export function buildApp(config: AppConfig = {}) {
     queue: globalAdmissionQueue,
     defaultTier: "pro",
   });
-  const researchBundle = baseAiEngine instanceof OmniRouteEngine && config.crawlerBaseUrl
+  const researchBundle = baseAiEngine instanceof OmniRouteEngine
     ? createWebResearch(baseAiEngine, config.crawlerBaseUrl)
     : undefined;
   const webResearch = config.webResearch ?? researchBundle?.service;
@@ -1218,7 +1218,9 @@ ${localized.next}`;
       : undefined;
     if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined };
     const addedModels = (await aiPreferences.get(auth)).addedModels;
-    let actionText = requestMessage && managementRequest
+    let actionText = /```company-action/i.test(content)
+      ? content
+      : requestMessage && managementRequest
       ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage) ?? content
       : content;
     if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
@@ -1260,16 +1262,62 @@ ${localized.next}`;
     });
   }
 
+  function coreChatRoutingDecision(message: string, tools: ChatToolDefinition[], hasAttachedEvidence = false) {
+    const availableToolNames = tools.map((tool) => tool.function.name);
+    const directUrl = extractTargetUrlOrDomain(message);
+    const semanticExternalIntent = Boolean(webResearch?.shouldResearch(message));
+    const internalManagementIntent = CompanyChatActions.isManagementRequest(message);
+    const explicitWebIntent = explicitlyRequestsWebResearch(message);
+    const explicitExternalIntent = Boolean(directUrl)
+      || explicitWebIntent
+      || (!internalManagementIntent && !hasAttachedEvidence && semanticExternalIntent);
+    let toolChoice: ChatRequest["toolChoice"] = tools.length ? "auto" : "none";
+    if (explicitExternalIntent && directUrl && availableToolNames.includes("web_fetch")) {
+      toolChoice = { type: "function", function: { name: "web_fetch" } };
+    } else if (explicitExternalIntent && availableToolNames.includes("web_search")) {
+      toolChoice = { type: "function", function: { name: "web_search" } };
+    }
+    return {
+      directUrl,
+      semanticExternalIntent,
+      internalManagementIntent,
+      explicitWebIntent,
+      explicitExternalIntent,
+      hasAttachedEvidence,
+      availableToolNames,
+      filteredOutTools: CORE_CHAT_TOOLS.map((tool) => tool.function.name).filter((name) => !availableToolNames.includes(name)),
+      toolChoice,
+    };
+  }
+
   function logToolSelectionConfiguration(request: ChatRequest, tools: ChatToolDefinition[], context: Record<string, unknown>) {
     if (process.env.NPATI_TOOL_SELECTION_DIAGNOSTICS !== "true") return;
     app.log.info({
       ...context,
       model: request.model,
       temperature: request.temperature,
-      toolChoice: "auto",
+      toolChoice: request.toolChoice ?? (tools.length ? "auto" : "none"),
       tools,
       systemMessages: request.messages.filter((message) => message.role === "system").map((message) => message.content),
     }, "Chat tool-selection diagnostic configuration");
+  }
+
+  function logToolModelStep(event: {
+    step: number;
+    tools: ChatToolDefinition[];
+    toolChoice: NonNullable<ChatRequest["toolChoice"]>;
+    result: Awaited<ReturnType<AIEngine["chat"]>>;
+  }, context: Record<string, unknown>) {
+    if (process.env.NPATI_TOOL_SELECTION_DIAGNOSTICS !== "true") return;
+    app.log.info({
+      ...context,
+      agentLoopStep: event.step,
+      toolsPassedToModel: event.tools,
+      toolChoice: event.toolChoice,
+      rawModelToolCalls: event.result.toolCalls ?? [],
+      rawModelContent: event.result.content,
+      finishReason: event.result.finishReason,
+    }, "Chat tool-selection model step");
   }
 
   function logToolSelectionTrace(trace: { step: number; toolName: string; callId: string; status: string; error?: string }, context: Record<string, unknown>, message: string) {
@@ -1543,14 +1591,23 @@ ${localized.next}`;
     let nativeCompanyCleanText = "";
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
-        logToolSelectionConfiguration(request, availableCoreChatTools(auth), { conversationId: conversation?.id, contextType: "business" });
+        const tools = availableCoreChatTools(auth);
+        const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
+        const routedRequest = { ...request, toolChoice: routing.toolChoice };
+        logToolSelectionConfiguration(routedRequest, tools, {
+          conversationId: conversation?.id,
+          contextType: "business",
+          activeConversationLanguage,
+          semanticFiltering: routing,
+        });
         const loop = await runChatToolLoop({
           ai: aiEngine,
-          request,
-          tools: () => availableCoreChatTools(auth),
+          request: routedRequest,
+          tools: () => tools,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
             conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
+          onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
         for (const item of loop.metadata) {
           if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
@@ -1901,15 +1958,24 @@ ${localized.next}`;
     let nativeCompanyCleanText = "";
     if (nativeToolCalling) {
       try {
-        logToolSelectionConfiguration(chatRequest, availableCoreChatTools(auth), { conversationId: conversation?.id, contextType: "none" });
+        const tools = availableCoreChatTools(auth);
+        const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
+        chatRequest.toolChoice = routing.toolChoice;
+        logToolSelectionConfiguration(chatRequest, tools, {
+          conversationId: conversation?.id,
+          contextType: "none",
+          activeConversationLanguage,
+          semanticFiltering: routing,
+        });
         const loop = await runChatToolLoop({
           ai: aiEngine,
           request: chatRequest,
-          tools: () => availableCoreChatTools(auth),
+          tools: () => tools,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
             model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
+          onModelStep: (event) => logToolModelStep(event, { model: ai.model, conversationId: conversation?.id, contextType: "none" }),
         });
         chatResult = loop.result;
         content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
@@ -2246,7 +2312,7 @@ ${localized.next}`;
       aiEngine.healthCheck(),
       hub.healthCheck(),
       workspaceStore.health(),
-      researchBundle?.crawler.healthCheck() ?? Promise.resolve("not_configured" as const),
+      researchBundle?.crawler?.healthCheck() ?? Promise.resolve("not_configured" as const),
       objectStorage?.health() ?? Promise.resolve("not_configured" as const),
       redisHealthCheck(),
       coreBackendHealthCheck(),

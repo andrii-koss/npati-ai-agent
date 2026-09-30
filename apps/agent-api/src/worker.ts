@@ -24,7 +24,7 @@ const databaseUrl=process.env.DATABASE_URL,redisUrl=process.env.REDIS_URL;
 if(!databaseUrl||!redisUrl)throw new Error("DATABASE_URL and REDIS_URL are required by the Company worker");
 const ai=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL});
 const store=new PostgresWorkspaceStore(databaseUrl);await store.initialize();
-const research=process.env.CRAWL4AI_BASE_URL?createWebResearch(ai,process.env.CRAWL4AI_BASE_URL):undefined;
+const research=createWebResearch(ai,process.env.CRAWL4AI_BASE_URL);
 const attachments=process.env.NPATI_DATA_DIR?path.join(process.env.NPATI_DATA_DIR,"chat-attachments"):undefined;
 const required=["MINIO_ENDPOINT","MINIO_ACCESS_KEY","MINIO_SECRET_KEY"] as const;for(const name of required)if(!process.env[name])throw new Error(name+" is required by the Company worker");
 const storage=new MinioObjectStorage({endPoint:process.env.MINIO_ENDPOINT!,port:Number.parseInt(process.env.MINIO_PORT??"9000",10),useSSL:process.env.MINIO_USE_SSL==="true",accessKey:process.env.MINIO_ACCESS_KEY!,secretKey:process.env.MINIO_SECRET_KEY!,region:process.env.MINIO_REGION,operationTimeoutMs:Number.parseInt(process.env.MINIO_OPERATION_TIMEOUT_MS??"15000",10),streamIdleTimeoutMs:Number.parseInt(process.env.MINIO_STREAM_IDLE_TIMEOUT_MS??"30000",10),streamTotalTimeoutMs:Number.parseInt(process.env.MINIO_STREAM_TOTAL_TIMEOUT_MS??"300000",10)});await storage.initialize();
