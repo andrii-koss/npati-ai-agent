@@ -26,8 +26,8 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
         properties: {
           action: { type: "string", enum: ["create", "update", "delete"], description: "The requested NPATI company operation." },
           companyId: { type: "string", description: "Existing owned company UUID. Omit when creating." },
-          companyName: { type: "string", description: "Exact existing company name when no companyId is available." },
-          fields: { type: "object", description: "Company fields to create or change: name, industry, description, website, productsServices, languages, brandTone, companyInstructions, status. Preserve every supplied applicable value. For creation, name is required." },
+          companyName: { type: "string", description: "Exact existing company name used only to locate the company for update or delete when companyId is unavailable. It is not a field edit." },
+          fields: { type: "object", description: "Company fields to create or change: name, industry, description, website, productsServices, languages, brandTone, companyInstructions, status. Preserve every supplied applicable value. For creation, name is required. For delete, omit fields and agents; provide only action=delete and companyId or companyName." },
           agents: { type: "array", description: "Agent create, update, or delete operations for this company. Include every named agent exactly once. Each item should include action=create, fields with exact name and role, description and systemInstruction containing all supplied responsibilities, main=true for the lead agent, and parentAgentName for specialists when a hierarchy is supplied.", items: { type: "object" } },
           mainAgentId: { type: ["string", "null"], description: "Existing agent UUID to make the main agent." },
           mainAgentName: { type: ["string", "null"], description: "Exact agent name to make the main agent." },

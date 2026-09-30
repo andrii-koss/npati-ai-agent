@@ -199,16 +199,25 @@ function normalizeDirective(value: unknown, requestMessage: string): CompanyDire
   const raw = value as Record<string, unknown>;
   const action = operation(raw.action, "create");
   const nestedCompany = raw.company && typeof raw.company === "object" && !Array.isArray(raw.company) ? raw.company : undefined;
-  const companySource = raw.fields ?? nestedCompany ?? {
-    name: raw.name ?? raw.companyName,
-    industry: raw.industry,
-    description: raw.description,
-    productsServices: raw.productsServices,
-    languages: raw.languages,
-    brandTone: raw.brandTone,
-    companyInstructions: raw.companyInstructions,
-    status: raw.status,
-  };
+  const suppliedCompanyFields = raw.fields ?? nestedCompany;
+  const deleteFields = action === "delete" && suppliedCompanyFields && typeof suppliedCompanyFields === "object" && !Array.isArray(suppliedCompanyFields)
+    ? suppliedCompanyFields as Record<string, unknown>
+    : undefined;
+  const companySource = action === "delete"
+    ? deleteFields
+      ? Object.fromEntries(Object.entries(deleteFields).filter(([key]) => key !== "name" && key !== "companyName"))
+      : suppliedCompanyFields ?? {}
+    : suppliedCompanyFields ?? {
+        name: raw.name ?? (action === "create" ? raw.companyName : undefined),
+        industry: raw.industry,
+        description: raw.description,
+        productsServices: raw.productsServices,
+        languages: raw.languages,
+        brandTone: raw.brandTone,
+        companyInstructions: raw.companyInstructions,
+        status: raw.status,
+      };
+  const companyLocator = raw.companyName ?? (action === "delete" ? raw.name ?? deleteFields?.companyName ?? deleteFields?.name : undefined);
   const rawAgents = Array.isArray(raw.agents) ? raw.agents : [];
   const agents: AgentDirective[] = rawAgents.slice(0, 25).map((entry, index) => {
     const agent = entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
@@ -245,7 +254,7 @@ function normalizeDirective(value: unknown, requestMessage: string): CompanyDire
   return {
     action,
     companyId: typeof raw.companyId === "string" ? raw.companyId : undefined,
-    companyName: typeof raw.companyName === "string" ? raw.companyName : undefined,
+    companyName: typeof companyLocator === "string" ? companyLocator : undefined,
     fields: normalizeCompanyFields(companySource) as Record<string, unknown>,
     agents,
     mainAgentId: typeof raw.mainAgentId === "string" || raw.mainAgentId === null ? raw.mainAgentId : undefined,
