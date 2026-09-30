@@ -254,7 +254,7 @@ export class DefaultWebResearchProvider {
   constructor(
     private readonly searchProvider: OmniRouteSearchProvider,
     private readonly fetchProvider: OmniRouteFetchProvider,
-    private readonly crawler: Crawl4AIProvider,
+    private readonly crawler: Crawl4AIProvider | undefined,
     private readonly limits: WebResearchLimits,
     cache?: ResearchCache,
   ) { this.cache = cache ?? new MemoryResearchCache(); }
@@ -273,7 +273,7 @@ export class DefaultWebResearchProvider {
     let value: WebPageResult;
     try { value = await this.fetchProvider.fetch(input); }
     catch (error) {
-      if (await this.crawler.healthCheck() !== "ok") throw error;
+      if (!this.crawler || await this.crawler.healthCheck() !== "ok") throw error;
       value = await this.crawler.fetch(input);
     }
     value.text = value.text?.slice(0, this.limits.maxContentCharacters);
@@ -285,7 +285,9 @@ export class DefaultWebResearchProvider {
   async crawl(input: CrawlInput) {
     const key = researchCacheKey("crawl", input);
     if (!input.refresh) { const cached = await this.cache.get<CrawlResult>(key); if (cached) return cached; }
-    const value = await this.crawler.crawl(input);
+    const value = this.crawler
+      ? await this.crawler.crawl(input)
+      : await this.fetchOnlyCrawl(input);
     await this.cache.set(key, value, this.limits.cacheTtlSeconds);
     return value;
   }
@@ -293,8 +295,28 @@ export class DefaultWebResearchProvider {
   async crawlMany(input: CrawlBatchInput) {
     const key = researchCacheKey("crawl-many", input);
     if (!input.refresh) { const cached = await this.cache.get<CrawlResult>(key); if (cached) return cached; }
-    const value = await this.crawler.crawlMany(input);
+    const value = this.crawler
+      ? await this.crawler.crawlMany(input)
+      : await this.fetchOnlyCrawl({ ...input, url: input.urls[0] ?? "" });
     await this.cache.set(key, value, this.limits.cacheTtlSeconds);
     return value;
+  }
+
+  private async fetchOnlyCrawl(input: CrawlInput): Promise<CrawlResult> {
+    const startedAt = new Date().toISOString();
+    const page = await this.fetchProvider.fetch({ url: input.url, refresh: input.refresh });
+    return {
+      rootUrl: page.finalUrl ?? page.url,
+      pages: [{
+        url: page.finalUrl ?? page.url,
+        title: page.title,
+        text: page.text?.slice(0, this.limits.maxContentCharacters),
+        markdown: page.markdown?.slice(0, this.limits.maxContentCharacters),
+        links: page.links,
+        depth: 0,
+      }],
+      startedAt,
+      completedAt: new Date().toISOString(),
+    };
   }
 }

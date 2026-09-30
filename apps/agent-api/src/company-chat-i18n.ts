@@ -63,6 +63,11 @@ const languageSamples: Record<Exclude<CompanyChatLanguage, "zh" | "ja" | "ko" | 
   ru: "Пожалуйста, создайте компанию и ясно объясните план. Добавьте шесть специализированных агентов, проанализируйте сайт и подведите итоги. Удали всё, что только что создал, только после подтверждения.",
 };
 
+const languageCalibrationSamples: Partial<Record<keyof typeof languageSamples, string>> = {
+  en: "Open and analyze the supplied URL. Scan the public website, research current competitors, and report verified external evidence.",
+  pt: "Pesquise na web os concorrentes atuais de automação em Portugal e apresente fontes externas verificadas.",
+};
+
 function normalizedLanguageText(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase().replace(/https?:\/\/\S+|```[\s\S]*?```|`[^`]*`/gu, " ").replace(/[^\p{L}\p{M}]+/gu, " ").replace(/\s+/g, " ").trim();
 }
@@ -79,7 +84,10 @@ function ngramProfile(value: string): Map<string, number> {
   return profile;
 }
 
-const profiles = Object.fromEntries(Object.entries(languageSamples).map(([language, sample]) => [language, ngramProfile(sample)])) as Record<keyof typeof languageSamples, Map<string, number>>;
+const profiles = Object.fromEntries(Object.entries(languageSamples).map(([language, sample]) => [
+  language,
+  ngramProfile(sample + " " + (languageCalibrationSamples[language as keyof typeof languageSamples] ?? "")),
+])) as Record<keyof typeof languageSamples, Map<string, number>>;
 
 function profileSimilarity(left: Map<string, number>, right: Map<string, number>): number {
   let dot = 0; let leftSize = 0; let rightSize = 0;
@@ -162,7 +170,15 @@ export function resolveConversationLanguage(
     const requested = explicitlyRequestedLanguage(text);
     if (requested) { active = requested; continue; }
     const candidate = detectedLanguage(text);
-    if (!active) { if (candidate.letters >= 3) active = candidate.language; continue; }
+    if (!active) {
+      if (candidate.letters >= 3) {
+        const confidentInitialDetection = candidate.language === "en"
+          || candidate.letters >= 24
+          || candidate.confidence >= 0.04;
+        active = confidentInitialDetection ? candidate.language : "en";
+      }
+      continue;
+    }
     if (candidate.language === active) continue;
     const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
       || candidate.letters >= 8 && candidate.confidence >= 0.09;

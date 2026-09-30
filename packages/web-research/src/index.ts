@@ -32,10 +32,12 @@ export function webResearchLimits(environment: NodeJS.ProcessEnv = process.env):
   };
 }
 
-export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl: string, environment: NodeJS.ProcessEnv = process.env) {
+export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl?: string, environment: NodeJS.ProcessEnv = process.env) {
   const limits = webResearchLimits(environment);
   const validator = new SafeUrlValidator();
-  const crawler = new Crawl4AIProvider(crawlerBaseUrl, validator, limits, environment.CRAWL4AI_API_TOKEN);
+  const crawler = crawlerBaseUrl
+    ? new Crawl4AIProvider(crawlerBaseUrl, validator, limits, environment.CRAWL4AI_API_TOKEN)
+    : undefined;
   const cache = environment.REDIS_URL ? new RedisResearchCache(environment.REDIS_URL) : undefined;
   const provider = new DefaultWebResearchProvider(
     new OmniRouteSearchProvider(engine),

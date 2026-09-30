@@ -91,6 +91,13 @@ export interface ChatToolLoopResult {
   metadata: Record<string, unknown>[];
 }
 
+export interface ChatToolModelStep {
+  step: number;
+  tools: ChatToolDefinition[];
+  toolChoice: NonNullable<ChatRequest["toolChoice"]>;
+  result: ChatResult;
+}
+
 function toolArguments(call: ChatToolCall): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -114,6 +121,7 @@ export async function runChatToolLoop(input: {
   execute(call: ChatToolCall, args: Record<string, unknown>): Promise<ChatToolExecutionResult>;
   maxSteps?: number;
   onTrace?: (trace: ChatToolTrace) => void;
+  onModelStep?: (event: ChatToolModelStep) => void;
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
   const traces: ChatToolTrace[] = [];
@@ -123,7 +131,11 @@ export async function runChatToolLoop(input: {
 
   for (let step = 0; step < maxSteps; step += 1) {
     const tools = input.tools ? await input.tools() : CORE_CHAT_TOOLS;
-    result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice: tools.length ? "auto" : "none" });
+    const toolChoice = tools.length
+      ? step === 0 ? input.request.toolChoice ?? "auto" : "auto"
+      : "none";
+    result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+    input.onModelStep?.({ step, tools, toolChoice, result });
     if (!result.toolCalls?.length) return { result, messages, traces, metadata };
 
     messages.push({ role: "assistant", content: result.content || null, tool_calls: result.toolCalls });
