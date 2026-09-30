@@ -26,6 +26,7 @@ import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
 import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, isCompanyDeleteIntent } from "./company-delete-i18n";
+import { pendingCompanyDelete } from "./pending-company-delete";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
@@ -1721,7 +1722,13 @@ ${localized.next}`;
       ? await workspaceStore.getNeutralConversation(auth, conversationId)
       : undefined;
     const previousAssistant = [...(priorExisting?.messages ?? [])].reverse().find((item) => item.role === "assistant")?.content ?? "";
-    const effectiveMessage = resolveContextualCompanyFollowUp(message, previousAssistant);
+    const pendingDeletion = isShortAffirmativeReply(message)
+      ? await pendingCompanyDelete(workspaceStore, auth, previousAssistant)
+      : undefined;
+    const confirmedDeletion = pendingDeletion;
+    const effectiveMessage = confirmedDeletion
+      ? `Yes, delete company ${confirmedDeletion.name}`
+      : resolveContextualCompanyFollowUp(message, previousAssistant);
     if (EmailChatActions.containsCredentialSubmission(effectiveMessage)) {
       const safetyMessage = EmailChatActions.credentialSafetyMessage();
       onDelta?.(safetyMessage);
@@ -1733,7 +1740,9 @@ ${localized.next}`;
         contextCompaction: { applied: false, originalCount: priorExisting?.messages.length ?? 0, preservedCount: priorExisting?.messages.length ?? 0 },
       };
     }
-    let effectiveManagementCompany = managementCompany;
+    let effectiveManagementCompany = confirmedDeletion
+      ? { id: confirmedDeletion.id, name: confirmedDeletion.name }
+      : managementCompany;
     if (!effectiveManagementCompany) {
       const linkedCompanyId = /\/settings\/company\?company=([0-9a-f-]{36})/iu.exec(previousAssistant)?.[1];
       if (linkedCompanyId) {
@@ -1820,6 +1829,23 @@ ${localized.next}`;
         if (chatFiles) for (const item of savedAttachments) await chatFiles.delete(auth, item.id).catch(() => undefined);
         throw error;
       }
+    }
+    if (confirmedDeletion) {
+      const directive = `\`\`\`company-action\n${JSON.stringify({ action: "delete", companyId: confirmedDeletion.id })}\n\`\`\``;
+      const deleted = await executeCompanyChatAction(auth, directive, conversation?.id, effectiveMessage, {
+        selectedCompanyId: confirmedDeletion.id,
+        responseLanguage: activeConversationLanguage,
+      });
+      if (deleted.companyAction?.action !== "delete") throw new Error("Confirmed company deletion did not complete");
+      if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", deleted.cleanText);
+      return {
+        message: deleted.cleanText,
+        suggestedActions: [],
+        companyAction: deleted.companyAction,
+        conversationId: conversation?.id,
+        noMemory: memoryPolicy.noMemoryActive,
+        contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length },
+      };
     }
     const compositeDeletion = effectiveManagementCompany
       ? await executeCompositeCompanyDeletion(auth, safeUserRequest, effectiveManagementCompany.id)
