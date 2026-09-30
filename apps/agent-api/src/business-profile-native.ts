@@ -1,9 +1,35 @@
 import type { ChatToolDefinition } from "@npati/omniroute-adapter";
 import type { AuthContext, Business, BusinessInput, GoalInput, MemoryInput, WorkspaceStore } from "@npati/workspace";
 
-const profileFields = ["name", "businessType", "businessStage", "industry", "niche", "country", "market", "teamType", "presenceType", "businessModel", "website", "legalName", "contactEmail", "contactPhone", "postalAddress", "description", "productsServicesSummary", "audienceSummary", "registrationDetails"] as const;
+export const profileFields = ["name", "businessType", "businessStage", "industry", "niche", "country", "market", "teamType", "presenceType", "businessModel", "website", "legalName", "contactEmail", "contactPhone", "postalAddress", "description", "productsServicesSummary", "audienceSummary", "registrationDetails"] as const;
 const textFields = Object.fromEntries(profileFields.map((name) => [name, { type: "string", description: `User-supplied ${name}; preserve the exact applicable value. Never invent legal or contact values.` }]));
 
+export function reconcilePlannedBusinessArgs(args: Record<string, unknown>, plannedFields: Record<string, string>, primaryCreation: boolean): Record<string, unknown> {
+  const supplied = args.profile && typeof args.profile === "object" && !Array.isArray(args.profile) ? args.profile as Record<string, unknown> : {};
+  const profile = { ...supplied };
+  for (const field of profileFields) {
+    const value = plannedFields[field];
+    if (typeof value !== "string" || !value.trim()) continue;
+    if (field === "registrationDetails" && /\b(use|do not|don't|if available|available in the system)\b/i.test(value)) continue;
+    if (field === "contactEmail") {
+      const email = /mailto:([^\s)]+)|([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/.exec(value);
+      if (email) profile[field] = email[1] ?? email[2];
+    } else if (field === "website") profile[field] = /^https?:\/\//i.test(value.trim()) ? value.trim() : "https://" + value.trim();
+    else if (field === "businessStage") {
+      const stage = value.trim().toLowerCase();
+      if (["idea", "starting", "operating", "growing", "scaling"].includes(stage)) profile[field] = stage;
+    } else if (field === "teamType") {
+      const team = value.trim().toLowerCase();
+      if (["solo", "team"].includes(team)) profile[field] = team;
+    } else if (field === "presenceType") {
+      const presence = value.trim().toLowerCase();
+      if (["online", "local", "both"].includes(presence)) profile[field] = presence;
+      else if (presence.includes("online") && presence.includes("local")) profile[field] = "both";
+    } else profile[field] = value.trim();
+  }
+  if (primaryCreation && !profile.name && plannedFields.name?.trim()) profile.name = plannedFields.name.trim();
+  return { ...args, action: primaryCreation ? "create" : args.action, businessId: primaryCreation ? undefined : args.businessId, profile };
+}
 export const BUSINESS_PROFILE_TOOL: ChatToolDefinition = {
   type: "function",
   function: {
@@ -90,5 +116,5 @@ export async function executeBusinessProfileTool(input: {
   const missingGoals = goals.filter((goal) => !savedGoals.some((item) => Object.entries(goal).every(([key, value]) => (item as unknown as Record<string, unknown>)[key] === value))).map((goal) => goal.title);
   const missingMemories = memories.filter((memory) => !savedMemories.some((item) => Object.entries(memory).every(([key, value]) => (item as unknown as Record<string, unknown>)[key] === value))).map((memory) => memory.title);
   const complete = !missingFields.length && !missingGoals.length && !missingMemories.length && (!logoName || Boolean(verified.logoFileId));
-  return { complete, action: args.action as "create" | "update", alreadyExisted, businessId: business.id, businessName: business.name, savedFields: profile, goalIds: savedGoals.filter((item) => goals.some((goal) => goal.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.id), memoryIds: savedMemories.filter((item) => memories.some((memory) => memory.title.toLocaleLowerCase() === item.title.toLocaleLowerCase() && memory.content === item.content)).map((item) => item.id), logoFileId: verified.logoFileId ?? null, missingFields, missingGoals, missingMemories };
+  return { complete, action: args.action as "create" | "update", alreadyExisted, businessId: business.id, businessName: business.name, savedFields: profile, goalIds: savedGoals.filter((item) => goals.some((goal) => goal.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.id), memoryIds: savedMemories.filter((item) => memories.some((memory) => memory.title.toLocaleLowerCase() === item.title.toLocaleLowerCase() && memory.content === item.content)).map((item) => item.id), logoFileId: verified.logoFileId ?? null, goalTitles: savedGoals.filter((item) => goals.some((goal) => goal.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.title), memoryFacts: savedMemories.filter((item) => memories.some((memory) => memory.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.content), missingFields, missingGoals, missingMemories };
 }

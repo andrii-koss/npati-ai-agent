@@ -17,7 +17,7 @@ import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, runChatToolLoop, type ChatToolExecutionResult } from "./chat-tool-orchestrator";
-import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool } from "./business-profile-native";
+import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { planStructuredChatRequest, businessPlanComplete } from "./chat-task-plan";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
@@ -1348,9 +1348,11 @@ ${localized.next}`;
     progress?: ResearchProgressListener;
     responseLanguage?: CompanyChatLanguage;
     logoAttachments?: Array<{ name: string; mimeType: string; data: Buffer; kind?: string }>;
+    plannedBusinessFields?: Record<string, string>;
+    primaryBusinessCreation?: boolean;
   }): Promise<ChatToolExecutionResult> {
     if (input.call.function.name === "npati_business_profile") {
-      const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args: input.args, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
+      const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args: input.plannedBusinessFields ? reconcilePlannedBusinessArgs(input.args, input.plannedBusinessFields, Boolean(input.primaryBusinessCreation)) : input.args, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
       return { output: outcome, metadata: { kind: "business_profile", outcome } };
     }
     if (input.call.function.name === "npati_company_action") {
@@ -1613,7 +1615,7 @@ ${localized.next}`;
         const plan = await planStructuredChatRequest(aiEngine, request, safePrompt);
         const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";
-        const needsResearch = plan?.requires_external_research !== false;
+        const needsResearch = plan?.requires_external_research === true;
         const routedRequest = { ...request, messages: plan ? [...request.messages, { role: "system" as const, content: `Internal execution plan: ${JSON.stringify(plan)}. Preserve the original user request and verify the primary outcome before responding.` }] : request.messages, toolChoice: businessPrimary ? (needsResearch ? "auto" as const : { type: "function" as const, function: { name: "npati_business_profile" } }) : routing.toolChoice };
         logToolSelectionConfiguration(routedRequest, tools, {
           conversationId: conversation?.id,
@@ -1627,7 +1629,7 @@ ${localized.next}`;
           tools: () => tools,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
-            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
+            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
@@ -1997,7 +1999,7 @@ ${localized.next}`;
         const plan = await planStructuredChatRequest(aiEngine, chatRequest, safeUserRequest);
         const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";
-        const needsResearch = plan?.requires_external_research !== false;
+        const needsResearch = plan?.requires_external_research === true;
         if (plan) chatRequest.messages.push({ role: "system", content: `Internal execution plan: ${JSON.stringify(plan)}. Preserve the original user request and verify the primary outcome before responding.` });
         chatRequest.toolChoice = businessPrimary ? (needsResearch ? "auto" : { type: "function", function: { name: "npati_business_profile" } }) : routing.toolChoice;
         logToolSelectionConfiguration(chatRequest, tools, {
@@ -2013,7 +2015,7 @@ ${localized.next}`;
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
-            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
+            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: ai.model, conversationId: conversation?.id, contextType: "none" }),
         });
