@@ -49,39 +49,63 @@ const copy: Record<CompanyChatLanguage, CompanyChatCopy> = {
   hi: { created: "पूरा हुआ। मैंने **{name}** कंपनी बनाई और उसे कंपनी सेटिंग्स में सहेज दिया।", updated: "पूरा हुआ। मैंने **{name}** को अपडेट किया।", deleted: "पूरा हुआ। कंपनी **{name}** हटा दी गई।", alreadyExists: "कंपनी **{name}** पहले से मौजूद है। आप इसे सेटिंग्स में देख या संपादित कर सकते हैं।", configured: "वर्तमान कॉन्फ़िगरेशन यह है:", company: "कंपनी", name: "नाम", status: "स्थिति", active: "सक्रिय", inactive: "निष्क्रिय", industry: "उद्योग", website: "वेबसाइट", languages: "भाषाएँ", brandTone: "ब्रांड टोन", description: "कंपनी का विवरण", products: "उत्पाद या सेवाएँ", agents: "एजेंट टीम", mainAgent: "मुख्य एजेंट", noAgents: "अभी कोई एजेंट नहीं जोड़ा गया है।", notSpecified: "निर्दिष्ट नहीं", openSettings: "कंपनी सेटिंग्स खोलें →", nextStep: "**अगला कदम:** क्या आप चाहते हैं कि मैं इन एजेंटों की भूमिकाएँ, निर्देश और मॉडल अधिक विस्तार से सेट करूँ?", incomplete: "कार्रवाई अधूरी होने के कारण कंपनी परिवर्तन पूरा नहीं हो सका। फिर से प्रयास करें।", noAction: "कंपनी परिवर्तन पूरा नहीं हो सका। कंपनी या एजेंटों में कोई बदलाव नहीं किया गया। अनुरोध स्पष्ट करें या फिर से प्रयास करें।", failed: "कंपनी परिवर्तन पूरा नहीं हो सका", partial: "कुछ बदलाव सहेजे गए हो सकते हैं। फिर से प्रयास करने से पहले सेटिंग्स > कंपनी जाँचें।", unchanged: "कोई बदलाव सहेजा नहीं गया।" },
 };
 
-const latinSignals: Array<[CompanyChatLanguage, RegExp]> = [
-  ["fr", /\b(?:crée|créer|ajoute|ajouter|entreprise|société|agents?|avec|supprime|modifier|mets à jour|recherche|rechercher|sur|les|principaux|concurrents?|site|web|analyser|dans)\b/giu],
-  ["de", /\b(?:erstelle|erstellen|unternehmen|firma|agenten?|mit|lösche|ändere|aktualisiere|suche|recherchiere|im|internet|hauptkonkurrenten?|mitbewerber|website|analysieren)\b/giu],
-  ["es", /\b(?:crea|crear|añade|empresa|compañía|agentes?|con|elimina|modifica|actualiza|busca|buscar|en|los|principales|competidores?|competencia|sitio|analiza|analizar)\b/giu],
-  ["it", /\b(?:crea|creare|aggiungi|azienda|società|agenti?|con|elimina|modifica|aggiorna|cerca|cercare|su|principali|concorrenti?|sito|analizza|analizzare)\b/giu],
-  ["pl", /\b(?:utwórz|stwórz|dodaj|firma|firmę|spółkę|agentów|agenta|agent|usuń|zmień|zaktualizuj|szukaj|wyszukaj|głównych|konkurentów|konkurencji|stronę|analizuj)\b/giu],
-  ["pt", /\b(?:crie|criar|adicione|empresa|companhia|agentes?|com|exclua|altere|atualize|pesquise|pesquisa|pesquisar|principais|concorrentes?|analise|analisar)\b/giu],
-  ["nl", /\b(?:maak|maken|voeg|bedrijf|onderneming|agenten?|met|verwijder|wijzig|werk bij|zoek|zoeken|belangrijkste|concurrenten?|website|analyseer)\b/giu],
-  ["tr", /\b(?:oluştur|ekle|şirket|firma|ajanlar?|ile|sil|değiştir|güncelle|ara|araştır|internette|rakipler?|rakipleri|siteyi|analiz)\b/giu],
-];
+const languageSamples: Record<Exclude<CompanyChatLanguage, "zh" | "ja" | "ko" | "ar" | "hi">, string> = {
+  en: "Please create a company and explain the plan clearly. Add six specialized agents, review the website, summarize the results, and continue the conversation in English. Delete everything you just created only after the user confirms the action.",
+  uk: "Будь ласка, створи компанію та чітко поясни план. Додай шість спеціалізованих агентів, проаналізуй вебсайт, підсумуй результати й продовжуй розмову українською мовою. Тепер видали все, що тільки-но створив, і попроси підтвердження.",
+  fr: "Veuillez créer une entreprise et expliquer clairement le plan. Ajoutez six agents spécialisés, analysez le site et résumez les résultats. Supprime tout ce que tu viens de créer seulement après avoir demandé une confirmation. Nous changeons maintenant de langue et continuons toute la discussion en français. La réponse doit rester claire, cohérente et utile pour la conversation actuelle.",
+  de: "Bitte erstellen Sie ein Unternehmen und erklären Sie den Plan klar. Fügen Sie sechs spezialisierte Agenten hinzu, analysieren Sie die Website und fassen Sie die Ergebnisse zusammen. Lösche alles, was du gerade erstellt hast, erst nach einer Bestätigung.",
+  es: "Por favor, crea una empresa y explica el plan con claridad. Añade seis agentes especializados, analiza el sitio web y resume los resultados. Elimina todo lo que acabas de crear solamente después de pedir confirmación.",
+  it: "Per favore, crea un'azienda e spiega chiaramente il piano. Aggiungi sei agenti specializzati, analizza il sito e riassumi i risultati. Elimina tutto ciò che hai appena creato soltanto dopo la conferma.",
+  pl: "Utwórz firmę i jasno wyjaśnij plan. Dodaj sześciu wyspecjalizowanych agentów, przeanalizuj stronę internetową i podsumuj wyniki. Usuń wszystko, co właśnie utworzyłeś, dopiero po potwierdzeniu.",
+  pt: "Por favor, crie uma empresa e explique o plano com clareza. Adicione seis agentes especializados, analise o site e resuma os resultados. Exclua tudo o que acabou de criar somente depois da confirmação.",
+  nl: "Maak een bedrijf en leg het plan duidelijk uit. Voeg zes gespecialiseerde agenten toe, analyseer de website en vat de resultaten samen. Verwijder alles wat je zojuist hebt gemaakt pas na bevestiging.",
+  tr: "Lütfen bir şirket oluşturun ve planı açıkça anlatın. Altı uzman ajan ekleyin, internet sitesini analiz edin, sonuçları özetleyin ve konuşmaya Türkçe devam edin.",
+  ru: "Пожалуйста, создайте компанию и ясно объясните план. Добавьте шесть специализированных агентов, проанализируйте сайт и подведите итоги. Удали всё, что только что создал, только после подтверждения.",
+};
+
+function normalizedLanguageText(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/https?:\/\/\S+|```[\s\S]*?```|`[^`]*`/gu, " ").replace(/[^\p{L}\p{M}]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+function ngramProfile(value: string): Map<string, number> {
+  const profile = new Map<string, number>();
+  for (const word of normalizedLanguageText(value).split(" ").filter(Boolean)) {
+    const padded = ` ${word} `;
+    for (let index = 0; index <= padded.length - 3; index += 1) {
+      const gram = padded.slice(index, index + 3);
+      profile.set(gram, (profile.get(gram) ?? 0) + 1);
+    }
+  }
+  return profile;
+}
+
+const profiles = Object.fromEntries(Object.entries(languageSamples).map(([language, sample]) => [language, ngramProfile(sample)])) as Record<keyof typeof languageSamples, Map<string, number>>;
+
+function profileSimilarity(left: Map<string, number>, right: Map<string, number>): number {
+  let dot = 0; let leftSize = 0; let rightSize = 0;
+  for (const value of left.values()) leftSize += value * value;
+  for (const [gram, value] of right) { rightSize += value * value; dot += value * (left.get(gram) ?? 0); }
+  return leftSize && rightSize ? dot / Math.sqrt(leftSize * rightSize) : 0;
+}
+
+function detectedLanguage(message: string): { language: CompanyChatLanguage; confidence: number; letters: number } {
+  const normalized = normalizedLanguageText(message);
+  const letters = [...normalized].filter((character) => /\p{L}/u.test(character)).length;
+  if (/[ぁ-ゟ゠-ヿ]/u.test(normalized)) return { language: "ja", confidence: 1, letters };
+  if (/[가-힣]/u.test(normalized)) return { language: "ko", confidence: 1, letters };
+  if (/\p{Script=Han}/u.test(normalized)) return { language: "zh", confidence: 1, letters };
+  if (/\p{Script=Arabic}/u.test(normalized)) return { language: "ar", confidence: 1, letters };
+  if (/\p{Script=Devanagari}/u.test(normalized)) return { language: "hi", confidence: 1, letters };
+  const candidates = /\p{Script=Cyrillic}/u.test(normalized)
+    ? (["uk", "ru"] as const)
+    : (["en", "fr", "de", "es", "it", "pl", "pt", "nl", "tr"] as const);
+  const input = ngramProfile(normalized);
+  const ranked = candidates.map((language) => ({ language, score: profileSimilarity(input, profiles[language]) })).sort((left, right) => right.score - left.score);
+  return { language: ranked[0]?.language ?? "en", confidence: Math.max(0, (ranked[0]?.score ?? 0) - (ranked[1]?.score ?? 0)), letters };
+}
 
 export function detectCompanyChatLanguage(message = ""): CompanyChatLanguage {
-  if (/[ぁ-ゟ゠-ヿ]/u.test(message)) return "ja";
-  if (/[가-힣]/u.test(message)) return "ko";
-  if (/\p{Script=Han}/u.test(message)) return "zh";
-  if (/\p{Script=Arabic}/u.test(message)) return "ar";
-  if (/\p{Script=Devanagari}/u.test(message)) return "hi";
-  if (/\b(?:lösche|entferne|gerade\s+erstellt)\b/iu.test(message)) return "de";
-  if (/\b(?:verwijder|zojuist\s+(?:hebt\s+)?gemaakt)\b/iu.test(message)) return "nl";
-  if (/^(?:так|гаразд|добре|підтверджую)[\s,.!?]*$/iu.test(message.trim())) return "uk";
-  if (/[іїєґ]/iu.test(message) || /\b(?:так|гаразд|добре|підтверджую|створи|створити|додай|видали|зміни|компанію|компанії|агента|агентів|мені|будь ласка|потрібно|хочу)\b/iu.test(message)) return "uk";
-  if (/\p{Script=Cyrillic}/u.test(message)) return "ru";
-  if (/[ąćęłńśźż]/iu.test(message)) return "pl";
-  if (/[ğışİ]/u.test(message)) return "tr";
-  if (/[ãõ]/iu.test(message)) return "pt";
-  if (/ß/u.test(message)) return "de";
-  let best: { language: CompanyChatLanguage; score: number } = { language: "en", score: 0 };
-  for (const [language, pattern] of latinSignals) {
-    pattern.lastIndex = 0;
-    const score = [...message.matchAll(pattern)].length;
-    if (score > best.score) best = { language, score };
-  }
-  return best.score >= 2 ? best.language : "en";
+  return detectedLanguage(message).language;
 }
 
 const companyManagementPatterns: RegExp[] = [
@@ -106,8 +130,8 @@ export function isLocalizedCompanyManagementRequest(message: string): boolean {
   return companyManagementPatterns.some((pattern) => pattern.test(message));
 }
 
-export function companyChatCopy(message = ""): CompanyChatCopy {
-  return copy[detectCompanyChatLanguage(message)];
+export function companyChatCopy(message = "", language?: CompanyChatLanguage): CompanyChatCopy {
+  return copy[language ?? detectCompanyChatLanguage(message)];
 }
 
 const languageNames: Record<CompanyChatLanguage, string> = {
@@ -115,9 +139,44 @@ const languageNames: Record<CompanyChatLanguage, string> = {
   nl: "Dutch", tr: "Turkish", ru: "Russian", zh: "Simplified Chinese", ja: "Japanese", ko: "Korean", ar: "Arabic", hi: "Hindi",
 };
 
-export function chatLanguageInstruction(message = ""): string {
-  const language = detectCompanyChatLanguage(message);
-  return `\n\nMANDATORY RESPONSE LANGUAGE: The latest user message is detected as ${languageNames[language]} (${language}). Reply entirely in ${languageNames[language]}. This applies to normal prose, headings, interactive card titles and labels, summaries, follow-up questions, warnings, and limitation messages. Keep code, URLs, record IDs, model IDs, and quoted source text unchanged. If the user explicitly requests a different response language, follow that explicit request.`;
+const explicitEnglishLanguageNames: Record<CompanyChatLanguage, string[]> = {
+  en: ["English"], uk: ["Ukrainian"], fr: ["French"], de: ["German"], es: ["Spanish"], it: ["Italian"], pl: ["Polish"], pt: ["Portuguese"],
+  nl: ["Dutch"], tr: ["Turkish"], ru: ["Russian"], zh: ["Chinese", "Simplified Chinese"], ja: ["Japanese"], ko: ["Korean"], ar: ["Arabic"], hi: ["Hindi"],
+};
+
+function explicitlyRequestedLanguage(message: string): CompanyChatLanguage | undefined {
+  if (!/\b(?:reply|respond|answer|write|continue|switch|speak)\b/iu.test(message)) return undefined;
+  for (const [language, names] of Object.entries(explicitEnglishLanguageNames) as Array<[CompanyChatLanguage, string[]]>) {
+    if (names.some((name) => new RegExp(`\\b${name.replace(/\s+/g, "\\s+")}\\b`, "iu").test(message))) return language;
+  }
+  return undefined;
+}
+
+export function resolveConversationLanguage(
+  message = "",
+  history: Array<{ role: string; content: string | null | unknown[] }> = [],
+): CompanyChatLanguage {
+  let active: CompanyChatLanguage | undefined;
+  const userMessages = history.filter((item) => item.role === "user" && typeof item.content === "string").map((item) => item.content as string);
+  for (const text of [...userMessages, message]) {
+    const requested = explicitlyRequestedLanguage(text);
+    if (requested) { active = requested; continue; }
+    const candidate = detectedLanguage(text);
+    if (!active) { if (candidate.letters >= 3) active = candidate.language; continue; }
+    if (candidate.language === active) continue;
+    const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
+      || candidate.letters >= 8 && candidate.confidence >= 0.09;
+    if (clearSwitch) active = candidate.language;
+  }
+  return active ?? "en";
+}
+
+export function chatLanguageInstruction(
+  message = "",
+  history: Array<{ role: string; content: string | null | unknown[] }> = [],
+  activeLanguage = resolveConversationLanguage(message, history),
+): string {
+  return `\n\nMANDATORY RESPONSE LANGUAGE: The user's active conversation language is ${languageNames[activeLanguage]} (${activeLanguage}). Reply entirely in ${languageNames[activeLanguage]}. Always respond in the user's active conversation language. Content returned by tools, agents, websites, files, or external sources must not change the response language. Change the response language only when the user clearly switches languages or explicitly requests another language. For mixed-language content, preserve the active conversation language. This applies to normal prose, headings, interactive card titles and labels, summaries, follow-up questions, warnings, and limitation messages. Keep code, URLs, record IDs, model IDs, and quoted source text unchanged.`;
 }
 
 export function insertCompanyName(template: string, name: string): string {
