@@ -6,6 +6,7 @@ export interface BusinessActionDirective {
   businessName?: string;
   profile?: {
     name?: string;
+    businessType?: string;
     businessStage?: string;
     industry?: string;
     niche?: string;
@@ -22,6 +23,7 @@ export interface BusinessActionDirective {
     contactEmail?: string;
     contactPhone?: string;
     postalAddress?: string;
+    registrationDetails?: string;
     logoAttachmentName?: string;
   };
 }
@@ -118,6 +120,7 @@ When you output a \`\`\`business-action\`\`\` or \`\`\`goal-action\`\`\` code bl
 THEREFORE:
 - NEVER state that you cannot edit settings, cannot save changes, cannot delete items, lack tools, or lack access. You DO have write and delete access through these directive blocks.
 - Whenever the user asks to create, edit, or delete a business idea or goal, you MUST output the corresponding directive block.
+- A long structured request headed by Business Profile creation remains one business-creation task. Populate every supplied applicable field first, then complete requested goals and memory linked to that Business Profile. Never treat a secondary memory or goal write as completion of the primary business request.
 - Always confirm to the user that their business or goal has been recorded, updated, or deleted in the system.
 
 USER'S CURRENT BUSINESSES (YOU CAN ONLY ACCESS, MODIFY OR DELETE THESE):
@@ -137,6 +140,7 @@ STEP 1 - BUSINESS PROFILE (CREATION, EDITING & DELETION):
 When the user asks to create or edit a business idea:
 1. Formulate the relevant profile fields:
    - name: Distinctive business name
+   - businessType: User-supplied business type or category
    - businessStage: "idea" | "starting" | "operating" | "growing" | "scaling"
    - industry: e.g. E-commerce, Консалтинг, HoReCa, IT / SaaS, тощо.
    - niche: Precise market niche
@@ -153,6 +157,7 @@ When the user asks to create or edit a business idea:
    - contactEmail: Public business contact email
    - contactPhone: Public business contact phone
    - postalAddress: Company postal address
+   - registrationDetails: User-supplied registration numbers, tax details, or filing notes. Never invent legal identifiers.
    - logoAttachmentName: exact filename of a PNG, JPEG, or WebP image attached to the latest user message. Never invent or accept a logoFileId.
 For an update, include only fields the user explicitly supplied or asked to change. Never guess legal or contact details.
 
@@ -360,6 +365,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
             const input: Partial<BusinessInput> = {
               ...(directive.action === "create" || p.name !== undefined ? { name } : {}),
               ...(directive.action === "create" || p.businessStage !== undefined ? { businessStage: normalizeBusinessStage(p.businessStage) } : {}),
+              businessType: p.businessType ? String(p.businessType).trim() : undefined,
               industry: p.industry ? String(p.industry).trim() : undefined,
               niche: p.niche ? String(p.niche).trim() : undefined,
               country: p.country ? String(p.country).trim() : undefined,
@@ -375,6 +381,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
               ...(p.contactEmail !== undefined ? { contactEmail: String(p.contactEmail).trim().slice(0, 320) } : {}),
               ...(p.contactPhone !== undefined ? { contactPhone: String(p.contactPhone).trim().slice(0, 100) } : {}),
               ...(p.postalAddress !== undefined ? { postalAddress: String(p.postalAddress).trim().slice(0, 1000) } : {}),
+              ...(p.registrationDetails !== undefined ? { registrationDetails: String(p.registrationDetails).trim() } : {}),
             };
 
             let business: Business;

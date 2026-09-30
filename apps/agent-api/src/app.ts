@@ -17,6 +17,8 @@ import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, runChatToolLoop, type ChatToolExecutionResult } from "./chat-tool-orchestrator";
+import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool } from "./business-profile-native";
+import { planStructuredChatRequest, businessPlanComplete } from "./chat-task-plan";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
@@ -1255,8 +1257,8 @@ ${localized.next}`;
   }
 
   function availableCoreChatTools(auth: AuthContext): ChatToolDefinition[] {
-    return CORE_CHAT_TOOLS.filter((tool) => {
-      if (tool.function.name === "npati_company_action") return auth.permissions.includes("business:manage");
+    return [...CORE_CHAT_TOOLS, BUSINESS_PROFILE_TOOL].filter((tool) => {
+      if (tool.function.name === "npati_company_action" || tool.function.name === "npati_business_profile") return auth.permissions.includes("business:manage");
       if (tool.function.name === "web_search" || tool.function.name === "web_fetch") return Boolean(webResearch);
       return false;
     });
@@ -1344,7 +1346,12 @@ ${localized.next}`;
     signal?: AbortSignal;
     progress?: ResearchProgressListener;
     responseLanguage?: CompanyChatLanguage;
+    logoAttachments?: Array<{ name: string; mimeType: string; data: Buffer; kind?: string }>;
   }): Promise<ChatToolExecutionResult> {
+    if (input.call.function.name === "npati_business_profile") {
+      const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args: input.args, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
+      return { output: outcome, metadata: { kind: "business_profile", outcome } };
+    }
     if (input.call.function.name === "npati_company_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Company management permission is required");
       const directive = `\`\`\`company-action\n${JSON.stringify(input.args)}\n\`\`\``;
@@ -1597,11 +1604,15 @@ ${localized.next}`;
     const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
+    let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
         const tools = availableCoreChatTools(auth);
+        const plan = await planStructuredChatRequest(aiEngine, request, safePrompt);
         const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
-        const routedRequest = { ...request, toolChoice: routing.toolChoice };
+        const businessPrimary = plan?.primary_action === "create_business_profile";
+        const needsResearch = plan?.requires_external_research !== false;
+        const routedRequest = { ...request, messages: plan ? [...request.messages, { role: "system" as const, content: `Internal execution plan: ${JSON.stringify(plan)}. Preserve the original user request and verify the primary outcome before responding.` }] : request.messages, toolChoice: businessPrimary ? (needsResearch ? "auto" as const : { type: "function" as const, function: { name: "npati_business_profile" } }) : routing.toolChoice };
         logToolSelectionConfiguration(routedRequest, tools, {
           conversationId: conversation?.id,
           contextType: "business",
@@ -1612,13 +1623,18 @@ ${localized.next}`;
           ai: aiEngine,
           request: routedRequest,
           tools: () => tools,
+          primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
-            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
+            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
         for (const item of loop.metadata) {
           if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
+          if (item.kind === "business_profile" && item.outcome) {
+            const outcome = item.outcome as { action: "create" | "update"; businessId: string };
+            nativeBusinessAction = { action: outcome.action, business: await workspaceStore.getUserBusiness(auth, outcome.businessId), businessId: outcome.businessId };
+          }
           if (item.kind === "company" && item.companyAction) {
             nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
@@ -1626,6 +1642,7 @@ ${localized.next}`;
         }
         return loop.result;
       } catch (error) {
+        if ((error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;
         app.log.warn({ err: error, model: context.ai.model }, "Business native tool loop failed; using prompt-compatible fallback");
         return aiEngine.chat(request);
       }
@@ -1654,14 +1671,14 @@ ${localized.next}`;
     });
     const companyAction = nativeCompanyAction
       ? { cleanText: result.message || nativeCompanyCleanText, companyAction: nativeCompanyAction }
-      : EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
+      : nativeBusinessAction || EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, responseLanguage: activeConversationLanguage });
-    const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
+    const workspaceAction = nativeBusinessAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, businessAction: executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
+    return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
   async function runNeutralMessage(
@@ -1964,11 +1981,16 @@ ${localized.next}`;
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
+    let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     if (nativeToolCalling) {
       try {
         const tools = availableCoreChatTools(auth);
+        const plan = await planStructuredChatRequest(aiEngine, chatRequest, safeUserRequest);
         const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
-        chatRequest.toolChoice = routing.toolChoice;
+        const businessPrimary = plan?.primary_action === "create_business_profile";
+        const needsResearch = plan?.requires_external_research !== false;
+        if (plan) chatRequest.messages.push({ role: "system", content: `Internal execution plan: ${JSON.stringify(plan)}. Preserve the original user request and verify the primary outcome before responding.` });
+        chatRequest.toolChoice = businessPrimary ? (needsResearch ? "auto" : { type: "function", function: { name: "npati_business_profile" } }) : routing.toolChoice;
         logToolSelectionConfiguration(chatRequest, tools, {
           conversationId: conversation?.id,
           contextType: "none",
@@ -1979,9 +2001,10 @@ ${localized.next}`;
           ai: aiEngine,
           request: chatRequest,
           tools: () => tools,
+          primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
-            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
+            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: ai.model, conversationId: conversation?.id, contextType: "none" }),
         });
@@ -1989,6 +2012,10 @@ ${localized.next}`;
         content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
         for (const item of loop.metadata) {
           if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
+          if (item.kind === "business_profile" && item.outcome) {
+            const outcome = item.outcome as { action: "create" | "update"; businessId: string };
+            nativeBusinessAction = { action: outcome.action, business: await workspaceStore.getUserBusiness(auth, outcome.businessId), businessId: outcome.businessId };
+          }
           if (item.kind === "company" && item.companyAction) {
             nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
@@ -1996,10 +2023,11 @@ ${localized.next}`;
         }
         if (content && !emailSettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta?.(content);
       } catch (error) {
+        if ((error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;
         app.log.warn({ err: error, model: ai.model }, "Native chat tool loop failed; using prompt-compatible fallback");
       }
     }
-    if (!content && !nativeCompanyAction && !companySettingsRequest) {
+    if (!content && !nativeCompanyAction && !nativeBusinessAction && !companySettingsRequest) {
       if(onDelta){
         for await(const chunk of aiEngine.stream(chatRequest)){
           if(signal?.aborted)throw signal.reason ?? new Error("Chat stream was cancelled");
@@ -2115,7 +2143,7 @@ ${localized.next}`;
     });
     const companyAction = nativeCompanyAction
       ? { cleanText: content || nativeCompanyCleanText, companyAction: nativeCompanyAction }
-      : emailSettingsRequest || workspaceSettingsRequest
+      : nativeBusinessAction || emailSettingsRequest || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safeUserRequest, {
           model: ai.model,
@@ -2125,7 +2153,7 @@ ${localized.next}`;
           researchContext: research?.context,
           responseLanguage: activeConversationLanguage,
         });
-    const workspaceAction = companySettingsRequest
+    const workspaceAction = nativeBusinessAction || companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
     content = workspaceAction.cleanText;
@@ -2137,7 +2165,7 @@ ${localized.next}`;
     return {
       message: content,
       suggestedActions: [],
-      businessAction: executedAction.businessAction,
+      businessAction: nativeBusinessAction ?? executedAction.businessAction,
       goalAction: executedAction.goalAction,
       emailAction: emailAction.emailAction,
       emailActions: emailAction.emailActions,
@@ -2531,7 +2559,7 @@ ${localized.next}`;
         type: "object",
         additionalProperties: false,
         properties: {
-          message: { type: "string", minLength: 1, maxLength: 10_000 },
+          message: { type: "string", minLength: 1, maxLength: 100_000 },
           conversationId: { type: "string", minLength: 1, maxLength: 100 },
           attachments: {
             type: "array", maxItems: 3,
