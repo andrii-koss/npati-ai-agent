@@ -89,6 +89,7 @@ export interface ChatToolLoopResult {
   messages: ChatRequest["messages"];
   traces: ChatToolTrace[];
   metadata: Record<string, unknown>[];
+  completionFallback?: "model_error" | "plan_incomplete";
 }
 
 export interface ChatToolModelStep {
@@ -129,16 +130,28 @@ export async function runChatToolLoop(input: {
   const metadata: Record<string, unknown>[] = [];
   const maxSteps = Math.max(1, Math.min(input.maxSteps ?? 8, 16));
   let result: ChatResult = { content: "" };
+  let completionReminders = 0;
 
   for (let step = 0; step < maxSteps; step += 1) {
     const tools = input.tools ? await input.tools() : CORE_CHAT_TOOLS;
     const toolChoice = tools.length
       ? step === 0 ? input.request.toolChoice ?? "auto" : "auto"
       : "none";
-    result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+    try {
+      result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+    } catch (error) {
+      if (metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+        return { result: { content: "" }, messages, traces, metadata, completionFallback: "model_error" };
+      }
+      throw error;
+    }
     input.onModelStep?.({ step, tools, toolChoice, result });
     if (!result.toolCalls?.length) {
       if (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata)) return { result, messages, traces, metadata };
+      completionReminders += 1;
+      if (completionReminders >= 2 && metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+        return { result: { content: "" }, messages, traces, metadata, completionFallback: "plan_incomplete" };
+      }
       messages.push({ role: "system", content: "The original primary requested outcome has not been verified. Continue the remaining required tool steps using the complete original user request. Do not claim completion or stop after a secondary action." });
       continue;
     }
@@ -167,5 +180,8 @@ export async function runChatToolLoop(input: {
     }
   }
 
+  if (metadata.some((item) => item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId)) {
+    return { result: { content: "" }, messages, traces, metadata, completionFallback: "plan_incomplete" };
+  }
   throw Object.assign(new Error(`Tool loop exceeded ${maxSteps} model iterations`), { code: input.primaryOutcomeComplete ? "TOOL_PRIMARY_INCOMPLETE" : "TOOL_LOOP_LIMIT" });
 }

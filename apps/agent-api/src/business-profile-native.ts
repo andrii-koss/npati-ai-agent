@@ -48,16 +48,19 @@ export async function executeBusinessProfileTool(input: {
   const matches = logoName ? (input.logoAttachments ?? []).filter((item) => item.name.toLocaleLowerCase() === logoName.toLocaleLowerCase()) : [];
   if (logoName && (matches.length !== 1 || !input.persistLogo)) throw new Error("Requested logo attachment is unavailable or ambiguous");
   let business: Business;
+  let alreadyExisted = false;
   const owned = await store.listUserBusinesses(auth);
   if (args.action === "create") {
     if (!profile.name) throw new Error("Business name is required");
     const existing = owned.filter((item) => item.name.toLocaleLowerCase() === profile.name!.toLocaleLowerCase());
     if (existing.length > 1) throw new Error("Business name is ambiguous");
+    alreadyExisted = Boolean(existing[0]);
     business = existing[0] ? await store.updateUserBusiness(auth, existing[0].id, profile as Partial<BusinessInput>) : await store.createBusiness(auth, profile as BusinessInput);
   } else {
     const businessId = typeof args.businessId === "string" ? args.businessId : "";
     const target = businessId ? owned.find((item) => item.id === businessId) : owned.length === 1 ? owned[0] : undefined;
     if (!target) throw new Error("Owned Business Profile target is missing or ambiguous");
+    alreadyExisted = true;
     business = await store.updateUserBusiness(auth, target.id, profile as Partial<BusinessInput>);
   }
   if (matches[0] && input.persistLogo && !business.logoFileId) business = await input.persistLogo(auth, business.id, matches[0]);
@@ -87,5 +90,5 @@ export async function executeBusinessProfileTool(input: {
   const missingGoals = goals.filter((goal) => !savedGoals.some((item) => Object.entries(goal).every(([key, value]) => (item as unknown as Record<string, unknown>)[key] === value))).map((goal) => goal.title);
   const missingMemories = memories.filter((memory) => !savedMemories.some((item) => Object.entries(memory).every(([key, value]) => (item as unknown as Record<string, unknown>)[key] === value))).map((memory) => memory.title);
   const complete = !missingFields.length && !missingGoals.length && !missingMemories.length && (!logoName || Boolean(verified.logoFileId));
-  return { complete, action: args.action, businessId: business.id, businessName: business.name, savedFields: profile, goalIds: savedGoals.filter((item) => goals.some((goal) => goal.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.id), memoryIds: savedMemories.filter((item) => memories.some((memory) => memory.title.toLocaleLowerCase() === item.title.toLocaleLowerCase() && memory.content === item.content)).map((item) => item.id), logoFileId: verified.logoFileId ?? null, missingFields, missingGoals, missingMemories };
+  return { complete, action: args.action as "create" | "update", alreadyExisted, businessId: business.id, businessName: business.name, savedFields: profile, goalIds: savedGoals.filter((item) => goals.some((goal) => goal.title.toLocaleLowerCase() === item.title.toLocaleLowerCase())).map((item) => item.id), memoryIds: savedMemories.filter((item) => memories.some((memory) => memory.title.toLocaleLowerCase() === item.title.toLocaleLowerCase() && memory.content === item.content)).map((item) => item.id), logoFileId: verified.logoFileId ?? null, missingFields, missingGoals, missingMemories };
 }

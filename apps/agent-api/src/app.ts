@@ -18,6 +18,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, runChatToolLoop, type ChatToolExecutionResult } from "./chat-tool-orchestrator";
 import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool } from "./business-profile-native";
+import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { planStructuredChatRequest, businessPlanComplete } from "./chat-task-plan";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
@@ -1604,6 +1605,7 @@ ${localized.next}`;
     const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
+    let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
@@ -1640,6 +1642,11 @@ ${localized.next}`;
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
           }
         }
+        const businessSummary = summarizeBusinessProfileChat(loop.metadata, activeConversationLanguage, plan);
+        if (businessSummary) {
+          nativeBusinessMessage = businessSummary.message;
+          nativeBusinessAction = { action: businessSummary.createdThisTurn ? "create" : businessSummary.outcome.action, business: await workspaceStore.getUserBusiness(auth, businessSummary.outcome.businessId), businessId: businessSummary.outcome.businessId };
+        }
         return loop.result;
       } catch (error) {
         if ((error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;
@@ -1658,6 +1665,7 @@ ${localized.next}`;
       signal,
       chat: nativeChat,
     });
+    if (nativeBusinessMessage) result.message = nativeBusinessMessage;
     if (nativeToolCalling && research?.sources.length) result.message = attachResearchSources(result.message, research);
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
@@ -1981,6 +1989,7 @@ ${localized.next}`;
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
+    let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     if (nativeToolCalling) {
       try {
@@ -2020,6 +2029,12 @@ ${localized.next}`;
             nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
           }
+        }
+        const businessSummary = summarizeBusinessProfileChat(loop.metadata, activeConversationLanguage, plan);
+        if (businessSummary) {
+          nativeBusinessMessage = businessSummary.message;
+          nativeBusinessAction = { action: businessSummary.createdThisTurn ? "create" : businessSummary.outcome.action, business: await workspaceStore.getUserBusiness(auth, businessSummary.outcome.businessId), businessId: businessSummary.outcome.businessId };
+          content = nativeBusinessMessage;
         }
         if (content && !emailSettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta?.(content);
       } catch (error) {
