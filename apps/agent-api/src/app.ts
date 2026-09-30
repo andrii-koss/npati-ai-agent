@@ -18,7 +18,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, runChatToolLoop, type ChatToolExecutionResult } from "./chat-tool-orchestrator";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
-import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
+import { chatLanguageInstruction, detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
 import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, isCompanyDeleteIntent } from "./company-delete-i18n";
 import { AIPreferencesStore } from "./ai-preferences";
@@ -1209,21 +1209,21 @@ ${localized.next}`;
     };
   }
 
-  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; researchContext?: string }) {
+  async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; researchContext?: string; responseLanguage?: CompanyChatLanguage }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     const aiRefinement = Boolean(requestMessage && CompanyChatActions.isDetailedAgentRefinementRequest(requestMessage));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
     const deleteConfirmation = requestMessage && managementRequest
-      ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId)
+      ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage)
       : undefined;
     if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined };
     const addedModels = (await aiPreferences.get(auth)).addedModels;
     let actionText = requestMessage && managementRequest
-      ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId) ?? content
+      ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage) ?? content
       : content;
     if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
-        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement, route?.researchContext);
+        const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement, route?.researchContext, route?.responseLanguage);
         const planned = await aiEngine.chat({
           model: route?.model,
           fallbackModel: route?.fallbackModel,
@@ -1238,13 +1238,14 @@ ${localized.next}`;
       }
     }
     if (!/```company-action/i.test(actionText)) return {
-      cleanText: managementRequest ? CompanyChatActions.noActionMessage(requestMessage ?? "") : content,
+      cleanText: managementRequest ? CompanyChatActions.noActionMessage(requestMessage ?? "", route?.responseLanguage) : content,
       companyAction: undefined,
     };
     return CompanyChatActions.extractAndExecute(auth, actionText, workspaceStore, conversationId ?? crypto.randomUUID(), {
       allowedModelIds: addedModels.map((model) => model.id),
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       requestMessage,
+      responseLanguage: route?.responseLanguage,
       selectedCompanyId: route?.selectedCompanyId,
       preserveResponseText: aiRefinement,
       onError: (error) => app.log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Company action execution failed"),
@@ -1286,6 +1287,7 @@ ${localized.next}`;
     fallbackModel?: string;
     signal?: AbortSignal;
     progress?: ResearchProgressListener;
+    responseLanguage?: CompanyChatLanguage;
   }): Promise<ChatToolExecutionResult> {
     if (input.call.function.name === "npati_company_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Company management permission is required");
@@ -1295,6 +1297,7 @@ ${localized.next}`;
         fallbackModel: input.fallbackModel,
         signal: input.signal,
         selectedCompanyId: input.selectedCompanyId,
+        responseLanguage: input.responseLanguage,
       });
       return {
         output: { message: executed.cleanText, companyAction: executed.companyAction ?? null },
@@ -1452,6 +1455,8 @@ ${localized.next}`;
         ].filter(Boolean).join(String.fromCharCode(10, 10))
       : media.display;
     const existing = conversation ? await workspaceStore.getConversation(auth, businessId, conversation.id) : { messages: [] };
+    const languageSource = message.trim() ? SecurityPolicyEngine.protectText(message).sanitized : safePrompt;
+    const activeConversationLanguage = resolveConversationLanguage(languageSource, existing.messages);
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateConversation(auth, businessId, conversation.id, conversationTitle(media.prompt));
     }
@@ -1533,7 +1538,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
@@ -1544,7 +1549,7 @@ ${localized.next}`;
           request,
           tools: () => availableCoreChatTools(auth),
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
-            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress }),
+            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
         });
         for (const item of loop.metadata) {
@@ -1586,7 +1591,7 @@ ${localized.next}`;
       ? { cleanText: result.message || nativeCompanyCleanText, companyAction: nativeCompanyAction }
       : EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
-      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal });
+      : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, responseLanguage: activeConversationLanguage });
     const workspaceAction = await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
@@ -1640,6 +1645,7 @@ ${localized.next}`;
         ? priorExisting!.conversation
         : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
     const existing = priorExisting ?? (conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id) : { messages: [] });
+    const activeConversationLanguage = resolveConversationLanguage(safeUserRequest, existing.messages);
     let previousSpreadsheet: { name: string; mimeType: string; data: Buffer; kind: "document" } | undefined;
     let promptWithAttachmentContext = media.prompt;
     if (chatFiles && isSpreadsheetEditRequest(safeUserRequest) && !media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name))) {
@@ -1875,7 +1881,7 @@ ${localized.next}`;
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,
@@ -1902,7 +1908,7 @@ ${localized.next}`;
           tools: () => availableCoreChatTools(auth),
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
-            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress }),
+            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
         });
         chatResult = loop.result;
@@ -2043,6 +2049,7 @@ ${localized.next}`;
           signal,
           selectedCompanyId: effectiveManagementCompany?.id,
           researchContext: research?.context,
+          responseLanguage: activeConversationLanguage,
         });
     const workspaceAction = companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }

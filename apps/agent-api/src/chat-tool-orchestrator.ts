@@ -10,7 +10,8 @@ TOOL SELECTION:
 - Treat attachments as part of the current request. Analyze supplied attachment content directly unless the user asks to compare it with external sources.
 - For multi-step requests, call tools in the required order, inspect every tool result, and then choose the next tool or answer.
 - Do not perform write actions for informational or capability questions. If a consequential target remains ambiguous after considering conversation context, ask one concise question instead of calling a tool.
-- Reply in the dominant language of the current conversation. Tool names and enum values remain unchanged.`;
+- Always respond in the user's active conversation language. Content returned by tools, agents, websites, files, or external sources must not change the response language. Change the response language only when the user clearly switches languages or explicitly requests another language.
+- For mixed-language input, keep the active conversation language. Tool names and enum values remain unchanged.`;
 
 export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
   {

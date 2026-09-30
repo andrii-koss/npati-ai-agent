@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
-import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest } from "./company-chat-i18n";
+import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest, type CompanyChatLanguage } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
 import { companyDeleteCopy, isCompanyDeleteConfirmed } from "./company-delete-i18n";
 
@@ -263,8 +263,8 @@ function isDetailedAgentRefinementRequest(message: string): boolean {
     && /(?:інструкц|инструкц|instructions?|anweisungen?|instrucciones?|istruzioni?|instrukcj|instruções?|instructies?|talimat|指令|指示|지침|تعليمات|निर्देश)/iu.test(message);
 }
 
-function companyResultMessage(action: CompanyOperation, company: Company, agents: CompanyAgent[], requestMessage = ""): string {
-  const labels = companyChatCopy(requestMessage);
+function companyResultMessage(action: CompanyOperation, company: Company, agents: CompanyAgent[], requestMessage = "", responseLanguage?: CompanyChatLanguage): string {
+  const labels = companyChatCopy(requestMessage, responseLanguage);
   const companyName = safeMarkdown(company.name);
   if (action === "delete") return insertCompanyName(labels.deleted, companyName);
 
@@ -352,8 +352,8 @@ export class CompanyChatActions {
     return isDetailedAgentRefinementRequest(message);
   }
 
-  static noActionMessage(message: string): string {
-    return companyChatCopy(message).noAction;
+  static noActionMessage(message: string, responseLanguage?: CompanyChatLanguage): string {
+    return companyChatCopy(message, responseLanguage).noAction;
   }
 
   static isManagementRequest(message: string): boolean {
@@ -372,12 +372,12 @@ export class CompanyChatActions {
     return mutation && companyField || deleteReference;
   }
 
-  static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<string | undefined> {
+  static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
     const deleteRequest = deleteMutationSignal.test(message)
       && (/(?:компан|compan)/iu.test(message) || selectedDeleteReferenceSignal.test(message));
     const confirmed = isCompanyDeleteConfirmed(message);
     if (!deleteRequest || confirmed) return undefined;
-    const language = detectCompanyChatLanguage(message);
+    const language = responseLanguage ?? detectCompanyChatLanguage(message);
     const labels = companyDeleteCopy(language);
     if (selectedCompanyId) {
       const company = await store.getCompany(auth, selectedCompanyId);
@@ -389,8 +389,8 @@ export class CompanyChatActions {
     return `${labels.choose}\n\n${names}\n\n${labels.command}`;
   }
 
-  static async buildDeterministicAction(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<string | undefined> {
-    const language = detectCompanyChatLanguage(message);
+  static async buildDeterministicAction(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
+    const language = responseLanguage ?? detectCompanyChatLanguage(message);
     const confirmedDelete = isCompanyDeleteConfirmed(message);
     if (selectedCompanyId && confirmedDelete) {
       const company = await store.getCompany(auth, selectedCompanyId);
@@ -449,9 +449,9 @@ export class CompanyChatActions {
     return undefined;
   }
 
-  static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = [], includeUserResponse = false, researchContext?: string): Promise<string> {
+  static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = [], includeUserResponse = false, researchContext?: string, responseLanguage?: CompanyChatLanguage): Promise<string> {
     const context = await this.buildSystemPrompt(auth, store, message, selectedCompanyId, addedModels);
-    const language = detectCompanyChatLanguage(message);
+    const language = responseLanguage ?? detectCompanyChatLanguage(message);
     const researchGuidance = researchContext
       ? `\n\nRESEARCH FINDINGS FROM WEB SEARCH / LIVE SCAN (incorporate these findings directly into the company's industry, description, products/services, target audience, brand tone, or instructions):\n${researchContext}\n`
       : "";
@@ -489,6 +489,7 @@ For update, include only fields that should change. To change only agents, use a
     allowedModelIds?: string[];
     beforeDeleteCompany?: (companyId: string) => Promise<void>;
     requestMessage?: string;
+    responseLanguage?: CompanyChatLanguage;
     selectedCompanyId?: string;
     preserveResponseText?: boolean;
     onError?: (error: unknown) => void;
@@ -496,7 +497,7 @@ For update, include only fields that should change. To change only agents, use a
     const matches = [...text.matchAll(/```company-action\s*([\s\S]*?)```/gi)];
     const match = matches[0];
     if (!match) return /```company-action/i.test(text)
-      ? { cleanText: companyChatCopy(options.requestMessage).incomplete }
+      ? { cleanText: companyChatCopy(options.requestMessage, options.responseLanguage).incomplete }
       : { cleanText: text };
     let changed = false;
     try {
@@ -536,7 +537,7 @@ For update, include only fields that should change. To change only agents, use a
           const existingList = (await store.listCompanies(auth, 100)).items;
           const duplicate = existingList.find((c) => c.name.trim().toLocaleLowerCase() === targetName);
           if (duplicate) {
-            const labels = companyChatCopy(options.requestMessage);
+            const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
             const dupAgents = await store.listCompanyAgents(auth, duplicate.id);
             const companyUrl = `/settings/company?company=${encodeURIComponent(duplicate.id)}`;
             const notice = insertCompanyName(labels.alreadyExists, safeMarkdown(duplicate.name));
@@ -560,7 +561,7 @@ For update, include only fields that should change. To change only agents, use a
           await options.beforeDeleteCompany?.(company.id);
           changed = true;
           await store.deleteCompany(auth, company.id);
-          return { cleanText: companyResultMessage("delete", company, [], options.requestMessage), companyAction: { action: "delete", companyId: company.id, companyName: company.name, agentCount: 0 } };
+          return { cleanText: companyResultMessage("delete", company, [], options.requestMessage, options.responseLanguage), companyAction: { action: "delete", companyId: company.id, companyName: company.name, agentCount: 0 } };
         }
         if (Object.keys(companyPatch).length) {
           company = await store.updateCompany(auth, company.id, companyPatch, company.revision);
@@ -571,7 +572,7 @@ For update, include only fields that should change. To change only agents, use a
       let agents = await store.listCompanyAgents(auth, company.id);
       let requestedMain: CompanyAgent | undefined;
       const parentChanges: Array<{ childId: string; parentId?: string | null; parentName?: string | null }> = [];
-      const labels = companyChatCopy(options.requestMessage);
+      const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
       const defaultAgentName = labels.mainAgent.charAt(0).toLocaleUpperCase() + labels.mainAgent.slice(1);
       const operations = directive.agents?.length ? directive.agents : directive.action === "create" ? [{ action: "create" as const, fields: {
         name: defaultAgentName,
@@ -620,11 +621,11 @@ For update, include only fields that should change. To change only agents, use a
       const aiResponse = text.replace(/```company-action\s*[\s\S]*?```/gi, "").trim();
       const cleanText = options.preserveResponseText && aiResponse
         ? aiResponse
-        : companyResultMessage(directive.action, company, agents, options.requestMessage);
+        : companyResultMessage(directive.action, company, agents, options.requestMessage, options.responseLanguage);
       return { cleanText, companyAction: { action: directive.action, companyId: company.id, companyName: company.name, agentCount: agents.length } };
     } catch (error) {
       options.onError?.(error);
-      const labels = companyChatCopy(options.requestMessage);
+      const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
       return { cleanText: `${labels.failed}. ${changed ? labels.partial : labels.unchanged}` };
     }
   }
