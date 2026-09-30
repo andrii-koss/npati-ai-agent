@@ -67,7 +67,7 @@ describe("native chat tool selection", () => {
     let researchCalls = 0;
     const ai = engine(async (request) => {
       modelCalls += 1;
-      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch"]);
+      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch", "npati_business_profile"]);
       expect(request.toolChoice).toEqual(modelCalls === 1
         ? { type: "function", function: { name: "npati_company_action" } }
         : "auto");
@@ -140,7 +140,7 @@ describe("native chat tool selection", () => {
   it("does not execute write tools for informational questions", async () => {
     const store = new InMemoryWorkspaceStore();
     const ai = engine(async (request) => {
-      expect(request.tools).toHaveLength(3);
+      expect(request.tools).toHaveLength(4);
       return { content: "Yes. I can create companies when you explicitly ask me to do so." };
     });
     const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace, webResearch: { shouldResearch: () => true, run: vi.fn() } as any });

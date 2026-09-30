@@ -8,7 +8,7 @@ TOOL SELECTION:
 - Use web tools only when external, public, or current information is needed, or when the user explicitly asks to browse, search, scan, or research external sources.
 - Base tool selection on semantic intent and the full conversation context, not keyword matching.
 - Treat attachments as part of the current request. Analyze supplied attachment content directly unless the user asks to compare it with external sources.
-- For multi-step requests, call tools in the required order, inspect every tool result, and then choose the next tool or answer.
+- Treat a long structured prompt as one task. Identify its primary outcome, entity, supplied fields, dependencies, and completion criteria before tools. Preserve all supplied applicable values. For multi-step requests, call tools in dependency order, inspect each result, return to the original goal, and answer only after the primary outcome is verified. A successful secondary action does not complete the primary task.
 - Do not perform write actions for informational or capability questions. If a consequential target remains ambiguous after considering conversation context, ask one concise question instead of calling a tool.
 - Always respond in the user's active conversation language. Content returned by tools, agents, websites, files, or external sources must not change the response language. Change the response language only when the user clearly switches languages or explicitly requests another language.
 - For mixed-language input, keep the active conversation language. Tool names and enum values remain unchanged.`;
@@ -18,7 +18,7 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
     type: "function",
     function: {
       name: "npati_company_action",
-      description: "Create, update, or delete companies and agents stored inside NPATI. Use only for explicit NPATI management actions. Examples: 'Create NovaScale Labs'; 'Add six agents to that company'. Do NOT use for explanations, capability questions, general business advice, public research, or website analysis.",
+      description: "Create, update, or delete AI Companies and their agents stored inside NPATI. Use for explicit company/agent management. Business Profiles with stage, audience, registration, goals, and memory use npati_business_profile. Do not use for explanations, capability questions, or public research.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -122,6 +122,7 @@ export async function runChatToolLoop(input: {
   maxSteps?: number;
   onTrace?: (trace: ChatToolTrace) => void;
   onModelStep?: (event: ChatToolModelStep) => void;
+  primaryOutcomeComplete?: (metadata: Record<string, unknown>[]) => boolean;
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
   const traces: ChatToolTrace[] = [];
@@ -136,7 +137,11 @@ export async function runChatToolLoop(input: {
       : "none";
     result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
     input.onModelStep?.({ step, tools, toolChoice, result });
-    if (!result.toolCalls?.length) return { result, messages, traces, metadata };
+    if (!result.toolCalls?.length) {
+      if (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata)) return { result, messages, traces, metadata };
+      messages.push({ role: "system", content: "The original primary requested outcome has not been verified. Continue the remaining required tool steps using the complete original user request. Do not claim completion or stop after a secondary action." });
+      continue;
+    }
 
     messages.push({ role: "assistant", content: result.content || null, tool_calls: result.toolCalls });
     for (const call of result.toolCalls) {
@@ -162,5 +167,5 @@ export async function runChatToolLoop(input: {
     }
   }
 
-  throw Object.assign(new Error(`Tool loop exceeded ${maxSteps} model iterations`), { code: "TOOL_LOOP_LIMIT" });
+  throw Object.assign(new Error(`Tool loop exceeded ${maxSteps} model iterations`), { code: input.primaryOutcomeComplete ? "TOOL_PRIMARY_INCOMPLETE" : "TOOL_LOOP_LIMIT" });
 }

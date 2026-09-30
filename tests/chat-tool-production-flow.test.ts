@@ -192,7 +192,7 @@ describe("production chat endpoint tool execution", () => {
       expect(response.statusCode).toBe(200);
       expect(webResearch.run).toHaveBeenCalledTimes(1);
       expect(webResearch.run.mock.calls[0]?.[0]).toContain("https://npati.com");
-      expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch"]);
+      expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch", "npati_business_profile"]);
       expect(requests[0]?.tools?.find((tool) => tool.function.name === "web_fetch")?.function.description).toContain("Open, scan, or analyze");
       expect(requests[0]?.toolChoice).toEqual({ type: "function", function: { name: "web_fetch" } });
       expect(requests[0]?.messages.find((item) => item.role === "system")?.content).toContain(languageMarker);
