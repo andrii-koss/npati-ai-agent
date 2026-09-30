@@ -4,6 +4,7 @@ import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { buildApp } from "../apps/agent-api/src/app";
 import { pendingCompanyDelete } from "../apps/agent-api/src/pending-company-delete";
 import { companyDeleteCopy } from "../apps/agent-api/src/company-delete-i18n";
+import { CompanyChatActions } from "../apps/agent-api/src/company-chat-actions";
 
 const auth: AuthContext = { userId: "delete-followup-user", workspaceId: "delete-followup-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
 const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
@@ -69,6 +70,52 @@ describe("company deletion confirmation through production chat", () => {
       expect((await store.listCompanies(auth)).items).toHaveLength(1);
     } finally { await app.close(); }
   });
+  it("executes a native delete tool call that identifies the company by name", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "NovaScale Labs" }, "native-delete-by-name");
+    const ai: AIEngine = {
+      supportsNativeTools: () => true,
+      async chat(request) {
+        if (request.messages.at(-1)?.role === "tool") return { content: "The company was deleted." };
+        return { content: "", toolCalls: [{ id: "delete-company-by-name", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "delete", companyName: "NovaScale Labs" }) } }] };
+      },
+      async *stream() { throw new Error("Native delete must not stream a legacy answer"); },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+      searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Yes, delete company NovaScale Labs", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(result(response.body).companyAction).toMatchObject({ action: "delete", companyId: company.id });
+      expect((await store.listCompanies(auth)).items).toHaveLength(0);
+    } finally { await app.close(); }
+  });
+  it("deletes after yes when the prior confirmation was phrased by the model", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "NovaScale Labs" }, "model-confirmation-company");
+    const conversation = await store.createNeutralConversation(auth, "Delete company");
+    await store.appendNeutralMessage(auth, conversation.id, "assistant", "Do you want to delete NovaScale Labs? Reply yes to confirm.");
+    const ai: AIEngine = {
+      supportsNativeTools: () => true,
+      async chat(request) {
+        if (request.messages.at(-1)?.role === "tool") return { content: "The company was deleted." };
+        return { content: "", toolCalls: [{ id: "confirmed-company-delete", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "delete", companyName: "NovaScale Labs" }) } }] };
+      },
+      async *stream() { throw new Error("Confirmed native delete must not use the legacy stream"); },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+      searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "yes", conversationId: conversation.id, contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(result(response.body).companyAction).toMatchObject({ action: "delete", companyId: company.id });
+      expect((await store.listCompanies(auth)).items).toHaveLength(0);
+    } finally { await app.close(); }
+  });
   it("recognizes server-issued company deletion questions in all 16 languages", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(auth, { name: "NovaScale Labs" }, "localized-company");
@@ -77,6 +124,32 @@ describe("company deletion confirmation through production chat", () => {
       const question = companyDeleteCopy(language, company.name).selected;
       expect((await pendingCompanyDelete(store, auth, question))?.id, language).toBe(company.id);
     }
+  });
+  it("deletes by companyName without treating the locator as an edit", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "NovaScale Labs" }, "delete-by-name");
+    const directive = `\`\`\`company-action\n${JSON.stringify({ action: "delete", companyName: "NovaScale Labs" })}\n\`\`\``;
+    const executed = await CompanyChatActions.extractAndExecute(auth, directive, store, "delete-by-name-chat", { requestMessage: "Yes, delete company NovaScale Labs" });
+    expect(executed.companyAction).toMatchObject({ action: "delete", companyId: company.id });
+    expect((await store.listCompanies(auth)).items).toHaveLength(0);
+  });
+  it("accepts common model delete target shapes without interpreting the name as an edit", async () => {
+    for (const target of [{ name: "NovaScale Labs" }, { fields: { name: "NovaScale Labs" } }, { company: { name: "NovaScale Labs" } }]) {
+      const store = new InMemoryWorkspaceStore();
+      const company = await store.createCompany(auth, { name: "NovaScale Labs" }, "delete-target-shape-" + Object.keys(target)[0]);
+      const directive = `\`\`\`company-action\n${JSON.stringify({ action: "delete", ...target })}\n\`\`\``;
+      const executed = await CompanyChatActions.extractAndExecute(auth, directive, store, "delete-target-shape-chat", { requestMessage: "Yes, delete company NovaScale Labs" });
+      expect(executed.companyAction, JSON.stringify(target)).toMatchObject({ action: "delete", companyId: company.id });
+      expect((await store.listCompanies(auth)).items).toHaveLength(0);
+    }
+  });
+  it("uses companyName as an update locator without changing the name", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "NovaScale Labs", website: "https://old.example" }, "update-by-name");
+    const directive = `\`\`\`company-action\n${JSON.stringify({ action: "update", companyName: "NovaScale Labs", fields: { website: "https://new.example" } })}\n\`\`\``;
+    const executed = await CompanyChatActions.extractAndExecute(auth, directive, store, "update-by-name-chat", { requestMessage: "Change the NovaScale Labs website" });
+    expect(executed.companyAction).toMatchObject({ action: "update", companyId: company.id });
+    expect(await store.getCompany(auth, company.id)).toMatchObject({ name: "NovaScale Labs", website: "https://new.example" });
   });
   it("does not infer deletion from an unrelated assistant message", async () => {
     const store = new InMemoryWorkspaceStore();
