@@ -1,0 +1,44 @@
+﻿Create a new business profile for NovaScale Labs and complete all available fields in the Business Profile form.
+Use the following information:
+Business name: NovaScale Labs\
+Stage: Operating\
+Industry: Technology / Artificial Intelligence\
+Niche: AI Automation, Digital Products & Business Automation\
+Country: United States\
+Market: Small and medium-sized businesses, startups, agencies, and online businesses\
+Team: Team\
+Presence: Online & local\
+Business model: B2B SaaS, AI automation services, consulting, and digital products\
+Website:
+novascalelabs.example
+Legal company name: NovaScale Labs LLC\
+Contact email: [hello@novascalelabs.example](mailto:hello@novascalelabs.example)\
+Contact phone: +1 555 010 2026\
+Postal address: 123 Innovation Drive, Austin, TX 78701, United States\
+What does the business do?\
+NovaScale Labs helps small and medium-sized businesses automate repetitive work, improve customer support, research markets, generate leads, create content, optimize internal operations, and grow through AI-powered agents and automated workflows.
+Products or services:
+
+- AI business automation
+- Custom AI agents
+- Workflow automation
+- AI-powered customer support
+- Sales and lead generation automation
+- Market and competitor research
+- Marketing and content automation
+- Business process optimization
+- AI consulting
+- Digital products and SaaS solutions\
+  Target audience:\
+  Small and medium-sized businesses, startups, agencies, entrepreneurs, online businesses, sales teams, marketing teams, customer support teams, and companies looking to automate repetitive business operations with AI.
+  Registration details:\
+  NovaScale Labs LLC. Use the business registration information available in the system. Do not invent registration numbers, tax IDs, or government identifiers if they do not already exist.
+  Alignment & Linkages
+  If no suitable User Goal exists, create a new goal:
+  Goal: Build and grow NovaScale Labs into an AI-powered automation company that helps businesses improve efficiency, automate repetitive work, and scale operations using specialized AI agents.
+  If no suitable business memory exists, create a new memory fact:
+  Memory: NovaScale Labs is an AI automation and digital products company focused on helping small and medium-sized businesses automate operations, customer support, sales, research, marketing, and internal workflows using specialized AI agents.
+  Link this goal and memory to the NovaScale Labs business profile.
+  Company Logo
+  If a NovaScale Labs logo already exists in the available files or company assets, use it. Do not invent or substitute an unrelated logo.
+  Complete all applicable fields and create the business profile. Do not leave fields empty when the information above provides an appropriate value. Do not invent sensitive legal, registration, tax, or identity information that was not provided.

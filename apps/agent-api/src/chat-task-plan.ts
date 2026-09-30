@@ -46,12 +46,9 @@ export function businessPlanComplete(plan: StructuredChatPlan | undefined, metad
   return outcomes.some((primary) => {
     const related = outcomes.filter((item) => item.businessId === primary.businessId);
     const savedFields = Object.assign({}, ...related.map((item) => item.savedFields ?? {})) as Record<string, string>;
-    if (Object.entries(plan.provided_fields).some(([key, value]) => {
-      const saved = savedFields[key];
-      if (saved === undefined || typeof value !== "string") return true;
-      const normalize = (text: string) => ["businessStage", "teamType", "presenceType"].includes(key) ? text.trim().toLowerCase() : text.trim();
-      return normalize(saved) !== normalize(value);
-    })) return false;
+    // Source text may contain Markdown, URLs without a scheme, and natural-language enum labels.
+    // The executor checks persisted values against canonical tool arguments; check coverage here.
+    if (Object.keys(plan.provided_fields).some((key) => savedFields[key] === undefined)) return false;
     const actions = plan.secondary_actions.join(" ").toLowerCase();
     if (/goal/.test(actions) && !related.some((item) => item.goalIds?.length)) return false;
     if (/memor/.test(actions) && !related.some((item) => item.memoryIds?.length)) return false;

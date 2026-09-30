@@ -60,7 +60,8 @@ describe("long Business Profile production chat path", () => {
       expect(nativeStep).toBe(3);
       expect(requests[1]?.toolChoice).toEqual({ type: "function", function: { name: "npati_business_profile" } });
       expect(requests[2]?.messages.some((item) => item.role === "system" && String(item.content).includes("primary requested outcome has not been verified"))).toBe(true);
-      expect(response.body).toContain("saved");
+      expect(response.body).toContain("NovaScale Labs");
+      expect(response.body).not.toContain("NPATI Agent could not complete this message");
     } finally { await app.close(); }
   });
   it("retries when the first business tool call omits supplied fields", async () => {
