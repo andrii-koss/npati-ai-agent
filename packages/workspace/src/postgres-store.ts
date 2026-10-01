@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -28,6 +28,11 @@ const companyColumns = `id, workspace_id AS "workspaceId", user_id AS "userId", 
   name, website, industry, description, products_services AS "productsServices", languages, brand_tone AS "brandTone",
   company_instructions AS "companyInstructions", knowledge, memory, main_agent_id AS "mainAgentId", status, revision,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
+const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy",
+  name, description, type, status, framework, runtime, repository_provider AS "repositoryProvider",
+  repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
+  preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
+  last_build_status AS "lastBuildStatus", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", name, role, description,
   system_instruction AS "systemInstruction", prompt_guidelines AS "promptGuidelines",
   recommended_prompts AS "recommendedPrompts", model_id AS "modelId", fallback_model_id AS "fallbackModelId",
@@ -35,7 +40,7 @@ const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "c
   sort_order AS "sortOrder", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const companyEdgeColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   parent_agent_id AS "parentAgentId", child_agent_id AS "childAgentId", relation_type AS "relationType", created_at AS "createdAt"`;
-const companyRunColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+const companyRunColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId", user_id AS "userId",
   main_agent_id AS "mainAgentId", idempotency_key AS "idempotencyKey", task, requested_mode AS "requestedMode",
   execution_mode AS "executionMode", status, selected_agent_ids AS "selectedAgentIds",
   omniroute_task_id AS "omnirouteTaskId", omniroute_combo_name AS "omnirouteComboName",
@@ -645,6 +650,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
 
 
+    const projectFoundation = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='054_project_foundation'");
+    if (!projectFoundation.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { runMigration054 } = await import("./migration-054");
+        await runMigration054(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('054_project_foundation')");
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -975,6 +992,70 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       ORDER BY created_at,id LIMIT $5`, [context.workspaceId, companyId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
     const items = result.rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+
+  async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
+    await this.assertCompany(context, companyId);
+    const created = await this.pool.query<Project>(`INSERT INTO projects
+      (id,workspace_id,company_id,created_by,name,description,type,create_request_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (workspace_id,company_id,created_by,create_request_key) DO NOTHING
+      RETURNING ${projectColumns}`,
+      [randomUUID(),context.workspaceId,companyId,context.userId,input.name,input.description ?? null,input.type,idempotencyKey]);
+    if (created.rows[0]) return { project: created.rows[0], created: true };
+    const existing = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
+      WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND create_request_key=$4`,
+      [context.workspaceId,companyId,context.userId,idempotencyKey]);
+    if (!existing.rows[0]) throw new WorkspaceNotFoundError("Project not found");
+    return { project: existing.rows[0], created: false };
+  }
+
+  async listProjects(context: AuthContext, companyId: string, includeArchived = false) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
+      WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND ($4 OR status<>'archived')
+      ORDER BY updated_at DESC,id`, [context.workspaceId,companyId,context.userId,includeArchived]);
+    return result.rows;
+  }
+
+  async getProject(context: AuthContext, companyId: string, projectId: string) {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4`,
+      [projectId,context.workspaceId,companyId,context.userId]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Project not found");
+    return result.rows[0];
+  }
+
+  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }) {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<Project>(`UPDATE projects
+      SET name=$5, revision=revision+1, updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4
+        AND revision=$6 AND status<>'archived' RETURNING ${projectColumns}`,
+      [projectId,context.workspaceId,companyId,context.userId,input.name,input.expectedRevision]);
+    if (!result.rows[0]) throw new Error("Project changed by another request or is archived");
+    return result.rows[0];
+  }
+
+  async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<Project>(`UPDATE projects
+      SET status='archived',revision=revision+1,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4
+        AND revision=$5 AND status<>'archived' RETURNING ${projectColumns}`,
+      [projectId,context.workspaceId,companyId,context.userId,expectedRevision]);
+    if (!result.rows[0]) throw new Error("Project changed by another request or is archived");
+    return result.rows[0];
+  }
+
+  async deleteProject(context: AuthContext, companyId: string, projectId: string) {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query(`DELETE FROM projects
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4`,
+      [projectId,context.workspaceId,companyId,context.userId]);
+    return Boolean(result.rowCount);
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

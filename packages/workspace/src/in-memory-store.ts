@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -12,6 +12,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly businesses = new Map<string, Business>();
   private readonly companies = new Map<string, Company>();
   private readonly companyAgents = new Map<string, CompanyAgent>();
+  private readonly projects = new Map<string, Project>();
+  private readonly projectCreateRequests = new Map<string, string>();
   private readonly companyEdges = new Map<string, CompanyAgentEdge>();
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
@@ -277,6 +279,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async deleteCompany(context: AuthContext, companyId: string) {
     this.assertCompany(context, companyId);
     this.companies.delete(companyId);
+    for (const [id, project] of this.projects) if (project.companyId === companyId) this.projects.delete(id);
     for (const [id, agent] of this.companyAgents) if (agent.companyId === companyId) this.companyAgents.delete(id);
     for (const [id, edge] of this.companyEdges) if (edge.companyId === companyId) this.companyEdges.delete(id);
     return true;
@@ -314,6 +317,61 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .filter((agent) => !after || agent.createdAt > after.createdAt || (agent.createdAt === after.createdAt && agent.id > after.id));
     const items = rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+  }
+
+
+  async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
+    this.assertCompany(context, companyId);
+    const requestKey = [context.workspaceId, context.userId, companyId, idempotencyKey].join(":");
+    const previous = this.projectCreateRequests.get(requestKey);
+    if (previous) return { project: await this.getProject(context, companyId, previous), created: false };
+    const timestamp = now();
+    const project: Project = {
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
+      name: input.name, description: input.description, type: input.type, status: "ready",
+      revision: 1, createdAt: timestamp, updatedAt: timestamp,
+    };
+    this.projects.set(project.id, project);
+    this.projectCreateRequests.set(requestKey, project.id);
+    return { project: structuredClone(project), created: true };
+  }
+
+  async listProjects(context: AuthContext, companyId: string, includeArchived = false) {
+    this.assertCompany(context, companyId);
+    return structuredClone([...this.projects.values()]
+      .filter((project) => project.workspaceId === context.workspaceId && project.companyId === companyId
+        && project.createdBy === context.userId && (includeArchived || project.status !== "archived"))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)));
+  }
+
+  async getProject(context: AuthContext, companyId: string, projectId: string) {
+    this.assertCompany(context, companyId);
+    const project = this.projects.get(projectId);
+    if (!project || project.workspaceId !== context.workspaceId || project.companyId !== companyId
+      || project.createdBy !== context.userId) throw new WorkspaceNotFoundError("Project not found");
+    return structuredClone(project);
+  }
+
+  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }) {
+    const project = await this.getProject(context, companyId, projectId);
+    if (project.revision !== input.expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");
+    const next = { ...project, name: input.name, revision: project.revision + 1, updatedAt: now() };
+    this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+  async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
+    const project = await this.getProject(context, companyId, projectId);
+    if (project.revision !== expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");
+    const next: Project = { ...project, status: "archived", revision: project.revision + 1, updatedAt: now() };
+    this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+  async deleteProject(context: AuthContext, companyId: string, projectId: string) {
+    await this.getProject(context, companyId, projectId);
+    for (const [key, id] of this.projectCreateRequests) if (id === projectId) this.projectCreateRequests.delete(key);
+    return this.projects.delete(projectId);
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

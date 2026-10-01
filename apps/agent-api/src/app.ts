@@ -35,6 +35,8 @@ import { registerInstallationAuthRoutes } from "./installation-auth-routes";
 import { InstallationAuthStore } from "./installation-auth";
 import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
+import { registerProjectRoutes } from "./project-routes";
+import { ProjectService } from "./project-service";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -2371,6 +2373,7 @@ ${localized.next}`;
     beforeDeleteCompany,
     beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
   });
+  registerProjectRoutes(app, new ProjectService(workspaceStore), authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {

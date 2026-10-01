@@ -32,6 +32,17 @@ export interface Company {
 export type CompanyInput = Partial<Omit<Company, "id" | "workspaceId" | "userId" | "mainAgentId" | "revision" | "createdAt" | "updatedAt">> & { name: string };
 export interface CompanyPage { items: Company[]; nextCursor: string | null; }
 
+export type ProjectType = "website" | "web_app" | "landing_page";
+export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived";
+export interface Project {
+  id: string; companyId: string; workspaceId: string; createdBy: string;
+  name: string; description?: string; type: ProjectType; status: ProjectStatus;
+  framework?: string; runtime?: string; repositoryProvider?: string; repositoryUrl?: string; repositoryBranch?: string;
+  sandboxId?: string; previewUrl?: string; previewPort?: number; lastRunId?: string; lastBuildStatus?: string;
+  revision: number; createdAt: string; updatedAt: string;
+}
+export interface ProjectInput { name: string; description?: string; type: ProjectType; }
+
 export interface BusinessToCompanyInput {
   companyName?: string;
   includeConfirmedMemory?: boolean;
@@ -74,7 +85,7 @@ export interface RunContextSnapshot extends ActiveContext {
 }
 
 export interface CompanyAgentRun {
-  id: string; workspaceId: string; companyId: string; userId: string; mainAgentId: string;
+  id: string; workspaceId: string; companyId: string; projectId?: string; userId: string; mainAgentId: string;
   idempotencyKey: string; task: string; requestedMode: CompanyRunMode;
   executionMode?: Exclude<CompanyRunMode, "auto">; status: CompanyRunStatus;
   selectedAgentIds: string[]; omnirouteTaskId?: string; omnirouteComboName?: string;
@@ -197,6 +208,12 @@ export interface WorkspaceStore {
   updateCompany(context: AuthContext, companyId: string, input: Partial<CompanyInput>, expectedRevision: number): Promise<Company>;
   deleteCompany(context: AuthContext, companyId: string): Promise<boolean>;
   setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number): Promise<Company>;
+  createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string): Promise<{ project: Project; created: boolean }>;
+  listProjects(context: AuthContext, companyId: string, includeArchived?: boolean): Promise<Project[]>;
+  getProject(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
+  updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }): Promise<Project>;
+  archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;
+  deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;
   listCompanyAgentsPage(context: AuthContext, companyId: string, limit?: number, cursor?: string): Promise<CompanyAgentPage>;
   getCompanyAgent(context: AuthContext, companyId: string, agentId: string): Promise<CompanyAgent>;
