@@ -4085,6 +4085,41 @@ a {
   border-radius: 14px 14px 3px 14px;
 }
 
+.message-stream article.user .user-prompt-preview {
+  max-width: min(560px, 100%);
+  margin: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
+.message-stream article.user .user-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.message-stream article.user .user-prompt-actions button {
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, .1);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.message-stream article.user .user-prompt-actions button:hover,
+.message-stream article.user .user-prompt-actions button:focus-visible {
+  background: rgba(255, 255, 255, .22);
+}
+
 .message-stream article.assistant {
   width: 100%;
   max-width: 100%;

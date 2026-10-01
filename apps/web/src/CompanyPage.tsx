@@ -5,6 +5,7 @@ import type { Model } from "./ai-marketplace-types";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
+import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 
 type Company = {
   id: string; businessId?: string; name: string; website?: string; industry?: string; description?: string;
@@ -485,7 +486,10 @@ export function CompanyPage() {
         });
         companyCreateKey.current = crypto.randomUUID();
       }
-      setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies(saved.id); setNotice(t("companySettings.notices.companySaved"));
+      if (!editingCompany && !readActiveCompanyId()) writeActiveCompanyId(saved.id);
+      window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: editingCompany ? "update" : "create", companyId: saved.id } }));
+      setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies(saved.id);
+      setNotice(t("companySettings.notices.companySaved"));
     } catch (error) {
       const msg = error instanceof Error ? error.message : t("companySettings.errors.couldNotSave");
       if (/changed by another request|revision|conflict/i.test(msg)) {
@@ -731,6 +735,8 @@ export function CompanyPage() {
     if (!confirmed) return;
     try {
       await api(`/companies/${selected.id}`, { method: "DELETE" });
+      if (readActiveCompanyId() === selected.id) writeActiveCompanyId("");
+      window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "delete", companyId: selected.id } }));
       setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies();
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDelete")); }
   }

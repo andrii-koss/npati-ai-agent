@@ -112,6 +112,11 @@ export const it: TranslationSchema = {
     notHelpful: "Risposta non utile",
     regenerate: "Rigenera",
     shareResponse: "Condividi risposta",
+    showFullPrompt: "Mostra il prompt completo",
+    collapsePrompt: "Comprimi il prompt",
+    copyPrompt: "Copia il prompt",
+    copiedPrompt: "Copiato",
+    editPrompt: "Modifica il prompt",
   },
   userMenu: {
     emailInbox: "Casella email",

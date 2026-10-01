@@ -106,6 +106,11 @@ export const uk: TranslationSchema = {
     notHelpful: "Не корисна відповідь",
     regenerate: "Згенерувати знову",
     shareResponse: "Поділитися відповіддю",
+    showFullPrompt: "Показати весь промт",
+    collapsePrompt: "Згорнути промт",
+    copyPrompt: "Скопіювати промт",
+    copiedPrompt: "Скопійовано",
+    editPrompt: "Редагувати промт",
   },
   userMenu: {
     emailInbox: "Поштова скринька",
