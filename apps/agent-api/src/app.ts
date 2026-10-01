@@ -123,10 +123,27 @@ function isCompositeBusinessCompanyCreation(message: string): boolean {
   return create && business && goal && company;
 }
 
+function requestsNewBusinessIdea(message: string): boolean {
+  return /(?:\u0441\u0442\u0432\u043e\u0440\p{L}*|\u0441\u043e\u0437\u0434\u0430\p{L}*|create|cr[e\u00e9]e|erstelle|crea|utw[o\u00f3]rz|stw[o\u00f3]rz)\s+(?:(?:\u0449\u0435|\u043e\u0434\u043d\u0443|\u043d\u043e\u0432\p{L}*|another|new|a|an|test\p{L}*|\u0442\u0435\u0441\u0442\p{L}*)\s+){0,5}(?:\u0431[\u0456\u0438]\u0437\u043d\u0435\u0441|business(?:\s+(?:idea|profile))?|id[e\u00e9]e\s+d['\u2019]entreprise|gesch[a\u00e4]ftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomys\u0142\s+na\s+biznes)/iu.test(message);
+}
+function normalizeNewBusinessDirective(text: string, requestMessage: string): string {
+  if (!requestsNewBusinessIdea(requestMessage)) return text;
+  return text.replace(/```business-action\s*([\s\S]*?)```/iu, (block, body: string) => {
+    try {
+      const directive = JSON.parse(body) as { action?: string; profile?: { name?: string } };
+      if (directive.action !== "update" || !directive.profile?.name?.trim()) return block;
+      return "```business-action\n" + JSON.stringify({ ...directive, action: "create" }) + "\n```";
+    } catch { return block; }
+  });
+}
 function requestsBusinessMemory(message: string): boolean {
   return /(?:пам(?:'|’)?ят|памят|мемор|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|स्मृति)/iu.test(message);
 }
 
+function requestsBusinessGoal(message: string): boolean {
+  return /(?:\u0446\u0456\u043b|\u0446\u0435\u043b|\bgoals?\b|objectif|ziel|objetivo|obiettivo|\bcel\b|\bmeta\b|doel|hedef|\u76ee\u6807|\u76ee\u6a19|\ubaa9\ud45c|\u0647\u062f\u0641|\u0932\u0915\u094d\u0937\u094d\u092f)/iu.test(message)
+    && !/(?:\u0431\u0435\u0437|without|sans|ohne|sin|senza|bez|no)\s+(?:\u0446\u0456\u043b\p{L}*|\u0446\u0435\u043b\p{L}*|goals?)/iu.test(message);
+}
 function requestsCompositeCompanyDeletionIntent(message: string): boolean {
   if (!isCompanyDeleteIntent(message)) return false;
   const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
@@ -1353,10 +1370,15 @@ ${localized.next}`;
     logoAttachments?: Array<{ name: string; mimeType: string; data: Buffer; kind?: string }>;
     plannedBusinessFields?: Record<string, string>;
     primaryBusinessCreation?: boolean;
+    businessCreateKey?: string;
     companyPlan?: StructuredChatPlan;
   }): Promise<ChatToolExecutionResult> {
     if (input.call.function.name === "npati_business_profile") {
-      const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args: input.plannedBusinessFields ? reconcilePlannedBusinessArgs(input.args, input.plannedBusinessFields, Boolean(input.primaryBusinessCreation)) : input.args, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
+      const plannedArgs = input.plannedBusinessFields ? reconcilePlannedBusinessArgs(input.args, input.plannedBusinessFields, Boolean(input.primaryBusinessCreation)) : input.args;
+      const profile = plannedArgs.profile as Record<string, unknown> | undefined;
+      const args = requestsNewBusinessIdea(input.requestMessage) && plannedArgs.action === "update" && typeof profile?.name === "string" && profile.name.trim()
+        ? { ...plannedArgs, action: "create" } : plannedArgs;
+      const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args, createRequestKey: input.businessCreateKey, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
       return { output: outcome, metadata: { kind: "business_profile", outcome } };
     }
     if (input.call.function.name === "npati_company_action") {
@@ -1467,6 +1489,20 @@ ${localized.next}`;
     });
   }
 
+  async function completeCreatedBusinessGoal(auth: AuthContext, requestMessage: string, business: Business | undefined, businessReply: string) {
+    if (!business || !requestsBusinessGoal(requestMessage)) return { reply: businessReply, goalAction: undefined };
+    const existing = await workspaceStore.listGoals(auth, business.id);
+    const goal = existing[0] ?? await workspaceStore.createGoal(auth, business.id, {
+      title: compositeCreationCopy(requestMessage).goalTitle,
+      status: "active",
+      priority: 2,
+    });
+    const goalAction = { action: "create" as const, goal, goalId: goal.id, businessName: business.name };
+    if (existing.length > 0) return { reply: businessReply, goalAction };
+    const card = "```card:" + goal.title + "\n**" + business.name + "**\n\n[" + goal.title + "](/settings/goals)\n```";
+    return { reply: [businessReply, card].filter(Boolean).join("\n\n"), goalAction };
+  }
+
   async function completeCreatedBusinessMemory(
     auth: AuthContext,
     requestMessage: string,
@@ -1484,7 +1520,9 @@ ${localized.next}`;
     }
     if (memoryResult.workspaceAction?.action !== "memory.create") {
       const existing = await workspaceStore.listMemory(auth, business.id);
-      if (existing.length === 0) {
+      if (existing.length > 0) {
+        memoryResult = { cleanText: "", workspaceAction: { action: "memory.create", resourceId: existing[0]!.id, businessId: business.id }, companyRunId: undefined };
+      } else {
         const copy = compositeMemoryCopy(requestMessage);
         const directive = {
           action: "memory.create",
@@ -1664,6 +1702,7 @@ ${localized.next}`;
     let nativeCompanyPrimary = false;
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
+    const businessCreateRequestKey = crypto.randomUUID();
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
         const tools = availableCoreChatTools(auth);
@@ -1688,7 +1727,7 @@ ${localized.next}`;
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
-            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
+            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
@@ -1730,7 +1769,7 @@ ${localized.next}`;
     else if (nativeCompanyPrimary && nativeCompanyAction && nativeCompanyCleanText) result.message = nativeCompanyCleanText;
     if (nativeToolCalling && research?.sources.length) result.message = attachResearchSources(result.message, research);
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, result.message, workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, normalizeNewBusinessDirective(result.message, safePrompt), workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
@@ -1744,12 +1783,15 @@ ${localized.next}`;
       : nativeBusinessAction || EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, responseLanguage: activeConversationLanguage });
-    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: (nativeBusinessAction ?? executedAction.businessAction)?.business?.id ?? businessId });
-    const workspaceAction = await completeCreatedBusinessMemory(auth, safePrompt, conversation?.id, (nativeBusinessAction ?? executedAction.businessAction)?.business, executedAction.cleanText, initialWorkspaceAction);
+    const createdBusinessAction = nativeBusinessAction ?? executedAction.businessAction;
+    const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
+    const goalCompletion = await completeCreatedBusinessGoal(auth, safePrompt, createdBusiness, executedAction.cleanText);
+    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: createdBusiness?.id ?? businessId });
+    const workspaceAction = await completeCreatedBusinessMemory(auth, safePrompt, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
-    return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
+    return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: goalCompletion.goalAction ?? executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
   async function runNeutralMessage(
@@ -2080,6 +2122,7 @@ ${localized.next}`;
     let nativeCompanyPrimary = false;
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
+    const businessCreateRequestKey = crypto.randomUUID();
     if (nativeToolCalling) {
       try {
         const tools = availableCoreChatTools(auth);
@@ -2106,7 +2149,7 @@ ${localized.next}`;
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
-            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
+            model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: ai.model, conversationId: conversation?.id, contextType: "none" }),
         });
@@ -2242,7 +2285,7 @@ ${localized.next}`;
       }
     }
 
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, content, workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, normalizeNewBusinessDirective(content, safeUserRequest), workspaceStore, app.log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
@@ -2262,10 +2305,13 @@ ${localized.next}`;
           researchContext: research?.context,
           responseLanguage: activeConversationLanguage,
         });
+    const createdBusinessAction = nativeBusinessAction ?? executedAction.businessAction;
+    const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
+    const goalCompletion = await completeCreatedBusinessGoal(auth, safeUserRequest, createdBusiness, executedAction.cleanText);
     const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
-      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: (nativeBusinessAction ?? executedAction.businessAction)?.business?.id });
-    const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, (nativeBusinessAction ?? executedAction.businessAction)?.business, executedAction.cleanText, initialWorkspaceAction);
+      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id });
+    const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
     content = workspaceAction.cleanText;
     if (research?.sources.length && !content.includes("### Джерела") && !content.includes("### Sources") && !content.includes(research.sources[0]?.url ?? "")) {
       content = attachResearchSources(content, research);
@@ -2276,7 +2322,7 @@ ${localized.next}`;
       message: content,
       suggestedActions: [],
       businessAction: nativeBusinessAction ?? executedAction.businessAction,
-      goalAction: executedAction.goalAction,
+      goalAction: goalCompletion.goalAction ?? executedAction.goalAction,
       emailAction: emailAction.emailAction,
       emailActions: emailAction.emailActions,
       companyAction: companyAction.companyAction,

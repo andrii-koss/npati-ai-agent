@@ -132,7 +132,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     if (!business.name) throw new Error("Business name is required");
     this.businesses.set(business.id, business);
     if (requestKey) this.businessCreateRequests.set(requestKey, business.id);
-    if ((await this.listBusinesses(context)).length === 1) this.current.set(`${context.workspaceId}:${context.userId}`, business.id);
+    this.current.set(`${context.workspaceId}:${context.userId}`, business.id);
     return business;
   }
 

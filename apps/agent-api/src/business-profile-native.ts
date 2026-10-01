@@ -50,6 +50,7 @@ export const BUSINESS_PROFILE_TOOL: ChatToolDefinition = {
 
 export async function executeBusinessProfileTool(input: {
   store: WorkspaceStore; auth: AuthContext; args: Record<string, unknown>;
+  createRequestKey?: string;
   logoAttachments?: Array<{ name: string; mimeType: string; data: Buffer; kind?: string }>;
   persistLogo?: (auth: AuthContext, businessId: string, attachment: { name: string; mimeType: string; data: Buffer; kind?: string }) => Promise<Business>;
 }) {
@@ -78,10 +79,15 @@ export async function executeBusinessProfileTool(input: {
   const owned = await store.listUserBusinesses(auth);
   if (args.action === "create") {
     if (!profile.name) throw new Error("Business name is required");
-    const existing = owned.filter((item) => item.name.toLocaleLowerCase() === profile.name!.toLocaleLowerCase());
-    if (existing.length > 1) throw new Error("Business name is ambiguous");
-    alreadyExisted = Boolean(existing[0]);
-    business = existing[0] ? await store.updateUserBusiness(auth, existing[0].id, profile as Partial<BusinessInput>) : await store.createBusiness(auth, profile as BusinessInput);
+    if (input.createRequestKey) {
+      business = await store.createBusiness(auth, profile as BusinessInput, input.createRequestKey);
+      business = await store.updateUserBusiness(auth, business.id, profile as Partial<BusinessInput>);
+    } else {
+      const existing = owned.filter((item) => item.name.toLocaleLowerCase() === profile.name!.toLocaleLowerCase());
+      if (existing.length > 1) throw new Error("Business name is ambiguous");
+      alreadyExisted = Boolean(existing[0]);
+      business = existing[0] ? await store.updateUserBusiness(auth, existing[0].id, profile as Partial<BusinessInput>) : await store.createBusiness(auth, profile as BusinessInput);
+    }
   } else {
     const businessId = typeof args.businessId === "string" ? args.businessId : "";
     const target = businessId ? owned.find((item) => item.id === businessId) : owned.length === 1 ? owned[0] : undefined;
