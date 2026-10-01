@@ -317,6 +317,26 @@ export class WorkspaceChatActions {
     return mutationSignals.some((pattern) => pattern.test(message)) && referenceSignals.some((pattern) => pattern.test(message));
   }
 
+  static isBusinessMemoryDeletionRequest(message: string): boolean {
+    const normalized = message.toLocaleLowerCase();
+    if (!normalized.includes("/settings/memory") && ["company memory","компанія пам'ять","пам'ять компанії"].some((phrase) => normalized.includes(phrase))) return false;
+    return ["memory","мемор","пам’ят","пам'ят","mémoire","gedächtnis","memoria","pamięć"].some((word) => normalized.includes(word))
+      && ["delete","remove","видал","приб","supprim","effac","lösch","entfern","elimin","borr","rimuov","usuń","skasuj"].some((word) => normalized.includes(word));
+  }
+
+  static noSavedMemoryMessage(message: string): string {
+    const messages: Record<string, string> = {
+      en: "I found no saved Business Memory records. Refresh Settings → Memory if an old card is still visible.",
+      uk: "Я не знайшов збережених записів пам’яті бізнесу. Якщо стара картка ще відображається, оновіть сторінку Налаштування → Пам’ять.",
+      de: "Ich habe keine gespeicherten Einträge im Business Memory gefunden. Aktualisieren Sie Einstellungen → Memory, falls noch eine alte Karte angezeigt wird.",
+      fr: "Je n’ai trouvé aucune entrée enregistrée dans la mémoire métier. Actualisez Paramètres → Mémoire si une ancienne fiche est encore visible.",
+      es: "No encontré registros guardados en la memoria del negocio. Actualiza Configuración → Memoria si aún aparece una tarjeta antigua.",
+      it: "Non ho trovato voci salvate nella memoria aziendale. Aggiorna Impostazioni → Memoria se vedi ancora una vecchia scheda.",
+      pl: "Nie znalazłem zapisanych wpisów pamięci biznesowej. Odśwież Ustawienia → Pamięć, jeśli nadal widać starą kartę.",
+    };
+    return messages[detectCompanyChatLanguage(message)] ?? messages.en!;
+  }
+
   static noActionMessage(message: string): string {
     const language = detectCompanyChatLanguage(message);
     const messages: Partial<Record<typeof language, string>> = {
@@ -422,6 +442,7 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 - Automation: action automation.update or automation.delete, automationId, companyId, and for update an automation object containing only changed fields. Editable fields: name, description, prompt, cronExpression, timezone, agentId (or null), status (active or paused).
 - Content: action content.update or content.delete, contentId, companyId, and for update a content object containing only changed fields. Editable fields: title, type, content. Updating content edits the stored document; it does not rerun agents.
 - Memory: action memory.update or memory.delete, memoryId, businessId, and for update a memory object containing only changed fields. Editable fields: type, title, content, confidence.
+If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
 - Activity: completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
 Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
@@ -442,12 +463,25 @@ Use activity.run when the user asks the company agents to perform work and wants
       const labels = copyFor(options.requestMessage);
 
       if (directive.action.startsWith("memory.")) {
-        const business = await resolveBusiness(deps.store, auth, directive, options.selectedBusinessId);
+        let targetBusinessId = directive.businessId || options.selectedBusinessId;
+        if (directive.action !== "memory.create" && !targetBusinessId && !directive.businessName) {
+          const owned = await deps.store.listUserMemories(auth);
+          const title = directive.memoryTitle?.trim().toLocaleLowerCase();
+          const matches = directive.memoryId
+            ? owned.filter((entry) => entry.id === directive.memoryId)
+            : title ? owned.filter((entry) => entry.title.toLocaleLowerCase() === title)
+            : owned.length === 1 ? owned : [];
+          if (matches.length === 1) targetBusinessId = matches[0]!.businessId;
+        }
+        const business = await resolveBusiness(deps.store, auth, directive, targetBusinessId);
         const item = directive.memory;
         if (directive.action !== "memory.create") {
           const available = await deps.store.listMemory(auth, business.id);
           const title = directive.memoryTitle?.trim().toLocaleLowerCase();
-          const matches = directive.memoryId ? available.filter((entry) => entry.id === directive.memoryId) : available.filter((entry) => entry.title.toLocaleLowerCase() === title);
+          const matches = directive.memoryId
+            ? available.filter((entry) => entry.id === directive.memoryId)
+            : title ? available.filter((entry) => entry.title.toLocaleLowerCase() === title)
+            : available.length === 1 ? available : [];
           if (matches.length !== 1) throw new Error("Memory target is missing or ambiguous");
           const current = matches[0]!;
           if (directive.action === "memory.delete") {

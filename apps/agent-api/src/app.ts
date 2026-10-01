@@ -1400,6 +1400,10 @@ ${localized.next}`;
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
     const managementRequest = Boolean(requestMessage && (WorkspaceChatActions.isManagementRequest(requestMessage) || ((route?.selectedCompanyId || route?.selectedBusinessId) && WorkspaceChatActions.isPotentialMutationRequest(requestMessage))));
+    if (requestMessage && auth.permissions.includes("business:manage") && WorkspaceChatActions.isBusinessMemoryDeletionRequest(requestMessage)) {
+      const savedMemory = await workspaceStore.listUserMemories(auth);
+      if (savedMemory.length === 0) return { cleanText: WorkspaceChatActions.noSavedMemoryMessage(requestMessage), workspaceAction: undefined, companyRunId: undefined };
+    }
     if (!/```workspace-action/i.test(content) && !managementRequest) return { cleanText: content, workspaceAction: undefined, companyRunId: undefined };
     const dependencies: import("./workspace-chat-actions").WorkspaceChatActionDependencies = {
       store: workspaceStore,

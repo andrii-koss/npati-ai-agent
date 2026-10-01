@@ -108,4 +108,28 @@ describe("BusinessActionHandler delete support", () => {
     const remaining = await store.listGoals(auth, b.id);
     expect(remaining).toHaveLength(0);
   });
+  it("deletes the only owned goal even when another business has no goals", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const first = await store.createBusiness(auth, { name: "First idea", businessStage: "idea" });
+    const second = await store.createBusiness(auth, { name: "Second idea", businessStage: "idea" });
+    const goal = await store.createGoal(auth, second.id, { title: "Launch", priority: 2, status: "active" });
+
+    const result = await BusinessActionHandler.extractAndExecute(auth,
+      "Deleted.\n\n```goal-action\n" + JSON.stringify({ action: "delete" }) + "\n```", store);
+    expect(result.goalAction?.goalId).toBe(goal.id);
+    expect(await store.listGoals(auth, first.id)).toHaveLength(0);
+    expect(await store.listGoals(auth, second.id)).toHaveLength(0);
+  });
+
+  it("does not delete a different goal when the requested goal ID is wrong", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(auth, { name: "Main idea", businessStage: "idea" });
+    await store.createGoal(auth, business.id, { title: "Keep this", priority: 2, status: "active" });
+
+    const result = await BusinessActionHandler.extractAndExecute(auth,
+      "Deleted.\n\n```goal-action\n" + JSON.stringify({ action: "delete", businessId: business.id, goalId: "missing-goal" }) + "\n```", store);
+    expect(result.goalAction).toBeUndefined();
+    expect(await store.listGoals(auth, business.id)).toHaveLength(1);
+  });
+
 });

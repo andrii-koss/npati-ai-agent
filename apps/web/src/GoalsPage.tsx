@@ -1,5 +1,5 @@
 import { getStoredAuthToken } from "./AuthContext";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
@@ -65,6 +65,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     const error = new Error(
       payload?.error?.message ?? `Request failed with HTTP ${response.status}`
     );
+    Object.assign(error, { status: response.status });
     throw error;
   }
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
@@ -74,18 +75,12 @@ const GOALS_CACHE_PREFIX = "npati_goals_cache_v1_";
 const GOALS_LATEST_CACHE_KEY = "npati_goals_cache_latest_v1";
 
 function getCachedGoals(businessId?: string): Goal[] {
+  if (!businessId) return [];
   try {
-    if (businessId) {
-      const raw = sessionStorage.getItem(GOALS_CACHE_PREFIX + businessId) || localStorage.getItem(GOALS_CACHE_PREFIX + businessId);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    }
-    const latest = sessionStorage.getItem(GOALS_LATEST_CACHE_KEY) || localStorage.getItem(GOALS_LATEST_CACHE_KEY);
-    if (latest) {
-      const parsed = JSON.parse(latest);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const raw = sessionStorage.getItem(GOALS_CACHE_PREFIX + businessId) || localStorage.getItem(GOALS_CACHE_PREFIX + businessId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((goal) => goal.businessId === businessId);
     }
   } catch { /* storage may be restricted */ }
   return [];
@@ -101,6 +96,9 @@ function updateCachedGoals(businessId: string, items: Goal[]) {
     if (items.length > 0) {
       sessionStorage.setItem(GOALS_LATEST_CACHE_KEY, serialized);
       localStorage.setItem(GOALS_LATEST_CACHE_KEY, serialized);
+    } else {
+      sessionStorage.removeItem(GOALS_LATEST_CACHE_KEY);
+      localStorage.removeItem(GOALS_LATEST_CACHE_KEY);
     }
   } catch { /* storage may be restricted */ }
 }
@@ -119,13 +117,14 @@ function getInitialBusinessId(): string {
 
 export function GoalsPage() {
   const { t, language } = useTranslation();
-  const { overview } = useWorkspace();
+  const { overview, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
-  const businessId = business?.id || getInitialBusinessId();
+  const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
 
   const [goals, setGoals] = useState<Goal[]>(() => getCachedGoals(businessId));
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const loadVersion = useRef(0);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
@@ -139,17 +138,29 @@ export function GoalsPage() {
   const [saving, setSaving] = useState(false);
 
   const loadGoals = async () => {
+    const version = ++loadVersion.current;
     if (!businessId) {
+      setGoals([]);
+      setLoading(false);
       return;
     }
+    setGoals(getCachedGoals(businessId));
     try {
       const data = await api<Goal[]>(`/businesses/${businessId}/goals`);
+      if (version !== loadVersion.current) return;
       setGoals(data);
       updateCachedGoals(businessId, data);
     } catch (err: any) {
-      setNotice(t("goalsPage.notices.failedToLoad", { message: err.message }));
+      if (version !== loadVersion.current) return;
+      if ([403, 404].includes(err?.status ?? 0)) {
+        setGoals([]);
+        updateCachedGoals(businessId, []);
+        void refresh();
+      } else {
+        setNotice(t("goalsPage.notices.failedToLoad", { message: err.message }));
+      }
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
   };
 

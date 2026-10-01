@@ -89,6 +89,50 @@ describe("workspace resources from chat", () => {
     expect(await store.listMemory(alice, business.id)).toEqual([expect.objectContaining({ title: "主要受众", type: "audience" })]);
   });
 
+  it("recognizes deletion of a Settings Memory record in chat", () => {
+    const request = "\u041d\u0430 \u0441\u0442\u043e\u0440\u0456\u043d\u0446\u0456 https://ai.npati.com/settings/memory \u0454 \u043c\u0435\u043c\u043e\u0440\u0456, \u043c\u043e\u0436\u0435\u0448 \u0432\u0438\u0434\u0430\u043b\u0438\u0442\u0438 \u0439\u043e\u0433\u043e?";
+    expect(WorkspaceChatActions.isBusinessMemoryDeletionRequest(request)).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest(request)).toBe(true);
+    expect(WorkspaceChatActions.noSavedMemoryMessage(request)).toContain("\u043d\u0435 \u0437\u043d\u0430\u0439\u0448\u043e\u0432");
+    expect(WorkspaceChatActions.isBusinessMemoryDeletionRequest("Delete company memory")).toBe(false);
+  });
+
+  it("removes goals and memory when their business is deleted", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const business = await store.createBusiness(alice, { name: "Expired idea", businessStage: "idea" });
+    await store.createMemory(alice, business.id, { type: "business_fact", title: "Core focus", content: "Automation" });
+    await store.createGoal(alice, business.id, { title: "Launch" });
+    await store.deleteBusiness(alice, business.id);
+    expect(await store.listUserMemories(alice)).toHaveLength(0);
+    expect(await store.listUserGoals(alice)).toHaveLength(0);
+  });
+  it("deletes the only owned Business Memory record without a selected business", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const first = await store.createBusiness(alice, { name: "First idea", businessStage: "idea" });
+    const second = await store.createBusiness(alice, { name: "Second idea", businessStage: "idea" });
+    const memory = await store.createMemory(alice, second.id, { type: "business_fact", title: "Core focus", content: "Automation" });
+    const deps = dependencies(store, new CompanyAutomationsRepository(), async (_auth, companyId, input) => completedRun(companyId, input.task));
+
+    const deleted = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "memory.delete", intro: "Deleted." }), deps, "delete-only-memory", { requestMessage: "Delete the memory on Settings > Memory" });
+    expect(deleted.workspaceAction).toMatchObject({ action: "memory.delete", resourceId: memory.id, businessId: second.id });
+    expect(await store.listMemory(alice, second.id)).toHaveLength(0);
+    expect(await store.listMemory(alice, first.id)).toHaveLength(0);
+  });
+
+  it("keeps multiple Business Memory records when deletion has no unique target", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const first = await store.createBusiness(alice, { name: "First idea", businessStage: "idea" });
+    const second = await store.createBusiness(alice, { name: "Second idea", businessStage: "idea" });
+    await store.createMemory(alice, first.id, { type: "business_fact", title: "First fact", content: "First" });
+    await store.createMemory(alice, second.id, { type: "business_fact", title: "Second fact", content: "Second" });
+    const deps = dependencies(store, new CompanyAutomationsRepository(), async (_auth, companyId, input) => completedRun(companyId, input.task));
+
+    const result = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "memory.delete", intro: "Deleted." }), deps, "ambiguous-memory", { requestMessage: "Delete the memory" });
+    expect(result.workspaceAction).toBeUndefined();
+    expect(await store.listMemory(alice, first.id)).toHaveLength(1);
+    expect(await store.listMemory(alice, second.id)).toHaveLength(1);
+  });
+
   it("runs real company work for Activity and Content and returns verified cards", async () => {
     const store = new InMemoryWorkspaceStore();
     const automations = new CompanyAutomationsRepository();
