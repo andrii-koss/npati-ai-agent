@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
@@ -119,7 +119,9 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     const payload = (await response.json().catch(() => null)) as {
       error?: { message?: string; code?: string };
     } | null;
-    throw new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
+    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
+    Object.assign(error, { status: response.status });
+    throw error;
   }
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
@@ -128,18 +130,12 @@ const MEMORY_CACHE_PREFIX = "npati_memory_cache_v1_";
 const MEMORY_LATEST_CACHE_KEY = "npati_memory_cache_latest_v1";
 
 function getCachedMemory(businessId?: string): MemoryItem[] {
+  if (!businessId) return [];
   try {
-    if (businessId) {
-      const raw = sessionStorage.getItem(MEMORY_CACHE_PREFIX + businessId) || localStorage.getItem(MEMORY_CACHE_PREFIX + businessId);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    }
-    const latest = sessionStorage.getItem(MEMORY_LATEST_CACHE_KEY) || localStorage.getItem(MEMORY_LATEST_CACHE_KEY);
-    if (latest) {
-      const parsed = JSON.parse(latest);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const raw = sessionStorage.getItem(MEMORY_CACHE_PREFIX + businessId) || localStorage.getItem(MEMORY_CACHE_PREFIX + businessId);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((item) => item.businessId === businessId);
     }
   } catch { /* storage may be restricted */ }
   return [];
@@ -155,6 +151,9 @@ function updateCachedMemory(businessId: string, items: MemoryItem[]) {
     if (items.length > 0) {
       sessionStorage.setItem(MEMORY_LATEST_CACHE_KEY, serialized);
       localStorage.setItem(MEMORY_LATEST_CACHE_KEY, serialized);
+    } else {
+      sessionStorage.removeItem(MEMORY_LATEST_CACHE_KEY);
+      localStorage.removeItem(MEMORY_LATEST_CACHE_KEY);
     }
   } catch { /* storage may be restricted */ }
 }
@@ -187,8 +186,8 @@ export function MemoryPage() {
   const { t } = useTranslation();
   const { overview, loading: workspaceLoading, refresh } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
-  const businessId = business?.id || getInitialBusinessId();
-  const businessName = business?.name || getInitialBusinessName();
+  const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
+  const businessName = business?.name ?? (overview ? "" : getInitialBusinessName());
 
   const [items, setItems] = useState<MemoryItem[]>(() => getCachedMemory(businessId));
   const [loading, setLoading] = useState(() => getCachedMemory(businessId).length === 0);
@@ -196,6 +195,7 @@ export function MemoryPage() {
   const [selectedTab, setSelectedTab] = useState<string>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const loadVersion = useRef(0);
 
   // Drawer modal state
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -210,18 +210,27 @@ export function MemoryPage() {
   };
 
   const loadMemory = async () => {
+    const version = ++loadVersion.current;
     if (!businessId) {
-      setLoading(workspaceLoading && items.length === 0);
+      setItems([]);
+      setLoading(false);
       return;
     }
+    setItems(getCachedMemory(businessId));
     try {
       const data = await api<MemoryItem[]>(`/businesses/${businessId}/memory`);
+      if (version !== loadVersion.current) return;
       setItems(data);
       updateCachedMemory(businessId, data);
-    } catch {
-      // Keep cached items on transient failure
+    } catch (error) {
+      if (version !== loadVersion.current) return;
+      if ([403, 404].includes((error as Error & { status?: number }).status ?? 0)) {
+        setItems([]);
+        updateCachedMemory(businessId, []);
+        void refresh();
+      }
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
   };
 

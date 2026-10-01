@@ -265,7 +265,7 @@ When the user asks to create, add, or edit a Goal (e.g., "поставити ц�
 
 4. DELETING A GOAL:
 When the user asks to delete or remove a Goal (e.g., "видали ціль", "видалити ціль <назва>", "зняти ціль", "delete goal", etc.):
-Identify the target business and target goal by ID or title. Emit an executable delete directive at the end of your response:
+Identify the target business and target goal by ID or title. If the user refers to a goal without a title and exactly one owned goal exists across all businesses, use that goal's exact ID and business ID. If several goals could match, ask which one. Emit an executable delete directive at the end of your response:
 \`\`\`goal-action
 {
   "action": "delete",
@@ -429,6 +429,15 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
           // Determine target business
           const userBusinesses = await workspaceStore.listUserBusinesses(auth);
           let targetBusinessId = directive.businessId?.trim();
+          if (directive.action === "delete" && !targetBusinessId && !directive.businessName && !businessAction?.business) {
+            const ownedGoals = await workspaceStore.listUserGoals(auth);
+            const requested = (directive.goal?.title || directive.goalId || "").toLocaleLowerCase().trim();
+            const matches = requested
+              ? ownedGoals.filter((goal) => goal.id.toLocaleLowerCase() === requested || goal.title.toLocaleLowerCase() === requested)
+              : ownedGoals.length === 1 ? ownedGoals : [];
+            if (matches.length !== 1) throw new Error("Goal target is missing or ambiguous");
+            targetBusinessId = matches[0]!.businessId;
+          }
 
           if (targetBusinessId === "{{businessId}}" && businessAction?.business) {
             targetBusinessId = businessAction.business.id;
@@ -439,6 +448,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
                      (directive.businessName && b.name.toLowerCase() === directive.businessName.toLowerCase())
             );
             if (matched) targetBusinessId = matched.id;
+            else if (directive.action === "delete") throw new Error("Target business not found for goal");
             else if (businessAction?.business) targetBusinessId = businessAction.business.id;
             else if (userBusinesses.length > 0) targetBusinessId = userBusinesses[0]!.id;
             else throw new Error("No available business found to link this goal to.");
@@ -447,7 +457,7 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
               const matched = userBusinesses.find(
                 (b) => b.name.toLowerCase() === directive.businessName!.toLowerCase()
               );
-              targetBusinessId = matched ? matched.id : (businessAction?.business?.id || userBusinesses[0]?.id);
+              targetBusinessId = matched ? matched.id : directive.action === "delete" ? undefined : (businessAction?.business?.id || userBusinesses[0]?.id);
             } else if (businessAction?.business) {
               targetBusinessId = businessAction.business.id;
             } else if (userBusinesses.length > 0) {
@@ -471,13 +481,11 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
             if (targetGoalId && existingGoals.some((eg) => eg.id === targetGoalId)) {
               targetGoal = existingGoals.find((eg) => eg.id === targetGoalId);
             } else if (searchTitle) {
-              targetGoal = existingGoals.find(
-                (eg) => eg.title.toLowerCase() === searchTitle ||
-                       eg.title.toLowerCase().includes(searchTitle) ||
-                       searchTitle.includes(eg.title.toLowerCase())
-              );
+              const exact = existingGoals.filter((goal) => goal.title.toLowerCase() === searchTitle);
+              const partial = existingGoals.filter((goal) => goal.title.toLowerCase().includes(searchTitle) || searchTitle.includes(goal.title.toLowerCase()));
+              targetGoal = (exact.length === 1 ? exact : partial.length === 1 ? partial : [])[0];
             }
-            if (!targetGoal && existingGoals.length === 1) {
+            if (!targetGoal && !searchTitle && existingGoals.length === 1) {
               targetGoal = existingGoals[0];
             }
 
