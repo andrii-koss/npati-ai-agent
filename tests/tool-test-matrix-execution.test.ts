@@ -148,7 +148,7 @@ describe("Section 11: 42-Tool Full Matrix Execution (10 Dimensions per Tool)", (
       const executeWithTimeout = async (timeoutMs: number) => {
         return Promise.race([
           new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool ${tool.tool_id} timed out`)), timeoutMs)),
-          new Promise((resolve) => setTimeout(() => resolve({ success: true }), timeoutMs + 100)),
+          new Promise<never>(() => {}), // A stalled tool must be bounded by the timeout.
         ]).catch((err) => ({ status: "failed", error: (err as Error).message }));
       };
 
