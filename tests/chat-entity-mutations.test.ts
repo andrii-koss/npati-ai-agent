@@ -134,4 +134,60 @@ describe("business and goal mutations through production chat", () => {
       expect(await store.listMemory(auth, current!.id)).toEqual([expect.objectContaining({ title: "Current idea" })]);
     } finally { await app.close(); }
   });
+  it("creates five separate ideas with one goal and memory per chat turn", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let calls = 0;
+    const ai: AIEngine = {
+      supportsNativeTools: () => true,
+      chat: async (request) => {
+        if (!request.tools?.length) return { content: "NO_ACTION" };
+        if (request.messages.at(-1)?.role === "tool") return { content: "The requested idea was saved." };
+        const user = [...request.messages].reverse().find((item) => item.role === "user")?.content ?? "";
+        const number = Number(/Idea (\d+)/.exec(String(user))?.[1] ?? 0);
+        calls += 1;
+        return { content: "", toolCalls: [{ id: "idea-" + calls, type: "function", function: { name: "npati_business_profile", arguments: JSON.stringify({
+          action: number <= 3 ? "create" : "update",
+          profile: { name: "Repeated model name", businessStage: "idea", description: "Distinct request " + number },
+        }) } }] };
+      },
+      async *stream() { throw new Error("Native business creation should not use streaming fallback"); },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+      searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    let conversationId: string | undefined;
+    try {
+      for (let number = 1; number <= 5; number++) {
+        const message = "\u0421\u0442\u0432\u043e\u0440\u0438 \u0449\u0435 \u043e\u0434\u043d\u0443 \u0431\u0456\u0437\u043d\u0435\u0441 \u0456\u0434\u0435\u044e, \u0446\u0456\u043b\u044c \u0456 \u043c\u0435\u043c\u043e\u0440\u0456. Idea " + number;
+        const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, conversationId, contextType: "none" } });
+        expect(response.statusCode).toBe(200);
+        const completed = result(response.body);
+        conversationId = completed.conversationId;
+        expect(completed.businessAction?.action, message).toBe("create");
+        expect(completed.goalAction?.action, message).toBe("create");
+        expect(completed.workspaceAction?.action, message).toBe("memory.create");
+        const businesses = await store.listUserBusinesses(auth);
+        expect(businesses, message).toHaveLength(number);
+        const current = (await store.overview(auth)).currentBusiness;
+        expect(current?.id, message).toBe(completed.businessAction.businessId);
+        expect(await store.listGoals(auth, current!.id)).toHaveLength(1);
+        expect(await store.listMemory(auth, current!.id)).toHaveLength(1);
+      }
+      const allBusinesses = await store.listUserBusinesses(auth);
+      for (const business of allBusinesses) {
+        const goalsPage = await app.inject({ method: "GET", url: "/businesses/" + business.id + "/goals" });
+        const memoryPage = await app.inject({ method: "GET", url: "/businesses/" + business.id + "/memory" });
+        expect(goalsPage.statusCode).toBe(200);
+        expect(memoryPage.statusCode).toBe(200);
+        expect(goalsPage.json()).toHaveLength(1);
+        expect(memoryPage.json()).toHaveLength(1);
+      }
+      const older = allBusinesses.find((item) => item.description === "Distinct request 1")!;
+      const switched = await app.inject({ method: "PUT", url: "/workspace/current-business", payload: { businessId: older.id } });
+      expect(switched.statusCode).toBe(200);
+      const context = await app.inject({ method: "GET", url: "/workspace/context" });
+      expect(context.json().currentBusiness.id).toBe(older.id);
+    } finally { await app.close(); }
+  });
 });

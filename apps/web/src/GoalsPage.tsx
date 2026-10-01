@@ -117,7 +117,7 @@ function getInitialBusinessId(): string {
 
 export function GoalsPage() {
   const { t, language } = useTranslation();
-  const { overview, refresh } = useWorkspace();
+  const { overview, refresh, switchBusiness } = useWorkspace();
   const business = overview?.currentBusiness || overview?.businesses?.[0];
   const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
 
@@ -391,6 +391,20 @@ export function GoalsPage() {
             </p>
           </div>
           <div className="automations-header-actions">
+            {(overview?.businesses.length ?? 0) > 1 && (
+              <select
+                className="business-scope-select"
+                aria-label={t("nav.business")}
+                value={businessId}
+                onChange={(event) => void switchBusiness(event.target.value)}
+              >
+                {overview?.businesses.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}{overview?.businesses.some((other) => other.id !== item.id && other.name === item.name) ? ` ? ${item.id.slice(0, 8)}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               className="button-primary automations-action-primary goals-action-primary"

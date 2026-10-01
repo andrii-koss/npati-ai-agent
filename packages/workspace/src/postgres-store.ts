@@ -779,8 +779,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       RETURNING ${businessColumns}`, values);
     const business = result.rows[0] ?? (idempotencyKey ? (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0] : undefined);
     if (!business) throw new Error('Could not create company');
-    const count = await this.pool.query("SELECT count(*)::int AS count FROM businesses WHERE workspace_id=$1 AND activation_status='active'", [context.workspaceId]);
-    if (count.rows[0].count === 1) await this.setCurrentBusiness(context, business.id);
+    await this.setCurrentBusiness(context, business.id);
     return business;
   }
 
