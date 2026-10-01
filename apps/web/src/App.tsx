@@ -14,6 +14,7 @@ import { MemoryPage } from "./MemoryPage";
 import { GoalsPage } from "./GoalsPage";
 import { ConversationalChat } from "./ConversationalChat";
 import { CompanyPage } from "./CompanyPage";
+import { ProjectPage } from "./ProjectPage";
 import { ConfirmDialogContainer, confirmModal, alertModal, promptModal } from "./ConfirmDialog";
 import { I18nProvider, useTranslation } from "./i18n";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -1423,6 +1424,7 @@ export function App() {
             <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
             <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
             <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
+            <Route path="/projects/:companyId/:projectId" element={<Workspace><ProjectPage /></Workspace>} />
             <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />
