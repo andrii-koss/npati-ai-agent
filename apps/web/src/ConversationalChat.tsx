@@ -380,18 +380,25 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     return "none";
   });
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const knownCompanyIdsRef = useRef<Set<string> | null>(null);
+  const companyLoadVersionRef = useRef(0);
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     let active = true;
     const loadCompanies = async (preferredCompanyId?: string) => {
+      const version = ++companyLoadVersionRef.current;
       const value = await request<{ companies: Array<{ id: string; name: string }> }>("/companies?limit=100");
-      if (!active) return;
+      if (!active || version !== companyLoadVersionRef.current) return;
+      const knownIds = knownCompanyIdsRef.current;
+      const newCompanies = knownIds ? value.companies.filter((company) => !knownIds.has(company.id)) : [];
+      knownCompanyIdsRef.current = new Set(value.companies.map((company) => company.id));
       setCompanies(value.companies);
       if (businessRoute || businessSetup) return;
       setSelection((current) => {
-        const preferred = preferredCompanyId ? `company:${preferredCompanyId}` : "";
+        const newCompanyId = newCompanies.length === 1 ? newCompanies[0]?.id : undefined;
+        const preferred = preferredCompanyId ? `company:${preferredCompanyId}` : newCompanyId ? `company:${newCompanyId}` : "";
         if (preferred && current === "none" && value.companies.some((company) => `company:${company.id}` === preferred)) {
           persistSelection(preferred);
           return preferred;

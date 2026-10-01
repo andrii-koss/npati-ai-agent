@@ -5,6 +5,7 @@ import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, cr
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
+import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { SPEECH_VOICES } from "./speech-voices";
@@ -1555,7 +1556,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         window.dispatchEvent(new CustomEvent("npati:business-changed", { detail: (result as any).businessAction }));
       }
       if (result.companyAction) {
+        if (result.companyAction.action === "create" && !companyId && !readActiveCompanyId()) writeActiveCompanyId(result.companyAction.companyId);
+        if (result.companyAction.action === "delete" && readActiveCompanyId() === result.companyAction.companyId) writeActiveCompanyId("");
         window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: result.companyAction }));
+      } else {
+        window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
       }
       if ((result as any)?.goalAction) {
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
@@ -1600,6 +1605,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       flushDeltas();
       const typed = reason as Error & { code?: string };
       if (typed.name === "AbortError") {
+        window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
         progressCompleteRef.current = true;
         setProgressComplete(true);
         setNotice("");
@@ -1607,6 +1613,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }
       setProgressFailed(true);
       setNotice(typed.message);
+      window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
       if (privateRequest) {
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
         setInput(message); setAttachments(sentAttachments);
