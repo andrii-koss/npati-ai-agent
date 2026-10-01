@@ -106,6 +106,11 @@ export const en: TranslationSchema = {
     notHelpful: "Not helpful response",
     regenerate: "Regenerate",
     shareResponse: "Share response",
+    showFullPrompt: "Show full prompt",
+    collapsePrompt: "Collapse prompt",
+    copyPrompt: "Copy prompt",
+    copiedPrompt: "Copied",
+    editPrompt: "Edit prompt",
   },
   userMenu: {
     emailInbox: "Email Inbox",

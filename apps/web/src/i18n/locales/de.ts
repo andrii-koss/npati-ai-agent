@@ -106,6 +106,11 @@ export const de: TranslationSchema = {
     notHelpful: "Nicht hilfreiche Antwort",
     regenerate: "Erneut generieren",
     shareResponse: "Antwort teilen",
+    showFullPrompt: "Vollständigen Prompt anzeigen",
+    collapsePrompt: "Prompt einklappen",
+    copyPrompt: "Prompt kopieren",
+    copiedPrompt: "Kopiert",
+    editPrompt: "Prompt bearbeiten",
   },
   userMenu: {
     emailInbox: "E-Mail-Postfach",

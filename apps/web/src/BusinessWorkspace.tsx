@@ -4,6 +4,7 @@ import type { AgentReply } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
+import { UserPromptMessage } from "./UserPromptMessage";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { SPEECH_VOICES } from "./speech-voices";
@@ -1687,7 +1688,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
-                  <ChatMessageContent content={message.content} />
+                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={message.content} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}

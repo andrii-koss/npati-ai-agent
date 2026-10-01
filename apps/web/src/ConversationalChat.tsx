@@ -6,6 +6,7 @@ import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, 
 import { Link, useNavigate } from "react-router-dom";
 import { BusinessChatPage, ChatContextSwitcherContext, FloatingNotice, useWorkspace } from "./BusinessWorkspace";
 import { ChatMessageContent } from "./ChatMessageContent";
+import { UserPromptMessage } from "./UserPromptMessage";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { confirmModal } from "./ConfirmDialog";
@@ -222,7 +223,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
               className={message.role}
               aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
             >
-              <ChatMessageContent content={message.content} />
+              {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={message.content} />}
             </article>
           ))}
           {sending && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{(researching ? researchThinkingSteps : onboardingThinkingSteps)[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
@@ -296,7 +297,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
               className={message.role}
               aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
             >
-              <ChatMessageContent content={message.content} />
+              {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={message.content} />}
             </article>
           ))}
           {sending && (
@@ -391,7 +392,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
       if (businessRoute || businessSetup) return;
       setSelection((current) => {
         const preferred = preferredCompanyId ? `company:${preferredCompanyId}` : "";
-        if (preferred && value.companies.some((company) => `company:${company.id}` === preferred)) {
+        if (preferred && current === "none" && value.companies.some((company) => `company:${company.id}` === preferred)) {
           persistSelection(preferred);
           return preferred;
         }
@@ -442,7 +443,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
   }
 
   const selectValue = selection.startsWith("company:")
-    ? (companies.some((c) => "company:" + c.id === selection) ? selection : (companies[0] ? "company:" + companies[0].id : "none"))
+    ? (companies.some((c) => "company:" + c.id === selection) ? selection : "none")
     : "none";
 
   const activeCompanyName = companies.find((c) => "company:" + c.id === selectValue)?.name;

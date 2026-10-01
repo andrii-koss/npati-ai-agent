@@ -123,6 +123,11 @@ export interface TranslationSchema {
     notHelpful: string;
     regenerate: string;
     shareResponse: string;
+    showFullPrompt: string;
+    collapsePrompt: string;
+    copyPrompt: string;
+    copiedPrompt: string;
+    editPrompt: string;
   };
   userMenu: {
     emailInbox: string;
