@@ -7,7 +7,7 @@ import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, ty
 import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
 import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
-import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
+import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError } from "@npati/workspace";
 import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver } from "@npati/shared";
 import Fastify from "fastify";
@@ -1467,6 +1467,46 @@ ${localized.next}`;
     });
   }
 
+  async function completeCreatedBusinessMemory(
+    auth: AuthContext,
+    requestMessage: string,
+    conversationId: string | undefined,
+    business: Business | undefined,
+    businessReply: string,
+    result: Awaited<ReturnType<typeof executeWorkspaceChatAction>>,
+  ): Promise<Awaited<ReturnType<typeof executeWorkspaceChatAction>>> {
+    if (!business || !requestsBusinessMemory(requestMessage)) return result;
+    let memoryResult = result;
+    if (memoryResult.workspaceAction?.action === "memory.create" && memoryResult.workspaceAction.businessId !== business.id) {
+      const action = memoryResult.workspaceAction;
+      if (action.businessId) await workspaceStore.deleteMemory(auth, action.businessId, action.resourceId);
+      memoryResult = { cleanText: "", workspaceAction: undefined, companyRunId: undefined };
+    }
+    if (memoryResult.workspaceAction?.action !== "memory.create") {
+      const existing = await workspaceStore.listMemory(auth, business.id);
+      if (existing.length === 0) {
+        const copy = compositeMemoryCopy(requestMessage);
+        const directive = {
+          action: "memory.create",
+          businessId: business.id,
+          intro: copy.intro,
+          memory: { type: "business_fact", title: business.name, content: [business.name, business.description].filter(Boolean).join("\n\n"), confidence: 1 },
+        };
+        const fence = "```";
+        memoryResult = await executeWorkspaceChatAction(auth, fence + "workspace-action\n" + JSON.stringify(directive) + "\n" + fence, conversationId, requestMessage, { selectedBusinessId: business.id });
+      }
+    }
+    const fence = "```";
+    const cleanBusinessReply = businessReply.replace(new RegExp(fence + "workspace-action[\\s\\S]*?" + fence, "giu"), "").trim();
+    if (memoryResult.workspaceAction?.action !== "memory.create") {
+      const failure = detectCompanyChatLanguage(requestMessage) === "uk"
+        ? "\u0411\u0456\u0437\u043d\u0435\u0441-\u0456\u0434\u0435\u044e \u0441\u0442\u0432\u043e\u0440\u0435\u043d\u043e, \u0430\u043b\u0435 \u0437\u0430\u043f\u0438\u0441 \u0443 \u043f\u0430\u043c\u2019\u044f\u0442\u0456 \u043d\u0435 \u0437\u0431\u0435\u0440\u0456\u0433\u0441\u044f. \u0421\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0441\u0442\u0432\u043e\u0440\u0438\u0442\u0438 \u0439\u043e\u0433\u043e \u0449\u0435 \u0440\u0430\u0437."
+        : "The business idea was created, but its memory record was not saved. Please try creating the memory again.";
+      return { ...memoryResult, cleanText: [cleanBusinessReply, failure].filter(Boolean).join("\n\n") };
+    }
+    return { ...memoryResult, cleanText: [cleanBusinessReply, memoryResult.cleanText].filter(Boolean).join("\n\n") };
+  }
+
   async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; attachments?: import("./email-inbox-types").EmailAttachment[] }) {
     const managementRequest = Boolean(requestMessage && EmailChatActions.isManagementRequest(requestMessage));
     if (!/```email-action/i.test(content) && !managementRequest) return { cleanText: content, emailAction: undefined };
@@ -1704,7 +1744,8 @@ ${localized.next}`;
       : nativeBusinessAction || EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
       ? { cleanText: emailAction.cleanText, companyAction: undefined }
       : await executeCompanyChatAction(auth, emailAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, responseLanguage: activeConversationLanguage });
-    const workspaceAction = nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: businessId });
+    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: (nativeBusinessAction ?? executedAction.businessAction)?.business?.id ?? businessId });
+    const workspaceAction = await completeCreatedBusinessMemory(auth, safePrompt, conversation?.id, (nativeBusinessAction ?? executedAction.businessAction)?.business, executedAction.cleanText, initialWorkspaceAction);
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
@@ -2221,9 +2262,10 @@ ${localized.next}`;
           researchContext: research?.context,
           responseLanguage: activeConversationLanguage,
         });
-    const workspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
+    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
-      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id });
+      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: (nativeBusinessAction ?? executedAction.businessAction)?.business?.id });
+    const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, (nativeBusinessAction ?? executedAction.businessAction)?.business, executedAction.cleanText, initialWorkspaceAction);
     content = workspaceAction.cleanText;
     if (research?.sources.length && !content.includes("### Джерела") && !content.includes("### Sources") && !content.includes(research.sources[0]?.url ?? "")) {
       content = attachResearchSources(content, research);
