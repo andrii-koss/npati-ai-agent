@@ -17,6 +17,7 @@ import type { ProjectPreviewService } from "./project-preview-service";
 import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { DeployTargetConfig } from "./deploy-provider";
+import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -72,6 +73,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectGit?: ProjectGitService,
     private readonly projectFileLeaseManager?: ProjectFileLeaseManager,
     private readonly projectDeploy?: ProjectDeployService,
+    private readonly projectQa?: ProjectBrowserQaService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -143,6 +145,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     if (tool.startsWith("project.preview.")) return this.projectPreviewTool(context, company, tool, input);
     if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
     if (tool.startsWith("project.deploy.")) return this.projectDeployTool(context, company, tool, input);
+    if (tool.startsWith("project.qa.")) return this.projectQaTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -455,6 +458,39 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       }
       default:
         throw new Error(`Unsupported deploy tool: ${tool}`);
+    }
+  }
+
+  private async projectQaTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectQa) throw new Error("Project browser QA service is not configured");
+    const projectId = typeof input.projectId === "string" ? input.projectId : undefined;
+    if (!projectId) throw new Error("Browser QA tool requires projectId");
+
+    switch (tool) {
+      case "project.qa.inspect": {
+        const result = await this.projectQa.inspect(context, company.id, {
+          projectId,
+          path: typeof input.path === "string" ? input.path : undefined,
+          viewport: (input.viewport as any) || "desktop",
+          checks: Array.isArray(input.checks) ? (input.checks as any) : undefined,
+          timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
+          maxScreenshotBytes: typeof input.maxScreenshotBytes === "number" ? input.maxScreenshotBytes : undefined,
+          agentId: typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : undefined,
+          runId: typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined,
+        });
+        return { reportId: result.report.id, status: result.report.status, summary: result.report.summary, issues: result.issues, metrics: result.metrics };
+      }
+      case "project.qa.report": {
+        const reportId = typeof input.reportId === "string" ? input.reportId : undefined;
+        if (reportId) {
+          const report = await this.projectQa.getReport(context, company.id, projectId, reportId);
+          return { report: report ? { id: report.id, status: report.status, summary: report.summary, issues: report.issues, metrics: report.metrics } : null };
+        }
+        const report = await this.projectQa.getLatestReport(context, company.id, projectId);
+        return { report: report ? { id: report.id, status: report.status, summary: report.summary, issues: report.issues, metrics: report.metrics } : null };
+      }
+      default:
+        throw new Error(`Unsupported QA tool: ${tool}`);
     }
   }
 

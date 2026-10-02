@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
 import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
-import type { SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
+import type { SandboxBrowserQaOptions, SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
 import { classifyTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
@@ -38,6 +38,16 @@ export class ProjectSandboxService {
     this.limits.commandTimeoutMs = Math.min(this.limits.commandTimeoutMs, 600_000);
     this.limits.installBuildTimeoutMs = Math.min(this.limits.installBuildTimeoutMs, 600_000);
     this.limits.outputLimitBytes = Math.min(this.limits.outputLimitBytes, 128_000);
+  }
+  async inspectBrowser(ctx: AuthContext, companyId: string, projectId: string, options: SandboxBrowserQaOptions & { agentId?: string }) {
+    const project = await this.project(ctx, companyId, projectId);
+    await this.agent(ctx, companyId, options.agentId ?? "system", "project.qa.inspect");
+    if (!project.sandboxId || !this.provider.inspectBrowser) throw new SandboxProviderError("qa_unavailable", "Browser QA runner is unavailable", 503, "browser_qa", "project.qa.inspect");
+    const scope = scopeOf(ctx, project);
+    const status = await this.provider.getStatus(scope, project.sandboxId);
+    if (status.state !== "running") throw new SandboxProviderError("sandbox_not_running", "Project sandbox is not running", 409, "browser_qa", "project.qa.inspect");
+    this.touch(ctx, project);
+    return this.provider.inspectBrowser(scope, project.sandboxId, options);
   }
   private async project(ctx: AuthContext, companyId: string, projectId: string, allowArchived = false) {
     const project = await this.projects.get(ctx, companyId, projectId);

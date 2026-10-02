@@ -107,7 +107,7 @@ export function selectProjectTaskAgent(
     const tools = agent.tools ?? [];
     let score = roleWords[role].test(text) ? 20 : 0;
     if (role === "frontend" && tools.some((tool) => tool.startsWith("project.files."))) score += 15;
-    if (role === "qa" && tools.some((tool) => tool.startsWith("project.preview.") || tool.startsWith("project.terminal."))) score += 10;
+    if (role === "qa" && tools.some((tool) => tool.startsWith("project.qa.") || tool.startsWith("project.preview.") || tool.startsWith("project.terminal."))) score += 15;
     if (role === "security" && tools.some((tool) => tool.startsWith("project.git."))) score += 5;
     if (agent.modelId) score += 1;
     if (edges.some((edge) => edge.parentAgentId === mainAgentId && edge.childAgentId === agent.id)) score += 3;

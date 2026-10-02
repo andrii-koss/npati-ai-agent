@@ -105,6 +105,63 @@ export interface CreateDeploymentInput {
   runId?: string;
 }
 
+export type BrowserQaStatus = "passed" | "warning" | "failed" | "error";
+
+export interface BrowserQaIssue {
+  id: string;
+  type: "console_error" | "broken_link" | "a11y" | "performance";
+  severity: "error" | "warning" | "info";
+  message: string;
+  selector?: string;
+  context?: Record<string, unknown>;
+  recommendation: string;
+}
+
+export interface BrowserQaMetrics {
+  loadTimeMs: number;
+  domContentLoadedMs: number;
+  resourceCount: number;
+  totalSizeBytes: number;
+  brokenLinksCount: number;
+  consoleErrorsCount: number;
+  a11yViolationsCount: number;
+  performanceIssuesCount: number;
+}
+
+export interface BrowserQaScreenshot {
+  name: string;
+  viewport: { width: number; height: number };
+  mimeType: string;
+  base64Data: string;
+  sizeBytes: number;
+}
+
+export interface ProjectQaReport {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  status: BrowserQaStatus;
+  targetUrl: string;
+  summary: string;
+  issues: BrowserQaIssue[];
+  metrics: BrowserQaMetrics;
+  screenshots: BrowserQaScreenshot[];
+  runId?: string;
+  createdAt: string;
+}
+
+export interface CreateProjectQaReportInput {
+  status: BrowserQaStatus;
+  targetUrl: string;
+  summary: string;
+  issues: BrowserQaIssue[];
+  metrics: BrowserQaMetrics;
+  screenshots?: BrowserQaScreenshot[];
+  runId?: string;
+}
+
 export interface BusinessToCompanyInput {
   companyName?: string;
   includeConfirmedMemory?: boolean;
@@ -287,6 +344,10 @@ export interface WorkspaceStore {
   listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectDeployment[]>;
   getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null>;
   updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment>;
+  createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport>;
+  listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectQaReport[]>;
+  getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null>;
+  getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;
   listCompanyAgentsPage(context: AuthContext, companyId: string, limit?: number, cursor?: string): Promise<CompanyAgentPage>;
   getCompanyAgent(context: AuthContext, companyId: string, agentId: string): Promise<CompanyAgent>;

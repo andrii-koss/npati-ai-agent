@@ -18160,3 +18160,23 @@ body:has(.npati-dialog-backdrop) .sidebar {
   color: var(--text-muted, #64748b);
   font-size: 0.9rem;
 }
+
+/* Project Browser QA */
+.qa-tab-pane { display: grid; gap: 1rem; }
+.qa-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.qa-toolbar label, .qa-report-detail label { display: grid; gap: .35rem; font-size: .85rem; }
+.qa-toolbar input, .qa-toolbar select, .qa-report-detail select {
+  min-height: 2.25rem; padding: .4rem .6rem; border: 1px solid var(--border-color, #d1d5db);
+  border-radius: .4rem; background: var(--surface, #fff); color: inherit;
+}
+.qa-report-layout { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 1rem; }
+.qa-report-list { display: grid; align-content: start; gap: .5rem; }
+.qa-report-list button { display: flex; justify-content: space-between; align-items: center; gap: .5rem; text-align: left; }
+.qa-report-detail { min-width: 0; padding: 1rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: .65rem; }
+.qa-metrics { display: flex; flex-wrap: wrap; gap: .75rem; margin: .75rem 0; font-size: .85rem; }
+.qa-issue-list { padding-left: 1.25rem; }
+.qa-issue-list li { margin: .4rem 0; overflow-wrap: anywhere; }
+.qa-screenshot { margin: 1rem 0 0; }
+.qa-screenshot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border-color, #e2e8f0); }
+.qa-screenshot figcaption { margin-top: .4rem; font-size: .8rem; opacity: .75; }
+@media (max-width: 680px) { .qa-report-layout { grid-template-columns: 1fr; } }

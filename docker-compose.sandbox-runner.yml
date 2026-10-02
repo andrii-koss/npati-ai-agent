@@ -10,6 +10,7 @@ services:
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
       NPATI_SANDBOX_IMAGE: npati/project-sandbox:local
       NPATI_SANDBOX_EGRESS_IMAGE: npati/sandbox-egress:local
+      NPATI_BROWSER_QA_IMAGE: npati/browser-qa:local
       NPATI_SANDBOX_SYNC_MAX_FILES: ${NPATI_SANDBOX_SYNC_MAX_FILES:-500}
       NPATI_SANDBOX_SYNC_MAX_BYTES: ${NPATI_SANDBOX_SYNC_MAX_BYTES:-20000000}
     ports:

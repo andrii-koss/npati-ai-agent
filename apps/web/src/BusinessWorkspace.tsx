@@ -1578,13 +1578,23 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     };
     flushDeltasRef.current = flushDeltas;
 
+    const activeCompanyForRequest = companyId ?? readActiveCompanyId();
+    let activeProjectId: string | undefined;
+    try {
+      const stored = sessionStorage.getItem("npati_active_project");
+      if (stored) {
+        const active = JSON.parse(stored) as { companyId?: string; projectId?: string };
+        if (active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
+      }
+    } catch {}
     try {
       const result = await streamChat<AgentReply>({
         message: requestMessage,
         conversationId: selected ?? undefined,
         attachments: sentAttachments,
-        contextType: companyId ? "company" : (business ? "business" : "none"),
-        ...(companyId ? { companyId } : {}),
+        contextType: activeProjectId ? "project" : companyId ? "company" : (business ? "business" : "none"),
+        ...(activeCompanyForRequest && (companyId || activeProjectId) ? { companyId: activeCompanyForRequest } : {}),
+        ...(activeProjectId ? { projectId: activeProjectId } : {}),
         noMemory: privateRequest,
         streamId,
       }, enqueueProgress, {
@@ -1623,7 +1633,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
       if (result.activeContext?.projectId) {
-        try { sessionStorage.setItem("npati_active_project_id", result.activeContext.projectId); } catch {}
+        try {
+          sessionStorage.setItem("npati_active_project", JSON.stringify({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId }));
+          if (!readActiveCompanyId() && result.activeContext.companyId) writeActiveCompanyId(result.activeContext.companyId);
+        } catch {}
       }
       setMessages((current) => {
         const found = current.some((item) => item.id === assistantId);

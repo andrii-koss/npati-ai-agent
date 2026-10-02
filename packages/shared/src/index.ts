@@ -196,3 +196,4 @@ export * from "./project-intent";
 
 export * from "./project-git-capabilities";
 export * from "./project-deploy-capabilities";
+export * from "./project-qa-capabilities";

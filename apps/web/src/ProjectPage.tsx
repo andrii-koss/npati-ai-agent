@@ -7,7 +7,7 @@ import type { Project } from "./ProjectSection";
 type FileEntry = { path: string; name: string; type: "file" | "directory"; size?: number; revision?: string };
 type FileContent = { path: string; content: string; size: number; revision: string };
 type TerminalEvent = { id: string; commandSummary: string; riskLevel: string; status: string; output: string; errorCode?: string; createdAt: string };
-type BottomTab = "changes" | "terminal" | "checkpoints" | "deployments" | "logs" | "activity";
+type BottomTab = "changes" | "terminal" | "checkpoints" | "deployments" | "qa" | "logs" | "activity";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 type MobileView = "all" | "files" | "chat" | "preview" | "bottom";
 
@@ -220,6 +220,15 @@ export function ProjectPage() {
   const [deploying, setDeploying] = useState(false);
   const [deployFeedback, setDeployFeedback] = useState<string | null>(null);
 
+  const [qaReports, setQaReports] = useState<any[]>([]);
+  const [activeQaReport, setActiveQaReport] = useState<any | null>(null);
+  const [loadingQa, setLoadingQa] = useState(false);
+  const [runningQa, setRunningQa] = useState(false);
+  const [qaPath, setQaPath] = useState("/");
+  const [qaViewport, setQaViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [qaIssueFilter, setQaIssueFilter] = useState<string>("all");
+  const [qaFeedback, setQaFeedback] = useState<string | null>(null);
+
   const [error, setError] = useState("");
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -276,6 +285,56 @@ export function ProjectPage() {
       setDeployFeedback(`Deploy error: ${err.message || err}`);
     } finally {
       setDeploying(false);
+    }
+  };
+
+  const loadQaReports = async () => {
+    if (!base) return;
+    setLoadingQa(true);
+    try {
+      const data = await apiGet<{ reports: any[] }>(`${base}/qa/reports`);
+      setQaReports(data.reports ?? []);
+      if (data.reports?.length > 0 && !activeQaReport) {
+        const detail = await apiGet<{ report: any }>(`${base}/qa/reports/${encodeURIComponent(data.reports[0].id)}`);
+        setActiveQaReport(detail.report);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingQa(false);
+    }
+  };
+
+  const openQaReport = async (reportId: string) => {
+    try {
+      const data = await apiGet<{ report: any }>(`${base}/qa/reports/${encodeURIComponent(reportId)}`);
+      setActiveQaReport(data.report);
+      setQaFeedback(null);
+    } catch (err: any) {
+      setQaFeedback(err.message || String(err));
+    }
+  };
+  const handleRunQa = async () => {
+    if (!base) return;
+    setRunningQa(true);
+    setQaFeedback(null);
+    try {
+      const data = await apiPost<any>(`${base}/qa/inspect`, {
+        path: qaPath,
+        viewport: qaViewport,
+      });
+      setActiveQaReport(data.report);
+      setQaReports((prev) => [data.report, ...prev]);
+      setQaFeedback(
+        language === "uk"
+          ? `Browser QA успішно виконано (статус: ${data.report.status.toUpperCase()})`
+          : `Browser QA completed (status: ${data.report.status.toUpperCase()})`
+      );
+      setTimeout(() => setQaFeedback(null), 5000);
+    } catch (err: any) {
+      setQaFeedback(`Browser QA Error: ${err.message || err}`);
+    } finally {
+      setRunningQa(false);
     }
   };
 
@@ -339,6 +398,8 @@ export function ProjectPage() {
       void loadCheckpoints();
     } else if (bottomTab === "deployments") {
       void loadDeployments();
+    } else if (bottomTab === "qa") {
+      void loadQaReports();
     } else if (bottomTab === "activity") {
       void loadProjectRuns();
       const timer = setInterval(() => { void loadProjectRuns(); }, 3000);
@@ -910,6 +971,16 @@ export function ProjectPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={bottomTab === "qa"}
+                onClick={() => setBottomTab("qa")}
+                className={bottomTab === "qa" ? "active" : ""}
+              >
+                Browser QA
+                {qaReports.length > 0 && <span className="tab-badge">{qaReports.length}</span>}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={bottomTab === "logs"}
                 onClick={() => setBottomTab("logs")}
                 className={bottomTab === "logs" ? "active" : ""}
@@ -1262,6 +1333,73 @@ export function ProjectPage() {
                 </div>
               )}
 
+              {bottomTab === "qa" && (
+                <div className="qa-tab-pane">
+                  <div className="qa-toolbar">
+                    <label>
+                      {language === "uk" ? "Шлях" : "Path"}
+                      <input value={qaPath} onChange={(event) => setQaPath(event.target.value)} placeholder="/" />
+                    </label>
+                    <label>
+                      {language === "uk" ? "Екран" : "Viewport"}
+                      <select value={qaViewport} onChange={(event) => setQaViewport(event.target.value as typeof qaViewport)}>
+                        <option value="desktop">Desktop</option>
+                        <option value="tablet">Tablet</option>
+                        <option value="mobile">Mobile</option>
+                      </select>
+                    </label>
+                    <button type="button" className="button-primary" onClick={() => void handleRunQa()} disabled={runningQa}>
+                      {runningQa ? (language === "uk" ? "Перевірка…" : "Inspecting…") : (language === "uk" ? "Запустити Browser QA" : "Run Browser QA")}
+                    </button>
+                    <button type="button" className="button-secondary" onClick={() => void loadQaReports()} disabled={loadingQa}>
+                      {language === "uk" ? "Оновити" : "Refresh"}
+                    </button>
+                  </div>
+                  <p className="activity-hint">{language === "uk" ? "Спочатку запустіть Preview. Знімок показує лише розташування елементів." : "Start Preview first. The screenshot shows element layout only."}</p>
+                  {qaFeedback && <p role="status">{qaFeedback}</p>}
+                  <div className="qa-report-layout">
+                    <div className="qa-report-list">
+                      {qaReports.length === 0 ? <p>{language === "uk" ? "Звітів ще немає." : "No reports yet."}</p> : qaReports.map((report) => (
+                        <button key={report.id} type="button" className={activeQaReport?.id === report.id ? "button-secondary active" : "button-secondary"} onClick={() => void openQaReport(report.id)}>
+                          <span className={`status-pill status-${report.status}`}>{report.status}</span>
+                          <span>{new Date(report.createdAt).toLocaleString()}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {activeQaReport && (
+                      <section className="qa-report-detail" aria-label="Browser QA report">
+                        <h3>{language === "uk" ? "Звіт Browser QA" : "Browser QA report"}</h3>
+                        <p>{activeQaReport.summary}</p>
+                        <div className="qa-metrics">
+                          <span>Load: {activeQaReport.metrics?.loadTimeMs ?? 0} ms</span>
+                          <span>Console: {activeQaReport.metrics?.consoleErrorsCount ?? 0}</span>
+                          <span>Links: {activeQaReport.metrics?.brokenLinksCount ?? 0}</span>
+                          <span>A11y: {activeQaReport.metrics?.a11yViolationsCount ?? 0}</span>
+                        </div>
+                        <label>
+                          {language === "uk" ? "Показати issues" : "Show issues"}
+                          <select value={qaIssueFilter} onChange={(event) => setQaIssueFilter(event.target.value)}>
+                            <option value="all">{language === "uk" ? "Усі" : "All"}</option>
+                            <option value="error">Error</option>
+                            <option value="warning">Warning</option>
+                          </select>
+                        </label>
+                        <ul className="qa-issue-list">
+                          {(activeQaReport.issues ?? []).filter((item: any) => qaIssueFilter === "all" || item.severity === qaIssueFilter).map((item: any) => (
+                            <li key={item.id}><strong>{item.type}</strong> · {item.message}</li>
+                          ))}
+                        </ul>
+                        {(activeQaReport.screenshots ?? []).map((shot: any, index: number) => (
+                          <figure key={index} className="qa-screenshot">
+                            <img src={`data:image/png;base64,${shot.base64Data}`} alt={language === "uk" ? "Знімок макета з прихованим вмістом" : "Layout screenshot with hidden content"} />
+                            <figcaption>{shot.name} · {shot.viewport.width} × {shot.viewport.height}</figcaption>
+                          </figure>
+                        ))}
+                      </section>
+                    )}
+                  </div>
+                </div>
+              )}
               {bottomTab === "logs" && (
                 <div className="logs-tab-pane">
                   <div className="logs-toolbar">

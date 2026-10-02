@@ -50,6 +50,8 @@ import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { ProjectDeployService } from "./project-deploy-service";
 import { registerProjectDeployRoutes } from "./project-deploy-routes";
+import { ProjectBrowserQaService } from "./project-browser-qa-service";
+import { registerProjectQaRoutes } from "./project-qa-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
 import { ProjectOrchestrator } from "./project-orchestrator";
@@ -841,7 +843,13 @@ export function buildApp(config: AppConfig = {}) {
       return browserCredentials.resolve(ctx, companyId, credentialId);
     } : undefined
   );
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService);
+  const projectBrowserQaService = new ProjectBrowserQaService(
+    projectService,
+    workspaceStore,
+    projectPreviewService,
+    projectSandbox,
+  );
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService, projectBrowserQaService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -868,6 +876,7 @@ export function buildApp(config: AppConfig = {}) {
     companyRuntime,
     projectGitService,
     projectDeployService,
+    projectBrowserQaService,
   );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {
@@ -2435,6 +2444,7 @@ ${localized.next}`;
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
+  registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {
@@ -2770,9 +2780,10 @@ ${localized.next}`;
     onboardingAction?: "start" | "skip" | "pause" | "resume" | "confirm";
     businessSetup?: boolean;
     scenario?: OnboardingScenario;
-    contextType?: "none" | "business" | "company";
+    contextType?: "none" | "business" | "company" | "project";
     businessId?: string;
     companyId?: string;
+    projectId?: string;
     noMemory?: boolean;
     ephemeral?: boolean;
   } }>("/chat", {
@@ -2901,7 +2912,7 @@ ${localized.next}`;
 
         const projectExecResult = await projectOrchestrator.executeWebsiteTask(auth, {
           companyId: targetCompanyId,
-          projectId: activeProjId ?? undefined,
+          projectId: intentDecision.intent === "CREATE_PROJECT" || intentDecision.intent === "CREATE_WEBSITE" ? undefined : activeProjId ?? undefined,
           intentDecision,
           prompt: prompt || "",
           idempotencyKey: (request.headers["idempotency-key"] as string) || `website-${Date.now()}`,
@@ -2921,7 +2932,7 @@ ${localized.next}`;
         return {
           message: projectExecResult.responseMessage,
           suggestedActions: [
-            `Preview: ${projectExecResult.project.name}`,
+            ...(projectExecResult.previewUrl ? [`Preview: ${projectExecResult.project.name}`] : []),
             `Open: ${projectExecResult.project.name}`,
           ],
           conversationId: conversation?.id,
@@ -3142,9 +3153,10 @@ ${localized.next}`;
     streamId?:string;
     conversationId?: string;
     attachments?: ChatAttachmentInput[];
-    contextType?: "none" | "business" | "company";
+    contextType?: "none" | "business" | "company" | "project";
     businessId?: string;
     companyId?: string;
+    projectId?: string;
     noMemory?: boolean;
     ephemeral?: boolean;
   } }>("/chat/stream", async (request, reply) => {
@@ -3162,14 +3174,23 @@ ${localized.next}`;
 
       const overview = await workspaceStore.overview(auth);
       const requestedContext = {
-        contextType: request.body.contextType ?? (request.body.companyId ? "company" : "business"),
-        businessId: request.body.businessId ?? ((request.body.contextType === "none" || request.body.contextType === "company" || request.body.companyId) ? null : overview.currentBusiness?.id ?? null),
+        contextType: request.body.contextType ?? (request.body.projectId ? "project" : request.body.companyId ? "company" : "business"),
+        businessId: request.body.businessId ?? ((request.body.contextType === "none" || request.body.contextType === "company" || request.body.contextType === "project" || request.body.companyId || request.body.projectId) ? null : overview.currentBusiness?.id ?? null),
         companyId: request.body.companyId ?? null,
+        projectId: request.body.projectId ?? null,
       };
 
       const resolved = await activeContextResolver.resolve(auth, requestedContext);
 
-      if (resolved.context.contextType === "business" && !resolved.business) {
+      const activeProjectId = request.body.projectId ?? resolved.project?.id ?? null;
+      const activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
+      const projectIntent = defaultHybridRouter.classifyProject({
+        message,
+        activeCompanyId,
+        activeProjectId,
+        hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
+      });
+      if (projectIntent.intent === "CHAT" && resolved.context.contextType === "business" && !resolved.business) {
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
@@ -3202,7 +3223,72 @@ ${localized.next}`;
       }, 15_000);
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
-        if (resolved.context.contextType === "none") {
+        if (projectIntent.intent !== "CHAT") {
+          let projectResponse;
+          if (projectIntent.unsupportedIntentMessage || projectIntent.needsClarification) {
+            projectResponse = {
+              message: projectIntent.unsupportedIntentMessage ?? projectIntent.clarificationPrompt ?? "Select an active Project.",
+              suggestedActions: [],
+              activeContext: resolved.context,
+            };
+          } else {
+            let targetCompanyId = activeCompanyId;
+            if (!targetCompanyId) {
+              const companies = (await workspaceStore.listCompanies(auth)).items;
+              if (companies.length === 1) targetCompanyId = companies[0]!.id;
+              else if (companies.length === 0) {
+                projectResponse = {
+                  message: "Select an active Company before creating a website.",
+                  suggestedActions: ["Create a Company"],
+                  activeContext: resolved.context,
+                };
+              } else {
+                projectResponse = {
+                  message: `Select an active Company before creating or editing a website. Available companies: ${companies.map((company) => company.name).join(", ")}.`,
+                  suggestedActions: companies.slice(0, 3).map((company) => `Company: ${company.name}`),
+                  activeContext: resolved.context,
+                };
+              }
+            }
+            if (targetCompanyId) {
+              const executed = await projectOrchestrator.executeWebsiteTask(auth, {
+                companyId: targetCompanyId,
+                projectId: projectIntent.intent === "CREATE_PROJECT" || projectIntent.intent === "CREATE_WEBSITE" ? undefined : activeProjectId ?? undefined,
+                intentDecision: projectIntent,
+                prompt: message,
+                idempotencyKey: (request.headers["idempotency-key"] as string) || `website-${Date.now()}`,
+              });
+              const conversation = memoryPolicy.writeAllowed
+                ? request.body.conversationId
+                  ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+                  : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
+                : undefined;
+              if (conversation) {
+                await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+                await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", executed.responseMessage);
+              }
+              projectResponse = {
+                message: executed.responseMessage,
+                suggestedActions: [...(executed.previewUrl ? [`Preview: ${executed.project.name}`] : []), `Open: ${executed.project.name}`],
+                conversationId: conversation?.id,
+                activeContext: {
+                  contextType: "project" as const,
+                  companyId: executed.project.companyId,
+                  projectId: executed.project.id,
+                  workspaceId: auth.workspaceId,
+                  businessId: null,
+                },
+                companyRunId: executed.runDetails.run.id,
+                projectCard: executed.projectCard,
+                projectAction: executed.projectAction,
+              };
+            }
+          }
+          send("result", projectResponse);
+        } else if (resolved.context.contextType === "project") {
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal);
+          send("result", { ...result, activeContext: resolved.context });
+        } else if (resolved.context.contextType === "none") {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company") {

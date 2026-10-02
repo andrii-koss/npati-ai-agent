@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -41,6 +41,9 @@ const projectDeploymentColumns = `id, workspace_id AS "workspaceId", company_id 
   user_id AS "userId", provider, environment, branch, commit_hash AS "commitHash", status, target_url AS "targetUrl",
   external_deployment_id AS "externalDeploymentId", preflight_summary AS "preflightSummary", error_message AS "errorMessage",
   run_id AS "runId", created_at::text AS "createdAt", updated_at::text AS "updatedAt"`;
+const projectQaReportColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
+  user_id AS "userId", status, target_url AS "targetUrl", summary, issues, metrics, screenshots,
+  run_id AS "runId", created_at::text AS "createdAt"`;
 const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", name, role, description,
   system_instruction AS "systemInstruction", prompt_guidelines AS "promptGuidelines",
   recommended_prompts AS "recommendedPrompts", model_id AS "modelId", fallback_model_id AS "fallbackModelId",
@@ -706,6 +709,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const projectQaReports = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='058_project_qa_reports'");
+    if (!projectQaReports.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration058 } = await import("./migration-058");
+        await runMigration058(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('058_project_qa_reports')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1225,6 +1240,41 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [deploymentId, context.workspaceId, companyId, projectId, status, targetUrl, externalDeploymentId, preflightSummary, errorMessage]);
     if (!result.rows[0]) throw new WorkspaceNotFoundError("Project deployment not found");
     return result.rows[0];
+  }
+
+  async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> {
+    await this.getProject(context, companyId, projectId);
+    const id = `qa_${randomUUID()}`;
+    const result = await this.pool.query<ProjectQaReport>(`INSERT INTO project_qa_reports
+      (id, workspace_id, company_id, project_id, user_id, status, target_url, summary, issues, metrics, screenshots, run_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING ${projectQaReportColumns}`,
+      [id, context.workspaceId, companyId, projectId, context.userId, input.status, input.targetUrl, input.summary, JSON.stringify(input.issues ?? []), JSON.stringify(input.metrics ?? {}), JSON.stringify(input.screenshots ?? []), input.runId ?? null]);
+    return result.rows[0]!;
+  }
+
+  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    const result = await this.pool.query<ProjectQaReport>(`SELECT ${projectQaReportColumns} FROM project_qa_reports
+      WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3
+      ORDER BY created_at DESC, id DESC LIMIT $4`,
+      [context.workspaceId, companyId, projectId, safeLimit]);
+    return result.rows;
+  }
+
+  async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<ProjectQaReport>(`SELECT ${projectQaReportColumns} FROM project_qa_reports
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4`,
+      [reportId, context.workspaceId, companyId, projectId]);
+    if (!result.rowCount) return null;
+    return result.rows[0]!;
+  }
+
+  async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
+    const list = await this.listProjectQaReports(context, companyId, projectId, 1);
+    return list[0] ?? null;
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

@@ -3,7 +3,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { SandboxCommandResult, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
+import type { SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand } from "./terminal-command-policy";
@@ -82,7 +82,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       await this.docker(["start", names.proxy]);
       await this.docker([
         "create", "--name", names.sandbox, "--label", `npati.scope=${label(scope)}`, "--label", `npati.sandbox=${id}`,
-        "--network", names.network, "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--network", names.network, "--network-alias", "project-preview", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--cpus", this.limits.cpu, "--memory", this.limits.memory, "--pids-limit", String(this.limits.pids),
         "--tmpfs", `/workspace:rw,nosuid,nodev,uid=10001,gid=10001,size=${this.limits.diskBytes}`,
         "--tmpfs", "/tmp:rw,nosuid,nodev,uid=10001,gid=10001,size=64m",
@@ -117,6 +117,35 @@ export class DockerSandboxProvider implements SandboxProvider {
       status: result.timedOut || result.code === 124 || result.code === 137 ? "timed_out" : result.code === 0 ? "completed" : "failed", exitCode: result.timedOut ? null : result.code,
       stdout: text(result.stdout), stderr: text(result.stderr), durationMs: Date.now() - started, step: "command", tool: "project.terminal.exec", retryable: result.timedOut,
     };
+  }
+  async inspectBrowser(scope: SandboxScope, id: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult> {
+    const names = await this.inspect(scope, id);
+    if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535 ||
+        !/^\/(?!\/)[A-Za-z0-9/_~.%-]*$/.test(options.path) || options.path.includes("..") ||
+        !Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 60000 ||
+        !Number.isInteger(options.maxScreenshotBytes) || options.maxScreenshotBytes < 50000 || options.maxScreenshotBytes > 2000000 ||
+        !Number.isInteger(options.maxBrokenLinks) || options.maxBrokenLinks < 1 || options.maxBrokenLinks > 50 ||
+        !Number.isInteger(options.viewport.width) || options.viewport.width < 320 || options.viewport.width > 1920 ||
+        !Number.isInteger(options.viewport.height) || options.viewport.height < 320 || options.viewport.height > 1200) {
+      throw new SandboxProviderError("invalid_qa_options", "Invalid browser QA options", 400, "browser_qa", "project.qa.inspect");
+    }
+    const container = `npati-qa-${randomUUID()}`;
+    this.touch(id);
+    try {
+      const result = await args("docker", ["run", "--rm", "--name", container, "--network", names.network,
+        "--user", "1000:1000", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--cpus", "1", "--memory", "768m", "--pids-limit", "256", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
+        "--env", "HOME=/tmp", "-i", process.env.NPATI_BROWSER_QA_IMAGE || "npati/browser-qa:local"],
+        options.timeoutMs + 5000, JSON.stringify({ ...options, host: names.sandbox }), 3_000_000);
+      if (result.timedOut) throw new SandboxProviderError("qa_timeout", "Browser QA timed out or exceeded its output limit", 504, "browser_qa", "project.qa.inspect");
+      if (result.code !== 0) throw new SandboxProviderError("qa_failed", "Browser QA runner failed", 503, "browser_qa", "project.qa.inspect");
+      const parsed = JSON.parse(result.stdout.toString("utf8")) as SandboxBrowserQaResult;
+      if (!Number.isInteger(parsed.statusCode) || !Array.isArray(parsed.brokenLinks) || !Array.isArray(parsed.accessibility))
+        throw new SandboxProviderError("qa_invalid_result", "Browser QA runner returned invalid output", 503, "browser_qa", "project.qa.inspect");
+      return parsed;
+    } finally {
+      await args("docker", ["rm", "-f", container], 5000).catch(() => undefined);
+    }
   }
   async uploadFiles(scope: SandboxScope, id: string, files: SandboxFile[]) {
     const names = await this.inspect(scope, id);

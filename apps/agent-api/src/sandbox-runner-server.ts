@@ -49,6 +49,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "startProcess": result = await provider.startProcess(scope, id, String(p.command ?? ""), p.options as any); break;
       case "stopProcess": result = await provider.stopProcess(scope, id, String(p.processId ?? "")); break;
       case "getProcessStatus": result = await provider.getProcessStatus(scope, id, String(p.processId ?? "")); break;
+      case "inspectBrowser": result = await provider.inspectBrowser(scope, id, p.options as any); break;
       default: throw new SandboxProviderError("invalid_operation", "Unknown sandbox operation", 400);
     }
     return { result: result ?? null };

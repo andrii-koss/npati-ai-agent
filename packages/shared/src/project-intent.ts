@@ -61,6 +61,8 @@ const IMPROVE_REGEX = /(?:покращ(?:ити)?|оптимізуй|рефак�
 
 const TEST_REGEX = /(?:запусти тести|протестуй|проведи тести|run (?:the )?(?:project |website |unit )?tests?|execute tests?|test (?:the )?(?:project|site|app|suite))/i;
 
+const BROWSER_QA_REGEX = /(?:browser qa|headless|qa inspect|перевір (?:в )?браузері|перевір верстку|протестуй сайт|тест сторінки|check links|accessibility|a11y|broken links|audit website)/i;
+
 const BUILD_REGEX = /(?:збери проєкт|зроби білд|запусти білд|компіляція|build (?:the )?(?:project|site|app)|npm run build|yarn build|pnpm build)/i;
 
 const PREVIEW_REGEX = /(?:запусти (?:preview|прев['ʼ]?ю|сайт)|покажи (?:прев['ʼ]?ю|preview|сайт)|start preview|open preview|live preview|launch preview|preview project|view site)/i;
@@ -173,6 +175,22 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
     });
   }
 
+  // Creation takes precedence when the same request also asks for preview
+  if (CREATE_PROJECT_REGEX.test(text) && PREVIEW_REGEX.test(text)) {
+    const isWebsite = /сайт|веб-?сайт|лендінг|website|web\s*site|landing/i.test(text);
+    return buildDecision({
+      intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
+      confidence: 0.92,
+      isExecutableInStep5: true,
+      needsClarification: false,
+      targetDetails: {
+        topic: text,
+        framework: extractFramework(text),
+        entityName: extractEntityName(text),
+      },
+    });
+  }
+
   // 7. Preview Project
   if (PREVIEW_REGEX.test(text)) {
     return buildDecision({
@@ -197,15 +215,16 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
     });
   }
 
-  // 9. Test Project
-  if (TEST_REGEX.test(text)) {
+  // 9. Test Project / Browser QA
+  if (BROWSER_QA_REGEX.test(text) || TEST_REGEX.test(text)) {
+    const isBrowserQa = BROWSER_QA_REGEX.test(text);
     return buildDecision({
       intent: "TEST_PROJECT",
       confidence: 0.9,
       isExecutableInStep5: true,
       needsClarification: !input.activeProjectId,
-      clarificationPrompt: !input.activeProjectId ? "Будь ласка, оберіть активний проєкт для запуску тестів." : undefined,
-      suggestedAction: "project.terminal.exec",
+      clarificationPrompt: !input.activeProjectId ? (isBrowserQa ? "Будь ласка, оберіть активний проєкт для Browser QA перевірки." : "Будь ласка, оберіть активний проєкт для запуску тестів.") : undefined,
+      suggestedAction: isBrowserQa ? "project.qa.inspect" : "project.terminal.exec",
     });
   }
 
@@ -236,7 +255,6 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
       },
     });
   }
-
   // 12. Continue Project (requires context)
   if (CONTINUE_REGEX.test(text) && input.activeProjectId) {
     return buildDecision({
