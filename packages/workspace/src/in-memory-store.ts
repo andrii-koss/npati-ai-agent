@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -364,6 +364,23 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const project = await this.getProject(context, companyId, projectId);
     if ((project.sandboxId ?? null) !== expectedSandboxId || project.status === "archived") throw new Error("Project sandbox changed by another request or is archived");
     const next: Project = { ...project, sandboxId: sandboxId ?? undefined, revision: project.revision + 1, updatedAt: now() };
+    this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
+    const project = await this.getProject(context, companyId, projectId);
+    if (project.status === "archived") throw new Error("Project is archived");
+    const next: Project = {
+      ...project,
+      status: patch.status ?? project.status,
+      previewUrl: patch.previewUrl !== undefined ? (patch.previewUrl ?? undefined) : project.previewUrl,
+      previewPort: patch.previewPort !== undefined ? (patch.previewPort ?? undefined) : project.previewPort,
+      framework: patch.framework !== undefined ? (patch.framework ?? undefined) : project.framework,
+      runtime: patch.runtime !== undefined ? (patch.runtime ?? undefined) : project.runtime,
+      lastBuildStatus: patch.lastBuildStatus !== undefined ? (patch.lastBuildStatus ?? undefined) : project.lastBuildStatus,
+      revision: project.revision + 1,
+      updatedAt: now(),
+    };
     this.projects.set(projectId, next);
     return structuredClone(next);
   }

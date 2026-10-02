@@ -43,6 +43,8 @@ import { RemoteSandboxProvider } from "./sandbox-provider";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { registerProjectTerminalRoutes } from "./project-terminal-routes";
+import { registerProjectPreviewRoutes } from "./project-preview-routes";
+import { ProjectPreviewService } from "./project-preview-service";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -819,7 +821,8 @@ export function buildApp(config: AppConfig = {}) {
   });
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox);
+  const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -2399,6 +2402,7 @@ ${localized.next}`;
   registerProjectRoutes(app, projectService, authProvider);
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
+  registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {

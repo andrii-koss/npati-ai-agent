@@ -1282,14 +1282,17 @@ export function CompanyPage() {
             <small className="company-field-hint">{t("companySettings.agentDrawer.toolsHint")}</small>
             <div className="company-tool-grid">
               {([{
-                label: language === "uk" ? "������� ������" : "Project Read",
+                label: language === "uk" ? "Читання файлів" : "Project Read",
                 ids: ["project.files.list", "project.files.read", "project.files.search"],
               }, {
-                label: language === "uk" ? "����� ������" : "Project Write",
+                label: language === "uk" ? "Запис файлів" : "Project Write",
                 ids: ["project.files.create", "project.files.write", "project.files.edit", "project.files.move", "project.files.delete"],
               }, {
-                label: "Terminal",
+                label: language === "uk" ? "Термінал" : "Terminal",
                 ids: ["project.terminal.exec", "project.terminal.process"],
+              }, {
+                label: language === "uk" ? "Попередній перегляд" : "Preview",
+                ids: ["project.preview.start", "project.preview.stop", "project.preview.status"],
               }]).map((permission) => <label className="company-tool" key={permission.label}>
                 <input type="checkbox" checked={permission.ids.every((id) => agentForm.tools.includes(id))} onChange={(event) => setAgentForm({
                   ...agentForm,

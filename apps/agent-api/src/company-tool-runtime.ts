@@ -10,6 +10,7 @@ import type { EmailAgentTools } from "./email-agent-tools";
 import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService, TerminalSecretReference } from "./project-sandbox-service";
+import type { ProjectPreviewService } from "./project-preview-service";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -60,6 +61,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectWorkspace?: ProjectWorkspace,
     private readonly projectAgentStore?: Pick<WorkspaceStore, "getCompanyAgent">,
     private readonly projectSandbox?: ProjectSandboxService,
+    private readonly projectPreview?: ProjectPreviewService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -128,6 +130,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       };
       return tool === "project.terminal.exec" ? this.projectSandbox.execute(context, company.id, request) : this.projectSandbox.process(context, company.id, request);
     }
+    if (tool.startsWith("project.preview.")) return this.projectPreviewTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -273,4 +276,26 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       transcript: typeof metadata.transcript === "string" ? metadata.transcript.slice(0, 80_000) : undefined,
     };
   }
+  private async projectPreviewTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectPreview) throw new Error("Project preview service is not configured");
+    const agentId = typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "";
+    if (agentId && this.projectAgentStore) {
+      const agent = await this.projectAgentStore.getCompanyAgent(context, company.id, agentId);
+      if (!agent.isActive || !agent.tools.includes(tool)) throw new Error(`Agent lacks permission for tool ${tool}`);
+    }
+    const projectId = text(input.projectId, "Project ID", 100);
+    if (tool === "project.preview.start") {
+      const command = typeof input.command === "string" ? input.command : undefined;
+      const port = typeof input.port === "number" ? input.port : undefined;
+      return this.projectPreview.startPreview(context, company.id, projectId, { command, port, agentId });
+    }
+    if (tool === "project.preview.stop") {
+      return this.projectPreview.stopPreview(context, company.id, projectId, { agentId });
+    }
+    if (tool === "project.preview.status") {
+      return this.projectPreview.getPreviewStatus(context, company.id, projectId);
+    }
+    throw new Error(`Unknown project preview tool: ${tool}`);
+  }
+
 }

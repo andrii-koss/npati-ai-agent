@@ -1,0 +1,92 @@
+import type { CapabilityDefinition } from "./capabilities";
+import type { CapabilityMatrixEntry } from "./capability-matrix";
+
+export const PROJECT_PREVIEW_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "project.preview.start",
+    inventoryIds: [317],
+    type: "tool",
+    domain: "files",
+    name: "Project Preview Start",
+    description: "Detect the framework, start the development preview server in the sandbox, and generate a signed preview URL.",
+    useWhen: ["An authorized Company agent needs to launch the preview server for a project."],
+    doNotUseWhen: ["The project is archived, the agent lacks Preview permission, or the sandbox runner is unavailable."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: ["tools:execute"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+        port: { type: "number" },
+        command: { type: "string" },
+      },
+    },
+    version: 1,
+  },
+  {
+    id: "project.preview.stop",
+    inventoryIds: [318],
+    type: "tool",
+    domain: "files",
+    name: "Project Preview Stop",
+    description: "Stop the active development preview server process for a project.",
+    useWhen: ["An authorized Company agent needs to shut down the preview server."],
+    doNotUseWhen: ["The project has no active preview server running."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: ["tools:execute"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+      },
+    },
+    version: 1,
+  },
+  {
+    id: "project.preview.status",
+    inventoryIds: [319],
+    type: "tool",
+    domain: "files",
+    name: "Project Preview Status",
+    description: "Get the current development preview server and sandbox runtime status for a project.",
+    useWhen: ["An authorized Company agent needs to check if the preview server is healthy or inspect dev server errors."],
+    doNotUseWhen: ["The project is archived."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: ["tools:execute"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+      },
+    },
+    version: 1,
+  },
+];
+
+export const PROJECT_PREVIEW_MATRIX: CapabilityMatrixEntry[] = PROJECT_PREVIEW_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "files",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/project-preview.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));

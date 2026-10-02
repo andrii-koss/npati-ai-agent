@@ -13,8 +13,40 @@ export interface ProjectWorkspaceInfo {
   activeSandboxId?: string;
   currentRevision: string;
 }
-export interface ProjectFileEntry { path: string; name: string; type: "file" | "directory"; size?: number; revision?: string; }
-export interface ProjectFileContent { path: string; content: string; size: number; revision: string; }
+
+export interface ProjectFileEntry {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  size?: number;
+  revision?: string;
+}
+
+export interface ProjectFileContent {
+  path: string;
+  content: string;
+  size: number;
+  revision: string;
+}
+
+export interface ProjectFileChange {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  diff: string;
+  oldSize?: number;
+  newSize?: number;
+}
+
+export interface ProjectChangesResult {
+  summary: {
+    added: number;
+    modified: number;
+    deleted: number;
+    total: number;
+  };
+  changes: ProjectFileChange[];
+}
+
 export interface ProjectWorkspace {
   info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectWorkspaceInfo>;
   listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectFileEntry[]>;
@@ -26,10 +58,14 @@ export interface ProjectWorkspace {
   editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string): Promise<ProjectFileContent>;
   deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string): Promise<void>;
   moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string): Promise<ProjectFileContent>;
+  setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<{ fileCount: number }>;
+  getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectChangesResult>;
 }
+
 export class ProjectFileError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400, public readonly currentRevision?: string) { super(message); }
 }
+
 export function safeProjectPath(value: string): string {
   if (typeof value !== "string" || !value || value.length > 1024 || value.includes("\0") || value.includes("\\") || value.startsWith("/") || /^[a-zA-Z]:/.test(value)) throw new ProjectFileError("invalid_path", "Invalid project file path");
   const parts = value.split("/");
@@ -37,9 +73,119 @@ export function safeProjectPath(value: string): string {
   if (parts.some((part) => /^(?:\.npati-.*|\.env(?:\..*)?|\.npmrc|\.netrc|\.git|\.aws|\.ssh|(?:credentials?|secrets?)(?:[._-].*)?|id_(?:rsa|ed25519)|.*\.(?:pem|key|p12))$/i.test(part))) throw new ProjectFileError("secret_path", "Protected file path", 403);
   return parts.join("/");
 }
+
 const revision = (content: Buffer | string) => createHash("sha256").update(content).digest("hex");
 const validId = (value: string) => typeof value === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const fileLimit = (value: number | undefined, fallback: number) => value && Number.isSafeInteger(value) && value > 0 ? value : fallback;
+
+export function generateUnifiedDiff(filePath: string, oldStr: string | null, newStr: string | null): string {
+  if (oldStr === null && newStr !== null) {
+    const lines = newStr.split(/\r?\n/);
+    return `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join("\n")}`;
+  }
+  if (oldStr !== null && newStr === null) {
+    const lines = oldStr.split(/\r?\n/);
+    return `--- a/${filePath}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.map((l) => `-${l}`).join("\n")}`;
+  }
+  if (oldStr === null || newStr === null || oldStr === newStr) return "";
+
+  const oldLines = oldStr.split(/\r?\n/);
+  const newLines = newStr.split(/\r?\n/);
+
+  if (oldLines.length > 5000 || newLines.length > 5000) {
+    return `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n[File too large for unified diff]`;
+  }
+
+  const m = oldLines.length;
+  const n = newLines.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i < m; i++) {
+    const nextRow = dp[i + 1]!;
+    const curRow = dp[i]!;
+    for (let j = 0; j < n; j++) {
+      if (oldLines[i] === newLines[j]) {
+        nextRow[j + 1] = (curRow[j] ?? 0) + 1;
+      } else {
+        nextRow[j + 1] = Math.max(curRow[j + 1] ?? 0, nextRow[j] ?? 0);
+      }
+    }
+  }
+
+  type DiffOp = { type: "common" | "add" | "del"; text: string; oldLine?: number; newLine?: number };
+  const ops: DiffOp[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    const oldLine = oldLines[i - 1] ?? "";
+    const newLine = newLines[j - 1] ?? "";
+    const dpRow = dp[i] ?? [];
+    const dpPrevRow = dp[i - 1] ?? [];
+    if (i > 0 && j > 0 && oldLine === newLine) {
+      ops.unshift({ type: "common", text: oldLine, oldLine: i, newLine: j });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || (dpRow[j - 1] ?? 0) >= (dpPrevRow[j] ?? 0))) {
+      ops.unshift({ type: "add", text: newLine, newLine: j });
+      j--;
+    } else if (i > 0 && (j === 0 || (dpRow[j - 1] ?? 0) < (dpPrevRow[j] ?? 0))) {
+      ops.unshift({ type: "del", text: oldLine, oldLine: i });
+      i--;
+    }
+  }
+
+  const context = 3;
+  const hunks: string[] = [];
+  let currentHunk: DiffOp[] = [];
+  let lastModifiedIndex = -1;
+
+  for (let idx = 0; idx < ops.length; idx++) {
+    const op = ops[idx];
+    if (!op) continue;
+    if (op.type !== "common") {
+      if (currentHunk.length === 0) {
+        const startCtx = Math.max(0, idx - context);
+        currentHunk = ops.slice(startCtx, idx);
+      }
+      currentHunk.push(op);
+      lastModifiedIndex = currentHunk.length - 1;
+    } else if (currentHunk.length > 0) {
+      currentHunk.push(op);
+      if (currentHunk.length - 1 - lastModifiedIndex >= context * 2) {
+        const hunkToFormat = currentHunk.slice(0, lastModifiedIndex + context + 1);
+        hunks.push(formatHunk(hunkToFormat));
+        currentHunk = [];
+        lastModifiedIndex = -1;
+      }
+    }
+  }
+
+  if (currentHunk.length > 0 && lastModifiedIndex !== -1) {
+    const hunkToFormat = currentHunk.slice(0, lastModifiedIndex + context + 1);
+    hunks.push(formatHunk(hunkToFormat));
+  }
+
+  if (hunks.length === 0) return "";
+  return `--- a/${filePath}\n+++ b/${filePath}\n` + hunks.join("\n");
+}
+
+function formatHunk(hunkOps: Array<{ type: string; text: string; oldLine?: number; newLine?: number }>): string {
+  let oldStart = 0, oldCount = 0, newStart = 0, newCount = 0;
+  for (const op of hunkOps) {
+    if (op.type === "common") {
+      if (oldStart === 0 && op.oldLine) oldStart = op.oldLine;
+      if (newStart === 0 && op.newLine) newStart = op.newLine;
+      oldCount++;
+      newCount++;
+    } else if (op.type === "del") {
+      if (oldStart === 0 && op.oldLine) oldStart = op.oldLine;
+      oldCount++;
+    } else if (op.type === "add") {
+      if (newStart === 0 && op.newLine) newStart = op.newLine;
+      newCount++;
+    }
+  }
+  const lines = hunkOps.map((op) => (op.type === "add" ? `+${op.text}` : op.type === "del" ? `-${op.text}` : ` ${op.text}`));
+  return `@@ -${oldStart || 1},${oldCount} +${newStart || 1},${newCount} @@\n${lines.join("\n")}`;
+}
 
 export class LocalProjectWorkspace implements ProjectWorkspace {
   private readonly locks = new Map<string, Promise<void>>();
@@ -209,9 +355,90 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
     await this.lock(base, async () => { const { absolute } = await this.target(base, filePath); await this.bytes(absolute); await rm(absolute); });
   }
+
+  async setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<{ fileCount: number }> {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+    return this.lock(base, async () => {
+      const files = await this.listFiles(ctx, companyId, projectId, workspaceId);
+      const snapshot: Record<string, string> = {};
+      for (const entry of files) {
+        if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache"].includes(p))) continue;
+        const { absolute } = await this.target(base, entry.path);
+        const content = (await this.bytes(absolute)).toString("utf8");
+        snapshot[entry.path] = content;
+      }
+      const baselineFile = path.join(base, ".npati-baseline.json");
+      await writeFile(baselineFile, JSON.stringify({ timestamp: new Date().toISOString(), files: snapshot }, null, 2), "utf8");
+      return { fileCount: Object.keys(snapshot).length };
+    });
+  }
+
+  async getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectChangesResult> {
+    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId);
+    const baselineFile = path.join(base, ".npati-baseline.json");
+    let baselineFiles: Record<string, string> = {};
+    try {
+      const raw = await readFile(baselineFile, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.files === "object") baselineFiles = parsed.files;
+    } catch {
+      // No baseline saved yet; baseline is empty, so all current files show as added
+    }
+
+    const currentFiles = await this.listFiles(ctx, companyId, projectId, workspaceId);
+    const currentMap = new Map<string, string>();
+    for (const entry of currentFiles) {
+      if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache"].includes(p))) continue;
+      const { absolute } = await this.target(base, entry.path);
+      const content = (await this.bytes(absolute)).toString("utf8");
+      currentMap.set(entry.path, content);
+    }
+
+    const changes: ProjectFileChange[] = [];
+    const allPaths = new Set([...Object.keys(baselineFiles), ...currentMap.keys()]);
+
+    for (const filePath of [...allPaths].sort()) {
+      const inBaseline = Object.prototype.hasOwnProperty.call(baselineFiles, filePath);
+      const inCurrent = currentMap.has(filePath);
+
+      if (!inBaseline && inCurrent) {
+        const content = currentMap.get(filePath)!;
+        changes.push({
+          path: filePath,
+          status: "added",
+          diff: generateUnifiedDiff(filePath, null, content),
+          newSize: Buffer.byteLength(content, "utf8"),
+        });
+      } else if (inBaseline && !inCurrent) {
+        const content = baselineFiles[filePath] ?? "";
+        changes.push({
+          path: filePath,
+          status: "deleted",
+          diff: generateUnifiedDiff(filePath, content, null),
+          oldSize: Buffer.byteLength(content, "utf8"),
+        });
+      } else if (inBaseline && inCurrent) {
+        const oldContent = baselineFiles[filePath] ?? "";
+        const newContent = currentMap.get(filePath)!;
+        if (oldContent !== newContent) {
+          changes.push({
+            path: filePath,
+            status: "modified",
+            diff: generateUnifiedDiff(filePath, oldContent, newContent),
+            oldSize: Buffer.byteLength(oldContent, "utf8"),
+            newSize: Buffer.byteLength(newContent, "utf8"),
+          });
+        }
+      }
+    }
+
+    const summary = {
+      added: changes.filter((c) => c.status === "added").length,
+      modified: changes.filter((c) => c.status === "modified").length,
+      deleted: changes.filter((c) => c.status === "deleted").length,
+      total: changes.length,
+    };
+
+    return { summary, changes };
+  }
 }
-
-
-
-
-

@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -1059,6 +1059,22 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         AND sandbox_id IS NOT DISTINCT FROM $6 AND status<>'archived' RETURNING ${projectColumns}`,
       [projectId,context.workspaceId,companyId,context.userId,sandboxId,expectedSandboxId]);
     if (!result.rows[0]) throw new Error("Project sandbox changed by another request or is archived");
+    return result.rows[0];
+  }
+  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
+    const current = await this.getProject(context, companyId, projectId);
+    const status = patch.status ?? current.status;
+    const previewUrl = patch.previewUrl !== undefined ? patch.previewUrl : (current.previewUrl ?? null);
+    const previewPort = patch.previewPort !== undefined ? patch.previewPort : (current.previewPort ?? null);
+    const framework = patch.framework !== undefined ? patch.framework : (current.framework ?? null);
+    const runtime = patch.runtime !== undefined ? patch.runtime : (current.runtime ?? null);
+    const lastBuildStatus = patch.lastBuildStatus !== undefined ? patch.lastBuildStatus : (current.lastBuildStatus ?? null);
+    const result = await this.pool.query<Project>(`UPDATE projects
+      SET status=$5, preview_url=$6, preview_port=$7, framework=$8, runtime=$9, last_build_status=$10, revision=revision+1, updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4 AND status<>'archived'
+      RETURNING ${projectColumns}`,
+      [projectId, context.workspaceId, companyId, context.userId, status, previewUrl, previewPort, framework, runtime, lastBuildStatus]);
+    if (!result.rows[0]) throw new Error("Project preview update failed or project is archived");
     return result.rows[0];
   }
   async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {

@@ -214,6 +214,7 @@ export interface WorkspaceStore {
   updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }): Promise<Project>;
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;
   setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null): Promise<Project>;
+  updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;
   listCompanyAgentsPage(context: AuthContext, companyId: string, limit?: number, cursor?: string): Promise<CompanyAgentPage>;

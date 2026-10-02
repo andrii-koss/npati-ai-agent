@@ -149,3 +149,6 @@ export * from "./run-trace";
 export * from "./capability-matrix";
 export * from "./tool-test-matrix";
 export * from "./capability-inspector";
+export * from "./project-file-capabilities";
+export * from "./project-terminal-capabilities";
+export * from "./project-preview-capabilities";
