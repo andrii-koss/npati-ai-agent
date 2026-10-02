@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AuthContext, Project, ProjectCheckpoint, CheckpointTrigger, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
@@ -86,6 +86,15 @@ export const defaultCheckpointThresholds: CheckpointThresholds = {
 
 function validId(value: string) {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value);
+}
+
+export function safeAgentSlug(slug: string): string {
+  if (typeof slug !== "string" || !slug || slug.includes("/") || slug.includes("\\") || slug.includes("..")) {
+    throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
+  }
+  const clean = slug.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+  if (!clean || clean === "." || clean === "..") throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
+  return clean;
 }
 
 function redactSecrets(text: string): string {
@@ -218,14 +227,21 @@ export class ProjectGitService {
       await this.runGit(dir, ["config", "commit.gpgsign", "false"]);
 
       const gitignorePath = path.join(dir, ".gitignore");
-      const hasGitignore = await lstat(gitignorePath).then((s) => s.isFile()).catch(() => false);
-      if (!hasGitignore) {
+      let gitignoreContent = "";
+      try {
+        gitignoreContent = await readFile(gitignorePath, "utf-8");
+      } catch {
+        // file doesn't exist yet
+      }
+      if (!gitignoreContent.includes(".worktrees")) {
         const defaultGitignore = [
           "node_modules",
           "dist",
           "build",
           ".next",
           ".cache",
+          ".worktrees",
+          ".npati-worktrees",
           ".npati-*",
           ".env",
           ".env.*",
@@ -235,7 +251,7 @@ export class ProjectGitService {
           "yarn-debug.log*",
           "yarn-error.log*",
         ].join("\n") + "\n";
-        await writeFile(gitignorePath, defaultGitignore, "utf-8");
+        await writeFile(gitignorePath, gitignoreContent ? `${gitignoreContent.trimEnd()}\n.worktrees\n.npati-worktrees\n` : defaultGitignore, "utf-8");
       }
 
       await this.runGit(dir, ["add", "-A"]);
@@ -607,4 +623,275 @@ export class ProjectGitService {
     return { prNumber: data.number, prUrl: data.html_url, message: `Pull Request #${data.number} created successfully.` };
   }
 
+  private readonly mergeLocks = new Map<string, Promise<void>>();
+
+  getAgentWorktreePath(dir: string, agentSlug: string): string {
+    const slug = safeAgentSlug(agentSlug);
+    const wtBase = path.join(dir, ".worktrees");
+    const wtPath = path.join(wtBase, slug);
+    const resolved = path.resolve(wtPath);
+    if (!resolved.startsWith(path.resolve(wtBase) + path.sep)) {
+      throw new GitError("INVALID_WORKTREE_PATH", "Worktree path traversal attempt", 403);
+    }
+    return resolved;
+  }
+
+  async createAgentWorktree(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { agentSlug: string; baseBranch?: string },
+  ): Promise<{ worktreePath: string; branch: string; baseBranch: string }> {
+    this.requireWrite(ctx);
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    const slug = safeAgentSlug(options.agentSlug);
+    const branch = `agent/${slug}`;
+    const baseBranch = options.baseBranch ?? "project/main";
+
+    // Ensure baseBranch exists (point to HEAD if not yet created)
+    const { branches } = await this.branch(ctx, companyId, projectId, { action: "list" });
+    if (!branches.includes(baseBranch)) {
+      await this.runGit(dir, ["branch", baseBranch, "HEAD"]).catch(() => undefined);
+    }
+
+    const wtDir = this.getAgentWorktreePath(dir, options.agentSlug);
+    await mkdir(path.dirname(wtDir), { recursive: true });
+
+    // Clean up if worktree already exists at this path
+    try {
+      await this.runGit(dir, ["worktree", "remove", "--force", wtDir]);
+    } catch {}
+    await rm(wtDir, { recursive: true, force: true }).catch(() => undefined);
+    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
+
+    // Create worktree on branch starting from baseBranch
+    await this.runGit(dir, ["worktree", "add", "-B", branch, wtDir, baseBranch]);
+
+    return {
+      worktreePath: wtDir,
+      branch,
+      baseBranch,
+    };
+  }
+
+  async commitAgentWorktree(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { agentSlug: string; message: string; stageAll?: boolean },
+  ): Promise<{ commitHash: string; message: string }> {
+    this.requireWrite(ctx);
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    const wtDir = this.getAgentWorktreePath(dir, options.agentSlug);
+    const message = options.message?.trim() || `Agent ${options.agentSlug} update`;
+
+    // Stage changes in worktree
+    await this.runGit(wtDir, ["add", "-A"]);
+
+    // Assert safe index in worktree
+    const { stdout: stagedOut } = await this.runGit(wtDir, ["diff", "--no-ext-diff", "--cached", "--name-only", "-z"]);
+    for (const file of stagedOut.split("\0").filter(Boolean)) {
+      try { safeProjectPath(file); }
+      catch { throw new GitError("PROTECTED_FILE", "Protected files cannot be committed in worktree", 403); }
+    }
+
+    // Check status
+    const { stdout: statusOut } = await this.runGit(wtDir, ["status", "--porcelain=v1"]);
+    if (statusOut.trim().length > 0) {
+      await this.runGit(wtDir, ["commit", "-m", message]);
+    } else {
+      await this.runGit(wtDir, ["commit", "--allow-empty", "-m", message]);
+    }
+
+    const { stdout: hashOut } = await this.runGit(wtDir, ["rev-parse", "HEAD"]);
+    return {
+      commitHash: hashOut.trim(),
+      message,
+    };
+  }
+
+  async diffAgentWorktree(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { agentSlug: string; baseBranch?: string },
+  ): Promise<{ diff: string; files: string[] }> {
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    const slug = safeAgentSlug(options.agentSlug);
+    const branch = `agent/${slug}`;
+    const baseBranch = options.baseBranch ?? "project/main";
+
+    const { stdout: namesOut } = await this.runGit(dir, ["diff", "--name-only", `${baseBranch}...${branch}`]);
+    const files = namesOut.split(/\r?\n/).filter(Boolean);
+
+    const { stdout: diffOut } = await this.runGit(dir, ["diff", "--no-ext-diff", `${baseBranch}...${branch}`]);
+    return {
+      diff: diffOut.slice(0, 128_000),
+      files,
+    };
+  }
+
+  async mergeAgentWorktree(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { agentSlug: string; targetBranch?: string; message?: string },
+  ): Promise<{ merged: boolean; commitHash: string; targetBranch: string; sourceBranch: string }> {
+    this.requireWrite(ctx);
+    const lockKey = `${companyId}:${projectId}`;
+    const prev = this.mergeLocks.get(lockKey) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.mergeLocks.set(lockKey, prev.then(() => current));
+    await prev;
+
+    try {
+      const dir = await this.ensureRepository(ctx, companyId, projectId);
+      const slug = safeAgentSlug(options.agentSlug);
+      const sourceBranch = `agent/${slug}`;
+      const targetBranch = options.targetBranch ?? "project/main";
+      const commitMsg = options.message?.trim() || `Merge ${sourceBranch} into ${targetBranch}`;
+
+      // Ensure targetBranch exists
+      const { branches } = await this.branch(ctx, companyId, projectId, { action: "list" });
+      if (!branches.includes(targetBranch)) {
+        await this.runGit(dir, ["branch", targetBranch, "HEAD"]).catch(() => undefined);
+      }
+
+      // Switch to targetBranch in main repo
+      await this.runGit(dir, ["checkout", targetBranch]);
+
+      try {
+        await this.runGit(dir, ["merge", "--no-ff", "-m", commitMsg, sourceBranch]);
+      } catch (mergeError: any) {
+        // Detect conflicting unmerged files
+        let conflictFiles: string[] = [];
+        try {
+          const { stdout: unmerged } = await this.runGit(dir, ["diff", "--name-only", "--diff-filter=U"]);
+          conflictFiles = unmerged.split(/\r?\n/).filter(Boolean);
+        } catch {
+          if (mergeError instanceof GitConflictError) {
+            conflictFiles = mergeError.conflictingFiles;
+          }
+        }
+
+        // Always abort the in-progress merge immediately to leave main workspace clean
+        try {
+          await this.runGit(dir, ["merge", "--abort"]);
+        } catch {}
+
+        if (conflictFiles.length > 0) {
+          throw new GitConflictEscalationError(
+            conflictFiles,
+            `Merge conflict detected between ${sourceBranch} and ${targetBranch} in: ${conflictFiles.join(", ")}`,
+          );
+        }
+        throw mergeError;
+      }
+
+      const { stdout: headOut } = await this.runGit(dir, ["rev-parse", "HEAD"]);
+      return {
+        merged: true,
+        commitHash: headOut.trim(),
+        targetBranch,
+        sourceBranch,
+      };
+    } finally {
+      release();
+    }
+  }
+
+  async removeAgentWorktree(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { agentSlug: string; deleteBranch?: boolean },
+  ): Promise<{ removed: boolean }> {
+    this.requireWrite(ctx);
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    const slug = safeAgentSlug(options.agentSlug);
+    const wtDir = this.getAgentWorktreePath(dir, slug);
+
+    try {
+      await this.runGit(dir, ["worktree", "remove", "--force", wtDir]);
+    } catch {}
+    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
+    await rm(wtDir, { recursive: true, force: true }).catch(() => undefined);
+
+    if (options.deleteBranch) {
+      await this.runGit(dir, ["branch", "-D", `agent/${slug}`]).catch(() => undefined);
+    }
+
+    return { removed: true };
+  }
+
+  async cleanupAllWorktrees(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+  ): Promise<{ cleanedCount: number }> {
+    this.requireWrite(ctx);
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    let cleanedCount = 0;
+
+    try {
+      const { stdout } = await this.runGit(dir, ["worktree", "list", "--porcelain"]);
+      const lines = stdout.split(/\r?\n/);
+      const wtBase = path.resolve(path.join(dir, ".worktrees"));
+
+      for (const line of lines) {
+        if (line.startsWith("worktree ")) {
+          const wtPath = path.resolve(line.slice(9).trim());
+          if (wtPath.startsWith(wtBase + path.sep)) {
+            try {
+              await this.runGit(dir, ["worktree", "remove", "--force", wtPath]);
+              cleanedCount++;
+            } catch {}
+            await rm(wtPath, { recursive: true, force: true }).catch(() => undefined);
+          }
+        }
+      }
+    } catch {}
+
+    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
+    await rm(path.join(dir, ".worktrees"), { recursive: true, force: true }).catch(() => undefined);
+
+    return { cleanedCount };
+  }
+
+  async listAgentWorktrees(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+  ): Promise<Array<{ worktreePath: string; branch: string; head: string }>> {
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    const { stdout } = await this.runGit(dir, ["worktree", "list", "--porcelain"]);
+    const lines = stdout.split(/\r?\n/);
+    const wtBase = path.resolve(path.join(dir, ".worktrees"));
+
+    const worktrees: Array<{ worktreePath: string; branch: string; head: string }> = [];
+    let curPath = "";
+    let curHead = "";
+    let curBranch = "";
+
+    for (const line of lines) {
+      if (line.startsWith("worktree ")) {
+        if (curPath && curPath.startsWith(wtBase + path.sep)) {
+          worktrees.push({ worktreePath: curPath, branch: curBranch, head: curHead });
+        }
+        curPath = path.resolve(line.slice(9).trim());
+        curHead = "";
+        curBranch = "";
+      } else if (line.startsWith("HEAD ")) {
+        curHead = line.slice(5).trim();
+      } else if (line.startsWith("branch ")) {
+        curBranch = line.slice(7).trim().replace(/^refs\/heads\//, "");
+      }
+    }
+    if (curPath && curPath.startsWith(wtBase + path.sep)) {
+      worktrees.push({ worktreePath: curPath, branch: curBranch, head: curHead });
+    }
+
+    return worktrees;
+  }
 }
