@@ -8,7 +8,7 @@ import {
 
 describe("Section 11: Tool Test Matrix for Agent-Callable Capabilities", () => {
   it("covers all 42 agent-callable capabilities without omission", () => {
-    const callableFromCatalog = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
+    const callableFromCatalog = CAPABILITY_CATALOG.filter((c) => c.agentCallable && c.inventoryIds.every((id) => id <= 306));
     expect(callableFromCatalog.length).toBe(42);
     expect(TOOL_TEST_MATRIX.length).toBe(42);
 

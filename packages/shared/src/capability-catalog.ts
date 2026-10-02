@@ -7240,3 +7240,6 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
     "version": 1
   }
 ];
+
+import { PROJECT_FILE_CAPABILITIES } from "./project-file-capabilities";
+CAPABILITY_CATALOG.push(...PROJECT_FILE_CAPABILITIES);

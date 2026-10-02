@@ -233,7 +233,7 @@ function OrgChart({ agents, edges, mainAgentId, models, workingAgentIds, onSelec
 }
 
 export function CompanyPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
   const { overview } = useWorkspace();
@@ -1281,6 +1281,21 @@ export function CompanyPage() {
             <h3>{t("companySettings.agentDrawer.toolsCapabilities")}</h3>
             <small className="company-field-hint">{t("companySettings.agentDrawer.toolsHint")}</small>
             <div className="company-tool-grid">
+              {([{
+                label: language === "uk" ? "������� ������" : "Project Read",
+                ids: ["project.files.list", "project.files.read", "project.files.search"],
+              }, {
+                label: language === "uk" ? "����� ������" : "Project Write",
+                ids: ["project.files.create", "project.files.write", "project.files.edit", "project.files.move", "project.files.delete"],
+              }]).map((permission) => <label className="company-tool" key={permission.label}>
+                <input type="checkbox" checked={permission.ids.every((id) => agentForm.tools.includes(id))} onChange={(event) => setAgentForm({
+                  ...agentForm,
+                  tools: event.target.checked
+                    ? [...new Set([...agentForm.tools, ...permission.ids])]
+                    : agentForm.tools.filter((id) => !permission.ids.includes(id)),
+                })} />
+                <span><strong>{permission.label}</strong></span>
+              </label>)}
               {availableTools.map((tool) => {
                 const translated = translatedTool(t, tool);
                 const isChecked = agentForm.tools.includes(tool.name) || agentForm.tools.includes(tool.id);

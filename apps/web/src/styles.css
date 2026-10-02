@@ -17074,3 +17074,16 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .project-error { color: #b42318; }
 .project-page header { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
 .project-create-selected { display: grid; gap: 4px; padding: 10px; border: 1px solid #d9dfe8; border-radius: 10px; }
+.project-files { margin-top: 24px; }
+.project-files form { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.project-files form input { min-width: min(320px, 100%); }
+.project-file-browser { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; }
+.project-file-browser nav, .project-file-browser section { min-height: 320px; padding: 16px; border: 1px solid var(--border-color, #d9dfe8); border-radius: 14px; }
+.project-file-browser nav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; overflow: auto; }
+.project-file-browser nav button { width: 100%; padding-block: 6px; border: 0; background: transparent; text-align: start; cursor: pointer; }
+.project-file-browser nav button:hover, .project-file-browser nav button[aria-current="page"] { background: var(--surface-muted, #f2f4f8); }
+.project-file-browser section { min-width: 0; overflow: auto; }
+.project-file-browser pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .project-file-browser { grid-template-columns: 1fr; } }
+.project-tabs { display: flex; gap: 8px; margin-top: 24px; border-bottom: 1px solid var(--border-color, #d9dfe8); }
+.project-tabs button { padding: 10px 16px; border: 0; border-bottom: 2px solid currentColor; background: transparent; cursor: default; }
