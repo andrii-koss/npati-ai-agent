@@ -1,4 +1,5 @@
 import type { ProjectGitService } from "./project-git-service";
+import type { ProjectDeployService } from "./project-deploy-service";
 import { ProjectMultiAgentService } from "./project-multi-agent";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
@@ -24,6 +25,7 @@ export class ProjectOrchestrator {
     private readonly previewService: ProjectPreviewService,
     private readonly companyRuntime: CompanyDelegationRuntime,
     private readonly gitService?: ProjectGitService,
+    private readonly deployService?: ProjectDeployService,
   ) {}
 
   /**
@@ -53,6 +55,7 @@ export class ProjectOrchestrator {
       if (tools.some((t) => t.startsWith("project.terminal."))) score += 5;
       if (tools.some((t) => t.startsWith("project.preview."))) score += 5;
       if (tools.some((t) => t.startsWith("project.git."))) score += 5;
+      if (tools.some((t) => t.startsWith("project.deploy."))) score += 5;
 
       // Role and instruction semantic relevance (NOT agent.name)
       const roleText = `${agent.role} ${agent.description ?? ""} ${agent.systemInstruction ?? ""}`;
@@ -273,6 +276,65 @@ export class ProjectOrchestrator {
       project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: project.previewUrl ? "previewing" : "ready" });
       const { run: loggedRun } = await this.workspaceStore.createCompanyAgentRun(ctx, params.companyId, { task: "Connect project repository", requestedMode: "single", projectId: project.id }, `${idempotencyKey}-git-connect`);
       const completedRun = await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, loggedRun.id, { status: "completed", executionMode: "single", selectedAgentIds: [selectedAgent.id], result: responseMessage });
+      return {
+        project,
+        runDetails: { run: completedRun, steps: [], toolAudit: [], backgroundEvents: [] },
+        responseMessage,
+        projectCard: {
+          id: project.id,
+          projectId: project.id,
+          name: project.name,
+          status: project.status,
+          companyId: project.companyId,
+          framework: project.framework,
+          previewUrl: project.previewUrl,
+          lastBuildStatus: project.lastBuildStatus,
+        },
+        projectAction: {
+          action: "edit",
+          projectId: project.id,
+          projectName: project.name,
+          companyId: project.companyId,
+        },
+      };
+    }
+
+    // Step 10: Handle DEPLOY_PROJECT
+    if (params.intentDecision.intent === "DEPLOY_PROJECT") {
+      if (!this.deployService) {
+        throw new ProjectOrchestrationError("DEPLOY_NOT_CONFIGURED", "Project Deploy service is not configured", 500);
+      }
+
+      // Check preflight before deploying
+      const preflight = await this.deployService.preflight(ctx, params.companyId, project.id, {
+        target: { provider: "dokploy", environment: "production" },
+      });
+
+      const preflightSummaryText = [
+        `🚀 **Підготовка до деплою проєкту "${project.name}"**`,
+        `- **Environment**: \`${preflight.environment}\``,
+        `- **Branch**: \`${preflight.branch}\``,
+        `- **Змінено файлів**: ${preflight.filesChanged}`,
+        `- **Статус збірки**: \`${preflight.buildStatus}\``,
+        `- **Тести**: \`${preflight.testsStatus}\``,
+        `- **Платформа (Target)**: \`${preflight.target.provider}\``,
+      ].join("\n");
+
+      const responseMessage = `${preflightSummaryText}\n\n⚠️ **Деплой вимагає підтвердження**: Оберіть облікові дані Dokploy у Company Vault та надайте дозвіл для виконання публікації.`;
+
+      const { run: loggedRun } = await this.workspaceStore.createCompanyAgentRun(
+        ctx,
+        params.companyId,
+        { task: "Deploy website", requestedMode: "single", projectId: project.id },
+        `${idempotencyKey}-deploy`
+      );
+      const completedRun = await this.workspaceStore.updateCompanyAgentRun(
+        ctx,
+        params.companyId,
+        loggedRun.id,
+        { status: "completed", executionMode: "single", selectedAgentIds: [selectedAgent.id], result: responseMessage }
+      );
+
       return {
         project,
         runDetails: { run: completedRun, steps: [], toolAudit: [], backgroundEvents: [] },

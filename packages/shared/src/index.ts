@@ -195,3 +195,4 @@ export * from "./project-preview-capabilities";
 export * from "./project-intent";
 
 export * from "./project-git-capabilities";
+export * from "./project-deploy-capabilities";

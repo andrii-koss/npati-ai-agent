@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current phase: Phase 2, Step 9 (Completed)
-- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace; Step 6 Git & Checkpoints; Step 7 Project Import & Templates; Step 8 Multi-Agent Orchestration; Step 9 Agent Worktrees
-- Next step: Step 10 (Deployment, Custom Domains & SSL), only on a separate request
+- Current phase: Phase 2, Step 10 (Completed)
+- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace; Step 6 Git & Checkpoints; Step 7 Project Import & Templates; Step 8 Multi-Agent Orchestration; Step 9 Agent Worktrees; Step 10 DeployProvider & Dokploy Integration
+- Next step: Step 11 (Browser QA & Self-Correction), only on a separate request
 
 ## Source of truth
 
@@ -283,3 +283,85 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - Monorepo typecheck: `npm run typecheck` passed with code 0 across all 13 workspaces.
 - Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 catalog entries, all test files intact).
 - Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully with 0 errors.
+
+## Implemented in Step 10: DeployProvider & Dokploy Integration
+
+- **DeployProvider Interface & Dokploy Adapter**:
+  - Defined pluggable `DeployProvider` interface in `apps/agent-api/src/deploy-provider.ts` with `name`, `validateConfig`, `deploy`, `checkStatus`, and `rollback`.
+  - Implemented `DokployDeployProvider` supporting deployment to Dokploy via REST API (`/api/application.deploy`).
+  - Strict HTTPS endpoint validation; strips any embedded credentials in URLs; rejects insecure HTTP endpoints in production.
+  - Token and secret redaction (`redactMessage`): authorization tokens and secrets are strictly redacted from error messages, output payloads, and logs to eliminate credential leakage.
+  - Supports configurable transport (`typeof fetch`) allowing isolated unit and integration testing without live external infrastructure.
+
+- **ProjectDeployService & Preflight Checks**:
+  - `ProjectDeployService` in `apps/agent-api/src/project-deploy-service.ts` provides complete deployment lifecycle orchestration.
+  - **Preflight Inspection**: Before approval or deployment, computes a comprehensive preflight summary displaying:
+    1. **Environment**: Production, Staging, or Preview.
+    2. **Branch**: Current Git branch (`gitStatus.branch` or fallback).
+    3. **Files changed**: Total count, staged, unstaged, and untracked file lists.
+    4. **Build status**: Current project build health (`ready`, `building`, `failed`).
+    5. **Tests**: Test status (`passed`, `failed`, `skipped`).
+    6. **Target**: Hosting provider name, sanitized target endpoint, application/project ID, and domain.
+  - **High-Risk Approval Enforcement**:
+    - Deploy is strictly classified as a high-risk operation (`risk: "high"`, `requiresConfirmation: true`).
+    - Attempting deployment without confirmed approval throws `DeployApprovalRequiredError` with status 403, returning the complete preflight summary and approval payload for human confirmation.
+    - Approval gating integrates with NPATI's existing durable approval mechanism (`durableApprovals` / `riskApprovalService`).
+  - **Credential Security & Tenant Isolation**:
+    - Raw API tokens, passwords, and keys in request payloads are strictly forbidden (`raw_credential_forbidden` error).
+    - Credentials must reference a `credentialId` from the Company encrypted vault (`resolveCredential`), scoped to the authenticated tenant/company.
+    - Tenant isolation: Tenants cannot deploy or inspect other tenants' projects or access vault credentials outside their company.
+  - **Post-Deploy Operations**:
+    - Records deployment in `project_deployments` store with commit hash, provider, environment, target URL, and execution duration.
+    - Updates Project preview/deploy attributes: `deploymentUrl`, `deploymentStatus: "deployed"`, and `lastDeployedAt`.
+    - Automatically creates a post-deployment Git safety checkpoint (`Deploy: <environment>`).
+
+- **Database Migration 057**:
+  - Created `packages/workspace/src/migration-057.ts` adding table `project_deployments` (with composite foreign key to `projects`, status checks, and descending timestamp index) and adding `deployment_url`, `deployment_status`, `last_deployed_at` to `projects`.
+  - Full rollback function `rollbackMigration057` provided.
+  - Implemented store methods in `InMemoryWorkspaceStore` and `PostgresWorkspaceStore`: `createProjectDeployment`, `listProjectDeployments`, `getProjectDeployment`, `updateProjectDeployment`, and updated `updateProjectPreview`.
+
+- **Intent Router & Orchestrator**:
+  - Intent `DEPLOY_PROJECT` is fully working and executable with active project context in `packages/shared/src/project-intent.ts`.
+  - Matches deploy prompts in Ukrainian (e.g., "Задеплой проєкт на продакшн dokploy", "опублікуй сайт") and English (e.g., "Deploy this website to Dokploy production", "deploy to dokploy").
+  - `ProjectOrchestrator` handles `DEPLOY_PROJECT` intent, selecting specialist agents with deploy capabilities and executing deployment with preflight and approval validation.
+
+- **Capabilities & Permission Matrix**:
+  - `project.deploy.publish` (Inventory ID 331, risk: high, requiresConfirmation: true) for triggering deployments.
+  - `project.deploy.status` (Inventory ID 332, risk: low, requiresConfirmation: false) for inspecting deployment status and target URLs.
+  - Mapped to test suite `tests/project-deploy.test.ts`.
+  - Added "Deploy" permission group toggle in Company agent editor drawer (`CompanyPage.tsx`).
+
+- **Web UI & Project Page**:
+  - Added "Deploy" bottom tab to `apps/web/src/ProjectPage.tsx` with:
+    - Environment selector (Production / Staging).
+    - Preflight inspection button displaying Environment, Branch, Files changed, Build status, Tests, and Target.
+    - Company Vault Credential ID input for Dokploy.
+    - Deploy trigger button with confirmation.
+    - Historical deployments list showing status, provider, environment, commit hash, timestamp, and target link.
+    - Live site button (🚀) in project header linking directly to the deployed production site.
+  - Added responsive CSS styling in `apps/web/src/styles.css`.
+
+## Step 10 verification and limits
+
+- `tests/project-deploy.test.ts`: 9/9 passed, covering:
+  1. Comprehensive preflight summary generation (Environment, Branch, Files changed, Build status, Tests, Target).
+  2. Deploy without approval blocked with 403 `approval_required` and preflight payload.
+  3. Forged and mismatched approval token rejection.
+  4. Successful deployment execution when approval is granted, updating store and project record.
+  5. Raw credentials strictly forbidden in request payload.
+  6. Credential leakage prevention: tokens masked with `[REDACTED]` from error messages and logs.
+  7. Tenant and project isolation enforcement.
+  8. Dokploy endpoint URL validation and non-HTTPS rejection in production.
+  9. `DEPLOY_PROJECT` intent classification and capability matrix registration.
+- Project test suites regression: 85/85 passed across all 8 project suites:
+  - `tests/project-deploy.test.ts` (9/9 passed)
+  - `tests/project-git-checkpoints.test.ts` (13/13 passed)
+  - `tests/project-git-worktrees.test.ts` (10/10 passed)
+  - `tests/project-preview.test.ts` (19/19 passed)
+  - `tests/project-files-integration.test.ts` (4/4 passed)
+  - `tests/project-terminal-integration.test.ts` (10/10 passed)
+  - `tests/project-import.test.ts` (9/9 passed)
+  - `tests/project-workspace.test.ts` (11/11 passed)
+- Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core entries, 0 gaps, 0 duplicates).
+- Monorepo typecheck: `npm --prefix packages/workspace run typecheck`, `npm --prefix packages/shared run typecheck`, `npm --prefix apps/agent-api run typecheck`, `npm --prefix apps/web run typecheck` all passed with code 0.
+- Production builds: `npm --prefix apps/agent-api run build` and `npm --prefix apps/web run build` succeeded with 0 errors.

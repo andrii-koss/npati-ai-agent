@@ -39,6 +39,7 @@ export interface Project {
   name: string; description?: string; type: ProjectType; status: ProjectStatus;
   framework?: string; runtime?: string; repositoryProvider?: string; repositoryUrl?: string; repositoryBranch?: string;
   sandboxId?: string; previewUrl?: string; previewPort?: number; lastRunId?: string; lastBuildStatus?: string;
+  deploymentUrl?: string; deploymentStatus?: string; lastDeployedAt?: string;
   revision: number; createdAt: string; updatedAt: string;
 }
 export interface ProjectInput { name: string; description?: string; type: ProjectType; }
@@ -67,6 +68,41 @@ export interface CreateCheckpointInput {
   trigger: CheckpointTrigger;
   runId?: string;
   fileCount?: number;
+}
+
+export type DeploymentStatus = "queued" | "building" | "deployed" | "failed";
+
+export interface ProjectDeployment {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  provider: string;
+  environment: string;
+  branch: string;
+  commitHash?: string;
+  status: DeploymentStatus;
+  targetUrl?: string;
+  externalDeploymentId?: string;
+  preflightSummary?: Record<string, unknown>;
+  errorMessage?: string;
+  runId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDeploymentInput {
+  provider: string;
+  environment?: string;
+  branch?: string;
+  commitHash?: string;
+  status?: DeploymentStatus;
+  targetUrl?: string;
+  externalDeploymentId?: string;
+  preflightSummary?: Record<string, unknown>;
+  errorMessage?: string;
+  runId?: string;
 }
 
 export interface BusinessToCompanyInput {
@@ -241,12 +277,16 @@ export interface WorkspaceStore {
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;
   setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null): Promise<Project>;
   updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project>;
-  updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }): Promise<Project>;
+  updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
   createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint>;
   listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
   getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint>;
   deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean>;
+  createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment>;
+  listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectDeployment[]>;
+  getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null>;
+  updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;
   listCompanyAgentsPage(context: AuthContext, companyId: string, limit?: number, cursor?: string): Promise<CompanyAgentPage>;
   getCompanyAgent(context: AuthContext, companyId: string, agentId: string): Promise<CompanyAgent>;

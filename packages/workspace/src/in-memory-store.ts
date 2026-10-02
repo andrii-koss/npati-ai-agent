@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -15,6 +15,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly projects = new Map<string, Project>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
+  private readonly projectDeployments = new Map<string, ProjectDeployment>();
   private readonly companyEdges = new Map<string, CompanyAgentEdge>();
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
@@ -375,7 +376,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.projects.set(projectId, next);
     return structuredClone(next);
   }
-  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
+  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }) {
     const project = await this.getProject(context, companyId, projectId);
     if (project.status === "archived") throw new Error("Project is archived");
     const next: Project = {
@@ -386,6 +387,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       framework: patch.framework !== undefined ? (patch.framework ?? undefined) : project.framework,
       runtime: patch.runtime !== undefined ? (patch.runtime ?? undefined) : project.runtime,
       lastBuildStatus: patch.lastBuildStatus !== undefined ? (patch.lastBuildStatus ?? undefined) : project.lastBuildStatus,
+      deploymentUrl: patch.deploymentUrl !== undefined ? (patch.deploymentUrl ?? undefined) : project.deploymentUrl,
+      deploymentStatus: patch.deploymentStatus !== undefined ? (patch.deploymentStatus ?? undefined) : (patch.lastDeploymentStatus !== undefined ? (patch.lastDeploymentStatus ?? undefined) : project.deploymentStatus),
+      lastDeployedAt: patch.lastDeployedAt !== undefined ? (patch.lastDeployedAt ?? undefined) : (patch.deploymentUrl ? now() : project.lastDeployedAt),
       revision: project.revision + 1,
       updatedAt: now(),
     };
@@ -406,6 +410,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     for (const [id, chk] of this.projectCheckpoints) {
       if (chk.projectId === projectId && chk.companyId === companyId && chk.workspaceId === context.workspaceId) {
         this.projectCheckpoints.delete(id);
+      }
+    }
+    for (const [id, dep] of this.projectDeployments) {
+      if (dep.projectId === projectId && dep.companyId === companyId && dep.workspaceId === context.workspaceId) {
+        this.projectDeployments.delete(id);
       }
     }
     return this.projects.delete(projectId);
@@ -456,6 +465,68 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       return false;
     }
     return this.projectCheckpoints.delete(checkpointId);
+  }
+
+  async createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment> {
+    await this.getProject(context, companyId, projectId);
+    const deployment: ProjectDeployment = {
+      id: `dep_${randomUUID()}`,
+      workspaceId: context.workspaceId,
+      companyId,
+      projectId,
+      userId: context.userId,
+      provider: input.provider,
+      environment: input.environment ?? "production",
+      branch: input.branch ?? "project/main",
+      commitHash: input.commitHash,
+      status: input.status ?? "queued",
+      targetUrl: input.targetUrl,
+      externalDeploymentId: input.externalDeploymentId,
+      preflightSummary: input.preflightSummary,
+      errorMessage: input.errorMessage,
+      runId: input.runId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    this.projectDeployments.set(deployment.id, deployment);
+    return structuredClone(deployment);
+  }
+
+  async listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectDeployment[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    return structuredClone([...this.projectDeployments.values()]
+      .filter((d) => d.workspaceId === context.workspaceId && d.companyId === companyId && d.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, safeLimit));
+  }
+
+  async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> {
+    await this.getProject(context, companyId, projectId);
+    const deployment = this.projectDeployments.get(deploymentId);
+    if (!deployment || deployment.workspaceId !== context.workspaceId || deployment.companyId !== companyId || deployment.projectId !== projectId) {
+      return null;
+    }
+    return structuredClone(deployment);
+  }
+
+  async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> {
+    await this.getProject(context, companyId, projectId);
+    const current = this.projectDeployments.get(deploymentId);
+    if (!current || current.workspaceId !== context.workspaceId || current.companyId !== companyId || current.projectId !== projectId) {
+      throw new WorkspaceNotFoundError("Project deployment not found");
+    }
+    const updated: ProjectDeployment = {
+      ...current,
+      ...patch,
+      id: current.id,
+      workspaceId: current.workspaceId,
+      companyId: current.companyId,
+      projectId: current.projectId,
+      updatedAt: now(),
+    };
+    this.projectDeployments.set(deploymentId, updated);
+    return structuredClone(updated);
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

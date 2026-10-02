@@ -15,6 +15,8 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService, TerminalSecretReference } from "./project-sandbox-service";
 import type { ProjectPreviewService } from "./project-preview-service";
 import type { ProjectGitService } from "./project-git-service";
+import type { ProjectDeployService } from "./project-deploy-service";
+import type { DeployTargetConfig } from "./deploy-provider";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -69,6 +71,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectPreview?: ProjectPreviewService,
     private readonly projectGit?: ProjectGitService,
     private readonly projectFileLeaseManager?: ProjectFileLeaseManager,
+    private readonly projectDeploy?: ProjectDeployService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -139,6 +142,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     }
     if (tool.startsWith("project.preview.")) return this.projectPreviewTool(context, company, tool, input);
     if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
+    if (tool.startsWith("project.deploy.")) return this.projectDeployTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -412,6 +416,45 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         });
       default:
         throw new Error(`Unsupported git tool: ${tool}`);
+    }
+  }
+
+  private async projectDeployTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectDeploy) throw new Error("Project deploy service is not configured");
+    const projectId = typeof input.projectId === "string" ? input.projectId : undefined;
+    if (!projectId) throw new Error("Deploy tool requires projectId");
+
+    switch (tool) {
+      case "project.deploy.publish": {
+        const approved = input.__npatiApprovalGranted === true;
+        const credentialId = typeof input.credentialId === "string" ? input.credentialId : undefined;
+        const target: DeployTargetConfig = {
+          provider: typeof input.provider === "string" ? input.provider : "dokploy",
+          environment: (input.environment as any) || "production",
+          branch: typeof input.branch === "string" ? input.branch : undefined,
+          applicationId: typeof input.applicationId === "string" ? input.applicationId : undefined,
+          endpoint: typeof input.endpoint === "string" ? input.endpoint : undefined,
+          domain: typeof input.domain === "string" ? input.domain : undefined,
+        };
+        return this.projectDeploy.deploy(context, company.id, projectId, {
+          target,
+          credentialId,
+          branch: target.branch,
+          approved,
+          runId: typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined,
+        });
+      }
+      case "project.deploy.status": {
+        const deploymentId = typeof input.deploymentId === "string" ? input.deploymentId : undefined;
+        if (!deploymentId) {
+          const list = await this.projectDeploy.listDeployments(context, company.id, projectId, 1);
+          return { deployments: list };
+        }
+        const deployment = await this.projectDeploy.getDeployment(context, company.id, projectId, deploymentId);
+        return { deployment };
+      }
+      default:
+        throw new Error(`Unsupported deploy tool: ${tool}`);
     }
   }
 

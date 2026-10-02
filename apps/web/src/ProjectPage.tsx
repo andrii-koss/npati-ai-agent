@@ -7,7 +7,7 @@ import type { Project } from "./ProjectSection";
 type FileEntry = { path: string; name: string; type: "file" | "directory"; size?: number; revision?: string };
 type FileContent = { path: string; content: string; size: number; revision: string };
 type TerminalEvent = { id: string; commandSummary: string; riskLevel: string; status: string; output: string; errorCode?: string; createdAt: string };
-type BottomTab = "changes" | "terminal" | "checkpoints" | "logs" | "activity";
+type BottomTab = "changes" | "terminal" | "checkpoints" | "deployments" | "logs" | "activity";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 type MobileView = "all" | "files" | "chat" | "preview" | "bottom";
 
@@ -42,7 +42,6 @@ interface ChatMessage {
   timestamp: string;
 }
 
-
 interface CheckpointItem {
   id: string;
   name: string;
@@ -51,6 +50,30 @@ interface CheckpointItem {
   trigger: "manual" | "pre_run" | "post_run" | "pre_restore";
   fileCount: number;
   createdAt: string;
+}
+
+interface DeploymentItem {
+  id: string;
+  provider: string;
+  environment: string;
+  status: string;
+  targetUrl?: string;
+  commitHash?: string;
+  branch?: string;
+  errorMessage?: string;
+  deployedAt?: string;
+  createdAt: string;
+}
+
+interface PreflightInfo {
+  environment: string;
+  branch: string;
+  target: string;
+  buildStatus: string;
+  filesChanged: { staged: number; unstaged: number; untracked: number; total: number };
+  tests: { executed: boolean; status: string; passed?: number; failed?: number };
+  readyToDeploy: boolean;
+  blockers: string[];
 }
 
 interface ProjectRunItem {
@@ -188,10 +211,73 @@ export function ProjectPage() {
 
   const [loadingRuns, setLoadingRuns] = useState(false);
 
+  const [deployments, setDeployments] = useState<DeploymentItem[]>([]);
+  const [loadingDeployments, setLoadingDeployments] = useState(false);
+  const [preflightData, setPreflightData] = useState<PreflightInfo | null>(null);
+  const [loadingPreflight, setLoadingPreflight] = useState(false);
+  const [deployCredentialId, setDeployCredentialId] = useState("");
+  const [deployEnvironment, setDeployEnvironment] = useState<"production" | "staging">("production");
+  const [deploying, setDeploying] = useState(false);
+  const [deployFeedback, setDeployFeedback] = useState<string | null>(null);
+
   const [error, setError] = useState("");
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const base = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`;
+
+  const loadDeployments = async () => {
+    if (!base) return;
+    setLoadingDeployments(true);
+    try {
+      const data = await apiGet<{ deployments: DeploymentItem[] }>(`${base}/deployments`);
+      setDeployments(data.deployments ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingDeployments(false);
+    }
+  };
+
+  const handleRunPreflight = async () => {
+    if (!base) return;
+    setLoadingPreflight(true);
+    setDeployFeedback(null);
+    try {
+      const data = await apiPost<{ preflight: PreflightInfo }>(`${base}/deployments/preflight`, {
+        provider: "dokploy",
+        environment: deployEnvironment,
+      });
+      setPreflightData(data.preflight);
+    } catch (err: any) {
+      setDeployFeedback(`Preflight error: ${err.message || err}`);
+    } finally {
+      setLoadingPreflight(false);
+    }
+  };
+
+  const handleTriggerDeploy = async () => {
+    if (!base) return;
+    if (!deployCredentialId.trim()) {
+      alert(language === "uk" ? "Вкажіть ID облікового запису (credentialId) із Company Vault для Dokploy!" : "Please specify Dokploy vault credential ID!");
+      return;
+    }
+    setDeploying(true);
+    setDeployFeedback(null);
+    try {
+      const data = await apiPost<{ deployment: DeploymentItem; approvalRequired?: boolean; previewUrl?: string }>(`${base}/deployments`, {
+        provider: "dokploy",
+        environment: deployEnvironment,
+        credentialId: deployCredentialId.trim(),
+      });
+      setDeployFeedback(language === "uk" ? `Деплой успішно виконано! URL: ${data.previewUrl || data.deployment.targetUrl}` : `Deployment successful! URL: ${data.previewUrl || data.deployment.targetUrl}`);
+      await refreshProject();
+      await loadDeployments();
+    } catch (err: any) {
+      setDeployFeedback(`Deploy error: ${err.message || err}`);
+    } finally {
+      setDeploying(false);
+    }
+  };
 
   // Load runs for activity tab
   const loadProjectRuns = async () => {
@@ -251,6 +337,8 @@ export function ProjectPage() {
       apiGet<ChangesResult>(`${base}/changes`).then(setChanges).catch(() => {});
     } else if (bottomTab === "checkpoints") {
       void loadCheckpoints();
+    } else if (bottomTab === "deployments") {
+      void loadDeployments();
     } else if (bottomTab === "activity") {
       void loadProjectRuns();
       const timer = setInterval(() => { void loadProjectRuns(); }, 3000);
@@ -510,6 +598,18 @@ export function ProjectPage() {
                 title="Open preview in new tab"
               >
                 ↗ {language === "uk" ? "Нова вкладка" : "New Tab"}
+              </a>
+            )}
+
+            {project?.deploymentUrl && (
+              <a
+                href={project.deploymentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button-secondary project-ext-btn deploy-live-btn"
+                title={`Open deployed live site: ${project.deploymentUrl}`}
+              >
+                🚀 {language === "uk" ? "Live сайт" : "Live Site"}
               </a>
             )}
 
@@ -800,6 +900,16 @@ export function ProjectPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={bottomTab === "deployments"}
+                onClick={() => setBottomTab("deployments")}
+                className={bottomTab === "deployments" ? "active" : ""}
+              >
+                🚀 {language === "uk" ? "Деплой (Deploy)" : "Deploy"}
+                {deployments.length > 0 && <span className="tab-badge">{deployments.length}</span>}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={bottomTab === "logs"}
                 onClick={() => setBottomTab("logs")}
                 className={bottomTab === "logs" ? "active" : ""}
@@ -1011,6 +1121,140 @@ export function ProjectPage() {
                           </div>
                           <h4 className="checkpoint-name">{cp.name}</h4>
                           {cp.description && <p className="checkpoint-description">{cp.description}</p>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {bottomTab === "deployments" && (
+                <div className="deployments-tab-pane">
+                  <div className="deployments-toolbar">
+                    <div className="deployments-controls">
+                      <label className="deploy-env-label">
+                        <span>{language === "uk" ? "Середовище:" : "Environment:"}</span>
+                        <select
+                          value={deployEnvironment}
+                          onChange={(e) => setDeployEnvironment(e.target.value as "production" | "staging")}
+                          className="deploy-env-select"
+                        >
+                          <option value="production">Production</option>
+                          <option value="staging">Staging</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => void handleRunPreflight()}
+                        disabled={loadingPreflight}
+                      >
+                        {loadingPreflight ? "Checking…" : language === "uk" ? "🔍 Перевірити (Preflight)" : "🔍 Run Preflight"}
+                      </button>
+                      <input
+                        type="text"
+                        value={deployCredentialId}
+                        onChange={(e) => setDeployCredentialId(e.target.value)}
+                        placeholder={language === "uk" ? "Company Vault Credential ID (Dokploy)" : "Company Vault Credential ID (Dokploy)"}
+                        className="deploy-cred-input"
+                      />
+                      <button
+                        type="button"
+                        className="button-primary deploy-trigger-btn"
+                        onClick={() => void handleTriggerDeploy()}
+                        disabled={deploying}
+                      >
+                        {deploying ? "Deploying…" : language === "uk" ? "🚀 Задеплоїти (Dokploy)" : "🚀 Deploy (Dokploy)"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => void loadDeployments()}
+                        disabled={loadingDeployments}
+                      >
+                        {language === "uk" ? "Оновити" : "Refresh"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {deployFeedback && (
+                    <div className="deploy-feedback-banner">
+                      {deployFeedback}
+                    </div>
+                  )}
+
+                  {preflightData && (
+                    <section className="preflight-summary-card" aria-label="Deployment preflight summary">
+                      <h4>📋 {language === "uk" ? "Переддеплойна перевірка (Preflight Inspection)" : "Preflight Inspection"}</h4>
+                      <div className="preflight-grid">
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Середовище:" : "Environment:"}</span>
+                          <strong>{preflightData.environment}</strong>
+                        </div>
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Гілка:" : "Branch:"}</span>
+                          <code>{preflightData.branch}</code>
+                        </div>
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Змінені файли:" : "Files Changed:"}</span>
+                          <span>{preflightData.filesChanged.total} total ({preflightData.filesChanged.staged} staged, {preflightData.filesChanged.unstaged} unstaged)</span>
+                        </div>
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Статус білду:" : "Build Status:"}</span>
+                          <span className={`status-pill status-${preflightData.buildStatus}`}>{preflightData.buildStatus}</span>
+                        </div>
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Тести:" : "Tests:"}</span>
+                          <span>{preflightData.tests.executed ? `${preflightData.tests.status} (${preflightData.tests.passed ?? 0} passed)` : "Not executed"}</span>
+                        </div>
+                        <div className="preflight-item">
+                          <span className="preflight-label">{language === "uk" ? "Цільовий провайдер:" : "Target:"}</span>
+                          <strong>{preflightData.target}</strong>
+                        </div>
+                      </div>
+                      {preflightData.blockers.length > 0 && (
+                        <div className="preflight-blockers">
+                          <span className="blocker-title">⚠️ {language === "uk" ? "Блокери деплою:" : "Deployment Blockers:"}</span>
+                          <ul>
+                            {preflightData.blockers.map((b, i) => (
+                              <li key={i}>{b}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {deployments.length === 0 ? (
+                    <div className="empty-deployments-state">
+                      <p>
+                        {language === "uk"
+                          ? "Деплоїв для цього проєкту ще не було. Виконайте деплой або попросіть агента: «Задеплой проєкт на dokploy»."
+                          : "No deployments recorded yet. Deploy manually or prompt your agent: 'Deploy this project to dokploy'."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="deployments-list">
+                      {deployments.map((d) => (
+                        <article key={d.id} className="deployment-card">
+                          <div className="deployment-card-header">
+                            <span className={`status-pill status-${d.status}`}>{d.status}</span>
+                            <span className="deploy-provider-badge">📦 {d.provider}</span>
+                            <span className="deploy-env-badge">{d.environment}</span>
+                            {d.commitHash && <code className="deploy-hash">{d.commitHash.slice(0, 7)}</code>}
+                            <span className="deploy-time">{new Date(d.createdAt).toLocaleString()}</span>
+                            {d.targetUrl && (
+                              <a
+                                href={d.targetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="button-secondary deploy-view-link"
+                              >
+                                ↗ {language === "uk" ? "Відкрити сайт" : "Open Target"}
+                              </a>
+                            )}
+                          </div>
+                          {d.errorMessage && <p className="deploy-error-text">⚠️ {d.errorMessage}</p>}
                         </article>
                       ))}
                     </div>

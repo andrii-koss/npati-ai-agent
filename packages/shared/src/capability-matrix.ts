@@ -4832,3 +4832,6 @@ CAPABILITY_MATRIX.push(...PROJECT_PREVIEW_MATRIX);
 
 import { PROJECT_GIT_MATRIX } from "./project-git-capabilities";
 CAPABILITY_MATRIX.push(...PROJECT_GIT_MATRIX);
+
+import { PROJECT_DEPLOY_MATRIX } from "./project-deploy-capabilities";
+CAPABILITY_MATRIX.push(...PROJECT_DEPLOY_MATRIX);

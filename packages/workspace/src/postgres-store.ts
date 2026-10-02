@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -32,10 +32,15 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   name, description, type, status, framework, runtime, repository_provider AS "repositoryProvider",
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
-  last_build_status AS "lastBuildStatus", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",
+  last_deployed_at AS "lastDeployedAt", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
+const projectDeploymentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
+  user_id AS "userId", provider, environment, branch, commit_hash AS "commitHash", status, target_url AS "targetUrl",
+  external_deployment_id AS "externalDeploymentId", preflight_summary AS "preflightSummary", error_message AS "errorMessage",
+  run_id AS "runId", created_at::text AS "createdAt", updated_at::text AS "updatedAt"`;
 const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", name, role, description,
   system_instruction AS "systemInstruction", prompt_guidelines AS "promptGuidelines",
   recommended_prompts AS "recommendedPrompts", model_id AS "modelId", fallback_model_id AS "fallbackModelId",
@@ -689,6 +694,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const projectDeployments = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='057_project_deployments'");
+    if (!projectDeployments.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration057 } = await import("./migration-057");
+        await runMigration057(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('057_project_deployments')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1086,7 +1103,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     if (!result.rows[0]) throw new Error("Project repository update failed or project is archived");
     return result.rows[0];
   }
-  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
+  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }) {
     const current = await this.getProject(context, companyId, projectId);
     const status = patch.status ?? current.status;
     const previewUrl = patch.previewUrl !== undefined ? patch.previewUrl : (current.previewUrl ?? null);
@@ -1094,11 +1111,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const framework = patch.framework !== undefined ? patch.framework : (current.framework ?? null);
     const runtime = patch.runtime !== undefined ? patch.runtime : (current.runtime ?? null);
     const lastBuildStatus = patch.lastBuildStatus !== undefined ? patch.lastBuildStatus : (current.lastBuildStatus ?? null);
+    const deploymentUrl = patch.deploymentUrl !== undefined ? patch.deploymentUrl : (current.deploymentUrl ?? null);
+    const deploymentStatus = patch.deploymentStatus !== undefined ? patch.deploymentStatus : (patch.lastDeploymentStatus !== undefined ? patch.lastDeploymentStatus : (current.deploymentStatus ?? null));
+    const lastDeployedAt = patch.lastDeployedAt !== undefined ? patch.lastDeployedAt : (patch.deploymentUrl ? new Date().toISOString() : (current.lastDeployedAt ?? null));
     const result = await this.pool.query<Project>(`UPDATE projects
-      SET status=$5, preview_url=$6, preview_port=$7, framework=$8, runtime=$9, last_build_status=$10, revision=revision+1, updated_at=now()
+      SET status=$5, preview_url=$6, preview_port=$7, framework=$8, runtime=$9, last_build_status=$10, deployment_url=$11, deployment_status=$12, last_deployed_at=$13, revision=revision+1, updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4 AND status<>'archived'
       RETURNING ${projectColumns}`,
-      [projectId, context.workspaceId, companyId, context.userId, status, previewUrl, previewPort, framework, runtime, lastBuildStatus]);
+      [projectId, context.workspaceId, companyId, context.userId, status, previewUrl, previewPort, framework, runtime, lastBuildStatus, deploymentUrl, deploymentStatus, lastDeployedAt]);
     if (!result.rows[0]) throw new Error("Project preview update failed or project is archived");
     return result.rows[0];
   }
@@ -1157,6 +1177,54 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4`,
       [checkpointId, context.workspaceId, companyId, projectId]);
     return Boolean(result.rowCount);
+  }
+
+  async createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment> {
+    await this.getProject(context, companyId, projectId);
+    const id = `dep_${randomUUID()}`;
+    const result = await this.pool.query<ProjectDeployment>(`INSERT INTO project_deployments
+      (id, workspace_id, company_id, project_id, user_id, provider, environment, branch, commit_hash, status, target_url, external_deployment_id, preflight_summary, error_message, run_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING ${projectDeploymentColumns}`,
+      [id, context.workspaceId, companyId, projectId, context.userId, input.provider, input.environment ?? "production", input.branch ?? "project/main", input.commitHash ?? null, input.status ?? "queued", input.targetUrl ?? null, input.externalDeploymentId ?? null, input.preflightSummary ? JSON.stringify(input.preflightSummary) : null, input.errorMessage ?? null, input.runId ?? null]);
+    return result.rows[0]!;
+  }
+
+  async listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectDeployment[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    const result = await this.pool.query<ProjectDeployment>(`SELECT ${projectDeploymentColumns} FROM project_deployments
+      WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3
+      ORDER BY created_at DESC, id DESC LIMIT $4`,
+      [context.workspaceId, companyId, projectId, safeLimit]);
+    return result.rows;
+  }
+
+  async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<ProjectDeployment>(`SELECT ${projectDeploymentColumns} FROM project_deployments
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4`,
+      [deploymentId, context.workspaceId, companyId, projectId]);
+    if (!result.rowCount) return null;
+    return result.rows[0]!;
+  }
+
+  async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> {
+    await this.getProject(context, companyId, projectId);
+    const current = await this.getProjectDeployment(context, companyId, projectId, deploymentId);
+    if (!current) throw new WorkspaceNotFoundError("Project deployment not found");
+    const status = patch.status ?? current.status;
+    const targetUrl = patch.targetUrl !== undefined ? patch.targetUrl : (current.targetUrl ?? null);
+    const externalDeploymentId = patch.externalDeploymentId !== undefined ? patch.externalDeploymentId : (current.externalDeploymentId ?? null);
+    const preflightSummary = patch.preflightSummary !== undefined ? JSON.stringify(patch.preflightSummary) : (current.preflightSummary ? JSON.stringify(current.preflightSummary) : null);
+    const errorMessage = patch.errorMessage !== undefined ? patch.errorMessage : (current.errorMessage ?? null);
+    const result = await this.pool.query<ProjectDeployment>(`UPDATE project_deployments
+      SET status=$5, target_url=$6, external_deployment_id=$7, preflight_summary=$8, error_message=$9, updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4
+      RETURNING ${projectDeploymentColumns}`,
+      [deploymentId, context.workspaceId, companyId, projectId, status, targetUrl, externalDeploymentId, preflightSummary, errorMessage]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Project deployment not found");
+    return result.rows[0];
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

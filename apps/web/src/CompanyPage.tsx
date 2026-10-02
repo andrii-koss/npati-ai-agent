@@ -1296,6 +1296,9 @@ export function CompanyPage() {
               }, {
                 label: "Git",
                 ids: ["project.git.status", "project.git.diff", "project.git.log", "project.git.branch", "project.git.stage", "project.git.commit", "project.git.restore", "project.git.checkpoint", "project.git.restore_checkpoint", "project.git.push", "project.git.pr"],
+              }, {
+                label: language === "uk" ? "Деплой" : "Deploy",
+                ids: ["project.deploy.publish", "project.deploy.status"],
               }]).map((permission) => <label className="company-tool" key={permission.label}>
                 <input type="checkbox" checked={permission.ids.every((id) => agentForm.tools.includes(id))} onChange={(event) => setAgentForm({
                   ...agentForm,
@@ -1305,7 +1308,7 @@ export function CompanyPage() {
                 })} />
                 <span><strong>{permission.label}</strong></span>
               </label>)}
-              {availableTools.filter((tool) => !tool.id.startsWith("project.files.") && !tool.id.startsWith("project.terminal.") && !tool.id.startsWith("project.preview.") && !tool.id.startsWith("project.git.")).map((tool) => {
+              {availableTools.filter((tool) => !tool.id.startsWith("project.files.") && !tool.id.startsWith("project.terminal.") && !tool.id.startsWith("project.preview.") && !tool.id.startsWith("project.git.") && !tool.id.startsWith("project.deploy.")).map((tool) => {
                 const translated = translatedTool(t, tool);
                 const isChecked = agentForm.tools.includes(tool.name) || agentForm.tools.includes(tool.id);
                 return (
