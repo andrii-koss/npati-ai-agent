@@ -23,9 +23,10 @@ export async function streamChat<T>(
     message: string;
     conversationId?: string;
     attachments?: ChatAttachmentInput[];
-    contextType?: "none" | "business" | "company";
+    contextType?: "none" | "business" | "company" | "project";
     businessId?: string;
     companyId?: string;
+    projectId?: string;
     noMemory?: boolean;
     ephemeral?: boolean;
     streamId?:string;

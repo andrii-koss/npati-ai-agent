@@ -1,0 +1,6 @@
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
+WORKDIR /opt/npati-qa
+RUN npm install --omit=dev --no-audit --no-fund playwright@1.63.0
+COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
+USER pwuser
+ENTRYPOINT ["node", "/opt/npati-qa/browser-qa-runner.mjs"]

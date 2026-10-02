@@ -4,6 +4,16 @@ export type SandboxState = "created" | "running" | "stopped" | "failed" | "destr
 export interface SandboxScope { workspaceId: string; userId: string; companyId: string; projectId: string; }
 export interface SandboxStatus { id: string; state: SandboxState; createdAt: string; lastActivityAt: string; }
 export interface SandboxFile { path: string; content: string; revision?: string; }
+export interface SandboxBrowserQaResult {
+  statusCode: number; loadTimeMs: number; domContentLoadedMs: number; resourceCount: number; totalSizeBytes: number;
+  consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;
+  accessibility: Array<{ rule: string; impact: string; selector?: string }>;
+  screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true };
+}
+export interface SandboxBrowserQaOptions {
+  port: number; path: string; viewport: { width: number; height: number }; timeoutMs: number;
+  maxScreenshotBytes: number; maxBrokenLinks: number; screenshot: boolean;
+}
 export interface SandboxCommandResult {
   status: "running" | "stopped" | "completed" | "failed" | "timed_out";
   exitCode: number | null;
@@ -16,6 +26,7 @@ export interface SandboxCommandResult {
   processId?: string;
 }
 export interface SandboxProvider {
+  inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
   createSandbox(scope: SandboxScope, options?: { runtime?: string }): Promise<SandboxStatus>;
   startSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
   stopSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
@@ -72,4 +83,5 @@ export class RemoteSandboxProvider implements SandboxProvider {
   startProcess(scope: SandboxScope, sandboxId: string, command: string, options: { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string> }) { return this.request<SandboxCommandResult>("startProcess", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("stopProcess", { scope, sandboxId, processId }); }
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("getProcessStatus", { scope, sandboxId, processId }); }
+  inspectBrowser(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions) { return this.request<SandboxBrowserQaResult>("inspectBrowser", { scope, sandboxId, options }, Math.min(60_000, options.timeoutMs) + 15_000); }
 }

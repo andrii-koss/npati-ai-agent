@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -16,6 +16,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
+  private readonly projectQaReports = new Map<string, ProjectQaReport>();
   private readonly companyEdges = new Map<string, CompanyAgentEdge>();
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
@@ -417,6 +418,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         this.projectDeployments.delete(id);
       }
     }
+    for (const [id, rep] of this.projectQaReports) {
+      if (rep.projectId === projectId && rep.companyId === companyId && rep.workspaceId === context.workspaceId) {
+        this.projectQaReports.delete(id);
+      }
+    }
     return this.projects.delete(projectId);
   }
 
@@ -527,6 +533,50 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     };
     this.projectDeployments.set(deploymentId, updated);
     return structuredClone(updated);
+  }
+
+  async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> {
+    await this.getProject(context, companyId, projectId);
+    const report: ProjectQaReport = {
+      id: `qa_${randomUUID()}`,
+      workspaceId: context.workspaceId,
+      companyId,
+      projectId,
+      userId: context.userId,
+      status: input.status,
+      targetUrl: input.targetUrl,
+      summary: input.summary,
+      issues: structuredClone(input.issues),
+      metrics: structuredClone(input.metrics),
+      screenshots: structuredClone(input.screenshots ?? []),
+      runId: input.runId,
+      createdAt: now(),
+    };
+    this.projectQaReports.set(report.id, report);
+    return structuredClone(report);
+  }
+
+  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    return structuredClone([...this.projectQaReports.values()]
+      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId && r.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, safeLimit));
+  }
+
+  async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> {
+    await this.getProject(context, companyId, projectId);
+    const report = this.projectQaReports.get(reportId);
+    if (!report || report.workspaceId !== context.workspaceId || report.companyId !== companyId || report.projectId !== projectId) {
+      return null;
+    }
+    return structuredClone(report);
+  }
+
+  async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
+    const list = await this.listProjectQaReports(context, companyId, projectId, 1);
+    return list[0] ?? null;
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {

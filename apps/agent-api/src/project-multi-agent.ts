@@ -15,6 +15,7 @@ import {
   GitConflictEscalationError,
 } from "./project-git-service";
 import type { LocalProjectWorkspace } from "./project-workspace";
+import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 
 function clean(value: string, length = 1500): string {
   return SecurityPolicyEngine.protectText(value).sanitized.slice(0, length);
@@ -48,6 +49,7 @@ export class ProjectMultiAgentService {
     private readonly gitService?: ProjectGitService,
     private readonly workspace?: LocalProjectWorkspace,
     options?: ProjectMultiAgentOptions,
+    private readonly qaService?: ProjectBrowserQaService,
   ) {
     this.worktreeMode = options?.worktreeMode ?? (process.env.NPATI_PROJECT_WORKTREE_MODE === "true");
   }
@@ -153,19 +155,33 @@ export class ProjectMultiAgentService {
               openIssues = ["Preview/build failed: " + clean(error instanceof Error ? error.message : "Unknown error", 300)];
             }
             if (!openIssues.length) {
+              let browserQaSummary = "Browser QA was not configured.";
+              if (this.qaService) {
+                try {
+                  const qaResult = await this.qaService.inspect(ctx, companyId, { projectId });
+                  browserQaSummary = [qaResult.report.summary, ...qaResult.issues.slice(0, 20).map((item) => `[${item.type}] ${item.message}`)].join("\n").slice(0, 4000);
+                  if (qaResult.issues.length > 0) {
+                    openIssues = qaResult.issues.map((i) => `[${i.type}] ${i.message}`);
+                  }
+                } catch {
+                  throw new Error("Browser QA results are unavailable");
+                }
+              }
               const qaRun = await this.runtime.execute(ctx, companyId, {
                 task: [
-                  "Review this project implementation. Run available build/tests using permitted Project tools and inspect preview.",
+                  "Review this project implementation. Run available build/tests using permitted Project tools, capability `project.qa.inspect`, and inspect preview.",
                   "Return JSON only: {\"issues\":[\"specific issue\"]}. Do not edit files.",
                   "Task: " + task.title, "Project ID: " + projectId,
                   "Task Statuses:\n" + peerStatuses,
+                  "Browser QA Results:\n" + browserQaSummary,
                   "Project Context: " + clean(projectContext ?? "", 2000),
                   "Dependencies:\n" + (dependencies || "none"),
                 ].join("\n"),
                 mode: "single", preferredAgentId: task.agentId, projectId, allowedProjectId: projectId, noMemory: true, callBudget: budget,
               }, idempotencyKey + ":qa:" + iteration);
               if (qaRun.run.status !== "completed") throw new Error("QA Agent failed");
-              openIssues = issuesFromResult(qaRun.run.result ?? "");
+              const agentIssues = issuesFromResult(qaRun.run.result ?? "");
+              openIssues = [...new Set([...openIssues, ...agentIssues])];
             }
             if (!openIssues.length) return "QA passed; preview is available.";
             if (iteration === 1) return "QA finished with open issues: " + openIssues.join("; ");

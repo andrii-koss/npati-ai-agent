@@ -1,11 +1,12 @@
 import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
+import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { ProjectMultiAgentService } from "./project-multi-agent";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
-import type { ProjectPreviewService } from "./project-preview-service";
+import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { CompanyDelegationRuntime } from "./company-runtime";
 import type { ProjectCardData, ProjectActionData, ProjectIntentDecision } from "@npati/shared";
 
@@ -26,6 +27,7 @@ export class ProjectOrchestrator {
     private readonly companyRuntime: CompanyDelegationRuntime,
     private readonly gitService?: ProjectGitService,
     private readonly deployService?: ProjectDeployService,
+    private readonly qaService?: ProjectBrowserQaService,
   ) {}
 
   /**
@@ -56,6 +58,7 @@ export class ProjectOrchestrator {
       if (tools.some((t) => t.startsWith("project.preview."))) score += 5;
       if (tools.some((t) => t.startsWith("project.git."))) score += 5;
       if (tools.some((t) => t.startsWith("project.deploy."))) score += 5;
+      if (tools.some((t) => t.startsWith("project.qa."))) score += 5;
 
       // Role and instruction semantic relevance (NOT agent.name)
       const roleText = `${agent.role} ${agent.description ?? ""} ${agent.systemInstruction ?? ""}`;
@@ -180,7 +183,7 @@ export class ProjectOrchestrator {
         description: params.prompt,
         type: "website",
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
-      project = created;
+      project = await this.projectService.updatePreview(ctx, params.companyId, created.id, { framework });
 
       // Initialize PROJECT.md
       await this.initSharedProjectContext(ctx, params.companyId, project.id, {
@@ -379,6 +382,8 @@ export class ProjectOrchestrator {
         undefined,
         this.gitService,
         this.projectWorkspace as any,
+        undefined,
+        this.qaService,
       );
       const multiResult = ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
         ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT")
@@ -414,6 +419,8 @@ export class ProjectOrchestrator {
       || params.intentDecision.intent.startsWith("EDIT_")
       || params.intentDecision.intent === "DEBUG_PROJECT";
 
+    if (needsBuild && runDetails.run.status === "failed") lastBuildStatus = "failed";
+
     if (needsBuild && !usedMultiAgent && runDetails.run.status === "completed") {
       await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "building" });
 
@@ -434,6 +441,10 @@ export class ProjectOrchestrator {
         } catch (buildErr) {
           const errMessage = buildErr instanceof Error ? buildErr.message : String(buildErr);
           buildErrorSummary = errMessage;
+          if (buildErr instanceof PreviewError && buildErr.code === "sandbox_unavailable") {
+            lastBuildStatus = "failed";
+            break;
+          }
 
           if (repairAttempts < maxAttempts) {
             // Repair step: invoke agent with structured error context
@@ -472,14 +483,17 @@ export class ProjectOrchestrator {
 
       if (!buildPassed) {
         lastBuildStatus = "failed";
+        const failureMessage = repairAttempts >= maxAttempts
+          ? `Build repair limit exceeded after ${repairAttempts} attempts: ${buildErrorSummary.slice(0, 300)}`
+          : `Build or preview failed after ${repairAttempts} attempt(s): ${buildErrorSummary.slice(0, 300)}`;
         await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, activeRunId, {
           status: "failed",
-          errorMessage: `Build repair limit exceeded after ${repairAttempts} attempts: ${buildErrorSummary.slice(0, 300)}`,
+          errorMessage: failureMessage,
         });
         if (activeRunId !== runDetails.run.id) {
           await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, runDetails.run.id, {
             status: "failed",
-            errorMessage: `Build repair limit exceeded after ${repairAttempts} attempts: ${buildErrorSummary.slice(0, 300)}`,
+            errorMessage: failureMessage,
           });
         }
       }
@@ -541,7 +555,8 @@ export class ProjectOrchestrator {
       : `Оновлено проєкт "${project.name}".`);
 
     if (lastBuildStatus === "failed") {
-      responseMessage += `\n\n⚠️ Помилка збірки після ${usedMultiAgent ? 2 : 3} спроб автоматичного виправлення: ${buildErrorSummary.slice(0, 300)}`;
+      const failure = buildErrorSummary || runDetails.run.errorMessage || "Preview did not become available.";
+      responseMessage += `\n\n⚠️ Build or preview failed: ${failure.slice(0, 300)}`;
     }
 
     return {

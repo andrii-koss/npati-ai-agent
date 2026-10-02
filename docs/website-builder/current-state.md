@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current phase: Phase 2, Step 10 (Completed)
-- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace; Step 6 Git & Checkpoints; Step 7 Project Import & Templates; Step 8 Multi-Agent Orchestration; Step 9 Agent Worktrees; Step 10 DeployProvider & Dokploy Integration
-- Next step: Step 11 (Browser QA & Self-Correction), only on a separate request
+- Current phase: Phase 2, Step 11 (Browser QA implemented; live runner validation pending)
+- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace; Step 6 Git & Checkpoints; Step 7 Project Import & Templates; Step 8 Multi-Agent Orchestration; Step 9 Agent Worktrees; Step 10 DeployProvider & Dokploy Integration; Step 11 Browser QA
+- Next step: none in this roadmap; do not start another step automatically
 
 ## Source of truth
 
@@ -365,3 +365,47 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core entries, 0 gaps, 0 duplicates).
 - Monorepo typecheck: `npm --prefix packages/workspace run typecheck`, `npm --prefix packages/shared run typecheck`, `npm --prefix apps/agent-api run typecheck`, `npm --prefix apps/web run typecheck` all passed with code 0.
 - Production builds: `npm --prefix apps/agent-api run build` and `npm --prefix apps/web run build` succeeded with 0 errors.
+## Steps 1–11 verification (2026-10-02)
+
+| Step | Implementation evidence | Focused verification |
+| --- | --- | --- |
+| 1 Project | `project-service.ts`, `project-routes.ts`, migration 054 | `project-foundation.test.ts` |
+| 2 Workspace/Files | `project-workspace.ts`, `project-file-routes.ts` | `project-workspace.test.ts`, `project-files-integration.test.ts` |
+| 3 Sandbox/Terminal | `sandbox-provider.ts`, `docker-sandbox-provider.ts`, `project-sandbox-service.ts` | `project-sandbox-provider.test.ts`, `project-terminal-*.test.ts` |
+| 4 Preview | `project-preview-service.ts`, `project-preview-routes.ts` | `project-preview.test.ts` |
+| 5 Intent/Trace | `project-intent.ts`, `project-orchestrator.ts` | `project-intent-router.test.ts` |
+| 6 Git/Checkpoints | `project-git-service.ts`, migration 056 | `project-git-checkpoints.test.ts` |
+| 7 Import/Templates | `project-import-service.ts` | `project-import.test.ts` |
+| 8 Multi-agent | `project-multi-agent.ts`, `project-task-graph.ts` | `project-multi-agent.test.ts` |
+| 9 Worktrees | `project-git-service.ts` worktree methods | `project-git-worktrees.test.ts` |
+| 10 Deploy | `project-deploy-service.ts`, migration 057 | `project-deploy.test.ts` |
+| 11 Browser QA | `project-browser-qa-service.ts`, sandbox runner operation, migration 058 | `project-browser-qa.test.ts` |
+
+All 15 project test suites passed (163 tests). This verifies repository behavior with mocks and local services, not a live Docker browser or production infrastructure.
+
+## Step 11 Browser QA
+
+- Added `project.qa.inspect` and `project.qa.report` to the existing capability catalog, matrix, Company tool runtime and Inspector. The QA tab uses Company-scoped routes and durable project reports.
+- QA runs in a dedicated, short-lived Playwright container attached only to the verified project's internal sandbox network. The runner checks the sandbox scope before launch. It opens only that sandbox's preview host and port, blocks browser requests to other origins, and checks local links without following redirects.
+- The runner records browser console error counts, HTTP status, local broken links, basic DOM accessibility checks, navigation/resource timing, rendered HTML byte size and a viewport screenshot. The screenshot is rendered from viewport element geometry using neutral blocks; it never copies page text, media, CSS images or source pixels. Raw page HTML, console text, URL query parameters and secrets are not returned in reports or agent tool results.
+- QA input is bounded to local paths, known viewports, 1–60 seconds, 50 KB–2 MB screenshot size, and up to 50 local links. The Docker runner has CPU, memory, PID and temporary disk limits, a read-only filesystem, no mounted workspace or credentials, no direct external network, and removes its container after execution.
+- Migration 058 stores scoped reports in the existing workspace migration system. Read and write operations first resolve the authenticated Company and Project. Agent calls also check the agent's persisted capability allowlist. Tool responses omit screenshot bytes; authorized UI report reads can display the redacted image.
+- Start the Project preview before running QA. The QA action never silently starts a dev server or executes package commands. Multi-agent QA fails closed if the browser runner cannot return results.
+
+### Step 11 deployment and manual check
+
+On the dedicated sandbox runner host, build `docker build -f apps/agent-api/Dockerfile.browser-qa -t npati/browser-qa:local .` and configure `NPATI_BROWSER_QA_IMAGE` on the existing runner service. Apply migration 058 through the normal API startup migration path. Start a Project preview, open its QA tab, run desktop and mobile inspections, inspect issues and the saved report, then verify another Company cannot read the report. An old sandbox can be inspected because the runner targets its verified container name directly.
+
+### Step 11 verification and limits
+
+- Project suites: 163/163 passed. Root typecheck, API build, web build, sandbox-runner Compose config and the 306 baseline capability audit passed.
+- Full suite after updating stale catalog assertions: 1804 passed, 1 failed, 2 skipped. The sole failure is the previously documented NovaScale repeat-profile wording assertion (`novascale-exact-regression.test.ts`). The earlier 330/66 count assertions and the ID upper bound were updated to 334/70.
+- No root or workspace lint script exists. Root `npm run build` stops before compilation because `OMNIROUTE_VERSION` is absent; API and web builds pass separately. A live Playwright image build and end-to-end browser run were not exercised in this environment; the Docker path, image and migration apply/rollback require deployment validation.
+- The screenshot is a redacted layout wireframe and supports position/spacing review rather than text, color or image comparison. Basic a11y checks are not a full WCAG audit. Link checking is limited to local links. A compromised preview can still attack the browser process inside the isolated QA container; keep the runner host dedicated and current.
+## Chat end-to-end verification (2026-10-02)
+
+- The exact hosting-company request with Next.js and Live Preview originally resolved to `PREVIEW_PROJECT` before a Project existed. Creation now takes precedence when one request also asks for preview; the result is `CREATE_WEBSITE` with the Next.js target.
+- Ordinary web Chat uses `/chat/stream`. That route now sends Project intents through the existing Project Orchestrator and returns Project context, card, action, conversation and Company run ID. The web client sends the active Project ID for the next turn, scoped to the active Company. A new create intent starts a new Project even when an older Project is active.
+- `tests/website-builder-chat-e2e.test.ts` injects both exact user requests through `/chat/stream` with an isolated in-memory Company and an AI test double. It verifies one Project is created, the follow-up targets that same Project, `PROJECT.md` exists, and Changes, Activity and Run Trace endpoints respond. The selected agent is recorded in the run. The requested framework is stored on the Project.
+- This test does not claim a generated Next.js site: the AI test double does not write application files. It confirms a failed build state and no Preview URL when the sandbox runner is absent. The runner requires a dedicated isolated host; the local Docker Desktop runs the main NPATI stack and is not suitable for that runner. Dependencies, a real Next.js build, browser QA, and Live Preview remain unverified in a live deployment.
+- Verification: 16 focused tests passed; monorepo typecheck and separate API and web builds passed. Full suite: 1805 passed, 2 skipped, 1 pre-existing NovaScale repeat-profile wording assertion failed. No lint script is defined.
