@@ -46,6 +46,8 @@ import { registerProjectTerminalRoutes } from "./project-terminal-routes";
 import { registerProjectPreviewRoutes } from "./project-preview-routes";
 import { ProjectGitService } from "./project-git-service";
 import { registerProjectGitRoutes } from "./project-git-routes";
+import { ProjectImportService } from "./project-import-service";
+import { registerProjectImportRoutes } from "./project-import-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectOrchestrator } from "./project-orchestrator";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
@@ -826,6 +828,7 @@ export function buildApp(config: AppConfig = {}) {
   sandboxIdleTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
   const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
+  const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
   const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
@@ -2417,6 +2420,7 @@ ${localized.next}`;
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);
+  registerProjectImportRoutes(app, projectImportService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {

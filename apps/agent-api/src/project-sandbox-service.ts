@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
 import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
 import type { SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
@@ -167,6 +167,58 @@ export class ProjectSandboxService {
       throw new SandboxProviderError("sandbox_execution_failed", "Sandbox execution failed", 503, "sandbox", tool, true);
     }
   }
+  async cloneRepository(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    input: { url: string; branch: string; token?: string; timeoutMs: number },
+  ): Promise<SandboxFile[]> {
+    await this.agent(ctx, companyId, "system", "project.terminal.exec");
+    const project = await this.project(ctx, companyId, projectId);
+    if (project.repositoryProvider !== "github" || project.repositoryUrl !== input.url) {
+      throw new SandboxProviderError("repository_mismatch", "Repository is not connected to this Project", 403, "clone");
+    }
+    if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(input.url)
+      || !/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(input.branch)
+      || input.branch.includes("..") || input.branch.includes("@{")) {
+      throw new SandboxProviderError("invalid_repository", "Invalid repository connection", 400, "clone");
+    }
+    if ((await this.workspace.listFiles(ctx, companyId, projectId)).length > 0) {
+      throw new SandboxProviderError("project_not_empty", "Import requires an empty Project workspace", 409, "clone");
+    }
+    const ready = await this.ensure(ctx, project);
+    const target = `/workspace/.npati-runtime/import-${randomUUID()}`;
+    const command = `git -c core.hooksPath=/workspace/.npati-runtime/no-hooks clone --depth 1 --single-branch --branch '${input.branch}' -- '${input.url}' '${target}' && cp -R '${target}/.' /workspace/`;
+    const environment: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" };
+    if (input.token) {
+      const header = Buffer.from(`x-access-token:${input.token}`).toString("base64");
+      environment.GIT_CONFIG_COUNT = "1";
+      environment.GIT_CONFIG_KEY_0 = "http.https://github.com/.extraheader";
+      environment.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${header}`;
+    }
+    let result: SandboxCommandResult;
+    try {
+      result = await this.provider.executeCommand(ready.scope, ready.sandboxId, command, {
+        timeoutMs: Math.min(Math.max(input.timeoutMs, 1_000), 300_000),
+        outputLimitBytes: 4_096,
+        environment,
+      });
+    } catch {
+      throw new SandboxProviderError("repository_clone_failed", "Repository clone failed in sandbox", 502, "clone");
+    }
+    if (result.status !== "completed") {
+      throw new SandboxProviderError(result.status === "timed_out" ? "repository_clone_timeout" : "repository_access_denied",
+        result.status === "timed_out" ? "Repository clone timed out" : "Repository clone failed or access was denied",
+        result.status === "timed_out" ? 504 : 403, "clone");
+    }
+    const files = await this.provider.downloadFiles(ready.scope, ready.sandboxId);
+    if (files.length > this.limits.syncMaxFiles || files.reduce((bytes, file) => bytes + Buffer.byteLength(file.content, "utf8"), 0) > this.limits.syncMaxBytes) {
+      throw new SandboxProviderError("repository_too_large", "Repository exceeds Project import limits", 413, "clone");
+    }
+    for (const file of files) safeProjectPath(file.path);
+    return files;
+  }
+
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {
     const tool = "project.terminal.process" as const;
