@@ -25,6 +25,8 @@ services:
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
+      target: runtime
+    command: ["node", "dist/server.js"]
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -128,6 +130,7 @@ services:
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
+      target: runtime
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
     environment: *agent-api-env
