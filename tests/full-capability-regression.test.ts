@@ -4,16 +4,16 @@ import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { AuthContext } from "@npati/workspace";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 
-describe("PHASE 11: Full 306 Capability Regression Suite", () => {
+describe("PHASE 11: Full Capability Regression Suite", () => {
   describe("Audit Matrix Coverage and Hygiene", () => {
-    it("verifies 306/306 capabilities have test/evidence ownership and zero unknown/unmapped items", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(306);
-      expect(CAPABILITY_CATALOG.length).toBe(306);
+    it("verifies all 314 capabilities have test/evidence ownership and zero unknown/unmapped items", () => {
+      expect(CAPABILITY_MATRIX.length).toBe(314);
+      expect(CAPABILITY_CATALOG.length).toBe(314);
 
       const idSet = new Set<number>();
       for (const item of CAPABILITY_MATRIX) {
         expect(item.id).toBeGreaterThanOrEqual(1);
-        expect(item.id).toBeLessThanOrEqual(306);
+        expect(item.id).toBeLessThanOrEqual(314);
         expect(idSet.has(item.id)).toBe(false);
         idSet.add(item.id);
 
@@ -27,16 +27,16 @@ describe("PHASE 11: Full 306 Capability Regression Suite", () => {
         );
       }
 
-      expect(idSet.size).toBe(306);
+      expect(idSet.size).toBe(314);
     });
 
-    it("verifies exact separation: 42 agent-callable tools vs 264 internal runtime/ops items", () => {
+    it("verifies exact separation: 50 agent-callable tools vs 264 internal runtime/ops items", () => {
       const callable = CAPABILITY_MATRIX.filter((c) => c.agentCallable);
       const internal = CAPABILITY_MATRIX.filter((c) => !c.agentCallable);
 
-      expect(callable.length).toBe(42);
+      expect(callable.length).toBe(50);
       expect(internal.length).toBe(264);
-      expect(callable.length + internal.length).toBe(306);
+      expect(callable.length + internal.length).toBe(314);
 
       // All agentCallable must have type tool
       for (const tool of callable) {

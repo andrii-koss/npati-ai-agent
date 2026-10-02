@@ -37,6 +37,8 @@ import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connecto
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
+import { LocalProjectWorkspace } from "./project-workspace";
+import { registerProjectFileRoutes } from "./project-file-routes";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -223,6 +225,7 @@ export interface AppConfig {
   omnirouteRerankModel?: string;
   omnirouteVisionModel?: string;
   dataDirectory?: string;
+  projectWorkspaceRoot?: string;
   hubBaseUrl?: string;
   hubApiKey?: string;
   databaseUrl?: string;
@@ -796,7 +799,9 @@ export function buildApp(config: AppConfig = {}) {
     ? new BrowserUseClient(config.browserUseWorkerUrl, config.browserUseInternalToken, browserCredentials, undefined, chatFiles)
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool);
+  const projectService = new ProjectService(workspaceStore);
+  const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -2373,7 +2378,8 @@ ${localized.next}`;
     beforeDeleteCompany,
     beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
   });
-  registerProjectRoutes(app, new ProjectService(workspaceStore), authProvider);
+  registerProjectRoutes(app, projectService, authProvider);
+  registerProjectFileRoutes(app, projectWorkspace, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {

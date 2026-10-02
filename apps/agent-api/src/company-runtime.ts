@@ -71,7 +71,7 @@ function toolName(value: string) {
 }
 function summary(input: Record<string, unknown>) {
   return SecurityPolicyEngine.redactObject(Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
-    key, /token|secret|password|api.?key|authorization/i.test(key) ? "[REDACTED]"
+    key, /token|secret|password|api.?key|authorization|content|replacement|find/i.test(key) ? "[REDACTED]"
       : typeof value === "string" ? value.slice(0, 500)
       : typeof value === "number" || typeof value === "boolean" || value === null ? value : "[structured value]",
   ])));
@@ -337,6 +337,8 @@ export class CompanyDelegationRuntime {
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
+      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => toolName(tool).startsWith("project.files.")))
+        ? (await this.store.listProjects(ctx, companyId)).slice(0, 50).map((project) => ({ id: project.id, name: project.name, type: project.type })) : [];
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
@@ -347,6 +349,7 @@ export class CompanyDelegationRuntime {
           { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
           { role: "user", content: protect([
             `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
+            projectChoices.length ? `Projects available to file tools: ${json(projectChoices, 10_000)}` : "",
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
               id: agent.id, name: agent.name, role: agent.role, description: agent.description,
               tools: agent.tools.map(toolName).filter((tool) => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)),
@@ -359,6 +362,7 @@ export class CompanyDelegationRuntime {
             'knowledge: {"query":"question about this Company"}; files: {"operation":"list"} or {"operation":"read","key":"known file key"}.',
             "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
+            'project.files.list/search/read/create/write/edit/move/delete: input must include projectId (an actual Project ID in this Company). Path is workspace-relative. read/create/write/edit/move/delete need path (delete may use paths); search needs query; create/write need content; write/edit/move need expectedRevision returned by read/create; edit needs find and replacement; move needs to. Never request protected secret files. Delete always requires approval.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
             'browser.browser_tab_control: {"operation":"navigate","url":"absolute public https URL","profileId":"optional stable profile"}, {"operation":"extract","url":"optional URL","selector":"CSS selector","mode":"text|attribute","attribute":"when needed"}, {"operation":"pause","jobId":"running browser job id","profileId":"same profile"}, or {"operation":"resume","jobId":"paused/waiting browser job id","profileId":"same profile","resumeInput":{"task":"continuation and verification code/link if available"}}.',
             'browser.browser_clicktype for forms: {"operation":"fill_form","url":"optional URL","profileId":"profile","fields":[{"selector":"CSS selector","value":"non-secret value"},{"selector":"CSS selector","secretRef":"credentialAlias.field"}],"credentialRefs":[{"id":"vault credential id","alias":"credentialAlias"}],"submitSelector":"optional CSS selector"}. Never put passwords, tokens, OTPs or other secret values directly in tool input.',
@@ -632,13 +636,14 @@ export class CompanyDelegationRuntime {
       const operation=typeof plan.input.operation==="string"?plan.input.operation.trim().toLowerCase():"";
       const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
       const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
-      if (this.riskApprovalService.requiresApproval(toolToAssess) && !scopedBrowserAuthorization) {
+      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : undefined;
+      if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if(this.durableApprovals){
           if(!approvalId){
             const cleanPayload={...plan.input};delete cleanPayload._approvalToken;
             const req=await this.durableApprovals.requestApproval(ctx,company.id,{
               runId,agentId:agent.id,toolName:toolToAssess,
-              riskLevel:this.riskApprovalService.classifyRisk(toolToAssess)==="critical"?"critical":"high",
+              riskLevel:projectFileRisk === "high" ? "high" : this.riskApprovalService.classifyRisk(toolToAssess)==="critical"?"critical":"high",
               actionSummary:`${agent.name} requests ${toolToAssess}`,inputPayload:cleanPayload,
             });
             await this.store.appendCompanyAgentToolAudit(ctx,company.id,runId,{agentId:agent.id,toolName:toolToAssess,decision:"denied",status:"blocked",
@@ -720,6 +725,7 @@ export class CompanyDelegationRuntime {
             ? (adapterInput.topic as string).trim()
             : company.name || "company information";
         }
+        if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);

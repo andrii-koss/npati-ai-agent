@@ -4820,3 +4820,6 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
     "status": "VERIFIED_EXISTING"
   }
 ];
+
+import { PROJECT_FILE_MATRIX } from "./project-file-capabilities";
+CAPABILITY_MATRIX.push(...PROJECT_FILE_MATRIX);

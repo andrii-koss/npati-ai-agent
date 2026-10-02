@@ -19,13 +19,13 @@ describe("PHASE 8: Settings and Company UI as Control Plane", () => {
   describe("UI Capability Exposure & Filtering", () => {
     it("ensures UI only exposes agent-callable tools and never exposes internal runtime capabilities", () => {
       const allCapabilities = CAPABILITY_CATALOG;
-      expect(allCapabilities.length).toBe(306);
+      expect(allCapabilities.length).toBe(314);
 
       const agentCallableTools = allCapabilities.filter((cap) => cap.agentCallable);
       const internalNonTools = allCapabilities.filter((cap) => !cap.agentCallable);
 
-      // Exactly 42 tools should be agent-callable
-      expect(agentCallableTools.length).toBe(42);
+      // Exactly 50 tools should be agent-callable after Project Files
+      expect(agentCallableTools.length).toBe(50);
       expect(internalNonTools.length).toBe(264);
 
       // Verify that internal runtime/ops/orchestration capabilities are strictly non-agentCallable

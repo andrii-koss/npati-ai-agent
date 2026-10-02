@@ -1,5 +1,5 @@
 import type { AIEngine } from "@npati/omniroute-adapter";
-import type { AuthContext, Company } from "@npati/workspace";
+import type { AuthContext, Company, WorkspaceStore } from "@npati/workspace";
 import type { DefaultWebResearchProvider } from "@npati/web-research";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,6 +8,7 @@ import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
 import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
 import type { EmailAgentTools } from "./email-agent-tools";
 import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
+import type { ProjectWorkspace } from "./project-workspace";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -55,6 +56,8 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly execSandbox?: IsolatedExecSandbox,
     private readonly emailAgentTools?: EmailAgentTools,
     private readonly browserTool?: BrowserUseClient,
+    private readonly projectWorkspace?: ProjectWorkspace,
+    private readonly projectAgentStore?: Pick<WorkspaceStore, "getCompanyAgent">,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -107,6 +110,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       authorizeCompanyMcp(context,name);
       return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });
     }
+    if (tool.startsWith("project.files.")) return this.projectFiles(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -180,6 +184,48 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     throw new Error("Company Memory operation must be list, search, get, create, update or delete");
   }
 
+  private async projectFiles(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectWorkspace || !this.projectAgentStore) throw new Error("Project file runtime is not configured");
+    const agentId = typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "";
+    if (!agentId) throw new Error("Project file agent authorization is required");
+    const agent = await this.projectAgentStore.getCompanyAgent(context, company.id, agentId);
+    if (!agent.isActive || !agent.tools.includes(tool)) throw new Error("Agent lacks Project file permission");
+    const projectId = typeof input.projectId === "string" ? input.projectId : "";
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : undefined;
+    const filePath = typeof input.path === "string" ? input.path : "";
+    const expectedRevision = typeof input.expectedRevision === "string" ? input.expectedRevision : "";
+    const content = typeof input.content === "string" ? input.content : "";
+    const scope = [context, company.id, projectId] as const;
+    switch (tool) {
+      case "project.files.list": return this.projectWorkspace.listFiles(...scope, workspaceId);
+      case "project.files.search": return this.projectWorkspace.searchFiles(...scope, String(input.query ?? ""), workspaceId);
+      case "project.files.read": return this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+      case "project.files.create": {
+        const result = await this.projectWorkspace.createFile(...scope, filePath, content, workspaceId);
+        return { path: result.path, size: result.size, revision: result.revision };
+      }
+      case "project.files.write": {
+        const result = await this.projectWorkspace.writeFile(...scope, filePath, content, expectedRevision, workspaceId);
+        return { path: result.path, size: result.size, revision: result.revision };
+      }
+      case "project.files.edit": {
+        const result = await this.projectWorkspace.editFile(...scope, filePath, String(input.find ?? ""), String(input.replacement ?? ""), expectedRevision, workspaceId);
+        return { path: result.path, size: result.size, revision: result.revision };
+      }
+      case "project.files.move": {
+        const result = await this.projectWorkspace.moveFile(...scope, filePath, String(input.to ?? ""), expectedRevision, workspaceId);
+        return { path: result.path, size: result.size, revision: result.revision };
+      }
+      case "project.files.delete": {
+        if (input.__npatiApprovalGranted !== true) throw new Error("Project file deletion requires approval");
+        const paths = Array.isArray(input.paths) ? input.paths : [filePath];
+        if (!paths.length || paths.length > 100 || paths.some((item) => typeof item !== "string")) throw new Error("Invalid project file delete paths");
+        for (const item of paths as string[]) await this.projectWorkspace.deleteFile(...scope, item, workspaceId);
+        return { deleted: paths.length };
+      }
+      default: throw new Error("Unknown Project file capability");
+    }
+  }
   private async files(context: AuthContext, company: Company, input: Record<string, unknown>) {
     const operation = typeof input.operation === "string" ? input.operation : "list";
     const entries = company.knowledge.map((value, index) => ({ index, value, item: record(value) }));
