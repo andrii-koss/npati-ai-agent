@@ -4823,3 +4823,6 @@ export const CAPABILITY_MATRIX: CapabilityMatrixEntry[] = [
 
 import { PROJECT_FILE_MATRIX } from "./project-file-capabilities";
 CAPABILITY_MATRIX.push(...PROJECT_FILE_MATRIX);
+
+import { PROJECT_TERMINAL_MATRIX } from "./project-terminal-capabilities";
+CAPABILITY_MATRIX.push(...PROJECT_TERMINAL_MATRIX);

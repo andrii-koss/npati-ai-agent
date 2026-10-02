@@ -1,0 +1,4 @@
+FROM node:24-alpine
+COPY src/sandbox-egress-proxy.mjs /opt/sandbox-egress-proxy.mjs
+USER node
+CMD ["node", "/opt/sandbox-egress-proxy.mjs"]

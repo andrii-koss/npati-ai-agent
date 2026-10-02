@@ -9,6 +9,7 @@ import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
 import type { EmailAgentTools } from "./email-agent-tools";
 import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
 import type { ProjectWorkspace } from "./project-workspace";
+import type { ProjectSandboxService, TerminalSecretReference } from "./project-sandbox-service";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -58,6 +59,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly browserTool?: BrowserUseClient,
     private readonly projectWorkspace?: ProjectWorkspace,
     private readonly projectAgentStore?: Pick<WorkspaceStore, "getCompanyAgent">,
+    private readonly projectSandbox?: ProjectSandboxService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -111,6 +113,21 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });
     }
     if (tool.startsWith("project.files.")) return this.projectFiles(context, company, tool, input);
+    if (tool === "project.terminal.exec" || tool === "project.terminal.process") {
+      if (!this.projectSandbox) throw new Error("Project sandbox runner is not configured");
+      const request = {
+        projectId: typeof input.projectId === "string" ? input.projectId : "",
+        sandboxId: typeof input.sandboxId === "string" ? input.sandboxId : undefined,
+        command: typeof input.command === "string" ? input.command : undefined,
+        processId: typeof input.processId === "string" ? input.processId : undefined,
+        action: input.action as "start" | "status" | "logs" | "stop" | undefined,
+        environmentReferences: input.environmentReferences as Record<string, TerminalSecretReference> | undefined,
+        approved: input.__npatiApprovalGranted === true,
+        agentId: typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "",
+        runId: typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined,
+      };
+      return tool === "project.terminal.exec" ? this.projectSandbox.execute(context, company.id, request) : this.projectSandbox.process(context, company.id, request);
+    }
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {

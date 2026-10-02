@@ -662,6 +662,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query('ROLLBACK'); throw error; }
       finally { client.release(); }
     }
+    const projectTerminal = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='055_project_terminal'");
+    if (!projectTerminal.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration055 } = await import("./migration-055");
+        await runMigration055(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('055_project_terminal')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1039,6 +1051,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0];
   }
 
+  async setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null) {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<Project>(`UPDATE projects
+      SET sandbox_id=$5,revision=revision+1,updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4
+        AND sandbox_id IS NOT DISTINCT FROM $6 AND status<>'archived' RETURNING ${projectColumns}`,
+      [projectId,context.workspaceId,companyId,context.userId,sandboxId,expectedSandboxId]);
+    if (!result.rows[0]) throw new Error("Project sandbox changed by another request or is archived");
+    return result.rows[0];
+  }
   async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
     await this.getProject(context, companyId, projectId);
     const result = await this.pool.query<Project>(`UPDATE projects

@@ -20,6 +20,11 @@ import {EmailAgentTools} from "./email-agent-tools";
 import {BrowserCredentialsRepository} from "./browser-credentials-repository";
 import {BrowserUseClient} from "./browser-tool";
 import {ChatFileService} from "./chat-file-service";
+import { ProjectService } from "./project-service";
+import { LocalProjectWorkspace } from "./project-workspace";
+import { ProjectTerminalEventsRepository } from "./project-terminal-events";
+import { ProjectSandboxService } from "./project-sandbox-service";
+import { RemoteSandboxProvider } from "./sandbox-provider";
 const databaseUrl=process.env.DATABASE_URL,redisUrl=process.env.REDIS_URL;
 if(!databaseUrl||!redisUrl)throw new Error("DATABASE_URL and REDIS_URL are required by the Company worker");
 const ai=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL});
@@ -42,9 +47,23 @@ const memoryEngines=new ProductionMemoryEngineRegistry([
  ...(process.env.FTS5_DB_PATH?[new SqliteFts5MemoryEngine(process.env.FTS5_DB_PATH)]:[]),
 ]);
 const knowledgeProcessor=new CompanyKnowledgeProcessor(knowledge,files,storage,ai,memoryEngines);
-const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,chatFiles,knowledge,new WasmExecSandbox(),emailTools,browserTool),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
+const projects = new ProjectService(store);
+const projectWorkspace = new LocalProjectWorkspace(projects, { root: process.env.NPATI_PROJECT_WORKSPACE_ROOT ?? path.join(process.env.NPATI_DATA_DIR ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+const terminalEvents = new ProjectTerminalEventsRepository(projects, (store as any).pool);
+const runnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL, runnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
+const projectSandbox = runnerUrl && runnerSecret ? new ProjectSandboxService(projects, store, projectWorkspace, new RemoteSandboxProvider(runnerUrl, runnerSecret), terminalEvents, browserCredentials, {
+  commandTimeoutMs: Number(process.env.NPATI_TERMINAL_TIMEOUT_MS) || undefined,
+  installBuildTimeoutMs: Number(process.env.NPATI_TERMINAL_BUILD_TIMEOUT_MS) || undefined,
+  outputLimitBytes: Number(process.env.NPATI_TERMINAL_OUTPUT_LIMIT_BYTES) || undefined,
+  inactivityMs: Number(process.env.NPATI_SANDBOX_IDLE_MS) || undefined,
+  syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
+  syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
+}) : undefined;
+const idleTimer = projectSandbox ? setInterval(() => { void projectSandbox.stopInactive(); }, 60_000) : undefined;
+idleTimer?.unref();
+const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,chatFiles,knowledge,new WasmExecSandbox(),emailTools,browserTool,projectWorkspace,store,projectSandbox),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
 const runWorker=new CompanyRunQueueWorker(redisUrl,store,runtime,{concurrency:Number.parseInt(process.env.NPATI_COMPANY_WORKER_CONCURRENCY??"2",10),leaseMs:Number.parseInt(process.env.NPATI_COMPANY_RUN_LEASE_MS??"180000",10),recoveryMs:Number.parseInt(process.env.NPATI_COMPANY_RECOVERY_INTERVAL_MS??"30000",10)});
 const knowledgeWorker=new CompanyKnowledgeWorker(redisUrl,knowledge,knowledgeProcessor);
-for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close(),emailRepo.close(),browserCredentials.close(),chatFiles.close()]));
+for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>{ if (idleTimer) clearInterval(idleTimer); void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close(),emailRepo.close(),browserCredentials.close(),chatFiles.close()]); });
 console.info("[company-worker] Starting company run and knowledge workers");
 await Promise.all([runWorker.start(),knowledgeWorker.start()]);
