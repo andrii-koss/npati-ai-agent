@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current phase: Phase 1, Step 5 (Completed)
-- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace
-- Next step: Step 6 (Git & Checkpoints), only on a separate request
+- Current phase: Phase 2, Step 9 (Completed)
+- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace; Step 6 Git & Checkpoints; Step 7 Project Import & Templates; Step 8 Multi-Agent Orchestration; Step 9 Agent Worktrees
+- Next step: Step 10 (Deployment, Custom Domains & SSL), only on a separate request
 
 ## Source of truth
 
@@ -233,3 +233,53 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - Monorepo typecheck: `npm run typecheck` passed with code 0 across all 12 workspaces.
 - Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
 - Full test suite baseline: unaffected, with existing 2 pre-existing suite failures unchanged.
+
+## Implemented in Step 9
+
+- Isolated Git worktrees and branches per specialist agent (`agent/{slug}`, e.g. `agent/frontend`, `agent/seo`, `agent/designer`).
+- Base branch `project/main` created automatically and checked out before allocating agent worktrees.
+- Strict isolation between branches: changes written in one agent's worktree remain isolated on its branch and are completely invisible in other agents' worktrees until reviewed and merged into `project/main`.
+- Completion pipeline:
+  1. **Review**: Generates unified diff of agent's changes against `project/main` (`git diff project/main...agent/{slug}`).
+  2. **Merge**: Merges the agent's branch into `project/main` using `git merge --no-ff` under a serialized per-project mutex lock (`mergeLocks`) to prevent Git index corruption during concurrent merges.
+  3. **Build**: Verifies preview and build status (`projectPreviewService.buildProject()`).
+- Structured merge conflict escalation:
+  - Detects conflict state and extracts conflicting paths via `git diff --name-only --diff-filter=U`.
+  - Aborts in-progress merge cleanly using `git merge --abort`.
+  - Appends a structured audit event (`project-merge-conflict`) containing conflicting paths, agent ID, and branch.
+  - Throws `GitConflictEscalationError` with details (`conflictingFiles`, `branch`, `targetBranch`) for structured escalation.
+- Dual-mode support (Backward compatibility with Step 8):
+  - Preserves Step 8 shared-workspace mode without breaking changes.
+  - Switchable via `worktreeMode` option in `ProjectMultiAgentService` or `NPATI_PROJECT_WORKTREE_MODE` environment variable (`true`/`1` to enable, defaults to false/shared-workspace).
+- Comprehensive worktree cleanup:
+  - Cleans up individual agent worktrees upon task completion or error (`removeAgentWorktree`).
+  - Batch cleanup (`cleanupAllWorktrees`) runs in the outer orchestrator `finally` block to guarantee no dangling worktree directories or Git refs remain even if agent execution crashes or is aborted.
+- Security and tenant isolation:
+  - `safeAgentSlug` strictly rejects paths containing path traversal characters (`/`, `\`, `..`).
+  - `.worktrees` directory is protected in `LocalProjectWorkspace.safeProjectPath` and hidden from `tree`, `getChanges`, and `setBaseline`.
+  - `.worktrees` and `.npati-worktrees` are automatically ignored in the repository's `.gitignore`.
+  - Tenant isolation verified: Tenant B cannot access or create worktrees for Tenant A's project.
+- Filesystem workspace routing:
+  - `LocalProjectWorkspace` supports optional `agentId` on all file operations (`read`, `write`, `edit`, `delete`, `move`, `list`, `tree`, `search`).
+  - When an agent worktree is registered via `registerWorktree(agentId, worktreePath)`, all file operations for that agent transparently route to its isolated worktree directory.
+  - Unregistering via `unregisterWorktree(agentId)` restores default workspace routing.
+
+## Step 9 verification and limits
+
+- `tests/project-git-worktrees.test.ts`: 10/10 passed, covering:
+  1. Creation of isolated worktree and branch from `project/main`.
+  2. Strict isolation between agent branches.
+  3. Review -> merge pipeline and `project/main` update.
+  4. Merge conflict detection, clean `git merge --abort`, and `GitConflictEscalationError` throwing.
+  5. Individual agent worktree cleanup and `git worktree prune`.
+  6. Batch agent worktree cleanup.
+  7. `LocalProjectWorkspace` routing to worktree when registered.
+  8. Prevention of worktree path traversal attacks.
+  9. Tenant isolation enforcement between tenants.
+  10. Full multi-agent workflow execution in worktree mode with review, merge, and events.
+- Regression test suites:
+  - `tests/project-multi-agent.test.ts`: 16/16 passed (Step 8 shared-workspace mode unchanged).
+  - All 13 project test suites: 149/149 passed.
+- Monorepo typecheck: `npm run typecheck` passed with code 0 across all 13 workspaces.
+- Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 catalog entries, all test files intact).
+- Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully with 0 errors.

@@ -231,17 +231,17 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       }
     }
     switch (tool) {
-      case "project.files.list": return this.projectWorkspace.listFiles(...scope, workspaceId);
-      case "project.files.search": return this.projectWorkspace.searchFiles(...scope, String(input.query ?? ""), workspaceId);
+      case "project.files.list": return this.projectWorkspace.listFiles(...scope, workspaceId, agentId);
+      case "project.files.search": return this.projectWorkspace.searchFiles(...scope, String(input.query ?? ""), workspaceId, agentId);
       case "project.files.read": {
-        const file = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+        const file = await this.projectWorkspace.readFile(...scope, filePath, workspaceId, agentId);
         const key = JSON.stringify([context.workspaceId, company.id, projectId, agentId, input.__npatiTaskRunId, filePath, file.revision]);
         this.projectReadVersions.set(key, file.content);
         if (this.projectReadVersions.size > 500) this.projectReadVersions.delete(this.projectReadVersions.keys().next().value!);
         return file;
       }
       case "project.files.create": {
-        const result = await this.projectWorkspace.createFile(...scope, filePath, content, workspaceId);
+        const result = await this.projectWorkspace.createFile(...scope, filePath, content, workspaceId, agentId);
         return { path: result.path, size: result.size, revision: result.revision };
       }
       case "project.files.write": {
@@ -252,11 +252,11 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         const base = this.projectReadVersions.get(key) ?? suppliedBase;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const result = await this.projectWorkspace.writeFile(...scope, filePath, proposed, revision, workspaceId);
+            const result = await this.projectWorkspace.writeFile(...scope, filePath, proposed, revision, workspaceId, agentId);
             return { path: result.path, size: result.size, revision: result.revision };
           } catch (error) {
             if ((error as { code?: string }).code !== "revision_conflict") throw error;
-            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId, agentId);
             if (base === undefined) throw new Error("revision_conflict: base content unavailable; escalate to Main Agent");
             const merged = mergeProjectText(base, current.content, content);
             if (merged === undefined) throw new Error("revision_conflict: overlapping changes; escalate to Main Agent");
@@ -271,11 +271,11 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         let revision = expectedRevision;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const result = await this.projectWorkspace.editFile(...scope, filePath, find, replacement, revision, workspaceId);
+            const result = await this.projectWorkspace.editFile(...scope, filePath, find, replacement, revision, workspaceId, agentId);
             return { path: result.path, size: result.size, revision: result.revision };
           } catch (error) {
             if ((error as { code?: string }).code !== "revision_conflict") throw error;
-            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId, agentId);
             if (!find || current.content.indexOf(find) < 0 || current.content.indexOf(find) !== current.content.lastIndexOf(find))
               throw new Error("revision_conflict: edit target changed; escalate to Main Agent");
             revision = current.revision;
@@ -284,14 +284,14 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         throw new Error("revision_conflict: edit retry limit reached; escalate to Main Agent");
       }
       case "project.files.move": {
-        const result = await this.projectWorkspace.moveFile(...scope, filePath, String(input.to ?? ""), expectedRevision, workspaceId);
+        const result = await this.projectWorkspace.moveFile(...scope, filePath, String(input.to ?? ""), expectedRevision, workspaceId, agentId);
         return { path: result.path, size: result.size, revision: result.revision };
       }
       case "project.files.delete": {
         if (input.__npatiApprovalGranted !== true) throw new Error("Project file deletion requires approval");
         const paths = Array.isArray(input.paths) ? input.paths : [filePath];
         if (!paths.length || paths.length > 100 || paths.some((item) => typeof item !== "string")) throw new Error("Invalid project file delete paths");
-        for (const item of paths as string[]) await this.projectWorkspace.deleteFile(...scope, item, workspaceId);
+        for (const item of paths as string[]) await this.projectWorkspace.deleteFile(...scope, item, workspaceId, agentId);
         return { deleted: paths.length };
       }
       default: throw new Error("Unknown Project file capability");

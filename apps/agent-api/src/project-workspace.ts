@@ -48,18 +48,21 @@ export interface ProjectChangesResult {
 }
 
 export interface ProjectWorkspace {
-  info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectWorkspaceInfo>;
-  listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectFileEntry[]>;
-  getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectFileEntry[]>;
-  searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string): Promise<ProjectFileEntry[]>;
-  readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string): Promise<ProjectFileContent>;
-  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string): Promise<ProjectFileContent>;
-  writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string): Promise<ProjectFileContent>;
-  editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string): Promise<ProjectFileContent>;
-  deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string): Promise<void>;
-  moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string): Promise<ProjectFileContent>;
-  setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<{ fileCount: number }>;
-  getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectChangesResult>;
+  info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectWorkspaceInfo>;
+  listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
+  getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
+  searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
+  readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string): Promise<void>;
+  moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<{ fileCount: number }>;
+  getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectChangesResult>;
+  registerWorktree?(companyId: string, projectId: string, agentId: string, worktreeDir: string): void;
+  unregisterWorktree?(companyId: string, projectId: string, agentId: string): void;
+  getWorktree?(companyId: string, projectId: string, agentId?: string): string | undefined;
 }
 
 export class ProjectFileError extends Error {
@@ -70,7 +73,7 @@ export function safeProjectPath(value: string): string {
   if (typeof value !== "string" || !value || value.length > 1024 || value.includes("\0") || value.includes("\\") || value.startsWith("/") || /^[a-zA-Z]:/.test(value)) throw new ProjectFileError("invalid_path", "Invalid project file path");
   const parts = value.split("/");
   if (parts.length > 32 || parts.some((part) => !part || part === "." || part === ".." || part.includes(":") || /[<>|?*"\x00-\x1f]/.test(part) || /[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(part))) throw new ProjectFileError("invalid_path", "Invalid project file path");
-  if (parts.some((part) => /^(?:\.npati-.*|\.env(?:\..*)?|\.npmrc|\.netrc|\.git|\.aws|\.ssh|(?:credentials?|secrets?)(?:[._-].*)?|id_(?:rsa|ed25519)|.*\.(?:pem|key|p12))$/i.test(part))) throw new ProjectFileError("secret_path", "Protected file path", 403);
+  if (parts.some((part) => /^(?:\.npati-.*|\.worktrees|\.env(?:\..*)?|\.npmrc|\.netrc|\.git|\.aws|\.ssh|(?:credentials?|secrets?)(?:[._-].*)?|id_(?:rsa|ed25519)|.*\.(?:pem|key|p12))$/i.test(part))) throw new ProjectFileError("secret_path", "Protected file path", 403);
   return parts.join("/");
 }
 
@@ -189,6 +192,7 @@ function formatHunk(hunkOps: Array<{ type: string; text: string; oldLine?: numbe
 
 export class LocalProjectWorkspace implements ProjectWorkspace {
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly activeWorktrees = new Map<string, string>();
   private readonly root: string;
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
@@ -197,13 +201,45 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     this.maxFileBytes = fileLimit(options.maxFileBytes, 1024 * 1024);
     this.maxFiles = fileLimit(options.maxFiles, 2000);
   }
-  private async access(ctx: AuthContext, companyId: string, projectId: string, mode: "read" | "write", workspaceId?: string) {
+
+  registerWorktree(companyId: string, projectId: string, agentId: string, worktreeDir: string): void {
+    if (!validId(companyId) || !validId(projectId) || typeof agentId !== "string" || !agentId) {
+      throw new ProjectFileError("invalid_worktree", "Invalid worktree parameters");
+    }
+    const resolved = path.resolve(worktreeDir);
+    const expectedBase = path.resolve(path.join(this.root, companyId, projectId, ".worktrees"));
+    if (!resolved.startsWith(expectedBase + path.sep)) {
+      throw new ProjectFileError("invalid_worktree", "Worktree directory must reside within project .worktrees", 403);
+    }
+    this.activeWorktrees.set(`${companyId}:${projectId}:${agentId}`, resolved);
+  }
+
+  unregisterWorktree(companyId: string, projectId: string, agentId: string): void {
+    this.activeWorktrees.delete(`${companyId}:${projectId}:${agentId}`);
+  }
+
+  getWorktree(companyId: string, projectId: string, agentId?: string): string | undefined {
+    if (!agentId) return undefined;
+    return this.activeWorktrees.get(`${companyId}:${projectId}:${agentId}`);
+  }
+
+  private async access(ctx: AuthContext, companyId: string, projectId: string, mode: "read" | "write", workspaceId?: string, agentId?: string) {
     if (!validId(companyId) || !validId(projectId)) throw new ProjectFileError("invalid_project", "Invalid project identifier");
     const project = await this.projects.get(ctx, companyId, projectId);
     if (project.companyId !== companyId || project.id !== projectId || project.workspaceId !== ctx.workspaceId || (workspaceId !== undefined && workspaceId !== project.workspaceId)) throw new ProjectFileError("workspace_mismatch", "Project workspace access denied", 403);
     if (project.status === "archived" && mode === "write") throw new ProjectFileError("project_archived", "Archived project is read only", 409);
     const allowed = ctx.permissions.includes("*") || ctx.permissions.includes("owner") || ctx.permissions.includes("business:manage") || ctx.permissions.includes(mode === "read" ? "workspace:read" : "workspace:write");
     if (!allowed) throw new ProjectFileError("permission_denied", "Project file access denied", 403);
+
+    // Check if an isolated worktree is registered for this agent
+    const wtDir = agentId ? this.activeWorktrees.get(`${companyId}:${projectId}:${agentId}`) : undefined;
+    if (wtDir) {
+      const entry = await lstat(wtDir).catch(() => undefined);
+      if (entry?.isDirectory() && !entry.isSymbolicLink()) {
+        return { project, base: wtDir };
+      }
+    }
+
     const base = path.join(this.root, companyId, projectId);
     await mkdir(this.root, { recursive: true });
     for (const candidate of [this.root, path.join(this.root, companyId), base]) {
@@ -288,7 +324,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     const walk = async (relative: string): Promise<void> => {
       for (const entry of await readdir(path.join(base, relative), { withFileTypes: true })) {
         const child = relative ? relative + "/" + entry.name : entry.name;
-        if (entry.isSymbolicLink() || entry.name.startsWith(".npati-")) continue;
+        if (entry.isSymbolicLink() || entry.name.startsWith(".npati-") || entry.name === ".worktrees") continue;
         try { safeProjectPath(child); } catch { continue; }
         if (entry.isDirectory()) { items.push({ path: child, name: entry.name, type: "directory" }); await walk(child); }
         else if (entry.isFile()) {
@@ -302,19 +338,19 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     await walk("");
     return items.sort((a, b) => a.path.localeCompare(b.path));
   }
-  async info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string) {
-    const { project, base } = await this.access(ctx, companyId, projectId, "read", workspaceId);
+  async info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) {
+    const { project, base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
     const entries = await this.tree(base);
     return { companyId, projectId, workspaceId: project.workspaceId, logicalPath: `/workspaces/${companyId}/${projectId}`, currentBranch: project.repositoryBranch ?? "main", activeSandboxId: project.sandboxId, currentRevision: revision(JSON.stringify(entries)) };
   }
-  async getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string) { const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId); return this.tree(base); }
-  async listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string) { return (await this.getFileTree(ctx, companyId, projectId, workspaceId)).filter((entry) => entry.type === "file"); }
-  async searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string) {
+  async getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId); return this.tree(base); }
+  async listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { return (await this.getFileTree(ctx, companyId, projectId, workspaceId, agentId)).filter((entry) => entry.type === "file"); }
+  async searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string) {
     if (typeof query !== "string" || !query.trim() || query.length > 200) throw new ProjectFileError("invalid_query", "Invalid file search query");
-    return (await this.listFiles(ctx, companyId, projectId, workspaceId)).filter((entry) => entry.path.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 100);
+    return (await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).filter((entry) => entry.path.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 100);
   }
-  async readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId);
+  async readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
     const { clean, absolute } = await this.target(base, filePath);
     const bytes = await this.bytes(absolute);
     if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|\b(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8"))) throw new ProjectFileError("secret_content", "Protected file content", 403);
@@ -330,18 +366,18 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     finally { await rm(temporary, { force: true }); }
     return bytes;
   }
-  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
       if (await lstat(absolute).then(() => true, () => false)) throw new ProjectFileError("file_exists", "Project file already exists", 409);
-      if ((await this.listFiles(ctx, companyId, projectId, workspaceId)).length >= this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
+      if ((await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).length >= this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       const bytes = await this.save(absolute, content);
       return this.content(clean, bytes);
     });
   }
-  async writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+  async writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
       const current = await this.bytes(absolute);
@@ -349,9 +385,9 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       return this.content(clean, await this.save(absolute, content));
     });
   }
-  async editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string) {
+  async editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string, agentId?: string) {
     if (typeof find !== "string" || !find || typeof replacement !== "string") throw new ProjectFileError("invalid_edit", "Find and replacement must be text");
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
       const current = await this.bytes(absolute);
@@ -361,8 +397,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       return this.content(clean, await this.save(absolute, source.replace(find, replacement)));
     });
   }
-  async moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+  async moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const source = await this.target(base, from), destination = await this.target(base, to);
       const current = await this.bytes(source.absolute);
@@ -373,18 +409,18 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       return this.content(destination.clean, current);
     });
   }
-  async deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+  async deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     await this.lock(base, async () => { const { absolute } = await this.target(base, filePath); await this.bytes(absolute); await rm(absolute); });
   }
 
-  async setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<{ fileCount: number }> {
-    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId);
+  async setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<{ fileCount: number }> {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
-      const files = await this.listFiles(ctx, companyId, projectId, workspaceId);
+      const files = await this.listFiles(ctx, companyId, projectId, workspaceId, agentId);
       const snapshot: Record<string, string> = {};
       for (const entry of files) {
-        if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache"].includes(p))) continue;
+        if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache", ".worktrees"].includes(p))) continue;
         const { absolute } = await this.target(base, entry.path);
         const content = (await this.bytes(absolute)).toString("utf8");
         snapshot[entry.path] = content;
@@ -395,8 +431,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     });
   }
 
-  async getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string): Promise<ProjectChangesResult> {
-    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId);
+  async getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectChangesResult> {
+    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
     const baselineFile = path.join(base, ".npati-baseline.json");
     let baselineFiles: Record<string, string> = {};
     try {
@@ -407,10 +443,10 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       // No baseline saved yet; baseline is empty, so all current files show as added
     }
 
-    const currentFiles = await this.listFiles(ctx, companyId, projectId, workspaceId);
+    const currentFiles = await this.listFiles(ctx, companyId, projectId, workspaceId, agentId);
     const currentMap = new Map<string, string>();
     for (const entry of currentFiles) {
-      if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache"].includes(p))) continue;
+      if (entry.path.split("/").some((p) => ["node_modules", "dist", "build", ".next", ".cache", ".worktrees"].includes(p))) continue;
       const { absolute } = await this.target(base, entry.path);
       const content = (await this.bytes(absolute)).toString("utf8");
       currentMap.set(entry.path, content);

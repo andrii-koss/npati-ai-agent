@@ -310,7 +310,14 @@ export class ProjectOrchestrator {
     let runDetails: CompanyAgentRunDetails;
     let usedMultiAgent = false;
     try {
-      const multiAgent = new ProjectMultiAgentService(this.workspaceStore, this.companyRuntime, this.previewService);
+      const multiAgent = new ProjectMultiAgentService(
+        this.workspaceStore,
+        this.companyRuntime,
+        this.previewService,
+        undefined,
+        this.gitService,
+        this.projectWorkspace as any,
+      );
       const multiResult = ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
         ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT")
         : undefined;
