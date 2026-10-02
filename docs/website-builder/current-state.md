@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current phase: Phase 1, Step 3
-- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal
-- Next step: Step 4, only on a separate request
+- Current phase: Phase 1, Step 4
+- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes
+- Next step: Step 5 (Intent Router), only on a separate request
 
 ## Source of truth
 
@@ -96,3 +96,43 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - No Docker daemon or PostgreSQL test service was available in this workspace, so real remote-runner network isolation, image build, live `npm install && npm run build`, and migration 055 apply/rollback have not been exercised here. The fake-provider integration tests verify Run dispatch, approvals, tenant checks, timeout/error mapping, redaction, revision conflicts, and Terminal APIs.
 - A sandbox stopped for inactivity loses its tmpfs dependencies; the next command uploads source files again, and package installation may need to be repeated. The runner has no automatic orphan reconciliation if the API crashes during creation or deletion. Project source directories still retain files after Project deletion, as noted in Step 2. Generated binary files outside ignored build artifacts return `unsupported_binary_file` because the Step 2 ProjectWorkspace stores text content only.
 - Preview proxy and port exposure, Git operations beyond ordinary `git status`/`git diff` commands, deployment, manual Terminal input, and multi-agent coordination remain outside Step 3.
+
+## Implemented in Step 4
+
+- `ProjectPreviewService` detects package managers (lockfiles: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `package-lock.json`, `packageManager` field in `package.json`), frameworks (Next.js, Vite, Astro, Nuxt, Remix, SvelteKit, Static HTML, Python, PHP), dev commands (from `scripts.dev`, `scripts.start`, or framework defaults without hardcoded `npm run dev`), and ports (auto-detected from command flags or framework defaults).
+- Authenticated reverse proxy with cryptographically signed HMAC-SHA256 temporary tokens (default 15-minute TTL, refreshed from UI). Tokens are strictly bound to `user + company + project + sandbox`. Expired tokens, cross-project/cross-company tampering, and forged IDs are rejected with 401/403.
+- Dev server runs as a sandbox process via `project.terminal.process` and port is exposed through `SandboxProvider.exposePort`.
+- Crash & auto-restart monitoring: dev server process status is monitored. On crash or abnormal exit, the service automatically restarts the server up to 3 times. If failures persist, the project transitions to `failed` with captured runtime/build error logs.
+- Port-in-use conflicts (e.g. `EADDRINUSE`) are parsed into structured errors.
+- Build and runtime errors render styled error state cards in the preview UI rather than showing a blank white iframe.
+- Project status transitions (`creating`, `ready`, `working`, `building`, `previewing`, `failed`) and `last_build_status` persist in PostgreSQL and in-memory stores via `updateProjectPreview`.
+- Capabilities registered in canonical catalog and Inspector:
+  - `project.preview.start` (ID 317)
+  - `project.preview.stop` (ID 318)
+  - `project.preview.status` (ID 319)
+- Agent editor in Company settings includes the "Preview" permission group.
+- Changes tracking: `LocalProjectWorkspace.getChanges` and `setBaseline` calculate modified, added, and deleted files with full unified diffs (`--- a/...`, `+++ b/...`, `@@ ... @@`) relative to project baseline.
+- Modern ProjectPage UI:
+  - Header: project name, status badge, branch pill, framework pill, build status pill, Start/Stop Preview buttons, Open in New Tab, and Refresh.
+  - 3-column layout: Files explorer with search and file quick-viewer on the left; Developer Agent Chat thread and prompt composer in the center; Live Preview with Desktop/Tablet/Mobile device mode toggles and reload button on the right.
+  - Bottom drawer tabs: Changes (file list with status badges and unified diff viewer with addition/deletion line highlights), Terminal (events and outputs), Logs (raw sandbox/dev server logs), and Activity.
+  - Mobile responsive design with tab/panel switching.
+
+## Step 4 files and modules
+
+- Preview service & routes: `apps/agent-api/src/project-preview-service.ts`, `apps/agent-api/src/project-preview-routes.ts`.
+- Workspace diffs & baseline: `apps/agent-api/src/project-workspace.ts`.
+- Project service & store: `apps/agent-api/src/project-service.ts`, `packages/workspace/src/types.ts`, `packages/workspace/src/postgres-store.ts`, `packages/workspace/src/in-memory-store.ts`.
+- Capabilities & Matrix: `packages/shared/src/project-preview-capabilities.ts`, `packages/shared/src/capability-catalog.ts`, `packages/shared/src/capability-matrix.ts`, `packages/shared/src/index.ts`.
+- Agent runtime: `apps/agent-api/src/company-tool-runtime.ts`, `apps/agent-api/src/company-runtime.ts`, `apps/agent-api/src/app.ts`.
+- Sandbox provider: `apps/agent-api/src/docker-sandbox-provider.ts`, `apps/agent-api/src/sandbox-runner-server.ts`, `apps/agent-api/src/project-sandbox-service.ts`.
+- Web UI: `apps/web/src/ProjectPage.tsx`, `apps/web/src/ProjectSection.tsx`, `apps/web/src/CompanyPage.tsx`, `apps/web/src/styles.css`.
+- Tests: `tests/project-preview.test.ts`.
+
+## Step 4 verification
+
+- `tests/project-preview.test.ts`: 19/19 passed, covering stack detection, token signing & security validation, dev server start/stop, auto-restart crash limits, error card rendering, unified diff calculation, capability inspection, and end-to-end acceptance run.
+- All 5 project test suites: 47/47 passed (`project-workspace`, `project-sandbox-provider`, `project-files-integration`, `project-preview`, `project-terminal-integration`).
+- Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core items validated with 0 gaps/duplicates).
+- Monorepo typecheck: `npm run typecheck` passed with code 0 across all workspaces.
+- Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.

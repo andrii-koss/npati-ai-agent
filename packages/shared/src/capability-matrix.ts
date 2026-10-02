@@ -4826,3 +4826,6 @@ CAPABILITY_MATRIX.push(...PROJECT_FILE_MATRIX);
 
 import { PROJECT_TERMINAL_MATRIX } from "./project-terminal-capabilities";
 CAPABILITY_MATRIX.push(...PROJECT_TERMINAL_MATRIX);
+
+import { PROJECT_PREVIEW_MATRIX } from './project-preview-capabilities';
+CAPABILITY_MATRIX.push(...PROJECT_PREVIEW_MATRIX);

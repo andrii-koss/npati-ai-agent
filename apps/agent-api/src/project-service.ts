@@ -1,4 +1,4 @@
-import type { AuthContext, ProjectInput, WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, ProjectInput, ProjectStatus, WorkspaceStore } from "@npati/workspace";
 
 const projectTypes = new Set(["website", "web_app", "landing_page"]);
 
@@ -54,5 +54,17 @@ export class ProjectService {
     const project = await this.get(context, companyId, projectId);
     if (this.beforeRemove) await this.beforeRemove(context, project);
     return this.store.deleteProject(context, companyId, projectId);
+  }
+
+  async updatePreview(context: AuthContext, companyId: string, projectId: string, patch: {
+    status?: ProjectStatus;
+    previewUrl?: string | null;
+    previewPort?: number | null;
+    framework?: string | null;
+    runtime?: string | null;
+    lastBuildStatus?: string | null;
+  }) {
+    await this.get(context, companyId, projectId);
+    return this.store.updateProjectPreview(context, companyId, projectId, patch);
   }
 }

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
@@ -7,7 +7,9 @@ import { useTranslation } from "./i18n";
 export type Project = {
   id: string; companyId: string; name: string; description?: string;
   type: "website" | "web_app" | "landing_page"; status: string;
-  framework?: string; revision: number; updatedAt: string;
+  framework?: string; repositoryBranch?: string; sandboxId?: string;
+  previewUrl?: string; previewPort?: number; lastBuildStatus?: string;
+  revision: number; updatedAt: string;
 };
 
 const copy = {

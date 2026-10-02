@@ -45,6 +45,11 @@ export class ProjectSandboxService {
     return project;
   }
   private async agent(ctx: AuthContext, companyId: string, agentId: string, tool: string) {
+    if (!agentId || agentId === "system") {
+      const allowed = ctx.permissions.includes("*") || ctx.permissions.includes("owner") || ctx.permissions.includes("business:manage") || ctx.permissions.includes("workspace:write");
+      if (!allowed) throw new SandboxProviderError("terminal_permission_denied", "User lacks permission", 403, "authorization", tool);
+      return;
+    }
     const agent = await this.store.getCompanyAgent(ctx, companyId, agentId);
     if (!agent.isActive || !agent.tools.includes(tool)) throw new SandboxProviderError("terminal_permission_denied", "Agent lacks Terminal permission", 403, "authorization", tool);
   }
@@ -179,6 +184,11 @@ export class ProjectSandboxService {
     if (request.action === "status") return this.provider.getProcessStatus(scope, project.sandboxId, request.processId);
     if (request.action === "logs") return { processId: request.processId, output: redactTerminalText(await this.provider.getLogs(scope, project.sandboxId, request.processId)).slice(0, this.limits.outputLimitBytes) };
     throw new SandboxProviderError("invalid_process_action", "Invalid process action", 400, "process", tool);
+  }
+  async exposePort(ctx: AuthContext, companyId: string, projectId: string, port: number) {
+    const project = await this.project(ctx, companyId, projectId);
+    const ready = await this.ensure(ctx, project);
+    return this.provider.exposePort(ready.scope, ready.sandboxId, port);
   }
   async status(ctx: AuthContext, companyId: string, projectId: string): Promise<SandboxStatus | null> {
     const project = await this.project(ctx, companyId, projectId, true);

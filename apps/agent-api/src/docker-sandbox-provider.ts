@@ -156,7 +156,16 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     return files;
   }
-  async exposePort(): Promise<{ port: number; internalHost: string }> { throw new SandboxProviderError("preview_not_available", "Port exposure is reserved for a later step", 501); }
+  async exposePort(scope: SandboxScope, id: string, port: number): Promise<{ port: number; internalHost: string }> {
+    const names = await this.inspect(scope, id);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new SandboxProviderError("invalid_port", "Invalid port number", 400);
+    }
+    const inspect = await args("docker", ["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", names.sandbox]);
+    const internalIp = text(inspect.stdout).trim();
+    const internalHost = internalIp || names.sandbox;
+    return { port, internalHost };
+  }
   async getLogs(scope: SandboxScope, id: string, processId?: string) {
     const names = await this.inspect(scope, id);
     if (processId) { if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400); const result = await this.docker(["exec", names.sandbox, "cat", "--", `/tmp/npati-process-${processId}.log`]); return text(result.stdout); }

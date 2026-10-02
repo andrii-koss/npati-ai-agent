@@ -1,0 +1,146 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuthContext } from "@npati/workspace";
+import { AuthenticationError, type AuthProvider } from "./auth";
+import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
+import type { ProjectWorkspace } from "./project-workspace";
+
+interface ProjectParams {
+  companyId: string;
+  projectId: string;
+}
+
+export function registerProjectPreviewRoutes(
+  app: FastifyInstance,
+  previewService: ProjectPreviewService,
+  workspace: ProjectWorkspace,
+  auth: AuthProvider,
+) {
+  const authenticate = async (request: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> => {
+    try {
+      return await auth.authenticate(request);
+    } catch (error) {
+      const known = error instanceof AuthenticationError ? error : new AuthenticationError("Unauthorized", 401, "UNAUTHORIZED");
+      reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      return null;
+    }
+  };
+
+  // Start preview server
+  app.post<{ Params: ProjectParams; Body: { command?: string; port?: number } }>(
+    "/companies/:companyId/projects/:projectId/preview/start",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      const { command, port } = request.body ?? {};
+      try {
+        const result = await previewService.startPreview(ctx, companyId, projectId, { command, port });
+        return reply.code(200).send(result);
+      } catch (error) {
+        const known = error instanceof PreviewError ? error : new PreviewError("preview_start_failed", error instanceof Error ? error.message : "Failed to start preview", 500);
+        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      }
+    },
+  );
+
+  // Stop preview server
+  app.post<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/preview/stop",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        const result = await previewService.stopPreview(ctx, companyId, projectId);
+        return reply.code(200).send(result);
+      } catch (error) {
+        const known = error instanceof PreviewError ? error : new PreviewError("preview_stop_failed", error instanceof Error ? error.message : "Failed to stop preview", 500);
+        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      }
+    },
+  );
+
+  // Get preview status
+  app.get<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/preview/status",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        const result = await previewService.getPreviewStatus(ctx, companyId, projectId);
+        return reply.code(200).send(result);
+      } catch (error) {
+        const known = error instanceof PreviewError ? error : new PreviewError("preview_status_failed", error instanceof Error ? error.message : "Failed to get preview status", 500);
+        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      }
+    },
+  );
+
+  // Refresh or generate preview token
+  app.get<{ Params: ProjectParams; Querystring: { ttlMs?: string } }>(
+    "/companies/:companyId/projects/:projectId/preview/token",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      const ttl = Number(request.query.ttlMs) || 15 * 60 * 1000;
+      const session = previewService.getSession(projectId);
+      const sandboxId = session?.sandboxId || "default";
+      const token = previewService.generateToken({
+        userId: ctx.userId,
+        companyId,
+        projectId,
+        sandboxId,
+      }, ttl);
+      return reply.code(200).send(token);
+    },
+  );
+
+  // Changes: get workspace diffs
+  app.get<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/changes",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        const result = await workspace.getChanges(ctx, companyId, projectId);
+        return reply.code(200).send(result);
+      } catch (error) {
+        return reply.code(500).send({ error: { code: "changes_error", message: error instanceof Error ? error.message : "Failed to get changes" } });
+      }
+    },
+  );
+
+  // Baseline snapshot
+  app.post<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/changes/baseline",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        const result = await workspace.setBaseline(ctx, companyId, projectId);
+        return reply.code(200).send(result);
+      } catch (error) {
+        return reply.code(500).send({ error: { code: "baseline_error", message: error instanceof Error ? error.message : "Failed to set baseline" } });
+      }
+    },
+  );
+
+  // Authenticated Reverse Proxy routes (with token validation)
+  app.all<{ Params: { companyId: string; projectId: string; "*": string }; Querystring: { token?: string } }>(
+    "/companies/:companyId/projects/:projectId/preview/proxy",
+    async (request, reply) => {
+      return previewService.handleProxy(request, reply);
+    },
+  );
+
+  app.all<{ Params: { companyId: string; projectId: string; "*": string }; Querystring: { token?: string } }>(
+    "/companies/:companyId/projects/:projectId/preview/proxy/*",
+    async (request, reply) => {
+      return previewService.handleProxy(request, reply);
+    },
+  );
+}

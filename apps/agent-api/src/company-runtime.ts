@@ -338,7 +338,7 @@ export class CompanyDelegationRuntime {
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
-      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => (toolName(tool).startsWith("project.files.") || toolName(tool).startsWith("project.terminal."))))
+      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => (toolName(tool).startsWith("project.files.") || toolName(tool).startsWith("project.terminal.") || toolName(tool).startsWith("project.preview."))))
         ? (await this.store.listProjects(ctx, companyId)).slice(0, 50).map((project) => ({ id: project.id, name: project.name, type: project.type })) : [];
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
@@ -365,6 +365,7 @@ export class CompanyDelegationRuntime {
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'project.files.list/search/read/create/write/edit/move/delete: input must include projectId (an actual Project ID in this Company). Path is workspace-relative. read/create/write/edit/move/delete need path (delete may use paths); search needs query; create/write need content; write/edit/move need expectedRevision returned by read/create; edit needs find and replacement; move needs to. Never request protected secret files. Delete always requires approval.',
             'project.terminal.exec: {"projectId":"authorized Project ID","command":"sandbox command","environmentReferences":{"NAME":{"id":"Company vault credential UUID","field":"field name"}}}. project.terminal.process: {"projectId":"authorized Project ID","action":"start|status|logs|stop","command":"for start","processId":"for status/logs/stop"}. Commands run only in the remote Project sandbox. Use short, specific commands; unknown, destructive or shell-composed commands require approval. Never include secret values in commands or prompts; use vault references.',
+            'project.preview.start: {"projectId":"authorized Project ID","command":"optional dev command","port":optional port}. project.preview.stop: {"projectId":"authorized Project ID"}. project.preview.status: {"projectId":"authorized Project ID"}. Used to launch, stop, and inspect the project preview dev server.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
             'browser.browser_tab_control: {"operation":"navigate","url":"absolute public https URL","profileId":"optional stable profile"}, {"operation":"extract","url":"optional URL","selector":"CSS selector","mode":"text|attribute","attribute":"when needed"}, {"operation":"pause","jobId":"running browser job id","profileId":"same profile"}, or {"operation":"resume","jobId":"paused/waiting browser job id","profileId":"same profile","resumeInput":{"task":"continuation and verification code/link if available"}}.',
             'browser.browser_clicktype for forms: {"operation":"fill_form","url":"optional URL","profileId":"profile","fields":[{"selector":"CSS selector","value":"non-secret value"},{"selector":"CSS selector","secretRef":"credentialAlias.field"}],"credentialRefs":[{"id":"vault credential id","alias":"credentialAlias"}],"submitSelector":"optional CSS selector"}. Never put passwords, tokens, OTPs or other secret values directly in tool input.',
@@ -640,7 +641,7 @@ export class CompanyDelegationRuntime {
       const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
       const terminalDecision = tool.startsWith("project.terminal.") && (tool === "project.terminal.exec" || plan.input.action === "start") ? classifyTerminalCommand(String(plan.input.command ?? "")) : undefined;
       const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || (tool.startsWith("project.terminal.") && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length));
-      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? terminalNeedsApproval ? "high" : "low" : undefined;
+      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? terminalNeedsApproval ? "high" : "low" : tool.startsWith("project.preview.") ? "low" : undefined;
       const approvalPayload = tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(String(plan.input.command ?? "")).digest("hex"), action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
       if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if(this.durableApprovals){
@@ -731,7 +732,7 @@ export class CompanyDelegationRuntime {
             : company.name || "company information";
         }
         if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
-        if (tool.startsWith("project.terminal.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = !terminalNeedsApproval || Boolean(approvalId || plan.input._approvalToken); }
+        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = !terminalNeedsApproval || Boolean(approvalId || plan.input._approvalToken); }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);
