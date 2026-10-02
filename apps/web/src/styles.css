@@ -17416,3 +17416,328 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .terminal-event-card { border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
 .event-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary, #64748b); margin-bottom: 6px; }
 .raw-logs-pre { background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 8px; font-family: monospace; font-size: 0.8rem; max-height: 350px; overflow-y: auto; white-space: pre-wrap; }
+
+
+/* Step 5: Project Chat Card, Runs List & Activity Badges */
+.project-chat-card-container {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.project-chat-card {
+  background: var(--surface-card, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-chat-card-header {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(99, 102, 241, 0.08) 100%);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.project-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-card-title-group h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.project-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.project-badge-framework {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.project-status-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  text-transform: capitalize;
+}
+
+.project-status-pill.status-ready {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.project-status-pill.status-building,
+.project-status-pill.status-generating {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+}
+
+.project-status-pill.status-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.project-chat-card-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.project-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-info-item .info-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.project-info-item .info-value {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-primary, #0f172a);
+}
+
+.build-status-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.build-status-pill.status-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.build-status-pill.status-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.build-status-pill.status-building,
+.build-status-pill.status-pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+.project-changes-preview {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--surface-muted, #f8fafc);
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.project-changes-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 4px;
+}
+
+.project-changes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-change-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.project-change-item .change-path {
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.project-chat-card-actions {
+  padding: 10px 16px;
+  background: var(--surface-muted, #f8fafc);
+  border-top: 1px solid var(--border-color, #e2e8f0);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-btn-primary {
+  padding: 6px 12px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.project-btn-secondary {
+  padding: 6px 12px;
+  background: white;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-btn-secondary:hover {
+  background: #f1f5f9;
+}
+
+.project-btn-subtle {
+  padding: 6px 10px;
+  background: transparent;
+  color: #64748b;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-btn-subtle:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f172a;
+}
+
+/* Project Runs in Project Page */
+.project-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-run-card {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: var(--surface-card, #ffffff);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.run-badge-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.run-badge-status.status-completed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.run-badge-status.status-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+
+.run-badge-status.status-running {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+}
+
+.run-card-body {
+  font-size: 0.875rem;
+  color: var(--text-primary, #1e293b);
+}
+
+.run-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Activity Project Badges */
+.project-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.project-open-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.project-open-link:hover {
+  background: rgba(37, 99, 235, 0.15);
+  text-decoration: underline;
+}

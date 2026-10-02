@@ -9,6 +9,12 @@ import {
   type ResolutionContext,
   defaultEffectiveCapabilityResolver,
 } from "./effective-capabilities";
+import {
+  classifyProjectIntent,
+  type ProjectIntent,
+  type ProjectIntentDecision,
+  type ProjectIntentInput,
+} from "./project-intent";
 
 export type RouterSignal =
   | "url_detected"
@@ -16,7 +22,13 @@ export type RouterSignal =
   | "browser_action"
   | "crawl_action"
   | "file_action"
-  | "pure_explanation";
+  | "pure_explanation"
+  | "website_create"
+  | "website_edit"
+  | "website_build"
+  | "website_preview"
+  | "website_test"
+  | "website_debug";
 
 export interface RouterDecision {
   isNoTool: boolean;
@@ -26,12 +38,18 @@ export interface RouterDecision {
   candidateIds: string[];
   filteredOut: Array<{ toolId: string; reason: string }>;
   latencyMs: number;
+  projectIntent?: ProjectIntent;
+  projectIntentDecision?: ProjectIntentDecision;
 }
 
 export interface RouteInput {
   message: string;
   resolutionContext: ResolutionContext;
   maxCandidates?: number;
+  conversationHistory?: Array<{ role: string; content: string }>;
+  activeProjectId?: string | null;
+  hasWorkspace?: boolean;
+  lastRunStatus?: string | null;
 }
 
 const URL_REGEX = /https?:\/\/[^\s]+|www\.[^\s]+/i;
@@ -72,6 +90,22 @@ export class HybridRouter {
     const isPureExplanation = EXPLANATION_PREFIXES.some((prefix) => lower.startsWith(prefix) || lower.includes(prefix));
     if (isPureExplanation) matchedSignals.push("pure_explanation");
 
+    const projectIntentDecision = classifyProjectIntent({
+      message,
+      conversationHistory: input.conversationHistory,
+      activeCompanyId: input.resolutionContext.company?.id ?? input.resolutionContext.activeContext?.companyId,
+      activeProjectId: input.activeProjectId ?? input.resolutionContext.activeContext?.projectId,
+      hasWorkspace: input.hasWorkspace,
+      lastRunStatus: input.lastRunStatus,
+    });
+
+    if (projectIntentDecision.intent.startsWith("CREATE_")) matchedSignals.push("website_create");
+    else if (projectIntentDecision.intent.startsWith("EDIT_")) matchedSignals.push("website_edit");
+    else if (projectIntentDecision.intent === "BUILD_PROJECT") matchedSignals.push("website_build");
+    else if (projectIntentDecision.intent === "PREVIEW_PROJECT") matchedSignals.push("website_preview");
+    else if (projectIntentDecision.intent === "TEST_PROJECT") matchedSignals.push("website_test");
+    else if (projectIntentDecision.intent === "DEBUG_PROJECT") matchedSignals.push("website_debug");
+
     // 2. NO_TOOL Path: Simple explanation / reasoning without action signals
     if (isPureExplanation && !hasUrl && !hasBrowser && !hasCrawl && !hasFile && !hasTime) {
       const elapsed = performance.now() - start;
@@ -82,6 +116,8 @@ export class HybridRouter {
         candidateIds: [],
         filteredOut: [],
         latencyMs: elapsed,
+        projectIntent: projectIntentDecision.intent,
+        projectIntentDecision,
       };
     }
 
@@ -115,6 +151,12 @@ export class HybridRouter {
       if (hasTime && (tool.id.includes("search") || tool.id.includes("web"))) score += 15;
       if (hasBrowser && tool.domain === "browser") score += 15;
       if (hasFile && (tool.domain === "files" || tool.id.includes("file"))) score += 15;
+
+      // Project capability prioritization
+      if ((projectIntentDecision.intent.startsWith("CREATE_") || projectIntentDecision.intent.startsWith("EDIT_") || projectIntentDecision.intent === "DEBUG_PROJECT") && tool.id.startsWith("project.files.")) score += 20;
+      if (projectIntentDecision.intent === "BUILD_PROJECT" && tool.id.startsWith("project.terminal.")) score += 20;
+      if (projectIntentDecision.intent === "PREVIEW_PROJECT" && tool.id.startsWith("project.preview.")) score += 25;
+      if (projectIntentDecision.intent === "TEST_PROJECT" && tool.id.startsWith("project.terminal.")) score += 20;
 
       // Token overlap with name and useWhen
       for (const token of tokens) {
@@ -163,7 +205,13 @@ export class HybridRouter {
       candidateIds: candidateTools.map((c) => c.id),
       filteredOut,
       latencyMs: elapsed,
+      projectIntent: projectIntentDecision.intent,
+      projectIntentDecision,
     };
+  }
+
+  classifyProject(input: ProjectIntentInput): ProjectIntentDecision {
+    return classifyProjectIntent(input);
   }
 }
 

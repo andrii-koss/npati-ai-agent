@@ -42,6 +42,15 @@ interface ChatMessage {
   timestamp: string;
 }
 
+interface ProjectRunItem {
+  id: string;
+  task: string;
+  status: string;
+  result?: string;
+  errorMessage?: string;
+  createdAt: string;
+}
+
 function authHeaders() {
   const value = new Headers();
   const token = getStoredAuthToken();
@@ -103,10 +112,26 @@ export function ProjectPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
 
+  const [projectRuns, setProjectRuns] = useState<ProjectRunItem[]>([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+
   const [error, setError] = useState("");
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const base = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`;
+
+  // Load runs for activity tab
+  const loadProjectRuns = async () => {
+    setLoadingRuns(true);
+    try {
+      const data = await apiGet<{ runs: ProjectRunItem[] }>(`${base}/runs`);
+      setProjectRuns(data.runs || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
 
   // Load project initial state & files
   const refreshProject = async () => {
@@ -151,6 +176,8 @@ export function ProjectPage() {
       void refreshTerminalAndLogs();
     } else if (bottomTab === "changes") {
       apiGet<ChangesResult>(`${base}/changes`).then(setChanges).catch(() => {});
+    } else if (bottomTab === "activity") {
+      void loadProjectRuns();
     }
   }, [bottomTab, base]);
 
@@ -270,6 +297,7 @@ export function ProjectPage() {
             setChatMessages((prev) => [...prev, assistantMsg]);
             void refreshProject();
             void refreshTerminalAndLogs();
+            void loadProjectRuns();
           }
         } catch {
           clearInterval(pollInterval);
@@ -744,13 +772,34 @@ export function ProjectPage() {
 
               {bottomTab === "activity" && (
                 <div className="activity-tab-pane">
-                  <p className="activity-hint">{language === "uk" ? "Історія активності агента для цього проєкту" : "Agent activity history for this project"}</p>
-                  <ul className="project-activity-list">
-                    <li>Project status: {project.status}</li>
-                    <li>Current branch: {project.repositoryBranch || "main"}</li>
-                    <li>Sandbox ID: {project.sandboxId || "none"}</li>
-                    <li>Build status: {project.lastBuildStatus || "not built"}</li>
-                  </ul>
+                  <div className="activity-tab-toolbar">
+                    <p className="activity-hint">{language === "uk" ? "Історія запусків та активності для цього проєкту" : "Agent runs & activity history for this project"}</p>
+                    <button type="button" className="button-secondary" onClick={() => void loadProjectRuns()} disabled={loadingRuns}>
+                      {language === "uk" ? "Оновити" : "Refresh"}
+                    </button>
+                  </div>
+                  {projectRuns.length === 0 ? (
+                    <div className="empty-runs-state">
+                      <p>{language === "uk" ? "Запусків для цього проєкту ще не зафіксовано." : "No runs recorded for this project yet."}</p>
+                    </div>
+                  ) : (
+                    <div className="project-runs-list">
+                      {projectRuns.map((r) => (
+                        <article key={r.id} className="project-run-card">
+                          <div className="run-card-header">
+                            <span className={`status-pill status-${r.status}`}>{r.status}</span>
+                            <span className="run-card-time">{new Date(r.createdAt).toLocaleString()}</span>
+                            <Link to={`/activity?runId=${r.id}`} className="button-secondary view-run-btn">
+                              {language === "uk" ? "Переглянути Run →" : "View Run →"}
+                            </Link>
+                          </div>
+                          <p className="run-task-text">{r.task}</p>
+                          {r.result && <p className="run-result-text">✓ {r.result.slice(0, 180)}...</p>}
+                          {r.errorMessage && <p className="run-error-text">⚠️ {r.errorMessage}</p>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

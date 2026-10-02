@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current phase: Phase 1, Step 4
-- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes
-- Next step: Step 5 (Intent Router), only on a separate request
+- Current phase: Phase 1, Step 5 (Completed)
+- Completed steps: Step 0 architecture audit; Step 1 Project foundation; Step 2 ProjectWorkspace and Files capabilities; Step 3 SandboxProvider and Terminal; Step 4 Preview Server, Live Preview, and Changes; Step 5 Intent Router, Active Project Context, Activity & Run Trace
+- Next step: Step 6 (Git & Checkpoints), only on a separate request
 
 ## Source of truth
 
@@ -135,4 +135,34 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - All 5 project test suites: 47/47 passed (`project-workspace`, `project-sandbox-provider`, `project-files-integration`, `project-preview`, `project-terminal-integration`).
 - Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core items validated with 0 gaps/duplicates).
 - Monorepo typecheck: `npm run typecheck` passed with code 0 across all workspaces.
+- Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
+
+## Implemented in Step 5
+
+- Extended existing `HybridRouter` with 14 canonical project intents: `CREATE_PROJECT`, `CREATE_WEBSITE`, `EDIT_PROJECT`, `EDIT_WEBSITE`, `CONTINUE_PROJECT`, `DEBUG_PROJECT`, `REVIEW_PROJECT`, `IMPROVE_PROJECT`, `TEST_PROJECT`, `BUILD_PROJECT`, `PREVIEW_PROJECT`, `CONNECT_REPOSITORY`, `COMMIT_PROJECT`, `DEPLOY_PROJECT`. Executable in Step 5: `CREATE_*`, `EDIT_*`, `CONTINUE_PROJECT`, `DEBUG_PROJECT`, `BUILD_PROJECT`, `PREVIEW_PROJECT`, `TEST_PROJECT`. Unsupported intents (Git, Deploy, Review, Improve) are recognized with clear explanatory messages indicating their roadmap release phases.
+- Context-aware classification: Pure explanations ("Що таке Next.js?", "What is React?") take precedence and route to `CHAT`. Website creation prompts route to `CREATE_WEBSITE`/`CREATE_PROJECT`. Modification prompts with an active project context route directly to `EDIT_PROJECT`, while prompts without an active project ask for project clarification.
+- Active Project Context in chat: `active_company_id`, `active_project_id`, `active_workspace_id`. Stored in chat state and persisted in session storage. Resolved fail-closed on the server via `ActiveContextResolver`, strictly validating that the project belongs to the user's active company and workspace and is not archived.
+- Project Manager as orchestration layer (`ProjectOrchestrator`): Operates on top of existing `CompanyDelegationRuntime` (single mode). Specialist agents are selected based on role keywords, semantic descriptions, system instructions, and tool capabilities (`project.files.*`, `project.terminal.*`), NEVER checking `agent.name`. Falls back to the Company's Main Agent.
+- Targeted edits mandate: Injected system instructions enforce "surgical, targeted edits, not blind rewrite", requiring agents to search and inspect relevant files before modifying.
+- Shared Project Context: `PROJECT.md` in project root with purpose, tech stack, conventions, and status; updated after runs; separated from Company Memory and without secrets.
+- Build repair loop: Automatically runs dev/build checks with up to 3 repair attempts on failure. If the limit is reached, transitions run to `failed` with captured error details (`step`, `tool`, `retryable: false`).
+- Activity & Run Trace integration: Runs are linked to projects via `company_agent_runs.project_id`. The Project page includes an Activity tab with "View Run →" buttons linking directly to `/activity?runId=...`. Activity trace displays a `🌐 Project` pill and "Open Project →" button.
+- Chat UX: Interactive Project card in chat showing title, status badge, framework, build status, assigned agent, and action buttons (`Open Project`, `Preview`, `Changes`, `View Run`).
+- Company enforcement: Creating a website from chat requires an active Company. Prompts user to select or create a company if none is active; never silently creates a company.
+
+## Step 5 files and modules
+
+- Router & intents: `packages/shared/src/project-intent.ts`, `packages/shared/src/hybrid-router.ts`, `packages/shared/src/index.ts`.
+- Workspace stores & types: `packages/workspace/src/types.ts`, `packages/workspace/src/postgres-store.ts`, `packages/workspace/src/in-memory-store.ts`.
+- Orchestrator & resolver: `apps/agent-api/src/project-orchestrator.ts`, `apps/agent-api/src/active-context-resolver.ts`, `apps/agent-api/src/company-runtime.ts`, `apps/agent-api/src/project-preview-routes.ts`, `apps/agent-api/src/app.ts`.
+- Web UI & styles: `apps/web/src/BusinessWorkspace.tsx`, `apps/web/src/ProjectPage.tsx`, `apps/web/src/ActivityPage.tsx`, `apps/web/src/styles.css`.
+- Tests: `tests/project-intent-router.test.ts`.
+
+## Step 5 verification
+
+- `tests/project-intent-router.test.ts`: 14/14 passed, covering EN/UK intent classification, explanation vs creation, active project edit vs unattached edit clarification, future intent rejection, agent selection by role/capabilities, tenant isolation, PROJECT.md creation, build repair loop limits, self-healing recovery, and run trace linking.
+- All 9 project test suites: 100/100 passed (`project-foundation`, `project-files-integration`, `project-workspace`, `project-preview`, `project-terminal-integration`, `project-terminal-policy`, `project-sandbox-egress`, `project-sandbox-provider`, `project-intent-router`).
+- Hybrid router suite: 13/13 passed (`tests/hybrid-router.test.ts`).
+- Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core items validated).
+- Monorepo typecheck: `npm run typecheck` passed with code 0 across all 12 workspaces.
 - Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
