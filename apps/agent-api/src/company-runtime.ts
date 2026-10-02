@@ -229,13 +229,13 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto", projectId: input.projectId }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, signal });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, signal });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?:string;signal?:AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?:string;suppressTools?:boolean;callBudget?:{remaining:number};allowedProjectPaths?:string[];allowedProjectId?:string;signal?:AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
@@ -343,6 +343,7 @@ export class CompanyDelegationRuntime {
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
+      if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
       const planned = await this.ai.a2aSend({
         model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
@@ -420,7 +421,7 @@ export class CompanyDelegationRuntime {
         }
         return {...request,input:SecurityPolicyEngine.protectObject(request.input,guardrailPolicy)};
       });
-      const rawEvidence = await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true,options.approvalId);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true,options.approvalId,options.allowedProjectPaths,options.allowedProjectId);
       const evidence=rawEvidence?protect(rawEvidence):rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
@@ -439,6 +440,7 @@ export class CompanyDelegationRuntime {
         { status: "running", executionMode: execution.mode, selectedAgentIds: ids, omnirouteComboName: execution.model });
       if ((await this.store.getCompanyAgentRun(ctx, companyId, created.run.id)).run.cancelRequested)
         throw new DOMException("Cancelled", "AbortError");
+      if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
         messages: [
@@ -450,6 +452,7 @@ export class CompanyDelegationRuntime {
       totalCost += measured.costUsd;
       totalTokens += measured.totalTokens;
       if (knowledgeContext) {
+        if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         result = await this.ai.chat({
           model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
@@ -590,7 +593,7 @@ export class CompanyDelegationRuntime {
     return { costUsd, totalTokens: usage.totalTokens };
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false, approvalId?:string) {
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: {chunks:Array<{content:string}>;memories:Array<{content:string}>}, noMemory = false, approvalId?:string, allowedProjectPaths?:string[], allowedProjectId?:string) {
     const evidence: string[] = [];
     let sequenceNumber = 1;
     for (const plan of plans.slice(0, 10)) {
@@ -598,6 +601,21 @@ export class CompanyDelegationRuntime {
       const agent = agents.get(plan.agentId);
       if (!agent) throw new CompanyRuntimeError("INVALID_TOOL_AGENT", "Tool request references an unavailable agent", 502);
       const tool = toolName(plan.tool), allowed = new Set(agent.tools.map(toolName));
+      if (allowedProjectId && tool.startsWith("project.") && plan.input.projectId !== allowedProjectId) {
+        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: {}, errorMessage: "Tool targets another project", reasonCode: "project_task_tenant", sequenceNumber: sequenceNumber++ });
+        evidence.push("Project task target denied " + tool);
+        continue;
+      }
+      if (allowedProjectPaths?.length && tool.startsWith("project.")) {
+        const mutation = tool.startsWith("project.files.") && !["project.files.read", "project.files.list", "project.files.search"].includes(tool);
+        const paths = mutation ? (tool === "project.files.delete" && Array.isArray(plan.input.paths) ? plan.input.paths : [plan.input.path, ...(tool === "project.files.move" ? [plan.input.to] : [])]) : [];
+        const inScope = (value: unknown) => typeof value === "string" && allowedProjectPaths.some((scope) => value === scope || value.startsWith(scope + "/"));
+        if ((!tool.startsWith("project.files.") || mutation && !paths.every(inScope))) {
+          await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: { path: plan.input.path }, errorMessage: "Tool is outside the assigned project file scope", reasonCode: "project_task_scope", sequenceNumber: sequenceNumber++ });
+          evidence.push("Project task scope denied " + tool);
+          continue;
+        }
+      }
       if (noMemory && ["knowledge", "files", "storage.company_memory"].includes(tool)) {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
           { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "No-memory request blocks persistent context access", reasonCode: "no_memory", sequenceNumber: sequenceNumber++ });
@@ -732,7 +750,7 @@ export class CompanyDelegationRuntime {
             ? (adapterInput.topic as string).trim()
             : company.name || "company information";
         }
-        if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
+        if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
         if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = !terminalNeedsApproval || Boolean(approvalId || plan.input._approvalToken); }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);

@@ -165,9 +165,9 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
     return buildDecision({
       intent: "IMPROVE_PROJECT",
       confidence: 0.85,
-      isExecutableInStep5: false,
-      needsClarification: false,
-      unsupportedIntentMessage: "Складні рефакторинги будуть автоматизовані з мультиагентними командами.",
+      isExecutableInStep5: true,
+      needsClarification: !input.activeProjectId,
+      clarificationPrompt: !input.activeProjectId ? "Select an active Project to improve." : undefined,
     });
   }
 

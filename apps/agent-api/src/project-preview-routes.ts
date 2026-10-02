@@ -140,7 +140,19 @@ export function registerProjectPreviewRoutes(
       if (!workspaceStore) return reply.code(200).send({ runs: [] });
       try {
         const runs = await workspaceStore.listCompanyAgentRuns(ctx, companyId, 50, { projectId });
-        return reply.code(200).send({ runs });
+        const withTasks = await Promise.all(runs.map(async (run) => {
+          if (run.requestedMode !== "pipeline") return run;
+          const details = await workspaceStore.getCompanyAgentRun(ctx, companyId, run.id);
+          const plan = details.backgroundEvents.find((event) => event.eventKey === "project-plan");
+          const planned = Array.isArray(plan?.details.tasks) ? plan.details.tasks as Array<Record<string, unknown>> : [];
+          const tasks = planned.map((task) => {
+            const latest = [...details.backgroundEvents].reverse().find((event) => event.details.taskId === task.id);
+            return { id: task.id, title: task.title, role: task.role, agentId: task.agentId,
+              dependsOn: task.dependsOn, status: latest?.details.status ?? "queued" };
+          });
+          return { ...run, tasks };
+        }));
+        return reply.code(200).send({ runs: withTasks });
       } catch (error) {
         return reply.code(500).send({ error: { code: "runs_error", message: error instanceof Error ? error.message : "Failed to list runs" } });
       }

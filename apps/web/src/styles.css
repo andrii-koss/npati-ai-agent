@@ -17977,3 +17977,12 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .project-import-zip {
   margin-top: 0.8rem;
 }
+
+.project-task-list { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
+.project-task-team { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; padding-bottom: 0.35rem; }
+.task-team-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted, #667085); text-transform: uppercase; letter-spacing: 0.03em; }
+.task-agent-badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: var(--bg-surface-secondary, rgba(0,0,0,0.04)); border: 1px solid var(--border-color, #d9dde5); border-radius: 9999px; font-weight: 500; }
+.project-task-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.6rem 0.75rem; border: 1px solid var(--border-color, #d9dde5); border-radius: 0.5rem; }
+.project-task-row strong { flex: 1 1 12rem; }
+.project-task-row small { color: var(--text-muted, #667085); }
+.task-depends-on { color: var(--text-muted, #667085); font-size: 0.75rem; margin-left: auto; }
