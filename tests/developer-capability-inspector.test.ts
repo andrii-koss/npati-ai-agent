@@ -11,21 +11,21 @@ describe("Section 15: Developer / Capability Inspector", () => {
     it("returns correct aggregate counts matching the extended 316-item catalog", () => {
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(316);
-      expect(report.counts.agentCallable).toBe(52);
+      expect(report.counts.all).toBe(330);
+      expect(report.counts.agentCallable).toBe(66);
       expect(report.counts.runtimeOnly).toBe(264);
-      expect(report.counts.userVisible).toBe(52);
+      expect(report.counts.userVisible).toBe(66);
       expect(report.counts.automatic).toBeGreaterThan(0);
       expect(report.counts.requiresApproval).toBeGreaterThan(0);
       expect(report.counts.destructive).toBeGreaterThan(0);
       expect(report.counts.missingTest).toBe(0);
       expect(report.counts.missingUi).toBe(264);
-      expect(report.items.length).toBe(316);
+      expect(report.items.length).toBe(330);
     });
 
     it("filters precisely by agent-callable slice (50 tools)", () => {
       const report = inspector.inspect("agent-callable");
-      expect(report.items.length).toBe(52);
+      expect(report.items.length).toBe(66);
       for (const item of report.items) {
         expect(item.agentCallable).toBe(true);
       }
@@ -171,9 +171,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
-      expect(body.counts.all).toBe(316);
-      expect(body.counts.agentCallable).toBe(52);
-      expect(body.items.length).toBe(52);
+      expect(body.counts.all).toBe(330);
+      expect(body.counts.agentCallable).toBe(66);
+      expect(body.items.length).toBe(66);
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();

@@ -193,3 +193,5 @@ export * from "./project-file-capabilities";
 export * from "./project-terminal-capabilities";
 export * from "./project-preview-capabilities";
 export * from "./project-intent";
+
+export * from "./project-git-capabilities";

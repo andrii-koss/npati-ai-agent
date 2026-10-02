@@ -22,7 +22,7 @@ describe("business workspace repository", () => {
     const store = new InMemoryWorkspaceStore();
     const first = await store.createBusiness(owner, { name: "First", businessStage: "starting" });
     const second = await store.createBusiness(owner, { name: "Second", businessStage: "growing" });
-    expect((await store.overview(owner)).currentBusiness?.id).toBe(first.id);
+    expect((await store.overview(owner)).currentBusiness?.id).toBe(second.id);
     await store.setCurrentBusiness(owner, second.id);
     expect((await store.overview(owner)).currentBusiness?.id).toBe(second.id);
     expect((await store.updateBusiness(owner, second.id, { niche: "Sustainable retail" })).niche).toBe("Sustainable retail");

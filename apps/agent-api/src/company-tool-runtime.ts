@@ -11,6 +11,7 @@ import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService, TerminalSecretReference } from "./project-sandbox-service";
 import type { ProjectPreviewService } from "./project-preview-service";
+import type { ProjectGitService } from "./project-git-service";
 
 export interface CompanyToolExecutor {
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
@@ -62,6 +63,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectAgentStore?: Pick<WorkspaceStore, "getCompanyAgent">,
     private readonly projectSandbox?: ProjectSandboxService,
     private readonly projectPreview?: ProjectPreviewService,
+    private readonly projectGit?: ProjectGitService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -131,6 +133,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return tool === "project.terminal.exec" ? this.projectSandbox.execute(context, company.id, request) : this.projectSandbox.process(context, company.id, request);
     }
     if (tool.startsWith("project.preview.")) return this.projectPreviewTool(context, company, tool, input);
+    if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -296,6 +299,72 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.projectPreview.getPreviewStatus(context, company.id, projectId);
     }
     throw new Error(`Unknown project preview tool: ${tool}`);
+  }
+
+
+  private async projectGitTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectGit || !this.projectAgentStore) throw new Error("Project git runtime is not configured");
+    const agentId = typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "";
+    if (agentId) {
+      const agent = await this.projectAgentStore.getCompanyAgent(context, company.id, agentId);
+      if (!agent.isActive || !agent.tools.includes(tool)) throw new Error("Agent lacks Git permission");
+    }
+    const projectId = typeof input.projectId === "string" ? input.projectId : "";
+    switch (tool) {
+      case "project.git.status":
+        return this.projectGit.status(context, company.id, projectId);
+      case "project.git.diff":
+        return this.projectGit.diff(context, company.id, projectId, {
+          file: typeof input.file === "string" ? input.file : undefined,
+          staged: input.staged === true,
+        });
+      case "project.git.log":
+        return this.projectGit.log(context, company.id, projectId, Number(input.limit) || 20);
+      case "project.git.branch":
+        return this.projectGit.branch(context, company.id, projectId, {
+          action: (input.action as any) || "list",
+          branch: typeof input.branch === "string" ? input.branch : undefined,
+        });
+      case "project.git.stage":
+        return this.projectGit.stage(context, company.id, projectId, Array.isArray(input.files) ? (input.files as string[]) : undefined);
+      case "project.git.commit":
+        return this.projectGit.commit(context, company.id, projectId, {
+          message: typeof input.message === "string" ? input.message : "Agent update",
+          files: Array.isArray(input.files) ? (input.files as string[]) : undefined,
+          stageAll: input.stageAll === true,
+        });
+      case "project.git.restore":
+        return this.projectGit.restore(context, company.id, projectId, {
+          files: Array.isArray(input.files) ? (input.files as string[]) : [],
+        });
+      case "project.git.checkpoint":
+        return this.projectGit.createCheckpoint(context, company.id, projectId, {
+          name: typeof input.name === "string" ? input.name : "Checkpoint",
+          description: typeof input.description === "string" ? input.description : undefined,
+          trigger: (input.trigger as any) || "manual",
+        });
+      case "project.git.restore_checkpoint":
+        return this.projectGit.restoreCheckpoint(context, company.id, projectId, String(input.checkpointId ?? ""), {
+          approved: input.__npatiApprovalGranted === true,
+        });
+      case "project.git.push":
+        return this.projectGit.push(context, company.id, projectId, {
+          credentialId: typeof input.credentialId === "string" ? input.credentialId : undefined,
+          branch: typeof input.branch === "string" ? input.branch : undefined,
+          approved: input.__npatiApprovalGranted === true,
+        });
+      case "project.git.pr":
+        return this.projectGit.createPullRequest(context, company.id, projectId, {
+          title: typeof input.title === "string" ? input.title : "Website Update",
+          body: typeof input.body === "string" ? input.body : undefined,
+          base: typeof input.base === "string" ? input.base : undefined,
+          head: typeof input.head === "string" ? input.head : undefined,
+          credentialId: typeof input.credentialId === "string" ? input.credentialId : undefined,
+          approved: input.__npatiApprovalGranted === true,
+        });
+      default:
+        throw new Error(`Unsupported git tool: ${tool}`);
+    }
   }
 
 }

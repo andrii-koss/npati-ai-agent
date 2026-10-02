@@ -43,6 +43,32 @@ export interface Project {
 }
 export interface ProjectInput { name: string; description?: string; type: ProjectType; }
 
+export type CheckpointTrigger = "manual" | "pre_run" | "post_run" | "pre_restore";
+
+export interface ProjectCheckpoint {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  description?: string;
+  commitHash?: string;
+  trigger: CheckpointTrigger;
+  runId?: string;
+  fileCount: number;
+  createdAt: string;
+}
+
+export interface CreateCheckpointInput {
+  name: string;
+  description?: string;
+  commitHash?: string;
+  trigger: CheckpointTrigger;
+  runId?: string;
+  fileCount?: number;
+}
+
 export interface BusinessToCompanyInput {
   companyName?: string;
   includeConfirmedMemory?: boolean;
@@ -214,8 +240,13 @@ export interface WorkspaceStore {
   updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }): Promise<Project>;
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;
   setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null): Promise<Project>;
+  updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project>;
   updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
+  createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint>;
+  listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
+  getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint>;
+  deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;
   listCompanyAgentsPage(context: AuthContext, companyId: string, limit?: number, cursor?: string): Promise<CompanyAgentPage>;
   getCompanyAgent(context: AuthContext, companyId: string, agentId: string): Promise<CompanyAgent>;

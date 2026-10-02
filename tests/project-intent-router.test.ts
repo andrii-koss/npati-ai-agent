@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { rm, mkdtemp } from "node:fs/promises";
+import { rm, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -15,6 +15,7 @@ import { ProjectService } from "../apps/agent-api/src/project-service";
 import { LocalProjectWorkspace } from "../apps/agent-api/src/project-workspace";
 import { ActiveContextResolver } from "../apps/agent-api/src/active-context-resolver";
 import { ProjectOrchestrator } from "../apps/agent-api/src/project-orchestrator";
+import { ProjectGitService } from "../apps/agent-api/src/project-git-service";
 import type { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 import type { ProjectPreviewService } from "../apps/agent-api/src/project-preview-service";
 
@@ -98,7 +99,7 @@ describe("Step 5 - Project Intent Classification", () => {
     expect(t1.executable).toBe(true);
   });
 
-  it("recognizes future intents (Git/Deploy) as non-executable with guidance", () => {
+  it("recognizes Git intents as executable and Deploy as future work", () => {
     const dep = classifyProjectIntent({ prompt: "Deploy website to production" });
     expect(dep.intent).toBe("DEPLOY_PROJECT");
     expect(dep.isProjectIntent).toBe(true);
@@ -108,7 +109,7 @@ describe("Step 5 - Project Intent Classification", () => {
     const git = classifyProjectIntent({ prompt: "Commit changes and push to git repo" });
     expect(["COMMIT_PROJECT", "CONNECT_REPOSITORY"]).toContain(git.intent);
     expect(git.isProjectIntent).toBe(true);
-    expect(git.executable).toBe(false);
+    expect(git.executable).toBe(true);
   });
 
   it("integrates seamlessly into HybridRouter classifyProject", async () => {
@@ -217,6 +218,8 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
   let projectWorkspace: LocalProjectWorkspace;
   let projectService: ProjectService;
   let orchestrator: ProjectOrchestrator;
+  let gitPreviewService: ProjectPreviewService;
+  let gitCompanyRuntime: CompanyDelegationRuntime;
 
   let mockPreviewStartError: string | null = null;
   let previewAttempts = 0;
@@ -287,6 +290,8 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
       },
     } as unknown as CompanyDelegationRuntime;
 
+    gitPreviewService = mockPreviewService;
+    gitCompanyRuntime = mockCompanyRuntime;
     orchestrator = new ProjectOrchestrator(
       store,
       projectService,
@@ -297,6 +302,38 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     );
   });
 
+  it("connects a repository and records a project commit in Activity", async () => {
+    let company = await store.createCompany(authUserA, { name: "Git Company" }, "git-company-key");
+    const agent = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Project Developer", role: "developer",
+      tools: ["project.files.read", "project.files.write", "project.git.commit"],
+      isActive: true,
+    }, "git-agent-key");
+    company = await store.setCompanyMainAgent(authUserA, company.id, agent.id, company.revision);
+    const { project } = await projectService.create(authUserA, company.id, { name: "Git Website", type: "website" }, "git-project-key");
+    const git = new ProjectGitService(store, projectService, workspaceRoot);
+    await git.ensureRepository(authUserA, company.id, project.id);
+    const gitOrchestrator = new ProjectOrchestrator(store, projectService, projectWorkspace, undefined, gitPreviewService, gitCompanyRuntime, git);
+
+    const connected = await gitOrchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id, projectId: project.id,
+      prompt: "Connect repository https://github.com/example/site.",
+      intentDecision: classifyProjectIntent({ prompt: "Connect repository https://github.com/example/site.", activeProjectId: project.id }),
+    });
+    expect(connected.project.repositoryUrl).toBe("https://github.com/example/site.git");
+    expect(connected.runDetails.run.id).toMatch(/^[a-f0-9-]{36}$/);
+    expect(connected.project.status).toBe("ready");
+
+    await writeFile(path.join(workspaceRoot, company.id, project.id, "index.html"), "<h1>Git Website</h1>");
+    const committed = await gitOrchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id, projectId: project.id,
+      prompt: "Commit changes",
+      intentDecision: classifyProjectIntent({ prompt: "Commit changes", activeProjectId: project.id }),
+    });
+    expect(committed.runDetails.run.status).toBe("completed");
+    expect((await store.listProjectRuns(authUserA, company.id, project.id)).some((run) => run.id === committed.runDetails.run.id)).toBe(true);
+    expect((await git.log(authUserA, company.id, project.id))[0]?.message).toBe("Project update");
+  });
   it("selects agent by role and capabilities, NOT by agent.name", async () => {
     const comp = await store.createCompany(authUserA, { name: "Agent Test Co" }, "ag-co-key");
 
@@ -422,8 +459,9 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     // Verify run record has failed status
     const runs = await store.listProjectRuns(authUserA, comp.id, project.id);
     expect(runs.length).toBeGreaterThan(0);
-    expect(runs[0].status).toBe("failed");
-    expect(runs[0].errorMessage).toContain("Build repair limit exceeded after 3 attempts");
+    const failedRun = runs.find((run) => run.status === "failed");
+    expect(failedRun).toBeDefined();
+    expect(failedRun?.errorMessage).toContain("Build repair limit exceeded after 3 attempts");
   });
 
   it("repair loop recovers if build succeeds on second attempt", async () => {

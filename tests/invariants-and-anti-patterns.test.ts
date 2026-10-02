@@ -165,7 +165,7 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
       const agentCallable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
       const runtimeOnly = CAPABILITY_CATALOG.filter((c) => !c.agentCallable);
 
-      expect(agentCallable.length).toBe(52);
+      expect(agentCallable.length).toBe(66);
       expect(runtimeOnly.length).toBe(264);
 
       // Verify safety gating prevents raw internal capabilities from appearing as agent-callable tools

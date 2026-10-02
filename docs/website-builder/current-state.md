@@ -166,3 +166,26 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core items validated).
 - Monorepo typecheck: `npm run typecheck` passed with code 0 across all 12 workspaces.
 - Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
+
+## Step 6 review of Steps 3–5
+
+- Step 3 project file and terminal boundaries, Step 4 preview and workspace diff, and Step 5 project intents and orchestration were checked against their source modules and regression suites. Project data remains scoped through the existing Company and Workspace stores; the Git layer uses the same project lookup.
+- The Step 5 regression suite now treats `COMMIT_PROJECT` and `CONNECT_REPOSITORY` as executable. Deploy, Review, and Improve remain future work.
+- The Project workspace is the local source mirrored into the remote execution sandbox. Git runs against this scoped local workspace; the remote sandbox continues to run terminal and preview processes.
+
+## Implemented in Step 6
+
+- Git service and authenticated project routes provide status, diff, log, branch, stage, commit, file restore, checkpoint create/list/restore. Git hooks are disabled for service commands; staging and commits reject protected paths. Paths and project identity are validated before access.
+- Checkpoints are persisted in `project_checkpoints` via migration 056 and point to Git commits retained by `refs/npati/checkpoints/*`. A restore creates a pre-restore checkpoint first. Pre-run and successful post-run checkpoints are automatic; file and line thresholds are configurable with `NPATI_CHECKPOINT_FILE_THRESHOLD` and `NPATI_CHECKPOINT_LINE_THRESHOLD`.
+- Project page shows checkpoint history, names, descriptions, commit hashes, and Restore. The agent editor has a Git permission group. Git capabilities are registered in the catalog and matrix with risk and confirmation metadata.
+- `COMMIT_PROJECT` creates a real commit and checkpoint. `CONNECT_REPOSITORY` validates and persists a credential-free GitHub HTTPS URL in Project metadata.
+- GitHub push and pull request creation execute only through the Company tool runtime's existing approval flow. Direct HTTP push/PR routes reject requests, including client-supplied `approved` flags and tokens. Agent calls use a Company vault credential UUID whose `token` field is resolved server-side. Remote errors do not return credentials or Git command output.
+- Conflicted Git indexes produce structured `GIT_CONFLICT` errors with affected paths. The service does not choose conflict sides automatically; it immediately escalates to the user, staying below the two-attempt limit.
+
+## Step 6 verification and limits
+
+- Git/checkpoint tests cover commit/diff/file restore, checkpoint restore and pre-restore backup, URL validation, forged HTTP approval, token non-disclosure, tenant isolation, traversal rejection, and conflict preservation.
+- The root `npm run build` command is blocked by a missing repository `OMNIROUTE_VERSION` file during catalog generation; direct API and web workspace builds are used to validate the Step 6 code.
+- No live GitHub push or pull request was performed; that path requires a configured Company vault credential, approved Company run, and external GitHub access. Git runs on the scoped local Project workspace that syncs with the remote sandbox, rather than inside the remote container.
+- Final checks: `npm run typecheck` passed; API and web workspace builds passed; `npm run audit:capabilities` passed for the original 306 inventory entries; Git/checkpoint tests passed (13/13). Full `npm test`: 1754 passed, 2 skipped, 1 failed. The remaining failure is `tests/novascale-exact-regression.test.ts`, where the existing Business Profile chat path says "created" on a repeat request instead of "already exists"; it is outside the Website Builder Step 6 code. No workspace defines a lint script.
+- `COMMIT_PROJECT` and `CONNECT_REPOSITORY` now record completed Company Runs linked to the Project, so Activity can show these actions. Their integrated intent test passed (15/15 in the Step 5/6 intent suite).

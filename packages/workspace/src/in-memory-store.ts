@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -14,6 +14,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly companyAgents = new Map<string, CompanyAgent>();
   private readonly projects = new Map<string, Project>();
   private readonly projectCreateRequests = new Map<string, string>();
+  private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly companyEdges = new Map<string, CompanyAgentEdge>();
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
@@ -367,6 +368,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.projects.set(projectId, next);
     return structuredClone(next);
   }
+  async updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project> {
+    const project = await this.getProject(context, companyId, projectId);
+    if (project.status === "archived") throw new Error("Project is archived");
+    const next = { ...project, repositoryProvider: input.provider, repositoryUrl: input.url, repositoryBranch: input.branch, revision: project.revision + 1, updatedAt: now() };
+    this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
   async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
     const project = await this.getProject(context, companyId, projectId);
     if (project.status === "archived") throw new Error("Project is archived");
@@ -395,7 +403,59 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async deleteProject(context: AuthContext, companyId: string, projectId: string) {
     await this.getProject(context, companyId, projectId);
     for (const [key, id] of this.projectCreateRequests) if (id === projectId) this.projectCreateRequests.delete(key);
+    for (const [id, chk] of this.projectCheckpoints) {
+      if (chk.projectId === projectId && chk.companyId === companyId && chk.workspaceId === context.workspaceId) {
+        this.projectCheckpoints.delete(id);
+      }
+    }
     return this.projects.delete(projectId);
+  }
+
+  async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
+    await this.getProject(context, companyId, projectId);
+    const checkpoint: ProjectCheckpoint = {
+      id: `chk_${randomUUID()}`,
+      workspaceId: context.workspaceId,
+      companyId,
+      projectId,
+      userId: context.userId,
+      name: input.name.trim(),
+      description: input.description,
+      commitHash: input.commitHash,
+      trigger: input.trigger,
+      runId: input.runId,
+      fileCount: input.fileCount ?? 0,
+      createdAt: now(),
+    };
+    this.projectCheckpoints.set(checkpoint.id, checkpoint);
+    return structuredClone(checkpoint);
+  }
+
+  async listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectCheckpoint[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    return structuredClone([...this.projectCheckpoints.values()]
+      .filter((c) => c.workspaceId === context.workspaceId && c.companyId === companyId && c.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, safeLimit));
+  }
+
+  async getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint> {
+    await this.getProject(context, companyId, projectId);
+    const checkpoint = this.projectCheckpoints.get(checkpointId);
+    if (!checkpoint || checkpoint.workspaceId !== context.workspaceId || checkpoint.companyId !== companyId || checkpoint.projectId !== projectId) {
+      throw new WorkspaceNotFoundError("Project checkpoint not found");
+    }
+    return structuredClone(checkpoint);
+  }
+
+  async deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean> {
+    await this.getProject(context, companyId, projectId);
+    const checkpoint = this.projectCheckpoints.get(checkpointId);
+    if (!checkpoint || checkpoint.workspaceId !== context.workspaceId || checkpoint.companyId !== companyId || checkpoint.projectId !== projectId) {
+      return false;
+    }
+    return this.projectCheckpoints.delete(checkpointId);
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {
