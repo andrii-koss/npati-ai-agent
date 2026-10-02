@@ -1,4 +1,5 @@
 import type { ProjectGitService } from "./project-git-service";
+import { ProjectMultiAgentService } from "./project-multi-agent";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -307,8 +308,14 @@ export class ProjectOrchestrator {
     }
 
     let runDetails: CompanyAgentRunDetails;
+    let usedMultiAgent = false;
     try {
-      runDetails = await this.companyRuntime.execute(
+      const multiAgent = new ProjectMultiAgentService(this.workspaceStore, this.companyRuntime, this.previewService);
+      const multiResult = ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
+        ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT")
+        : undefined;
+      usedMultiAgent = Boolean(multiResult);
+      runDetails = multiResult ?? await this.companyRuntime.execute(
         ctx,
         params.companyId,
         {
@@ -338,7 +345,7 @@ export class ProjectOrchestrator {
       || params.intentDecision.intent.startsWith("EDIT_")
       || params.intentDecision.intent === "DEBUG_PROJECT";
 
-    if (needsBuild && runDetails.run.status === "completed") {
+    if (needsBuild && !usedMultiAgent && runDetails.run.status === "completed") {
       await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "building" });
 
       const maxAttempts = 3;
@@ -428,6 +435,7 @@ export class ProjectOrchestrator {
       previewUrl = pStatus.previewUrl || undefined;
     } catch {}
 
+    if (usedMultiAgent && needsBuild && runDetails.run.status === "completed") lastBuildStatus = previewUrl ? "success" : "failed";
     const finalStatus = lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
     project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
       status: finalStatus,
@@ -464,7 +472,7 @@ export class ProjectOrchestrator {
       : `Оновлено проєкт "${project.name}".`);
 
     if (lastBuildStatus === "failed") {
-      responseMessage += `\n\n⚠️ Помилка збірки після 3 спроб автоматичного виправлення: ${buildErrorSummary.slice(0, 300)}`;
+      responseMessage += `\n\n⚠️ Помилка збірки після ${usedMultiAgent ? 2 : 3} спроб автоматичного виправлення: ${buildErrorSummary.slice(0, 300)}`;
     }
 
     return {

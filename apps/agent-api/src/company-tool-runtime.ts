@@ -2,6 +2,9 @@ import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AuthContext, Company, WorkspaceStore } from "@npati/workspace";
 import type { DefaultWebResearchProvider } from "@npati/web-research";
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mergeProjectText } from "./project-task-graph";
+import { ProjectFileLeaseManager, ProjectFileLockError } from "./project-file-lock";
 import path from "node:path";
 import { McpScopeGuard } from "./mcp-scopes";
 import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
@@ -50,6 +53,7 @@ function record(value: unknown) {
 }
 
 export class CompanyToolRuntime implements CompanyToolExecutor {
+  private readonly projectReadVersions = new Map<string, string>();
   constructor(
     private readonly ai: AIEngine,
     private readonly research?: DefaultWebResearchProvider,
@@ -64,6 +68,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectSandbox?: ProjectSandboxService,
     private readonly projectPreview?: ProjectPreviewService,
     private readonly projectGit?: ProjectGitService,
+    private readonly projectFileLeaseManager?: ProjectFileLeaseManager,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -219,21 +224,64 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     const expectedRevision = typeof input.expectedRevision === "string" ? input.expectedRevision : "";
     const content = typeof input.content === "string" ? input.content : "";
     const scope = [context, company.id, projectId] as const;
+    if (this.projectFileLeaseManager && ["project.files.write", "project.files.edit", "project.files.create", "project.files.delete", "project.files.move"].includes(tool)) {
+      const lock = this.projectFileLeaseManager.isLocked(projectId, filePath, agentId);
+      if (lock.locked) {
+        throw new ProjectFileLockError("file_locked", `File ${filePath} is locked by agent ${lock.ownerAgentId}`, 409);
+      }
+    }
     switch (tool) {
       case "project.files.list": return this.projectWorkspace.listFiles(...scope, workspaceId);
       case "project.files.search": return this.projectWorkspace.searchFiles(...scope, String(input.query ?? ""), workspaceId);
-      case "project.files.read": return this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+      case "project.files.read": {
+        const file = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+        const key = JSON.stringify([context.workspaceId, company.id, projectId, agentId, input.__npatiTaskRunId, filePath, file.revision]);
+        this.projectReadVersions.set(key, file.content);
+        if (this.projectReadVersions.size > 500) this.projectReadVersions.delete(this.projectReadVersions.keys().next().value!);
+        return file;
+      }
       case "project.files.create": {
         const result = await this.projectWorkspace.createFile(...scope, filePath, content, workspaceId);
         return { path: result.path, size: result.size, revision: result.revision };
       }
       case "project.files.write": {
-        const result = await this.projectWorkspace.writeFile(...scope, filePath, content, expectedRevision, workspaceId);
-        return { path: result.path, size: result.size, revision: result.revision };
+        let revision = expectedRevision;
+        let proposed = content;
+        const key = JSON.stringify([context.workspaceId, company.id, projectId, agentId, input.__npatiTaskRunId, filePath, expectedRevision]);
+        const suppliedBase = typeof input.baseContent === "string" && createHash("sha256").update(input.baseContent).digest("hex") === expectedRevision ? input.baseContent : undefined;
+        const base = this.projectReadVersions.get(key) ?? suppliedBase;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const result = await this.projectWorkspace.writeFile(...scope, filePath, proposed, revision, workspaceId);
+            return { path: result.path, size: result.size, revision: result.revision };
+          } catch (error) {
+            if ((error as { code?: string }).code !== "revision_conflict") throw error;
+            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+            if (base === undefined) throw new Error("revision_conflict: base content unavailable; escalate to Main Agent");
+            const merged = mergeProjectText(base, current.content, content);
+            if (merged === undefined) throw new Error("revision_conflict: overlapping changes; escalate to Main Agent");
+            proposed = merged;
+            revision = current.revision;
+          }
+        }
+        throw new Error("revision_conflict: merge retry limit reached; escalate to Main Agent");
       }
       case "project.files.edit": {
-        const result = await this.projectWorkspace.editFile(...scope, filePath, String(input.find ?? ""), String(input.replacement ?? ""), expectedRevision, workspaceId);
-        return { path: result.path, size: result.size, revision: result.revision };
+        const find = String(input.find ?? ""), replacement = String(input.replacement ?? "");
+        let revision = expectedRevision;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const result = await this.projectWorkspace.editFile(...scope, filePath, find, replacement, revision, workspaceId);
+            return { path: result.path, size: result.size, revision: result.revision };
+          } catch (error) {
+            if ((error as { code?: string }).code !== "revision_conflict") throw error;
+            const current = await this.projectWorkspace.readFile(...scope, filePath, workspaceId);
+            if (!find || current.content.indexOf(find) < 0 || current.content.indexOf(find) !== current.content.lastIndexOf(find))
+              throw new Error("revision_conflict: edit target changed; escalate to Main Agent");
+            revision = current.revision;
+          }
+        }
+        throw new Error("revision_conflict: edit retry limit reached; escalate to Main Agent");
       }
       case "project.files.move": {
         const result = await this.projectWorkspace.moveFile(...scope, filePath, String(input.to ?? ""), expectedRevision, workspaceId);

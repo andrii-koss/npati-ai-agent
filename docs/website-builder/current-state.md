@@ -1,4 +1,4 @@
-# NPATI Website Builder — Current State
+# NPATI Website Builder â€” Current State
 
 ## Status
 
@@ -18,7 +18,7 @@
 - PostgreSQL migration 054 creates `projects`, a nullable `company_agent_runs.project_id` FK, and a rollback function. Existing Company runs remain valid without a Project.
 - PostgreSQL and in-memory stores implement create, list, get, rename, archive and delete. Project access is scoped to authenticated workspace, Company and owner. Archived projects are hidden by default.
 - `ProjectService` validates input and Company access. Routes under `/companies/:companyId/projects` use existing authentication permissions: `workspace:read` for reads and `business:manage` for mutations. Create supports an idempotency key; rename/archive use `expectedRevision`.
-- Settings → Company includes Project cards, creation dialog and Open/Rename/Archive/Delete actions. Import repository and Upload project display as coming soon.
+- Settings â†’ Company includes Project cards, creation dialog and Open/Rename/Archive/Delete actions. Import repository and Upload project display as coming soon.
 
 ## Implemented in Step 2
 
@@ -37,7 +37,7 @@
 - Capabilities: `packages/shared/src/project-file-capabilities.ts`, `packages/shared/src/capability-catalog.ts`, `packages/shared/src/capability-matrix.ts`.
 - Web: `apps/web/src/ProjectPage.tsx`, `apps/web/src/CompanyPage.tsx`, `apps/web/src/styles.css`.
 - Storage deployment: `docker-compose.scale.yml`.
-- Tests: `tests/project-foundation.test.ts`, `tests/project-workspace.test.ts`, `tests/project-files-integration.test.ts`; capability count assertions in existing registry, Inspector and release regression tests now reflect the expanded catalog while retaining checks for original inventory IDs 1–306.
+- Tests: `tests/project-foundation.test.ts`, `tests/project-workspace.test.ts`, `tests/project-files-integration.test.ts`; capability count assertions in existing registry, Inspector and release regression tests now reflect the expanded catalog while retaining checks for original inventory IDs 1â€“306.
 
 ## Verification
 
@@ -140,13 +140,13 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 ## Implemented in Step 5
 
 - Extended existing `HybridRouter` with 14 canonical project intents: `CREATE_PROJECT`, `CREATE_WEBSITE`, `EDIT_PROJECT`, `EDIT_WEBSITE`, `CONTINUE_PROJECT`, `DEBUG_PROJECT`, `REVIEW_PROJECT`, `IMPROVE_PROJECT`, `TEST_PROJECT`, `BUILD_PROJECT`, `PREVIEW_PROJECT`, `CONNECT_REPOSITORY`, `COMMIT_PROJECT`, `DEPLOY_PROJECT`. Executable in Step 5: `CREATE_*`, `EDIT_*`, `CONTINUE_PROJECT`, `DEBUG_PROJECT`, `BUILD_PROJECT`, `PREVIEW_PROJECT`, `TEST_PROJECT`. Unsupported intents (Git, Deploy, Review, Improve) are recognized with clear explanatory messages indicating their roadmap release phases.
-- Context-aware classification: Pure explanations ("Що таке Next.js?", "What is React?") take precedence and route to `CHAT`. Website creation prompts route to `CREATE_WEBSITE`/`CREATE_PROJECT`. Modification prompts with an active project context route directly to `EDIT_PROJECT`, while prompts without an active project ask for project clarification.
+- Context-aware classification: Pure explanations ("Ð©Ð¾ Ñ‚Ð°ÐºÐµ Next.js?", "What is React?") take precedence and route to `CHAT`. Website creation prompts route to `CREATE_WEBSITE`/`CREATE_PROJECT`. Modification prompts with an active project context route directly to `EDIT_PROJECT`, while prompts without an active project ask for project clarification.
 - Active Project Context in chat: `active_company_id`, `active_project_id`, `active_workspace_id`. Stored in chat state and persisted in session storage. Resolved fail-closed on the server via `ActiveContextResolver`, strictly validating that the project belongs to the user's active company and workspace and is not archived.
 - Project Manager as orchestration layer (`ProjectOrchestrator`): Operates on top of existing `CompanyDelegationRuntime` (single mode). Specialist agents are selected based on role keywords, semantic descriptions, system instructions, and tool capabilities (`project.files.*`, `project.terminal.*`), NEVER checking `agent.name`. Falls back to the Company's Main Agent.
 - Targeted edits mandate: Injected system instructions enforce "surgical, targeted edits, not blind rewrite", requiring agents to search and inspect relevant files before modifying.
 - Shared Project Context: `PROJECT.md` in project root with purpose, tech stack, conventions, and status; updated after runs; separated from Company Memory and without secrets.
 - Build repair loop: Automatically runs dev/build checks with up to 3 repair attempts on failure. If the limit is reached, transitions run to `failed` with captured error details (`step`, `tool`, `retryable: false`).
-- Activity & Run Trace integration: Runs are linked to projects via `company_agent_runs.project_id`. The Project page includes an Activity tab with "View Run →" buttons linking directly to `/activity?runId=...`. Activity trace displays a `🌐 Project` pill and "Open Project →" button.
+- Activity & Run Trace integration: Runs are linked to projects via `company_agent_runs.project_id`. The Project page includes an Activity tab with "View Run â†’" buttons linking directly to `/activity?runId=...`. Activity trace displays a `ðŸŒ� Project` pill and "Open Project â†’" button.
 - Chat UX: Interactive Project card in chat showing title, status badge, framework, build status, assigned agent, and action buttons (`Open Project`, `Preview`, `Changes`, `View Run`).
 - Company enforcement: Creating a website from chat requires an active Company. Prompts user to select or create a company if none is active; never silently creates a company.
 
@@ -167,7 +167,7 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - Monorepo typecheck: `npm run typecheck` passed with code 0 across all 12 workspaces.
 - Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
 
-## Step 6 review of Steps 3�5
+## Step 6 review of Steps 3–5
 
 - Step 3 project file and terminal boundaries, Step 4 preview and workspace diff, and Step 5 project intents and orchestration were checked against their source modules and regression suites. Project data remains scoped through the existing Company and Workspace stores; the Git layer uses the same project lookup.
 - The Step 5 regression suite now treats `COMMIT_PROJECT` and `CONNECT_REPOSITORY` as executable. Deploy, Review, and Improve remain future work.
@@ -203,3 +203,33 @@ Optional limits: `NPATI_SANDBOX_CPU`, `NPATI_SANDBOX_MEMORY`, `NPATI_SANDBOX_DIS
 - `tests/project-import.test.ts` covers ZIP slip and bomb rejection, Vite ZIP and Next.js repository flows, large repository rejection, denied private repository access without token disclosure, failed install, tenant isolation, and sandbox-only clone with environment-based credentials.
 - Live GitHub clone and a real remote sandbox Preview were not available in this workspace, so the end-to-end external acceptance flow still requires manual verification with a configured sandbox runner and reachable GitHub repository.
 - Imports require an empty Project workspace and source files supported by the existing text-only Project workspace. Binary assets, protected secret paths, and files over 1 MiB are rejected. A failed install leaves imported files available for inspection; retry requires a new empty Project.- Final checks for Step 7: focused import tests 9/9 passed; monorepo typecheck passed; API and Web production builds passed. The full suite had 1,764 passed, 2 skipped, and the same pre-existing NovaScale repeat-response failure recorded in Step 6. Root build remains blocked before compilation by the missing `OMNIROUTE_VERSION` file. No workspace lint script is defined.
+
+## Implemented in Step 8
+
+- Multi-agent orchestration for Project development builds on top of the existing Company execution engine (`CompanyDelegationRuntime`, `pipeline` mode, `ProjectMultiAgentService`) without creating a separate engine.
+- Main Agent plans website implementation tasks and decomposes them into a directed acyclic graph (DAG) with explicit `depends_on` relationships and safe file scopes. Enforces that Design precedes implementation, QA follows all implementation tasks, and SEO can run in parallel with frontend development once page structure is defined. Cycles and path traversal are rejected fail-closed.
+- Specialist agents are selected based on role keywords, semantic descriptions, system instructions, guidelines, capabilities (`tools`), model availability, and hierarchy edges (`selectProjectTaskAgent`), never checking `agent.name`. If fewer than two active project specialists exist, execution cleanly falls back to single-agent mode.
+- Parallel execution is restricted strictly to tasks without file scope conflicts (`taskScopesConflict`).
+- Hierarchical file locking and leases are implemented in `ProjectFileLeaseManager`:
+  - Scopes can lock individual files or entire directories with configurable TTL (`NPATI_FILE_LOCK_TTL_MS`, default 30s).
+  - Deadlock prevention via canonical lexicographical sorting of requested paths, plus wait-for graph cycle detection that immediately fails with `deadlock_detected` on circular wait. Contention wait times out with `lock_timeout`.
+  - Immediate lease release when an agent task finishes or crashes, and automatic background eviction of expired leases.
+  - Runtime tool execution in `CompanyToolRuntime` verifies active leases before `create`, `write`, `edit`, `delete`, or `move` operations, blocking conflicting concurrent edits with 409 status.
+- SHA-256 `expectedRevision` optimistic concurrency with automatic 3-way line merge retry loop (up to 3 attempts). On base content unavailability, overlapping line edits, or retry exhaustion, execution cleanly escalates to the Main Agent.
+- Context isolation and peer status visibility: Each specialist agent is passed its specific task, role, peer task statuses (`queued/running/completed/failed/waiting`), allowed file scope, Project Context, dependencies, and outputs of prior tasks. Raw conversation history is isolated (`noMemory: true`).
+- QA loop: `implementation -> build/preview -> QA inspection -> issues -> Developer targeted repair` with a strict limit of 2 iterations, returning a final report with open issues if repairs fail.
+- `IMPROVE_PROJECT`: Designer, Frontend, SEO, QA, and Security specialists analyze the project in parallel with tools suppressed (`suppressTools: true`). The Main Agent then synthesizes their findings into an improvement plan and dependency-ordered tasks without rewriting the entire website.
+- Model call budget: `NPATI_PROJECT_MAX_MODEL_CALLS` (default 40, max 100). Passes `callBudget` to the delegation runtime; when exhausted, terminates execution immediately with `MODEL_CALL_BUDGET_EXCEEDED` and transitions remaining queued tasks to `waiting`.
+- UI:
+  - Activity Page displays the "Project task plan" with statuses, agent IDs, roles, and dependencies (`After: ...`), and "Agent team" badge list.
+  - Project Page Activity tab displays run history with agent team badges, task rows with status pills, and task dependencies.
+- Parent runs persist step delegations to the workspace store via `replaceCompanyAgentRunSteps`, populating first-class delegation steps in `CompanyAgentRunDetails`.
+
+## Step 8 verification and limits
+
+- `tests/project-multi-agent.test.ts`: 16/16 passed, covering parallel execution of independent scopes, serialized conflicting paths, non-hanging execution on agent crash, cycle and path traversal rejection, disjoint 3-way line merging, overlapping edit escalation, hierarchical file lock conflict detection, deadlock prevention and timeout, immediate release on crash, TTL auto-eviction, 2-iteration QA review/repair loop, model call budget limit enforcement, peer task status visibility and context isolation, IMPROVE_PROJECT multi-agent analysis without tool execution, and Company delegation modes regression.
+- Project test suites: 75/75 passed across 7 project test files (`project-foundation`, `project-files-integration`, `project-workspace`, `project-git-checkpoints`, `project-import`, `project-intent-router`, `project-preview`).
+- Capability matrix audit: `npm run audit:capabilities` passed 100% (306/306 core items validated).
+- Monorepo typecheck: `npm run typecheck` passed with code 0 across all 12 workspaces.
+- Production builds: `npm run build --workspace=@npati/agent-api` and `npm run build --workspace=@npati/web` built successfully.
+- Full test suite baseline: unaffected, with existing 2 pre-existing suite failures unchanged.

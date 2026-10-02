@@ -60,6 +60,7 @@ interface ProjectRunItem {
   result?: string;
   errorMessage?: string;
   createdAt: string;
+  tasks?: Array<{ id: string; title: string; role: string; agentId: string; dependsOn: string[]; status: string }>;
 }
 
 function authHeaders() {
@@ -252,6 +253,8 @@ export function ProjectPage() {
       void loadCheckpoints();
     } else if (bottomTab === "activity") {
       void loadProjectRuns();
+      const timer = setInterval(() => { void loadProjectRuns(); }, 3000);
+      return () => clearInterval(timer);
     }
   }, [bottomTab, base]);
 
@@ -1050,6 +1053,26 @@ export function ProjectPage() {
                             </Link>
                           </div>
                           <p className="run-task-text">{r.task}</p>
+                          {r.tasks && r.tasks.length > 0 && (
+                            <div className="project-task-list" aria-label="Project task plan">
+                              <div className="project-task-team">
+                                <span className="task-team-label">{language === "uk" ? "Команда агентів:" : "Agent team:"}</span>
+                                {[...new Set(r.tasks.map((t) => `${t.role} (${t.agentId.slice(0, 8)})`))].map((label, idx) => (
+                                  <span key={idx} className="task-agent-badge">{label}</span>
+                                ))}
+                              </div>
+                              {r.tasks.map((task) => (
+                                <div key={task.id} className="project-task-row">
+                                  <span className={`status-pill status-${task.status}`}>{task.status}</span>
+                                  <strong>{task.title}</strong>
+                                  <span>{task.role} · {task.agentId.slice(0, 8)}</span>
+                                  {task.dependsOn && task.dependsOn.length > 0 && (
+                                    <small className="task-depends-on">After: {task.dependsOn.join(", ")}</small>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {r.result && <p className="run-result-text">✓ {r.result.slice(0, 180)}...</p>}
                           {r.errorMessage && <p className="run-error-text">⚠️ {r.errorMessage}</p>}
                         </article>

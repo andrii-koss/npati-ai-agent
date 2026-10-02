@@ -49,6 +49,7 @@ import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { ProjectPreviewService } from "./project-preview-service";
+import { ProjectFileLeaseManager } from "./project-file-lock";
 import { ProjectOrchestrator } from "./project-orchestrator";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
@@ -829,7 +830,8 @@ export function buildApp(config: AppConfig = {}) {
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
   const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService);
+  const projectFileLeaseManager = new ProjectFileLeaseManager();
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{

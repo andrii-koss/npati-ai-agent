@@ -33,6 +33,7 @@ interface RunStep {
 
 interface BackgroundRunEvent {
   id: string;
+  eventKey?: string;
   eventType: "queued" | "claimed" | "started" | "retry_scheduled" | "completed" | "failed" | "cancelled";
   runStatus: string;
   workerId?: string;
@@ -342,6 +343,10 @@ export function ActivityPage() {
   const activeRunsCount = runs.filter((r) => ["running", "planning", "queued"].includes(r.status)).length;
   const failedRunsCount = runs.filter((r) => r.status === "failed").length;
   const totalSecurityDecisions = activeRunDetails?.toolAudit?.length ?? 0;
+  const taskPlanEvent = activeRunDetails?.backgroundEvents?.find((event) => event.eventKey === "project-plan");
+  const projectTasks = Array.isArray(taskPlanEvent?.details.tasks)
+    ? taskPlanEvent.details.tasks as Array<{ id: string; title: string; role: string; agentId: string; dependsOn: string[] }>
+    : [];
 
   // Filtered runs for sidebar
   const filteredRuns = useMemo(() => {
@@ -857,6 +862,32 @@ export function ActivityPage() {
                   </div>
                 )}
 
+                {projectTasks.length > 0 && (
+                  <div className="trace-section">
+                    <div className="trace-section-header"><h3>Project task plan</h3></div>
+                    <div className="project-task-list">
+                      <div className="project-task-team">
+                        <span className="task-team-label">Agent team:</span>
+                        {[...new Set(projectTasks.map((t) => `${t.role} (${t.agentId?.slice(0, 8)})`))].map((label, idx) => (
+                          <span key={idx} className="task-agent-badge">{label}</span>
+                        ))}
+                      </div>
+                      {projectTasks.map((task) => {
+                        const latest = [...(activeRunDetails.backgroundEvents ?? [])].reverse()
+                          .find((event) => event.details.taskId === task.id);
+                        const status = String(latest?.details.status ?? "queued");
+                        return (
+                          <div key={task.id} className="project-task-row">
+                            <span className={`status-pill status-${status}`}>{status}</span>
+                            <strong>{task.title}</strong>
+                            <span>{task.role} · {task.agentId?.slice(0, 8)}</span>
+                            {task.dependsOn?.length > 0 && <small>After: {task.dependsOn.join(", ")}</small>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className="trace-section">
                   <div className="trace-section-header">
                     <h3>{t("activity.trace.timelineTitle", { count: activeRunDetails.backgroundEvents?.length ?? 0 })}</h3>

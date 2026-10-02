@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AuthContext, Project } from "@npati/workspace";
@@ -233,21 +233,43 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     this.locks.set(key, tail);
     await previous;
     const lockDirectory = path.join(key, ".npati-write-lock");
+    const ownerFile = path.join(lockDirectory, "owner");
+    const owner = randomUUID();
     const started = Date.now();
     let acquired = false;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
     try {
       while (!acquired) {
-        try { await mkdir(lockDirectory); acquired = true; }
-        catch (error) {
+        try {
+          await mkdir(lockDirectory);
+          acquired = true;
+          await writeFile(ownerFile, owner, "utf8");
+        } catch (error) {
+          if (acquired) throw error;
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+          const age = await stat(lockDirectory).then((entry) => Date.now() - entry.mtimeMs, () => 0);
+          if (age > 60_000) {
+            const stale = lockDirectory + ".stale-" + randomUUID();
+            try {
+              await rename(lockDirectory, stale);
+              await rm(stale, { recursive: true, force: true });
+            } catch { /* Another writer may have recovered the lease. */ }
+            continue;
+          }
           if (Date.now() - started > 10_000) throw new ProjectFileError("workspace_busy", "Project workspace is busy", 409);
           await delay(25);
         }
       }
+      heartbeat = setInterval(() => { void utimes(lockDirectory, new Date(), new Date()).catch(() => undefined); }, 5_000);
+      heartbeat.unref();
       return await operation();
     } finally {
       try {
-        if (acquired && path.resolve(lockDirectory).startsWith(path.resolve(key) + path.sep)) await rm(lockDirectory, { recursive: true, force: true });
+        if (heartbeat) clearInterval(heartbeat);
+        if (acquired && path.resolve(lockDirectory).startsWith(path.resolve(key) + path.sep)) {
+          const currentOwner = await readFile(ownerFile, "utf8").catch(() => "");
+          if (currentOwner === owner) await rm(lockDirectory, { recursive: true, force: true });
+        }
       } finally {
         release();
         if (this.locks.get(key) === tail) this.locks.delete(key);
