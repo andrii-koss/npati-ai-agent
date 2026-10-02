@@ -17936,3 +17936,44 @@ body:has(.npati-dialog-backdrop) .sidebar {
   color: var(--text-secondary, #475569);
   line-height: 1.4;
 }
+
+.project-import-panel {
+  margin: 1rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--border-color, #d5d9e3);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+
+.project-import-panel h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.1rem;
+}
+
+.project-import-panel p {
+  margin: 0 0 1rem;
+  color: var(--text-muted, #687181);
+}
+
+.project-import-form,
+.project-import-zip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.project-import-form input,
+.project-import-zip input {
+  min-width: 180px;
+  flex: 1 1 180px;
+  padding: 0.65rem;
+  border: 1px solid var(--border-color, #d5d9e3);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+
+.project-import-zip {
+  margin-top: 0.8rem;
+}

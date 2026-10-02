@@ -123,6 +123,11 @@ export function ProjectPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
 
+  const [importUrl, setImportUrl] = useState("");
+  const [importBranch, setImportBranch] = useState("main");
+  const [importCredentialId, setImportCredentialId] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
   const [projectRuns, setProjectRuns] = useState<ProjectRunItem[]>([]);
   const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
   const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
@@ -249,6 +254,56 @@ export function ProjectPage() {
       void loadProjectRuns();
     }
   }, [bottomTab, base]);
+
+  const finishImport = async () => {
+    await refreshProject();
+    await loadProjectRuns();
+    setImportUrl("");
+    setImportFile(null);
+  };
+
+  const handleRepositoryImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!importUrl.trim() || importing) return;
+    setImporting(true);
+    setError("");
+    try {
+      await apiPost(`${base}/import/repository`, {
+        url: importUrl.trim(),
+        branch: importBranch.trim() || "main",
+        credentialId: importCredentialId.trim() || undefined,
+      });
+      await finishImport();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Repository import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleZipImport = async () => {
+    if (!importFile || importing) return;
+    if (importFile.size > 10 * 1024 * 1024) {
+      setError("ZIP upload must be 10 MB or less");
+      return;
+    }
+    setImporting(true);
+    setError("");
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Could not read ZIP file"));
+        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.readAsDataURL(importFile);
+      });
+      await apiPost(`${base}/import/zip`, { filename: importFile.name, contentBase64 });
+      await finishImport();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "ZIP import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // Preview Start
   const handleStartPreview = async () => {
@@ -468,6 +523,23 @@ export function ProjectPage() {
       ) : !error ? (
         <p>{language === "uk" ? "Завантаження проєкту…" : "Loading project…"}</p>
       ) : null}
+
+      {project && files.length === 0 && (
+        <section className="project-import-panel" aria-label="Import project">
+          <h2>{language === "uk" ? "Імпорт проєкту" : "Import project"}</h2>
+          <p>{language === "uk" ? "Підключіть GitHub репозиторій або завантажте ZIP. NPATI перевірить файли, встановить залежності в sandbox і запустить Preview." : "Connect a GitHub repository or upload a ZIP. NPATI inspects files, installs dependencies in the sandbox, and starts Preview."}</p>
+          <form className="project-import-form" onSubmit={(event) => void handleRepositoryImport(event)}>
+            <input type="url" value={importUrl} onChange={(event) => setImportUrl(event.target.value)} placeholder="https://github.com/owner/repository" aria-label="GitHub repository URL" required />
+            <input type="text" value={importBranch} onChange={(event) => setImportBranch(event.target.value)} placeholder="main" aria-label="Git branch" />
+            <input type="text" value={importCredentialId} onChange={(event) => setImportCredentialId(event.target.value)} placeholder={language === "uk" ? "ID ключа в Company vault (для приватного репозиторію)" : "Company vault credential ID (private repository)"} aria-label="Company vault credential ID" />
+            <button className="button-primary" type="submit" disabled={importing}>{importing ? "Importing…" : language === "uk" ? "Імпортувати GitHub" : "Import GitHub"}</button>
+          </form>
+          <div className="project-import-zip">
+            <input type="file" accept=".zip,application/zip" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} aria-label="Project ZIP file" />
+            <button className="button-secondary" type="button" disabled={!importFile || importing} onClick={() => void handleZipImport()}>{language === "uk" ? "Завантажити ZIP" : "Upload ZIP"}</button>
+          </div>
+        </section>
+      )}
 
       {error && <p className="project-error-banner" role="alert">{error}</p>}
 
