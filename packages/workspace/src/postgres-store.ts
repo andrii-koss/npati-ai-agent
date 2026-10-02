@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -33,6 +33,9 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
   last_build_status AS "lastBuildStatus", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
+  trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
 const companyAgentColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", name, role, description,
   system_instruction AS "systemInstruction", prompt_guidelines AS "promptGuidelines",
   recommended_prompts AS "recommendedPrompts", model_id AS "modelId", fallback_model_id AS "fallbackModelId",
@@ -674,6 +677,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const projectCheckpoints = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='056_project_checkpoints'");
+    if (!projectCheckpoints.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration056 } = await import("./migration-056");
+        await runMigration056(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('056_project_checkpoints')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1061,6 +1076,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     if (!result.rows[0]) throw new Error("Project sandbox changed by another request or is archived");
     return result.rows[0];
   }
+  async updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project> {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<Project>(`UPDATE projects
+      SET repository_provider=$5, repository_url=$6, repository_branch=$7, revision=revision+1, updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4 AND status<>'archived'
+      RETURNING ${projectColumns}`,
+      [projectId, context.workspaceId, companyId, context.userId, input.provider, input.url, input.branch]);
+    if (!result.rows[0]) throw new Error("Project repository update failed or project is archived");
+    return result.rows[0];
+  }
   async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null }) {
     const current = await this.getProject(context, companyId, projectId);
     const status = patch.status ?? current.status;
@@ -1093,6 +1118,44 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const result = await this.pool.query(`DELETE FROM projects
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4`,
       [projectId,context.workspaceId,companyId,context.userId]);
+    return Boolean(result.rowCount);
+  }
+
+  async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
+    await this.getProject(context, companyId, projectId);
+    const id = `chk_${randomUUID()}`;
+    const result = await this.pool.query<ProjectCheckpoint>(`INSERT INTO project_checkpoints
+      (id, workspace_id, company_id, project_id, user_id, name, description, commit_hash, trigger, run_id, file_count)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING ${projectCheckpointColumns}`,
+      [id, context.workspaceId, companyId, projectId, context.userId, input.name.trim(), input.description ?? null, input.commitHash ?? null, input.trigger, input.runId ?? null, input.fileCount ?? 0]);
+    return result.rows[0]!;
+  }
+
+  async listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectCheckpoint[]> {
+    await this.getProject(context, companyId, projectId);
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    const result = await this.pool.query<ProjectCheckpoint>(`SELECT ${projectCheckpointColumns} FROM project_checkpoints
+      WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3
+      ORDER BY created_at DESC, id DESC LIMIT $4`,
+      [context.workspaceId, companyId, projectId, safeLimit]);
+    return result.rows;
+  }
+
+  async getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint> {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query<ProjectCheckpoint>(`SELECT ${projectCheckpointColumns} FROM project_checkpoints
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4`,
+      [checkpointId, context.workspaceId, companyId, projectId]);
+    if (!result.rowCount) throw new WorkspaceNotFoundError("Project checkpoint not found");
+    return result.rows[0]!;
+  }
+
+  async deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean> {
+    await this.getProject(context, companyId, projectId);
+    const result = await this.pool.query(`DELETE FROM project_checkpoints
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND project_id=$4`,
+      [checkpointId, context.workspaceId, companyId, projectId]);
     return Boolean(result.rowCount);
   }
 

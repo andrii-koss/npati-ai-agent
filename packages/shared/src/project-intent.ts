@@ -114,23 +114,27 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
 
   // 2. Connect repository
   if (CONNECT_REPO_REGEX.test(text)) {
+    const hasActiveProject = Boolean(input.activeProjectId);
     return buildDecision({
       intent: "CONNECT_REPOSITORY",
       confidence: 0.9,
-      isExecutableInStep5: false,
-      needsClarification: false,
-      unsupportedIntentMessage: "Підключення репозиторіїв Git/GitHub заплановане у Фазі 2 (Крок 6) та стане доступним незабаром.",
+      isExecutableInStep5: true,
+      needsClarification: !hasActiveProject,
+      clarificationPrompt: !hasActiveProject ? "Оберіть або створіть проєкт перед підключенням Git-репозиторію." : undefined,
+      suggestedAction: "Підключити Git репозиторій до активного проєкту",
     });
   }
 
   // 3. Git commit
   if (COMMIT_REGEX.test(text)) {
+    const hasActiveProject = Boolean(input.activeProjectId);
     return buildDecision({
       intent: "COMMIT_PROJECT",
       confidence: 0.9,
-      isExecutableInStep5: false,
-      needsClarification: false,
-      unsupportedIntentMessage: "Створення комітів та керування версіями заплановане у Фазі 2 (Крок 6).",
+      isExecutableInStep5: true,
+      needsClarification: !hasActiveProject,
+      clarificationPrompt: !hasActiveProject ? "Оберіть або створіть проєкт перед створенням коміту." : undefined,
+      suggestedAction: "Закомітити зміни у поточному проєкті",
     });
   }
 

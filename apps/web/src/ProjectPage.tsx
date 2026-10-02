@@ -7,7 +7,7 @@ import type { Project } from "./ProjectSection";
 type FileEntry = { path: string; name: string; type: "file" | "directory"; size?: number; revision?: string };
 type FileContent = { path: string; content: string; size: number; revision: string };
 type TerminalEvent = { id: string; commandSummary: string; riskLevel: string; status: string; output: string; errorCode?: string; createdAt: string };
-type BottomTab = "changes" | "terminal" | "logs" | "activity";
+type BottomTab = "changes" | "terminal" | "checkpoints" | "logs" | "activity";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 type MobileView = "all" | "files" | "chat" | "preview" | "bottom";
 
@@ -40,6 +40,17 @@ interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
+}
+
+
+interface CheckpointItem {
+  id: string;
+  name: string;
+  description?: string;
+  commitHash?: string;
+  trigger: "manual" | "pre_run" | "post_run" | "pre_restore";
+  fileCount: number;
+  createdAt: string;
 }
 
 interface ProjectRunItem {
@@ -113,6 +124,62 @@ export function ProjectPage() {
   const [chatBusy, setChatBusy] = useState(false);
 
   const [projectRuns, setProjectRuns] = useState<ProjectRunItem[]>([]);
+  const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
+  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
+  const [newCheckpointName, setNewCheckpointName] = useState("");
+  const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState(false);
+  const [restoringCheckpointId, setRestoringCheckpointId] = useState<string | null>(null);
+  const [checkpointFeedback, setCheckpointFeedback] = useState<string | null>(null);
+
+  const loadCheckpoints = async () => {
+    if (!base) return;
+    setLoadingCheckpoints(true);
+    try {
+      const data = await apiGet<{ checkpoints: CheckpointItem[] }>(`${base}/checkpoints`);
+      setCheckpoints(data.checkpoints ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingCheckpoints(false);
+    }
+  };
+
+  const handleCreateCheckpoint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!base || !newCheckpointName.trim()) return;
+    try {
+      await apiPost(`${base}/checkpoints`, { name: newCheckpointName.trim() });
+      setNewCheckpointName("");
+      setIsCreatingCheckpoint(false);
+      setCheckpointFeedback(language === "uk" ? "Точку відновлення успішно створено!" : "Checkpoint created successfully!");
+      setTimeout(() => setCheckpointFeedback(null), 4000);
+      await loadCheckpoints();
+    } catch (err: any) {
+      alert(err.message || "Failed to create checkpoint");
+    }
+  };
+
+  const handleRestoreCheckpoint = async (checkpoint: CheckpointItem) => {
+    if (!base) return;
+    const confirmMessage = language === "uk"
+      ? `Відновити стан проєкту до "${checkpoint.name}"?\n\nБезпека: NPATI автоматично створить резервну точку (авто-бекап) перед відкатом.`
+      : `Restore project to "${checkpoint.name}"?\n\nSafety: NPATI will automatically create a pre-restore backup checkpoint before rolling back.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setRestoringCheckpointId(checkpoint.id);
+    try {
+      await apiPost(`${base}/checkpoints/${checkpoint.id}/restore`, { approved: true });
+      setCheckpointFeedback(language === "uk" ? `Успішно відновлено до "${checkpoint.name}"!` : `Successfully restored to "${checkpoint.name}"!`);
+      setTimeout(() => setCheckpointFeedback(null), 5000);
+      await refreshProject();
+      await loadCheckpoints();
+    } catch (err: any) {
+      alert(err.message || "Failed to restore checkpoint");
+    } finally {
+      setRestoringCheckpointId(null);
+    }
+  };
+
   const [loadingRuns, setLoadingRuns] = useState(false);
 
   const [error, setError] = useState("");
@@ -176,6 +243,8 @@ export function ProjectPage() {
       void refreshTerminalAndLogs();
     } else if (bottomTab === "changes") {
       apiGet<ChangesResult>(`${base}/changes`).then(setChanges).catch(() => {});
+    } else if (bottomTab === "checkpoints") {
+      void loadCheckpoints();
     } else if (bottomTab === "activity") {
       void loadProjectRuns();
     }
@@ -643,6 +712,16 @@ export function ProjectPage() {
               >
                 Terminal
               </button>
+                            <button
+                type="button"
+                role="tab"
+                aria-selected={bottomTab === "checkpoints"}
+                onClick={() => setBottomTab("checkpoints")}
+                className={bottomTab === "checkpoints" ? "active" : ""}
+              >
+                {language === "uk" ? "Версії (Checkpoints)" : "Checkpoints"}
+                {checkpoints.length > 0 && <span className="tab-badge">{checkpoints.length}</span>}
+              </button>
               <button
                 type="button"
                 role="tab"
@@ -755,6 +834,111 @@ export function ProjectPage() {
                         {evt.output && <pre><code>{evt.output}</code></pre>}
                       </article>
                     ))
+                  )}
+                </div>
+              )}
+
+
+              {bottomTab === "checkpoints" && (
+                <div className="checkpoints-tab-pane">
+                  <div className="checkpoints-toolbar">
+                    <div className="checkpoints-toolbar-info">
+                      <p className="checkpoints-hint">
+                        {language === "uk"
+                          ? "Точки відновлення дозволяють безпечно повертатися до будь-якої стабільної версії проєкту."
+                          : "Checkpoints let you roll back project state safely at any point."}
+                      </p>
+                      {checkpointFeedback && <span className="checkpoint-success-msg">{checkpointFeedback}</span>}
+                    </div>
+                    <div className="checkpoints-toolbar-actions">
+                      {!isCreatingCheckpoint ? (
+                        <button
+                          type="button"
+                          className="button-primary create-checkpoint-btn"
+                          onClick={() => setIsCreatingCheckpoint(true)}
+                        >
+                          + {language === "uk" ? "Створити Checkpoint" : "Create Checkpoint"}
+                        </button>
+                      ) : (
+                        <form className="create-checkpoint-inline-form" onSubmit={handleCreateCheckpoint}>
+                          <input
+                            type="text"
+                            placeholder={language === "uk" ? "Назва точки (напр. Перед редизайном)" : "Checkpoint name (e.g. Before redesign)"}
+                            value={newCheckpointName}
+                            onChange={(e) => setNewCheckpointName(e.target.value)}
+                            autoFocus
+                            required
+                          />
+                          <button type="submit" className="button-primary">
+                            {language === "uk" ? "Зберегти" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => {
+                              setIsCreatingCheckpoint(false);
+                              setNewCheckpointName("");
+                            }}
+                          >
+                            {language === "uk" ? "Скасувати" : "Cancel"}
+                          </button>
+                        </form>
+                      )}
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => void loadCheckpoints()}
+                        disabled={loadingCheckpoints}
+                      >
+                        {language === "uk" ? "Оновити" : "Refresh"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {checkpoints.length === 0 ? (
+                    <div className="empty-checkpoints-state">
+                      <p>
+                        {language === "uk"
+                          ? "Точок відновлення ще не створено. Створіть вручну або виконайте команду в чаті."
+                          : "No checkpoints recorded yet. Create one manually or run a task in chat."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="checkpoints-list">
+                      {checkpoints.map((cp) => (
+                        <article key={cp.id} className="checkpoint-card">
+                          <div className="checkpoint-card-header">
+                            <span className={`trigger-badge trigger-${cp.trigger}`}>
+                              {cp.trigger === "manual" && (language === "uk" ? "Вручну" : "Manual")}
+                              {cp.trigger === "pre_run" && (language === "uk" ? "Перед запуском" : "Pre-run")}
+                              {cp.trigger === "post_run" && (language === "uk" ? "Після запуску" : "Post-run")}
+                              {cp.trigger === "pre_restore" && (language === "uk" ? "Авто-бекап" : "Pre-restore")}
+                            </span>
+                            {cp.commitHash && (
+                              <code className="checkpoint-hash" title={`Git Commit: ${cp.commitHash}`}>
+                                {cp.commitHash.slice(0, 7)}
+                              </code>
+                            )}
+                            <span className="checkpoint-files-count">
+                              {cp.fileCount} {language === "uk" ? "файлів" : "files"}
+                            </span>
+                            <span className="checkpoint-time">{new Date(cp.createdAt).toLocaleString()}</span>
+                            <button
+                              type="button"
+                              className="button-secondary restore-checkpoint-btn"
+                              disabled={restoringCheckpointId === cp.id}
+                              onClick={() => void handleRestoreCheckpoint(cp)}
+                            >
+                              {restoringCheckpointId === cp.id
+                                ? (language === "uk" ? "Відновлення..." : "Restoring...")
+                                : (language === "uk" ? "Відновити ↺" : "Restore ↺")}
+                            </button>
+                          </div>
+                          <h4 className="checkpoint-name">{cp.name}</h4>
+                          {cp.description && <p className="checkpoint-description">{cp.description}</p>}
+                        </article>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

@@ -1,3 +1,4 @@
+import type { ProjectGitService } from "./project-git-service";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -21,6 +22,7 @@ export class ProjectOrchestrator {
     private readonly sandboxService: ProjectSandboxService | undefined,
     private readonly previewService: ProjectPreviewService,
     private readonly companyRuntime: CompanyDelegationRuntime,
+    private readonly gitService?: ProjectGitService,
   ) {}
 
   /**
@@ -49,6 +51,7 @@ export class ProjectOrchestrator {
       }
       if (tools.some((t) => t.startsWith("project.terminal."))) score += 5;
       if (tools.some((t) => t.startsWith("project.preview."))) score += 5;
+      if (tools.some((t) => t.startsWith("project.git."))) score += 5;
 
       // Role and instruction semantic relevance (NOT agent.name)
       const roleText = `${agent.role} ${agent.description ?? ""} ${agent.systemInstruction ?? ""}`;
@@ -213,6 +216,96 @@ export class ProjectOrchestrator {
     });
 
     // 4. Execute Run through existing CompanyDelegationRuntime
+
+    // Step 6: Handle COMMIT_PROJECT and CONNECT_REPOSITORY
+    if (params.intentDecision.intent === "COMMIT_PROJECT") {
+      if (!this.gitService) {
+        throw new ProjectOrchestrationError("GIT_NOT_CONFIGURED", "Project Git service is not configured", 500);
+      }
+      const commitMessage = "Project update";
+      const commitRes = await this.gitService.commit(ctx, params.companyId, project.id, {
+        message: commitMessage,
+        stageAll: true,
+      });
+      const checkpoint = await this.gitService.createCheckpoint(ctx, params.companyId, project.id, {
+        name: `Commit: ${commitMessage.slice(0, 35)}`,
+        description: `Commit ${commitRes.commitHash.slice(0, 7)}: ${commitMessage}`,
+        trigger: "manual",
+      });
+      const responseMessage = `✅ Зміни успішно збережено в Git коміт: \`${commitRes.commitHash.slice(0, 7)}\`\nТочка відновлення створена: "${checkpoint.name}"`;
+      project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: project.previewUrl ? "previewing" : "ready" });
+      const { run: loggedRun } = await this.workspaceStore.createCompanyAgentRun(ctx, params.companyId, { task: "Commit project changes", requestedMode: "single", projectId: project.id }, `${idempotencyKey}-git-commit`);
+      const completedRun = await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, loggedRun.id, { status: "completed", executionMode: "single", selectedAgentIds: [selectedAgent.id], result: responseMessage });
+      return {
+        project,
+        runDetails: { run: completedRun, steps: [], toolAudit: [], backgroundEvents: [] },
+        responseMessage,
+        projectCard: {
+          id: project.id,
+          projectId: project.id,
+          name: project.name,
+          status: project.status,
+          companyId: project.companyId,
+          framework: project.framework,
+          previewUrl: project.previewUrl,
+          lastBuildStatus: project.lastBuildStatus,
+        },
+        projectAction: {
+          action: "edit",
+          projectId: project.id,
+          projectName: project.name,
+          companyId: project.companyId,
+        },
+      };
+    }
+
+    if (params.intentDecision.intent === "CONNECT_REPOSITORY") {
+      const match = params.prompt.match(/https?:\/\/[^\s]+/);
+      const repoUrl = match ? match[0].replace(/[.,!?;:]+$/, "") : undefined;
+      if (repoUrl) {
+        if (!this.gitService) throw new ProjectOrchestrationError("GIT_NOT_CONFIGURED", "Project Git service is not configured", 500);
+        project = await this.gitService.connectRepository(ctx, params.companyId, project.id, { url: repoUrl });
+      }
+      const responseMessage = repoUrl
+        ? `✅ Репозиторій \`${repoUrl}\` успішно зареєстровано для проєкту "${project.name}".`
+        : `ℹ️ Для підключення зовнішнього репозиторію вкажіть його URL, наприклад: "Підключи репозиторій https://github.com/owner/repo"`;
+      project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: project.previewUrl ? "previewing" : "ready" });
+      const { run: loggedRun } = await this.workspaceStore.createCompanyAgentRun(ctx, params.companyId, { task: "Connect project repository", requestedMode: "single", projectId: project.id }, `${idempotencyKey}-git-connect`);
+      const completedRun = await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, loggedRun.id, { status: "completed", executionMode: "single", selectedAgentIds: [selectedAgent.id], result: responseMessage });
+      return {
+        project,
+        runDetails: { run: completedRun, steps: [], toolAudit: [], backgroundEvents: [] },
+        responseMessage,
+        projectCard: {
+          id: project.id,
+          projectId: project.id,
+          name: project.name,
+          status: project.status,
+          companyId: project.companyId,
+          framework: project.framework,
+          previewUrl: project.previewUrl,
+          lastBuildStatus: project.lastBuildStatus,
+        },
+        projectAction: {
+          action: "edit",
+          projectId: project.id,
+          projectName: project.name,
+          companyId: project.companyId,
+        },
+      };
+    }
+
+    // Pre-run automatic checkpoint if project has existing files
+    if (this.gitService && !isCreate) {
+      try {
+        const change = await this.gitService.isLargeChange(ctx, params.companyId, project.id);
+        await this.gitService.createCheckpoint(ctx, params.companyId, project.id, {
+          name: change.isLarge ? "Before large change" : "Before run",
+          trigger: "pre_run",
+        });
+      } catch {}
+    }
+
     let runDetails: CompanyAgentRunDetails;
     try {
       runDetails = await this.companyRuntime.execute(
@@ -314,6 +407,18 @@ export class ProjectOrchestrator {
           });
         }
       }
+    }
+
+
+    // Post-run automatic checkpoint on successful run
+    if (this.gitService && runDetails.run.status === "completed" && (!needsBuild || lastBuildStatus === "success")) {
+      try {
+        await this.gitService.createCheckpoint(ctx, params.companyId, project.id, {
+          name: "Run completed",
+          trigger: "post_run",
+          runId: runDetails.run.id,
+        });
+      } catch {}
     }
 
     // 6. Update Project Status & Preview URL

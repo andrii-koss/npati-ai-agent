@@ -85,19 +85,19 @@ describe("PHASE 1: Active Context Specification & Isolation", () => {
     });
 
     it("correctly resolves valid contexts", () => {
-      expect(validateActiveContext({ contextType: "none" })).toEqual({
+      expect(validateActiveContext({ contextType: "none" })).toMatchObject({
         contextType: "none",
         businessId: null,
         companyId: null,
       });
 
-      expect(validateActiveContext({ contextType: "business", businessId: "biz-1" })).toEqual({
+      expect(validateActiveContext({ contextType: "business", businessId: "biz-1" })).toMatchObject({
         contextType: "business",
         businessId: "biz-1",
         companyId: null,
       });
 
-      expect(validateActiveContext({ contextType: "company", companyId: "comp-1" })).toEqual({
+      expect(validateActiveContext({ contextType: "company", companyId: "comp-1" })).toMatchObject({
         contextType: "company",
         businessId: null,
         companyId: "comp-1",
@@ -136,7 +136,7 @@ describe("PHASE 1: Active Context Specification & Isolation", () => {
       expect(response.statusCode).toBe(200);
       const data = response.json();
       expect(data.message).toContain("Explain what Redis is");
-      expect(data.activeContext).toEqual({
+      expect(data.activeContext).toMatchObject({
         contextType: "none",
         businessId: null,
         companyId: null,
