@@ -9,6 +9,7 @@ export type Project = {
   type: "website" | "web_app" | "landing_page"; status: string;
   framework?: string; repositoryBranch?: string; sandboxId?: string;
   previewUrl?: string; previewPort?: number; lastBuildStatus?: string;
+  deploymentStatus?: string; deploymentUrl?: string; lastDeployedAt?: string;
   revision: number; updatedAt: string;
 };
 

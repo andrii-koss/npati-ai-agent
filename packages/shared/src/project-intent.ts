@@ -69,7 +69,7 @@ const CONNECT_REPO_REGEX = /(?:підключи(?:ти)? (?:репозиторі
 
 const COMMIT_REGEX = /(?:зроби коміт|закоміть|git commit|commit changes)/i;
 
-const DEPLOY_REGEX = /(?:задеплой(?:ти)?|опублікуй сайт|виклади на хостинг|deploy (?:the )?(?:site|website|project)|publish site)/i;
+const DEPLOY_REGEX = /(?:задеплой(?:ти)?|опублікуй(?: сайт)?|виклади на хостинг|deploy (?:(?:the |this |a )?(?:site|website|project|app)|to )|publish (?:the |this |a )?(?:site|website|project)|deploy)/i;
 
 function extractEntityName(message: string): string | undefined {
   const match = message.match(/(?:for|для|назва|called|named|під назвою)\s+["'«]?([^"'»\n.,!?]+)["'»]?/i);
@@ -140,12 +140,14 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
 
   // 4. Deploy
   if (DEPLOY_REGEX.test(text)) {
+    const hasActiveProject = Boolean(input.activeProjectId);
     return buildDecision({
       intent: "DEPLOY_PROJECT",
       confidence: 0.9,
-      isExecutableInStep5: false,
-      needsClarification: false,
-      unsupportedIntentMessage: "Деплой на хостинг/сервер запланований у Фазі 3 (Крок 10).",
+      isExecutableInStep5: hasActiveProject,
+      needsClarification: !hasActiveProject,
+      clarificationPrompt: !hasActiveProject ? "Оберіть або створіть проєкт перед тим як виконати деплой сайту." : undefined,
+      suggestedAction: "project.deploy.publish",
     });
   }
 

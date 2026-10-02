@@ -48,6 +48,8 @@ import { ProjectGitService } from "./project-git-service";
 import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
+import { ProjectDeployService } from "./project-deploy-service";
+import { registerProjectDeployRoutes } from "./project-deploy-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
 import { ProjectOrchestrator } from "./project-orchestrator";
@@ -831,7 +833,15 @@ export function buildApp(config: AppConfig = {}) {
   const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
   const projectFileLeaseManager = new ProjectFileLeaseManager();
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager);
+  const projectDeployService = new ProjectDeployService(
+    workspaceStore,
+    projectService,
+    projectGitService,
+    browserCredentials ? async (ctx, companyId, credentialId) => {
+      return browserCredentials.resolve(ctx, companyId, credentialId);
+    } : undefined
+  );
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -857,6 +867,7 @@ export function buildApp(config: AppConfig = {}) {
     projectPreviewService,
     companyRuntime,
     projectGitService,
+    projectDeployService,
   );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {
@@ -2423,6 +2434,7 @@ ${localized.next}`;
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
+  registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {
