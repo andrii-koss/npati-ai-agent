@@ -1287,6 +1287,9 @@ export function CompanyPage() {
               }, {
                 label: language === "uk" ? "����� ������" : "Project Write",
                 ids: ["project.files.create", "project.files.write", "project.files.edit", "project.files.move", "project.files.delete"],
+              }, {
+                label: "Terminal",
+                ids: ["project.terminal.exec", "project.terminal.process"],
               }]).map((permission) => <label className="company-tool" key={permission.label}>
                 <input type="checkbox" checked={permission.ids.every((id) => agentForm.tools.includes(id))} onChange={(event) => setAgentForm({
                   ...agentForm,

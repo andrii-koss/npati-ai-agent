@@ -1,3 +1,4 @@
+import { classifyTerminalCommand } from "./terminal-command-policy";
 import { createHash } from "node:crypto";
 import type { AIEngine, ChatResult } from "@npati/omniroute-adapter";
 import type { AuthContext, Business, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, Goal, MemoryItem, WorkspaceStore } from "@npati/workspace";
@@ -337,7 +338,7 @@ export class CompanyDelegationRuntime {
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
-      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => toolName(tool).startsWith("project.files.")))
+      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => (toolName(tool).startsWith("project.files.") || toolName(tool).startsWith("project.terminal."))))
         ? (await this.store.listProjects(ctx, companyId)).slice(0, 50).map((project) => ({ id: project.id, name: project.name, type: project.type })) : [];
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx,companyId,input.task,options.memoryScope).catch(()=>({chunks:[],memories:[]})) : {chunks:[],memories:[]};
       const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
@@ -349,7 +350,7 @@ export class CompanyDelegationRuntime {
           { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
           { role: "user", content: protect([
             `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
-            projectChoices.length ? `Projects available to file tools: ${json(projectChoices, 10_000)}` : "",
+            projectChoices.length ? `Projects available to Project Files and Terminal tools: ${json(projectChoices, 10_000)}` : "",
             "Choose active agents only from this JSON:", json(candidates.map((agent) => ({
               id: agent.id, name: agent.name, role: agent.role, description: agent.description,
               tools: agent.tools.map(toolName).filter((tool) => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)),
@@ -363,6 +364,7 @@ export class CompanyDelegationRuntime {
             "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
             'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
             'project.files.list/search/read/create/write/edit/move/delete: input must include projectId (an actual Project ID in this Company). Path is workspace-relative. read/create/write/edit/move/delete need path (delete may use paths); search needs query; create/write need content; write/edit/move need expectedRevision returned by read/create; edit needs find and replacement; move needs to. Never request protected secret files. Delete always requires approval.',
+            'project.terminal.exec: {"projectId":"authorized Project ID","command":"sandbox command","environmentReferences":{"NAME":{"id":"Company vault credential UUID","field":"field name"}}}. project.terminal.process: {"projectId":"authorized Project ID","action":"start|status|logs|stop","command":"for start","processId":"for status/logs/stop"}. Commands run only in the remote Project sandbox. Use short, specific commands; unknown, destructive or shell-composed commands require approval. Never include secret values in commands or prompts; use vault references.',
             'mcp: {"name":"permitted MCP tool name","arguments":{}}. Never invent tool names, URLs or file keys.',
             'browser.browser_tab_control: {"operation":"navigate","url":"absolute public https URL","profileId":"optional stable profile"}, {"operation":"extract","url":"optional URL","selector":"CSS selector","mode":"text|attribute","attribute":"when needed"}, {"operation":"pause","jobId":"running browser job id","profileId":"same profile"}, or {"operation":"resume","jobId":"paused/waiting browser job id","profileId":"same profile","resumeInput":{"task":"continuation and verification code/link if available"}}.',
             'browser.browser_clicktype for forms: {"operation":"fill_form","url":"optional URL","profileId":"profile","fields":[{"selector":"CSS selector","value":"non-secret value"},{"selector":"CSS selector","secretRef":"credentialAlias.field"}],"credentialRefs":[{"id":"vault credential id","alias":"credentialAlias"}],"submitSelector":"optional CSS selector"}. Never put passwords, tokens, OTPs or other secret values directly in tool input.',
@@ -596,12 +598,12 @@ export class CompanyDelegationRuntime {
       const tool = toolName(plan.tool), allowed = new Set(agent.tools.map(toolName));
       if (noMemory && ["knowledge", "files", "storage.company_memory"].includes(tool)) {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "No-memory request blocks persistent context access", reasonCode: "no_memory", sequenceNumber: sequenceNumber++ });
+          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "No-memory request blocks persistent context access", reasonCode: "no_memory", sequenceNumber: sequenceNumber++ });
         throw new CompanyRuntimeError("NO_MEMORY_TOOL_FORBIDDEN", `No-memory request may not use ${tool}`, 403);
       }
       if (!allowed.has(tool)) {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "Tool is not permitted", reasonCode: "agent_allowlist", sequenceNumber: sequenceNumber++ });
+          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "Tool is not permitted", reasonCode: "agent_allowlist", sequenceNumber: sequenceNumber++ });
         throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}`, 403);
       }
       if (tool !== "knowledge" && tool !== "exec") {
@@ -613,13 +615,13 @@ export class CompanyDelegationRuntime {
         }, tool);
         if (!check.allowed) {
           await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: check.reason, reasonCode: check.detail?.reasonCode ?? "policy_denied", sequenceNumber: sequenceNumber++ });
+            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: check.reason, reasonCode: check.detail?.reasonCode ?? "policy_denied", sequenceNumber: sequenceNumber++ });
           throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}: ${check.reason}`, 403);
         }
       }
       if (tool === "exec" && !ctx.permissions.some((permission) => ["business:manage", "owner", "*"].includes(permission))) {
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: "Exec requires business:manage permission", reasonCode: "tenant_permissions", sequenceNumber: sequenceNumber++ });
+          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "Exec requires business:manage permission", reasonCode: "tenant_permissions", sequenceNumber: sequenceNumber++ });
         throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Exec requires business:manage permission", 403);
       }
       if (tool === "exec") {
@@ -627,7 +629,7 @@ export class CompanyDelegationRuntime {
         const review = AutoExecReviewer.reviewExecution({ type: "javascript", payload: code });
         if (review.decision === "BLOCKED") {
           await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(plan.input), errorMessage: review.reasons.join("; "), reasonCode: "auto_exec_reviewer", sequenceNumber: sequenceNumber++ });
+            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: review.reasons.join("; "), reasonCode: "auto_exec_reviewer", sequenceNumber: sequenceNumber++ });
           throw new CompanyRuntimeError("EXEC_REVIEW_BLOCKED", "Exec was blocked by the automatic security reviewer", 403);
         }
       }
@@ -636,11 +638,14 @@ export class CompanyDelegationRuntime {
       const operation=typeof plan.input.operation==="string"?plan.input.operation.trim().toLowerCase():"";
       const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
       const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
-      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : undefined;
+      const terminalDecision = tool.startsWith("project.terminal.") && (tool === "project.terminal.exec" || plan.input.action === "start") ? classifyTerminalCommand(String(plan.input.command ?? "")) : undefined;
+      const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || (tool.startsWith("project.terminal.") && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length));
+      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? terminalNeedsApproval ? "high" : "low" : undefined;
+      const approvalPayload = tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(String(plan.input.command ?? "")).digest("hex"), action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
       if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if(this.durableApprovals){
           if(!approvalId){
-            const cleanPayload={...plan.input};delete cleanPayload._approvalToken;
+            const cleanPayload={...approvalPayload};delete cleanPayload._approvalToken;
             const req=await this.durableApprovals.requestApproval(ctx,company.id,{
               runId,agentId:agent.id,toolName:toolToAssess,
               riskLevel:projectFileRisk === "high" ? "high" : this.riskApprovalService.classifyRisk(toolToAssess)==="critical"?"critical":"high",
@@ -650,7 +655,7 @@ export class CompanyDelegationRuntime {
               inputSummary:summary(cleanPayload),errorMessage:`Human approval required. Approval request ID: ${req.id}`,reasonCode:"approval_required",sequenceNumber:sequenceNumber++});
             throw new CompanyRuntimeError("APPROVAL_REQUIRED",`Tool "${toolToAssess}" requires human approval. Approval request ID: ${req.id}`,403);
           }
-          const cleanPayload={...plan.input};delete cleanPayload._approvalToken;
+          const cleanPayload={...approvalPayload};delete cleanPayload._approvalToken;
           try{await this.durableApprovals.consumeApproved(ctx,company.id,approvalId,{runId,agentId:agent.id,toolName:toolToAssess,inputPayload:cleanPayload});}
           catch(error){
             const code=(error as any)?.code??"APPROVAL_INVALID";
@@ -661,13 +666,13 @@ export class CompanyDelegationRuntime {
         } else {
         const token = typeof plan.input._approvalToken === "string" ? plan.input._approvalToken : undefined;
         if (!token) {
-          const req = this.riskApprovalService.createApprovalRequest(ctx, company.id, runId, agent.id, toolToAssess, plan.input);
+          const req = this.riskApprovalService.createApprovalRequest(ctx, company.id, runId, agent.id, toolToAssess, approvalPayload);
           await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
             agentId: agent.id,
             toolName: toolToAssess,
             decision: "denied",
             status: "blocked",
-            inputSummary: summary(plan.input),
+            inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
             errorMessage: `Human approval required for high-risk operation '${toolToAssess}'. Approval request ID: ${req.id}`,
             reasonCode: "approval_required",
             sequenceNumber: sequenceNumber++,
@@ -675,14 +680,14 @@ export class CompanyDelegationRuntime {
           throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval before execution. Approval request ID: ${req.id}`, 403);
         }
 
-        const verification = this.riskApprovalService.verifyApprovalToken(token, ctx, company.id, runId, toolToAssess, plan.input);
+        const verification = this.riskApprovalService.verifyApprovalToken(token, ctx, company.id, runId, toolToAssess, approvalPayload);
         if (!verification.valid) {
           await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
             agentId: agent.id,
             toolName: toolToAssess,
             decision: "denied",
             status: "blocked",
-            inputSummary: summary(plan.input),
+            inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
             errorMessage: verification.reason ?? "Invalid approval token",
             reasonCode: verification.reasonCode ?? "invalid_approval_token",
             sequenceNumber: sequenceNumber++,
@@ -697,7 +702,7 @@ export class CompanyDelegationRuntime {
             toolName: toolToAssess,
             decision: "denied",
             status: "blocked",
-            inputSummary: summary(plan.input),
+            inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
             errorMessage: "Approval token has already been consumed (replay attempt blocked)",
             reasonCode: "already_consumed",
             sequenceNumber: sequenceNumber++,
@@ -708,7 +713,7 @@ export class CompanyDelegationRuntime {
       }
 
       await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-        { agentId: agent.id, toolName: tool, decision: "allowed", status: "requested", inputSummary: summary(plan.input), sequenceNumber: sequenceNumber++ });
+        { agentId: agent.id, toolName: tool, decision: "allowed", status: "requested", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), sequenceNumber: sequenceNumber++ });
       const toolStart = performance.now();
       try {
         const cleanPayload = { ...plan.input };
@@ -726,11 +731,12 @@ export class CompanyDelegationRuntime {
             : company.name || "company information";
         }
         if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
+        if (tool.startsWith("project.terminal.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = !terminalNeedsApproval || Boolean(approvalId || plan.input._approvalToken); }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "allowed", status: "succeeded", inputSummary: summary(plan.input), latencyMs, sequenceNumber: sequenceNumber++ });
+          { agentId: agent.id, toolName: tool, decision: "allowed", status: "succeeded", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), latencyMs, sequenceNumber: sequenceNumber++ });
         if (result && typeof result === "object" && (result as any)._npatiBrowserTrace === true && Array.isArray((result as any).trace)) {
           for (const event of (result as any).trace.slice(0, 200)) {
             const eventStatus = event?.status === "failed" ? "failed" : "succeeded";
@@ -759,7 +765,7 @@ export class CompanyDelegationRuntime {
         if (signal.aborted) throw error;
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool,
-          decision: "allowed", status: "failed", inputSummary: summary(plan.input), latencyMs, sequenceNumber: sequenceNumber++,
+          decision: "allowed", status: "failed", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), latencyMs, sequenceNumber: sequenceNumber++,
           errorMessage: (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI").slice(0, 500) });
         if (tool.startsWith("browser.")) await this.telemetry?.log(ctx, company.id, {
           action: "browser.failed", category: "automation", resourceType: "company_agent_run", resourceId: runId,

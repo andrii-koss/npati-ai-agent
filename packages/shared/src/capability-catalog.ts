@@ -7243,3 +7243,6 @@ export const CAPABILITY_CATALOG: CapabilityDefinition[] = [
 
 import { PROJECT_FILE_CAPABILITIES } from "./project-file-capabilities";
 CAPABILITY_CATALOG.push(...PROJECT_FILE_CAPABILITIES);
+
+import { PROJECT_TERMINAL_CAPABILITIES } from "./project-terminal-capabilities";
+CAPABILITY_CATALOG.push(...PROJECT_TERMINAL_CAPABILITIES);

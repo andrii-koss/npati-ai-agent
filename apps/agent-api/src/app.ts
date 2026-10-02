@@ -39,6 +39,10 @@ import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
+import { RemoteSandboxProvider } from "./sandbox-provider";
+import { ProjectSandboxService } from "./project-sandbox-service";
+import { ProjectTerminalEventsRepository } from "./project-terminal-events";
+import { registerProjectTerminalRoutes } from "./project-terminal-routes";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -799,9 +803,23 @@ export function buildApp(config: AppConfig = {}) {
     ? new BrowserUseClient(config.browserUseWorkerUrl, config.browserUseInternalToken, browserCredentials, undefined, chatFiles)
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
-  const projectService = new ProjectService(workspaceStore);
+  let projectSandbox: ProjectSandboxService | undefined;
+  const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore);
+  const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
+  const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
+  const sandboxRunnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
+  if (sandboxRunnerUrl && sandboxRunnerSecret) projectSandbox = new ProjectSandboxService(projectService, workspaceStore, projectWorkspace, new RemoteSandboxProvider(sandboxRunnerUrl, sandboxRunnerSecret), projectTerminalEvents, browserCredentials, {
+    commandTimeoutMs: Number(process.env.NPATI_TERMINAL_TIMEOUT_MS) || undefined,
+    installBuildTimeoutMs: Number(process.env.NPATI_TERMINAL_BUILD_TIMEOUT_MS) || undefined,
+    outputLimitBytes: Number(process.env.NPATI_TERMINAL_OUTPUT_LIMIT_BYTES) || undefined,
+    inactivityMs: Number(process.env.NPATI_SANDBOX_IDLE_MS) || undefined,
+    syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
+    syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
+  });
+  const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
+  sandboxIdleTimer?.unref();
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -2380,6 +2398,7 @@ ${localized.next}`;
   });
   registerProjectRoutes(app, projectService, authProvider);
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
+  registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {
@@ -2487,7 +2506,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();

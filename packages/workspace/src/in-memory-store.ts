@@ -360,6 +360,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
+  async setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null) {
+    const project = await this.getProject(context, companyId, projectId);
+    if ((project.sandboxId ?? null) !== expectedSandboxId || project.status === "archived") throw new Error("Project sandbox changed by another request or is archived");
+    const next: Project = { ...project, sandboxId: sandboxId ?? undefined, revision: project.revision + 1, updatedAt: now() };
+    this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
   async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
     const project = await this.getProject(context, companyId, projectId);
     if (project.revision !== expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");

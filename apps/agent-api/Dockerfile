@@ -21,3 +21,9 @@ RUN mkdir -p /app/data && chown node:node /app/data
 EXPOSE 3001
 USER node
 CMD ["node", "dist/server.js"]
+
+FROM runtime AS sandbox-runner
+USER root
+RUN apk add --no-cache docker-cli
+EXPOSE 7865
+CMD ["node", "dist/sandbox-runner-server.js"]

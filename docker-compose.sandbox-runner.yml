@@ -1,0 +1,21 @@
+services:
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: apps/agent-api/Dockerfile
+      target: sandbox-runner
+    restart: unless-stopped
+    environment:
+      NPATI_SANDBOX_RUNNER_ISOLATED_HOST: "true"
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
+      NPATI_SANDBOX_IMAGE: npati/project-sandbox:local
+      NPATI_SANDBOX_EGRESS_IMAGE: npati/sandbox-egress:local
+      NPATI_SANDBOX_SYNC_MAX_FILES: ${NPATI_SANDBOX_SYNC_MAX_FILES:-500}
+      NPATI_SANDBOX_SYNC_MAX_BYTES: ${NPATI_SANDBOX_SYNC_MAX_BYTES:-20000000}
+    ports:
+      - "127.0.0.1:7865:7865"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m

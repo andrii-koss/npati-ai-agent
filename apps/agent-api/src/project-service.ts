@@ -3,7 +3,7 @@ import type { AuthContext, ProjectInput, WorkspaceStore } from "@npati/workspace
 const projectTypes = new Set(["website", "web_app", "landing_page"]);
 
 export class ProjectService {
-  constructor(private readonly store: WorkspaceStore) {}
+  constructor(private readonly store: WorkspaceStore, private readonly beforeRemove?: (context: AuthContext, project: Awaited<ReturnType<WorkspaceStore["getProject"]>>) => Promise<void>) {}
 
   private async company(context: AuthContext, companyId: string) {
     return this.store.getCompany(context, companyId);
@@ -41,13 +41,18 @@ export class ProjectService {
   }
 
   async archive(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
-    await this.get(context, companyId, projectId);
+    const project = await this.get(context, companyId, projectId);
     if (!Number.isInteger(expectedRevision) || expectedRevision < 1) throw new Error("Invalid expectedRevision");
-    return this.store.archiveProject(context, companyId, projectId, expectedRevision);
+    if (project.revision !== expectedRevision) throw new Error("Project changed by another request");
+    if (this.beforeRemove) await this.beforeRemove(context, project);
+    const current = this.beforeRemove ? await this.get(context, companyId, projectId) : project;
+    if (current.revision !== expectedRevision + (project.sandboxId ? 1 : 0)) throw new Error("Project changed by another request");
+    return this.store.archiveProject(context, companyId, projectId, current.revision);
   }
 
   async delete(context: AuthContext, companyId: string, projectId: string) {
-    await this.get(context, companyId, projectId);
+    const project = await this.get(context, companyId, projectId);
+    if (this.beforeRemove) await this.beforeRemove(context, project);
     return this.store.deleteProject(context, companyId, projectId);
   }
 }
