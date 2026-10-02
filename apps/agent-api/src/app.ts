@@ -45,6 +45,7 @@ import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { registerProjectTerminalRoutes } from "./project-terminal-routes";
 import { registerProjectPreviewRoutes } from "./project-preview-routes";
 import { ProjectPreviewService } from "./project-preview-service";
+import { ProjectOrchestrator } from "./project-orchestrator";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -840,6 +841,14 @@ export function buildApp(config: AppConfig = {}) {
       return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
     } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo,auditRepo,
     async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown);
+  const projectOrchestrator = new ProjectOrchestrator(
+    workspaceStore,
+    projectService,
+    projectWorkspace,
+    projectSandbox,
+    projectPreviewService,
+    companyRuntime,
+  );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {
     createTask: async ({ ctx, companyId, thread, inboundMessage, assignedAgentId }: {
@@ -2402,7 +2411,7 @@ ${localized.next}`;
   registerProjectRoutes(app, projectService, authProvider);
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
-  registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider);
+  registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
   if (knowledgeRepo && knowledgeProcessor && objectStorage) registerCompanyKnowledgeRoutes(app,{auth:authProvider,store:workspaceStore,repo:knowledgeRepo,files:fileRepository,storage:objectStorage,processor:knowledgeProcessor,queue:knowledgeQueue});
   if (automationsRepo) registerCompanyAutomationsRoutes(app, {
@@ -2603,15 +2612,17 @@ ${localized.next}`;
     return capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext);
   });
 
-  app.post<{ Body: { message: string; contextType?: string; companyId?: string; businessId?: string } }>("/router/evaluate", async (request) => {
+  app.post<{ Body: { message: string; contextType?: string; companyId?: string; businessId?: string; projectId?: string } }>("/router/evaluate", async (request) => {
     const auth = await authProvider.authenticate(request);
     const resolved = await activeContextResolver.resolve(auth, {
       contextType: request.body?.contextType,
       companyId: request.body?.companyId,
       businessId: request.body?.businessId,
+      projectId: request.body?.projectId,
     });
     return defaultHybridRouter.route({
       message: request.body?.message ?? "",
+      activeProjectId: request.body?.projectId ?? (resolved.context as any).projectId,
       resolutionContext: {
         auth,
         activeContext: resolved.context,
@@ -2765,9 +2776,10 @@ ${localized.next}`;
           onboardingAction: { type: "string", enum: ["start", "skip", "pause", "resume", "confirm"] },
           businessSetup: { type: "boolean" },
           scenario: { type: "string", enum: ["existing", "starting", "seller"] },
-          contextType: { type: "string", enum: ["none", "business", "company"] },
+          contextType: { type: "string", enum: ["none", "business", "company", "project"] },
           businessId: { type: "string", minLength: 1, maxLength: 100 },
           companyId: { type: "string", minLength: 1, maxLength: 100 },
+          projectId: { type: "string", minLength: 1, maxLength: 100 },
           noMemory: { type: "boolean" },
           ephemeral: { type: "boolean" },
         },
@@ -2786,16 +2798,122 @@ ${localized.next}`;
 
       const overview = await workspaceStore.overview(auth);
 
+      const chatBody = request.body as Record<string, any>;
+
       // Resolve Active Context safely and fail-closed
       const requestedContext = {
-        contextType: request.body.contextType ?? (request.body.companyId ? "company" : "business"),
-        businessId: request.body.businessSetup
+        contextType: chatBody.contextType ?? (chatBody.projectId ? "project" : chatBody.companyId ? "company" : "business"),
+        businessId: chatBody.businessSetup
           ? null
-          : request.body.businessId ?? ((request.body.contextType === "none" || request.body.contextType === "company" || request.body.companyId) ? null : overview.currentBusiness?.id ?? null),
-        companyId: request.body.companyId ?? null,
+          : chatBody.businessId ?? ((chatBody.contextType === "none" || chatBody.contextType === "company" || chatBody.contextType === "project" || chatBody.companyId || chatBody.projectId) ? null : overview.currentBusiness?.id ?? null),
+        companyId: chatBody.companyId ?? null,
+        projectId: chatBody.projectId ?? null,
       };
 
       const resolved = await activeContextResolver.resolve(auth, requestedContext);
+      const prompt = chatBody.message?.trim();
+      const activeProjId = requestedContext.projectId ?? (resolved.context as any).projectId ?? null;
+      const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
+
+      const intentDecision = defaultHybridRouter.classifyProject({
+        message: prompt || "",
+        activeCompanyId: activeCompId,
+        activeProjectId: activeProjId,
+        hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
+      });
+
+      // 1. Unsupported website intents (Git, Deploy)
+      if (intentDecision.unsupportedIntentMessage) {
+        return {
+          message: intentDecision.unsupportedIntentMessage,
+          suggestedActions: [],
+          activeContext: resolved.context,
+        };
+      }
+
+      // 2. Needs clarification (e.g. edit without active project)
+      if (intentDecision.needsClarification && intentDecision.clarificationPrompt) {
+        return {
+          message: intentDecision.clarificationPrompt,
+          suggestedActions: [],
+          activeContext: resolved.context,
+        };
+      }
+
+      // 3. Executable website builder tasks (Create, Edit, Build, Preview, Test, Debug)
+      if (intentDecision.isExecutableInStep5 && intentDecision.intent !== "CHAT") {
+        if (!prompt && !chatBody.attachments?.length) {
+          return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
+        }
+
+        let targetCompanyId: string | null = activeCompId;
+        if (!targetCompanyId) {
+          const companyPage = await workspaceStore.listCompanies(auth);
+          const companies = companyPage.items;
+          if (companies.length === 0) {
+            return {
+              message: "Для створення сайту потрібна активна Компанія. Будь ласка, створіть компанію у відповідному розділі.",
+              suggestedActions: ["Створити компанію"],
+              activeContext: resolved.context,
+            };
+          }
+          if (companies.length === 1 && companies[0]) {
+            targetCompanyId = companies[0].id;
+          } else {
+            return {
+              message: `Для створення або редагування сайту виберіть активну Компанію. Доступні компанії: ${companies.map(c => c.name).join(", ")}.`,
+              suggestedActions: companies.slice(0, 3).map(c => `Компанія: ${c.name}`),
+              activeContext: resolved.context,
+            };
+          }
+        }
+
+        if (!targetCompanyId) {
+          return {
+            message: "Будь ласка, оберіть активну Компанію для продовження.",
+            suggestedActions: [],
+            activeContext: resolved.context,
+          };
+        }
+
+        const projectExecResult = await projectOrchestrator.executeWebsiteTask(auth, {
+          companyId: targetCompanyId,
+          projectId: activeProjId ?? undefined,
+          intentDecision,
+          prompt: prompt || "",
+          idempotencyKey: (request.headers["idempotency-key"] as string) || `website-${Date.now()}`,
+        });
+
+        const conversation = memoryPolicy.writeAllowed
+          ? request.body.conversationId
+            ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+            : await workspaceStore.createNeutralConversation(auth, conversationTitle(prompt || "Website Task"))
+          : undefined;
+
+        if (conversation) {
+          await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", prompt || "Website Task");
+          await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", projectExecResult.responseMessage);
+        }
+
+        return {
+          message: projectExecResult.responseMessage,
+          suggestedActions: [
+            `Preview: ${projectExecResult.project.name}`,
+            `Open: ${projectExecResult.project.name}`,
+          ],
+          conversationId: conversation?.id,
+          activeContext: {
+            contextType: "project",
+            companyId: projectExecResult.project.companyId,
+            projectId: projectExecResult.project.id,
+            workspaceId: auth.workspaceId,
+            businessId: null,
+          },
+          companyRunId: projectExecResult.runDetails.run.id,
+          projectCard: projectExecResult.projectCard,
+          projectAction: projectExecResult.projectAction,
+        };
+      }
 
       // 1. NEUTRAL CONTEXT ('none')
       if (resolved.context.contextType === "none") {

@@ -225,11 +225,11 @@ export class CompanyDelegationRuntime {
     this.riskApprovalService = riskApprovalService ?? defaultRiskApprovalService;
   }
 
-  async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode }, key: string) {
-    return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto" }, key);
+  async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, key: string) {
+    return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto", projectId: input.projectId }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string }, key: string, signal?:AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
     return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, signal });

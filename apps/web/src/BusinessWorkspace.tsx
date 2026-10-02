@@ -1,6 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
-import type { AgentReply } from "@npati/shared";
+import type { AgentReply, ProjectCardData } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
@@ -40,7 +40,7 @@ type MemoryItem = { id: string; type: string; title: string; content: string; so
 type Company = { id: string; name: string; businessId?: string; revision: number; status: string };
 type Skill = { id: string; name: string; description: string; capabilities: string[] };
 type Conversation = { id: string; title: string; updatedAt: string };
-type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[] };
+type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[]; projectCard?: ProjectCardData };
 function messageHasImage(message: Message) {
   return message.attachments?.some((attachment) => attachment.kind === "image")
     || message.content.includes("[[npati-attachment:image:");
@@ -1077,6 +1077,63 @@ function AssistantMessageToolbar({
   );
 }
 
+
+function ProjectChatCard({ card }: { card: ProjectCardData }) {
+  const navigate = useNavigate();
+  return (
+    <div className="project-chat-card-container">
+      <div className="project-chat-card">
+        <div className="project-chat-card-top">
+          <div className="project-chat-card-info">
+            <span className="project-chat-card-icon">🌐</span>
+            <div>
+              <h4 className="project-chat-card-title">{card.name}</h4>
+              <span className="project-chat-card-sub">
+                {card.framework || "Website"} · {card.agentName ? `${card.agentName} (${card.agentRole})` : "Developer Agent"}
+              </span>
+            </div>
+          </div>
+          <span className={`status-pill status-${card.status}`}>{card.status}</span>
+        </div>
+        <div className="project-chat-card-meta">
+          <span>Build: <strong className={`build-${card.lastBuildStatus || "ready"}`}>{card.lastBuildStatus || "ready"}</strong></span>
+          {card.previewUrl && <span className="preview-live-badge">● Live Preview Active</span>}
+        </div>
+        <div className="project-chat-card-actions">
+          <button
+            type="button"
+            className="button-primary"
+            onClick={() => navigate(`/projects/${card.id}`)}
+          >
+            Open Project →
+          </button>
+          {card.previewUrl && (
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => navigate(`/projects/${card.id}`)}
+            >
+              Preview
+            </button>
+          )}
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => navigate(`/projects/${card.id}?tab=changes`)}
+          >
+            Changes
+          </button>
+          {card.runId && (
+            <Link to={`/activity?runId=${card.runId}`} className="button-secondary project-view-run-link">
+              View Run
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { t } = useTranslation();
   const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
@@ -1565,12 +1622,15 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if ((result as any)?.goalAction) {
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
+      if (result.activeContext?.projectId) {
+        try { sessionStorage.setItem("npati_active_project_id", result.activeContext.projectId); } catch {}
+      }
       setMessages((current) => {
         const found = current.some((item) => item.id === assistantId);
         if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
         return found
-          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage } : item)
-          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, createdAt: new Date().toISOString() }];
+          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage, projectCard: result.projectCard } : item)
+          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, projectCard: result.projectCard, createdAt: new Date().toISOString() }];
       });
       if (!privateRequest && result.conversationId) {
         setSelected(result.conversationId);
@@ -1696,6 +1756,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={message.content} />}
+                  {message.projectCard && <ProjectChatCard card={message.projectCard} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}

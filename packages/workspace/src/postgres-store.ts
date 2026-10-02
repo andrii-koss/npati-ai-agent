@@ -1215,7 +1215,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     } finally { client.release(); }
   }
 
-  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion" }, idempotencyKey: string) {
+  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) {
     const company = await this.assertCompany(context, companyId);
     if (!company.mainAgentId) throw new Error("Select an active Main Agent before running the company");
     const mainAgent = await this.getCompanyAgent(context, companyId, company.mainAgentId);
@@ -1234,11 +1234,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       capturedAt: timestamp,
     };
     const result = await this.pool.query<CompanyAgentRun>(`INSERT INTO company_agent_runs(
-      id,workspace_id,company_id,user_id,main_agent_id,idempotency_key,task,requested_mode,context_snapshot)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      id,workspace_id,company_id,project_id,user_id,main_agent_id,idempotency_key,task,requested_mode,context_snapshot)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       ON CONFLICT (workspace_id,company_id,user_id,idempotency_key) DO NOTHING
       RETURNING ${companyRunColumns}`,
-      [randomUUID(), context.workspaceId, companyId, context.userId, mainAgent.id, idempotencyKey, task, input.requestedMode, JSON.stringify(snapshot)]);
+      [randomUUID(), context.workspaceId, companyId, input.projectId ?? null, context.userId, mainAgent.id, idempotencyKey, task, input.requestedMode, JSON.stringify(snapshot)]);
     if (result.rows[0]) return { run: result.rows[0], created: true };
     const existing = await this.pool.query<CompanyAgentRun>(`SELECT ${companyRunColumns} FROM company_agent_runs
       WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND idempotency_key=$4`,
@@ -1247,15 +1247,19 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return { run: existing.rows[0], created: false };
   }
 
-  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50) {
+  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) {
     await this.assertCompany(context, companyId);
     const result = await this.pool.query<CompanyAgentRun>(
       `SELECT ${companyRunColumns} FROM company_agent_runs
-       WHERE workspace_id=$1 AND company_id=$2
+       WHERE workspace_id=$1 AND company_id=$2 AND ($4::text IS NULL OR project_id=$4)
        ORDER BY created_at DESC LIMIT $3`,
-      [context.workspaceId, companyId, Math.max(1, Math.min(100, limit))]
+      [context.workspaceId, companyId, Math.max(1, Math.min(100, limit)), filter?.projectId ?? null]
     );
     return result.rows;
+  }
+
+  async listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit = 50) {
+    return this.listCompanyAgentRuns(context, companyId, limit, { projectId });
   }
 
   async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {

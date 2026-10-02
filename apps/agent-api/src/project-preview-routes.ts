@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AuthContext } from "@npati/workspace";
+import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -14,6 +14,7 @@ export function registerProjectPreviewRoutes(
   previewService: ProjectPreviewService,
   workspace: ProjectWorkspace,
   auth: AuthProvider,
+  workspaceStore?: WorkspaceStore,
 ) {
   const authenticate = async (request: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> => {
     try {
@@ -125,6 +126,23 @@ export function registerProjectPreviewRoutes(
         return reply.code(200).send(result);
       } catch (error) {
         return reply.code(500).send({ error: { code: "baseline_error", message: error instanceof Error ? error.message : "Failed to set baseline" } });
+      }
+    },
+  );
+
+  // Project runs for Activity tab
+  app.get<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/runs",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      if (!workspaceStore) return reply.code(200).send({ runs: [] });
+      try {
+        const runs = await workspaceStore.listCompanyAgentRuns(ctx, companyId, 50, { projectId });
+        return reply.code(200).send({ runs });
+      } catch (error) {
+        return reply.code(500).send({ error: { code: "runs_error", message: error instanceof Error ? error.message : "Failed to list runs" } });
       }
     },
   );

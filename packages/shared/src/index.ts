@@ -53,6 +53,8 @@ export interface AgentReply {
   };
   activeContext?: ActiveContext;
   companyRunId?: string;
+  projectCard?: ProjectCardData;
+  projectAction?: ProjectActionData;
   telemetry?: {
     requestId?: string;
     provider?: string;
@@ -81,12 +83,14 @@ export interface BusinessProfile {
   stage: "idea" | "new" | "operating" | "growing";
 }
 
-export type ContextType = "none" | "business" | "company";
+export type ContextType = "none" | "business" | "company" | "project";
 
 export interface ActiveContext {
   contextType: ContextType;
   businessId: string | null;
   companyId: string | null;
+  projectId?: string | null;
+  workspaceId?: string | null;
 }
 
 export interface RunContextSnapshot extends ActiveContext {
@@ -95,6 +99,30 @@ export interface RunContextSnapshot extends ActiveContext {
   agentId?: string | null;
   companyRevision?: number | null;
   capturedAt: string;
+}
+
+export interface ProjectCardData {
+  id: string;
+  projectId?: string;
+  name: string;
+  status: string;
+  companyId: string;
+  companyName?: string;
+  framework?: string;
+  lastBuildStatus?: string | null;
+  buildStatus?: string | null;
+  previewUrl?: string | null;
+  agentName?: string;
+  agentRole?: string;
+  runId?: string;
+}
+
+export interface ProjectActionData {
+  action: "create" | "edit" | "build" | "preview" | "test" | "inspect";
+  projectId: string;
+  projectName: string;
+  companyId: string;
+  runId?: string;
 }
 
 export class ContextValidationError extends Error {
@@ -108,35 +136,47 @@ export function validateActiveContext(input: {
   contextType?: ContextType | string;
   businessId?: string | null;
   companyId?: string | null;
+  projectId?: string | null;
+  workspaceId?: string | null;
 }): ActiveContext {
   const rawType = input.contextType ? String(input.contextType).toLowerCase().trim() : undefined;
   const businessId = input.businessId?.trim() || null;
   const companyId = input.companyId?.trim() || null;
+  const projectId = input.projectId?.trim() || null;
+  const workspaceId = input.workspaceId?.trim() || null;
 
-  const contextType: ContextType = (rawType === "none" || rawType === "business" || rawType === "company")
+  const contextType: ContextType = (rawType === "none" || rawType === "business" || rawType === "company" || rawType === "project")
     ? (rawType as ContextType)
+    : projectId
+    ? "project"
     : companyId
     ? "company"
     : businessId
     ? "business"
     : "none";
 
-  if (businessId && companyId) {
+  if (businessId && companyId && !projectId) {
     throw new ContextValidationError("businessId and companyId are mutually exclusive and cannot be active simultaneously.");
   }
 
-  if (contextType === "none" && (businessId || companyId)) {
-    throw new ContextValidationError("Neutral context ('none') cannot have businessId or companyId.");
+  if (contextType === "none" && (businessId || companyId || projectId)) {
+    throw new ContextValidationError("Neutral context ('none') cannot have businessId, companyId, or projectId.");
   }
 
   if (contextType === "company" && !companyId) {
     throw new ContextValidationError("Context 'company' requires a valid companyId.");
   }
 
+  if (contextType === "project" && !projectId) {
+    throw new ContextValidationError("Context 'project' requires a valid projectId.");
+  }
+
   return {
     contextType,
     businessId,
     companyId,
+    projectId,
+    workspaceId,
   };
 }
 
@@ -152,3 +192,4 @@ export * from "./capability-inspector";
 export * from "./project-file-capabilities";
 export * from "./project-terminal-capabilities";
 export * from "./project-preview-capabilities";
+export * from "./project-intent";

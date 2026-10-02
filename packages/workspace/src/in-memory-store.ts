@@ -474,7 +474,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return edge;
   }
 
-  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion" }, idempotencyKey: string) {
+  async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) {
     const company = this.assertCompany(context, companyId);
     if (!company.mainAgentId) throw new Error("Select an active Main Agent before running the company");
     const mainAgent = this.assertCompanyAgent(context, companyId, company.mainAgentId);
@@ -486,7 +486,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     if (existingId) return { run: structuredClone(this.companyRuns.get(existingId)!), created: false };
     const timestamp = now();
     const run: CompanyAgentRun = {
-      id: randomUUID(), workspaceId: context.workspaceId, companyId, userId: context.userId,
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, projectId: input.projectId, userId: context.userId,
       mainAgentId: mainAgent.id, idempotencyKey, task, requestedMode: input.requestedMode,
       status: "queued", selectedAgentIds: [], cancelRequested: false, attemptCount: 0, maxAttempts: 3,
       contextSnapshot: {
@@ -506,13 +506,17 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return { run: structuredClone(run), created: true };
   }
 
-  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50) {
+  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) {
     this.assertCompany(context, companyId);
     return Array.from(this.companyRuns.values())
-      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId)
+      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId && (!filter?.projectId || r.projectId === filter.projectId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, Math.max(1, Math.min(100, limit)))
       .map((r) => structuredClone(r));
+  }
+
+  async listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit = 50) {
+    return this.listCompanyAgentRuns(context, companyId, limit, { projectId });
   }
 
   async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {

@@ -56,6 +56,7 @@ interface CompletionReport {
 interface CompanyRun {
   id: string;
   companyId: string;
+  projectId?: string;
   task: string;
   requestedMode: string;
   executionMode?: string;
@@ -119,7 +120,7 @@ function updateCachedRuns(companyId: string, runs: CompanyRun[]) {
 }
 
 export function ActivityPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const initialCompanies = useMemo(() => readCachedCompanies<CompanyItem>(), []);
   const initialCompanyId = useMemo(
     () => chooseAvailableCompanyId(initialCompanies),
@@ -130,7 +131,8 @@ export function ActivityPage() {
   const [companies, setCompanies] = useState<CompanyItem[]>(initialCompanies);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
   const [runs, setRuns] = useState<CompanyRun[]>(initialRuns);
-  const [selectedRunId, setSelectedRunId] = useState<string>(() => initialRuns[0]?.id ?? "");
+  const queryRunId = new URLSearchParams(window.location.search).get("runId");
+  const [selectedRunId, setSelectedRunId] = useState<string>(() => (queryRunId || initialRuns[0]?.id) ?? "");
   const [activeRunDetails, setActiveRunDetails] = useState<{
     run: CompanyRun;
     steps: RunStep[];
@@ -147,6 +149,13 @@ export function ActivityPage() {
   const [statusFilter, setStatusFilter] = useState<RunStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"presets" | "trace">("trace");
+
+  useEffect(() => {
+    if (queryRunId) {
+      setSelectedRunId(queryRunId);
+      setViewMode("trace");
+    }
+  }, [queryRunId]);
 
   // Dispatch state
   const [taskPrompt, setTaskPrompt] = useState("");
@@ -711,6 +720,7 @@ export function ActivityPage() {
                           <span className="activity-run-mode-tag">
                             {r.executionMode || r.requestedMode || "auto"}
                           </span>
+                          {r.projectId && <span className="activity-run-project-tag">🌐 Project</span>}
                           {durationFormatted && <span className="activity-run-latency">{durationFormatted}</span>}
                           <span className="activity-run-id">#{r.id.slice(0, 8)}</span>
                         </div>
@@ -749,6 +759,11 @@ export function ActivityPage() {
                           <span className="trace-combo-pill">
                             {t("activity.trace.comboPrefix", { combo: activeRunDetails.run.omnirouteComboName })}
                           </span>
+                        )}
+                        {activeRunDetails.run.projectId && (
+                          <Link to={`/projects/${activeRunDetails.run.projectId}`} className="button-secondary open-project-from-activity-btn">
+                            🌐 {language === "uk" ? "Відкрити проєкт" : "Open Project"}
+                          </Link>
                         )}
                       </div>
                     </div>
