@@ -620,6 +620,7 @@ export class ProjectOrchestrator {
             errorMessage: failureMessage,
           });
         }
+        runDetails = await this.workspaceStore.getCompanyAgentRun(ctx, params.companyId, runDetails.run.id);
       }
     }
 
@@ -675,7 +676,9 @@ export class ProjectOrchestrator {
     };
 
     let responseMessage = runDetails.run.status === "failed"
-      ? `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
+      ? isCreate && lastBuildStatus === "failed"
+        ? `Файли сайту "${project.name}" збережено, але перегляд не запущено.`
+        : `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
       : runDetails.run.result || (isCreate
         ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
         : `Оновлено проєкт "${project.name}".`);

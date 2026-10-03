@@ -18180,3 +18180,102 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .qa-screenshot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border-color, #e2e8f0); }
 .qa-screenshot figcaption { margin-top: .4rem; font-size: .8rem; opacity: .75; }
 @media (max-width: 680px) { .qa-report-layout { grid-template-columns: 1fr; } }
+.project-chat-preview-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+
+.project-chat-preview-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(15 23 42 / 45%);
+  cursor: pointer;
+}
+
+.project-chat-preview-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(72vw, 1100px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-shadow: -12px 0 36px rgb(15 23 42 / 20%);
+}
+
+.project-chat-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.project-chat-preview-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-chat-preview-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1rem;
+}
+
+.project-chat-preview-header span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.project-chat-preview-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.project-chat-preview-header-actions a {
+  color: #b91c1c;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.project-chat-preview-header-actions button {
+  border: 0;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.project-chat-preview-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+.project-chat-preview-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  color: #475569;
+  text-align: center;
+}
+
+@media (max-width: 800px) {
+  .project-chat-preview-drawer {
+    width: 100%;
+  }
+}
