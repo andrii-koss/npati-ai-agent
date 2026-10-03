@@ -8,7 +8,7 @@ import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@
 import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
-import { WorkspaceAccessError } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
@@ -3413,6 +3413,9 @@ ${localized.next}`;
       }
       if (error instanceof WorkspaceAccessError) {
         return reply.code(403).send({ error: { code: error.code, message: error.message } });
+      }
+      if (error instanceof WorkspaceNotFoundError) {
+        return reply.code(404).send({ error: { code: (error as any).code ?? "WORKSPACE_NOT_FOUND", message: error.message } });
       }
       if (!reply.sent) {
         request.log.error(error);
