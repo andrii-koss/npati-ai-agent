@@ -174,7 +174,7 @@ export const de: TranslationSchema = {
       kicker: "KI-Modus",
       manualTitle: "Manuelles Modell",
       autoTitle: "Automatische KI",
-      manualDesc: "NPATI verwendet Ihr ausgewähltes Modell mit automatischem Fallback.",
+      manualDesc: "NPATI verwendet nur das unter „Meine Modelle“ ausgewählte Modell.",
       autoDesc: "Npati Route: {{route}}",
       automatic: "Automatisch",
       recommended: "Empfohlen",

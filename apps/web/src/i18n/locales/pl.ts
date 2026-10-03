@@ -174,7 +174,7 @@ export const pl: TranslationSchema = {
       kicker: "Tryb AI",
       manualTitle: "Model wybrany ręcznie",
       autoTitle: "Automatyczne AI",
-      manualDesc: "NPATI używa wybranego modelu z możliwością automatycznego routingu awaryjnego.",
+      manualDesc: "NPATI używa tylko modelu wybranego w „Moje modele”.",
       autoDesc: "Trasa Npati: {{route}}",
       automatic: "Automatyczny",
       recommended: "Zalecany",

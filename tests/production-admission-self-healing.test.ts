@@ -145,4 +145,38 @@ describe("Production adaptive admission and self-healing", () => {
       ],
     } satisfies Partial<InferenceRouteFailure>);
   });
+  it("does not add auto when a selected chat model fails", async () => {
+    const calls: string[] = [];
+    const base = fakeEngine({
+      chat: async (request) => {
+        calls.push(request.model!);
+        throw new Error("HTTP 503 unavailable");
+      },
+    });
+    const resilient = createProductionResilientAIEngine(base);
+    await expect(resilient.chat({
+      model: "deepseek/DeepSeek-V4.1-Flash",
+      messages: [{ role: "user", content: "hello" }],
+    })).rejects.toThrow();
+    expect(calls).toEqual(["deepseek/DeepSeek-V4.1-Flash"]);
+  });
+
+  it("does not add auto to a failing selected stream", async () => {
+    const calls: string[] = [];
+    const base = fakeEngine({
+      stream: async function* (request) {
+        calls.push(request.model!);
+        throw new Error("HTTP 503 unavailable");
+      },
+    });
+    const resilient = createProductionResilientAIEngine(base);
+    const consume = async () => {
+      for await (const _chunk of resilient.stream({
+        model: "ollama-cloud/gemma4:31b",
+        messages: [{ role: "user", content: "hello" }],
+      })) { /* consume the stream */ }
+    };
+    await expect(consume()).rejects.toThrow();
+    expect(calls).toEqual(["ollama-cloud/gemma4:31b"]);
+  });
 });

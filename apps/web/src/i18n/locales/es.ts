@@ -240,7 +240,7 @@ export const es: TranslationSchema = {
       manualTitle: "Modelo manual",
       autoTitle: "IA automática",
       manualDesc:
-        "NPATI utiliza su modelo seleccionado y puede recurrir al enrutamiento automático.",
+        "NPATI usa solo el modelo seleccionado en Mis modelos.",
       autoDesc: "Ruta Npati: {{route}}",
       automatic: "Automático",
       recommended: "Recomendado",

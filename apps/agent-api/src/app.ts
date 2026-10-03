@@ -870,17 +870,9 @@ export function buildApp(config: AppConfig = {}) {
     async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown,
     async (ctx) => {
       const prefs = await aiPreferences.get(ctx);
-      const defId = prefs.routing.defaultModelId;
-      const models = [...prefs.addedModels];
-      if (defId) {
-        const idx = models.findIndex((m) => m.id === defId);
-        if (idx > 0) {
-          const [def] = models.splice(idx, 1);
-          if (def) models.unshift(def);
-        }
-      }
-      return models;
-    }, false);
+      const selected = prefs.addedModels.find((model) => model.id === prefs.routing.defaultModelId);
+      return selected && isChatCapableModel(selected) ? [selected] : [];
+    }, true);
   const projectOrchestrator = new ProjectOrchestrator(
     workspaceStore,
     projectService,
@@ -1079,7 +1071,6 @@ export function buildApp(config: AppConfig = {}) {
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
-    const automaticModel = preferences.routing.automaticModel || "auto";
     let manualModel = preferences.routing.mode === "manual" && preferences.routing.defaultModelId
       ? preferences.routing.defaultModelId
       : undefined;
@@ -1089,10 +1080,8 @@ export function buildApp(config: AppConfig = {}) {
         manualModel = undefined;
       }
     }
-    const primaryModel = manualModel ?? automaticModel;
-    const fallbackModel = preferences.routing.fallbackOnFailure
-      ? (primaryModel === "auto" ? (manualModel ?? "auto/smart") : "auto")
-      : undefined;
+    const primaryModel = manualModel ?? preferences.routing.automaticModel ?? "auto";
+    const fallbackModel = manualModel ? undefined : (preferences.routing.fallbackOnFailure ? "auto/smart" : undefined);
     return {
       mode: preferences.routing.mode,
       model: primaryModel,

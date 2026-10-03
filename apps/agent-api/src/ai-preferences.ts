@@ -35,7 +35,7 @@ const defaultRouting = (): AIRoutingPreferences => ({
   defaultModelId: null,
   automaticModel: 'auto',
   preferFree: true,
-  fallbackOnFailure: true,
+  fallbackOnFailure: false,
   balanceQualityCost: true,
   compression: 'stacked',
   monthlyBudgetUsd: 20,
@@ -48,7 +48,7 @@ const initialPreferences = (): AIPreferences => ({ addedModels: [], routing: def
 function normalize(value: unknown): AIPreferences {
   const parsed = value && typeof value === 'object' ? value as Partial<AIPreferences> : {};
   const models = Array.isArray(parsed.addedModels) ? parsed.addedModels : [];
-  const mode = parsed.routing?.mode === 'manual' ? 'manual' : 'automatic';
+  const mode = models.some((model) => isChatCapableModel(model)) ? 'manual' : 'automatic';
   let defaultModelId = typeof parsed.routing?.defaultModelId === 'string' ? parsed.routing.defaultModelId : null;
   const defaults = defaultRouting();
   const preferFree = typeof parsed.routing?.preferFree === 'boolean' ? parsed.routing.preferFree : defaults.preferFree;
@@ -65,9 +65,7 @@ function normalize(value: unknown): AIPreferences {
   } else if (chatModels.length > 0 && mode === 'manual') {
     defaultModelId = chatModels[0]?.id ?? null;
   }
-  const effectiveMode = mode === 'manual' && (!defaultModelId || !chatModels.some((m) => m.id === defaultModelId))
-    ? 'automatic'
-    : mode;
+  const effectiveMode = mode;
 
   return { addedModels: models, routing: {
     ...defaults,
@@ -76,7 +74,7 @@ function normalize(value: unknown): AIPreferences {
     preferFree,
     balanceQualityCost,
     automaticModel: automaticModel(preferFree, balanceQualityCost),
-    fallbackOnFailure: typeof parsed.routing?.fallbackOnFailure === 'boolean' ? parsed.routing.fallbackOnFailure : defaults.fallbackOnFailure,
+    fallbackOnFailure: mode === 'manual' ? false : (typeof parsed.routing?.fallbackOnFailure === 'boolean' ? parsed.routing.fallbackOnFailure : defaults.fallbackOnFailure),
     compression: parsed.routing?.compression === 'off' ? 'off' : 'stacked',
     monthlyBudgetUsd,
     warningPercent,
@@ -170,7 +168,7 @@ export class AIPreferencesStore {
       routing: {
         ...current.routing,
         defaultModelId: current.routing.defaultModelId === modelId ? null : current.routing.defaultModelId,
-        mode: current.routing.defaultModelId === modelId ? 'automatic' : current.routing.mode,
+        mode: current.addedModels.length === 1 ? 'automatic' : 'manual',
       },
     }));
   }
@@ -187,7 +185,7 @@ export class AIPreferencesStore {
         routing: {
           ...current.routing,
           defaultModelId: defaultRemoved ? null : current.routing.defaultModelId,
-          mode: defaultRemoved ? 'automatic' : current.routing.mode,
+          mode: current.addedModels.length === removedIds.size ? 'automatic' : 'manual',
         },
       };
     });
@@ -206,6 +204,7 @@ export class AIPreferencesStore {
 
   setRouting(scope: AuthContext, mode: AIMode, defaultModelId?: string | null, policy: Partial<Omit<AIRoutingPreferences, 'mode' | 'defaultModelId' | 'automaticModel'>> = {}) {
     return this.update(scope, (current) => {
+      if (mode === 'automatic' && current.addedModels.length > 0) throw new Error('Automatic AI routing is disabled when My Models is configured');
       const chatModels = current.addedModels.filter((m) => isChatCapableModel(m));
       const currentDefaultIsChat = current.routing.defaultModelId && chatModels.some((m) => m.id === current.routing.defaultModelId);
       const selected = defaultModelId ?? (currentDefaultIsChat ? current.routing.defaultModelId : null) ?? chatModels[0]?.id ?? null;
@@ -219,6 +218,7 @@ export class AIPreferencesStore {
         ...policy,
         mode,
         defaultModelId: mode === 'manual' ? selected : current.routing.defaultModelId,
+        fallbackOnFailure: mode === 'manual' ? false : (policy.fallbackOnFailure ?? current.routing.fallbackOnFailure),
         automaticModel: automaticModel(preferFree, balanceQualityCost),
         preferFree,
         balanceQualityCost,

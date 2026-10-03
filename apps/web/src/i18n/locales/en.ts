@@ -174,7 +174,7 @@ export const en: TranslationSchema = {
       kicker: "AI mode",
       manualTitle: "Manual model",
       autoTitle: "Automatic AI",
-      manualDesc: "NPATI uses your selected model and can fall back to automatic routing.",
+      manualDesc: "NPATI uses only the model selected in My Models.",
       autoDesc: "Npati route: {{route}}",
       automatic: "Automatic",
       recommended: "Recommended",
