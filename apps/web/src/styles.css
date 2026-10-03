@@ -18764,9 +18764,9 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-page-item.active {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #dbeafe;
+  background: #fff5f5;
+  color: var(--npati-red, #d83438);
+  border-color: #fecdd3;
   font-weight: 600;
 }
 
@@ -18791,7 +18791,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-page-item.active .npati-builder-page-settings-btn {
-  color: #1d4ed8;
+  color: var(--npati-red, #d83438);
 }
 
 /* Sections Structure Hierarchy */
@@ -18831,9 +18831,10 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-add-section-btn:hover {
-  border-color: #0f172a;
-  background: #f8fafc;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-color: var(--npati-red, #d83438);
+  color: var(--npati-red, #d83438);
+  background: #fff5f5;
+  box-shadow: 0 1px 3px rgba(216, 52, 56, 0.15);
 }
 
 .npati-builder-sections-list {
@@ -18863,9 +18864,9 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-section-row.active {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: #fff5f5;
+  border-color: #fecdd3;
+  color: var(--npati-red, #d83438);
   font-weight: 600;
 }
 
@@ -18990,8 +18991,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .npati-builder-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -19000,11 +19001,12 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-modal {
-  width: 440px;
+  width: 500px;
   max-width: 95vw;
   background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.18);
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 50px -10px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04);
   overflow: hidden;
   animation: npatiModalIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -19012,7 +19014,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
 @keyframes npatiModalIn {
   from {
     opacity: 0;
-    transform: scale(0.95) translateY(8px);
+    transform: scale(0.96) translateY(6px);
   }
   to {
     opacity: 1;
@@ -19021,69 +19023,81 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-modal-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 18px 22px;
+  border-bottom: 1px solid #f1f5f9;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: #ffffff;
 }
 
-.npati-builder-modal-header h4 {
+.npati-builder-modal-title {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
   color: #0f172a;
+  letter-spacing: -0.01em;
 }
 
 .npati-builder-modal-body {
-  padding: 20px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+  max-height: 72vh;
+  overflow-y: auto;
 }
 
 .npati-builder-modal-footer {
-  padding: 14px 20px;
-  border-top: 1px solid #e2e8f0;
+  padding: 16px 22px;
+  border-top: 1px solid #f1f5f9;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   background: #f8fafc;
 }
 
 .npati-builder-icon-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 4px 2px;
 }
 
 .npati-builder-icon-option {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 4px;
-  border-radius: 8px;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 4px;
+  border-radius: 9px;
   border: 1px solid #e2e8f0;
   background: #ffffff;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 11.5px;
   color: #475569;
-  transition: all 120ms ease;
+  transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .npati-builder-icon-option:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #0f172a;
+  border-color: var(--npati-red, #d83438);
+  background: #fff5f5;
+  color: var(--npati-red, #d83438);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(216, 52, 56, 0.15);
 }
 
 .npati-builder-icon-option.active {
-  border-color: #e11d2e;
-  background: #fef2f2;
-  color: #e11d2e;
-  font-weight: 600;
+  border-color: var(--npati-red, #d83438);
+  background: #fff5f5;
+  color: var(--npati-red, #d83438);
+  font-weight: 700;
+  box-shadow: 0 0 0 1.5px var(--npati-red, #d83438);
 }
 
 /* Quick Color Presets in Style Tab */
