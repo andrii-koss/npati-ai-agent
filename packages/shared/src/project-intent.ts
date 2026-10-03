@@ -78,17 +78,16 @@ function extractEntityName(message: string): string | undefined {
   return match ? match[1]?.trim() : undefined;
 }
 
-function extractFramework(message: string): string | undefined {
-  const lower = message.toLowerCase();
-  if (lower.includes("next.js") || lower.includes("nextjs") || lower.includes("next")) return "Next.js";
-  if (lower.includes("vite")) return "Vite";
-  if (lower.includes("astro")) return "Astro";
-  if (lower.includes("nuxt")) return "Nuxt";
-  if (lower.includes("remix")) return "Remix";
-  if (lower.includes("svelte")) return "SvelteKit";
-  if (lower.includes("react")) return "React";
-  if (lower.includes("vue")) return "Vue";
-  if (lower.includes("html") || lower.includes("static")) return "HTML/CSS";
+export function extractFramework(message: string): string | undefined {
+  if (/\bnext(?:\.js|js)?\b/i.test(message) || /next\.js/i.test(message)) return "Next.js";
+  if (/\bvite\b/i.test(message)) return "Vite";
+  if (/\bastro\b/i.test(message)) return "Astro";
+  if (/\bnuxt(?:\.js|js)?\b/i.test(message)) return "Nuxt";
+  if (/\bremix\b/i.test(message)) return "Remix";
+  if (/\bsvelte(?:kit)?\b/i.test(message)) return "SvelteKit";
+  if (/\breact\b/i.test(message)) return "React";
+  if (/\bvue(?:\.js|js)?\b/i.test(message)) return "Vue";
+  if (/\bhtml\b|\bcss\b|\bstatic\b/i.test(message)) return "HTML/CSS";
   return undefined;
 }
 

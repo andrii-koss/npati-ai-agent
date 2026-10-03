@@ -2,6 +2,7 @@ import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyI
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthenticationError, type AuthProvider } from "./auth";
+import { isChatCapableModel } from "@npati/omniroute-adapter";
 import type { AIPreferencesStore } from "./ai-preferences";
 
 function errorReply(reply: FastifyReply, error: unknown) {
@@ -39,9 +40,16 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     if (!aiPreferences) return;
     const requested = [input.modelId, input.fallbackModelId].filter((id): id is string => Boolean(id));
     if (!requested.length) return;
-    const allowed = new Set((await aiPreferences.get(context)).addedModels.map((model) => model.id));
+    const addedModels = (await aiPreferences.get(context)).addedModels;
+    const allowed = new Set(addedModels.filter((model) => isChatCapableModel(model)).map((model) => model.id));
     const invalid = requested.find((id) => !allowed.has(id));
-    if (invalid) throw new Error("Agent model must come from the configured NPATI My Models library");
+    if (invalid) {
+      const nonChat = addedModels.find((m) => m.id === invalid);
+      if (nonChat) {
+        throw new Error(`Model ${invalid} does not support chat/coding inference interface`);
+      }
+      throw new Error("Agent model must come from the configured NPATI My Models library");
+    }
   }
   app.get("/workspace/context", async (request, reply) => {
     try { return await store.overview(await authorize(auth, request, 'workspace:read')); } catch (error) { return errorReply(reply, error); }

@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { createHubClient } from "@npati/hub-connector";
 import { InMemoryProvider } from "@npati/memory";
-import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart, type ChatToolCall, type ChatToolDefinition } from "@npati/omniroute-adapter";
+import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart, type ChatToolCall, type ChatToolDefinition, isChatCapableModel, isNonChatSpecialtyModel } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService, extractTargetUrlOrDomain } from "@npati/web-research";
 import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
 import { createClient } from "redis";
@@ -54,7 +54,7 @@ import { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { registerProjectQaRoutes } from "./project-qa-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
-import { ProjectOrchestrator } from "./project-orchestrator";
+import { ProjectOrchestrator, ProjectOrchestrationError } from "./project-orchestrator";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -272,6 +272,7 @@ export interface AppConfig {
   storageProtection?: StorageProtection;
   storageReconcilerOptions?: StorageReconcilerOptions;
   activeSessionRegistry?: ActiveSessionRegistry;
+  projectSandbox?: ProjectSandboxService;
 }
 
 function inferOnboardingScenario(message: string): OnboardingScenario {
@@ -815,13 +816,13 @@ export function buildApp(config: AppConfig = {}) {
     ? new BrowserUseClient(config.browserUseWorkerUrl, config.browserUseInternalToken, browserCredentials, undefined, chatFiles)
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
-  let projectSandbox: ProjectSandboxService | undefined;
+  let projectSandbox: ProjectSandboxService | undefined = config.projectSandbox;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
   const sandboxRunnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
-  if (sandboxRunnerUrl && sandboxRunnerSecret) projectSandbox = new ProjectSandboxService(projectService, workspaceStore, projectWorkspace, new RemoteSandboxProvider(sandboxRunnerUrl, sandboxRunnerSecret), projectTerminalEvents, browserCredentials, {
+  if (!projectSandbox && sandboxRunnerUrl && sandboxRunnerSecret) projectSandbox = new ProjectSandboxService(projectService, workspaceStore, projectWorkspace, new RemoteSandboxProvider(sandboxRunnerUrl, sandboxRunnerSecret), projectTerminalEvents, browserCredentials, {
     commandTimeoutMs: Number(process.env.NPATI_TERMINAL_TIMEOUT_MS) || undefined,
     installBuildTimeoutMs: Number(process.env.NPATI_TERMINAL_BUILD_TIMEOUT_MS) || undefined,
     outputLimitBytes: Number(process.env.NPATI_TERMINAL_OUTPUT_LIMIT_BYTES) || undefined,
@@ -1066,9 +1067,15 @@ export function buildApp(config: AppConfig = {}) {
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
     const automaticModel = preferences.routing.automaticModel || "auto";
-    const manualModel = preferences.routing.mode === "manual" && preferences.routing.defaultModelId
+    let manualModel = preferences.routing.mode === "manual" && preferences.routing.defaultModelId
       ? preferences.routing.defaultModelId
       : undefined;
+    if (manualModel) {
+      const added = preferences.addedModels.find((m) => m.id === manualModel);
+      if (added ? !isChatCapableModel(added) : isNonChatSpecialtyModel({ id: manualModel })) {
+        manualModel = undefined;
+      }
+    }
     const primaryModel = manualModel ?? automaticModel;
     const fallbackModel = preferences.routing.fallbackOnFailure
       ? (primaryModel === "auto" ? (manualModel ?? "auto/smart") : "auto")
@@ -1306,7 +1313,7 @@ ${localized.next}`;
       ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage)
       : undefined;
     if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined };
-    const addedModels = (await aiPreferences.get(auth)).addedModels;
+    const addedModels = (await aiPreferences.get(auth)).addedModels.filter((m) => isChatCapableModel(m));
     let actionText = /```company-action/i.test(content)
       ? content
       : requestMessage && managementRequest
@@ -3139,6 +3146,9 @@ ${localized.next}`;
       if (error instanceof WorkspaceAccessError) {
         return reply.code(403).send({ error: { code: error.code, message: error.message } });
       }
+      if (error instanceof ProjectOrchestrationError) {
+        return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
+      }
       if (error instanceof StorageRateLimitError) return reply.header("retry-after",String(Math.ceil(error.retryAfterMs/1000))).code(429).send({error:{code:error.code,message:error.message}});
       if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))).code(429).send({ error: { code: error.code, message: error.message } });
       request.log.error(error);
@@ -3359,7 +3369,7 @@ ${localized.next}`;
         }
       } catch (error) {
         request.log.error(error);
-        const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError;
+        const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError || error instanceof ProjectOrchestrationError;
         const route = expected ? undefined : await getAIContext(auth).then((ai) => ai.model).catch(() => undefined);
         const detail = expected ? error.message : publicChatError(error, route);
         progress({ type: "final_generation_failed", error: detail });
