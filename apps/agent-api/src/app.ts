@@ -429,7 +429,9 @@ function decodeAttachment(input: ChatAttachmentInput) {
 }
 
 function publicChatError(error: unknown, route?: string) {
-  const raw = error instanceof Error ? error.message : String();
+  const raw = error instanceof InferenceRouteFailure && error.cause instanceof Error
+    ? error.cause.message
+    : error instanceof Error ? error.message : String(error);
   if (/Invalid file format/i.test(raw)) {
     return "The audio container does not match the file extension. Convert or export the file as M4A/AAC, MP3, WAV, WEBM, OGG, or FLAC and try again.";
   }
@@ -452,12 +454,14 @@ function publicChatError(error: unknown, route?: string) {
     const routeLabel = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected)
       ? `NPATI route "${selected}"`
       : "The selected NPATI AI route";
-    const status = attempts[0]?.httpStatus ?? (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
+    const status = Number(/\bAPI\s*\[(\d{3})\]/i.exec(raw)?.[1]) || attempts[0]?.httpStatus || (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
     const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
     const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId)
       ? ` Fallback route "${fallback.modelId}" also failed${fallback.httpStatus ? ` (HTTP ${fallback.httpStatus})` : ""}.`
       : "";
-    const reason = status === 401 || status === 403
+    const reason = /no active credentials for provider/i.test(raw)
+      ? "No active provider credential is available. Reconnect this provider in AI Marketplace."
+      : status === 401 || status === 403
       ? "The provider denied the request. Check its connection and permissions in AI Marketplace."
       : status === 404
         ? "The provider could not find this model. Check the model ID in AI Marketplace."
@@ -477,9 +481,9 @@ function publicCompanyRunMessage(result: string | null | undefined, errorMessage
   if (result?.trim()) return result;
   if (!errorMessage?.trim()) return "Company run completed.";
   const language = detectCompanyChatLanguage(requestMessage);
-  if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перемкніть AI mode або підключіть іншу модель в AI Marketplace і спробуйте ще раз.";
-  if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Переключите AI mode или подключите другую модель в AI Marketplace и попробуйте снова.";
-  return "The company task could not be completed because the selected AI model is temporarily unavailable. Switch AI mode or connect another model in AI Marketplace, then try again.";
+  if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перевірте підключення вибраної моделі в AI Marketplace і спробуйте ще раз.";
+  if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Проверьте подключение выбранной модели в AI Marketplace и попробуйте снова.";
+  return "The company task could not be completed because the selected AI model is temporarily unavailable. Check the selected model connection in AI Marketplace, then try again.";
 }
 
 function attachResearchSources(content: string, research?: { sources: Array<{ url: string; title?: string }> }) {

@@ -10,6 +10,24 @@ async function seedModels(engine: OmniRouteEngine, models: Array<{ id: string; t
 }
 
 describe("OmniRoute adapter", () => {
+  it("sends the current DeepSeek Flash API model ID for a selected V4.1 model", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "ok" } }],
+      model: "deepseek-flash",
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+
+    for (const model of ["deepseek/DeepSeek-V4.1-Flash", "deepseek/deepseek-v4-flash"]) {
+      await expect(engine.chat({ model, messages: [{ role: "user", content: "hello" }] })).resolves.toMatchObject({ content: "ok" });
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(JSON.parse(String(options.body)).model).toBe("deepseek/deepseek-flash");
+    }
+  });
+
   it("uses the verified upstream monitoring endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "healthy", version: "3.8.49" })));
     vi.stubGlobal("fetch", fetchMock);

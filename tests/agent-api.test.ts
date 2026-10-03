@@ -307,10 +307,12 @@ describe("Agent API", () => {
     await preferences.add(auth, selected);
     await preferences.setDefault(auth, selected.id);
     const calls: string[] = [];
+    let providerUnavailable = false;
     const aiEngine = {
       chat: async (request: ChatRequest) => {
         calls.push(request.model ?? "missing");
         expect(request.fallbackModel).toBeUndefined();
+        if (providerUnavailable) throw new Error('NPATI AI chat failed with HTTP 500: API [401]: No active credentials for provider: deepseek.');
         return { content: "Selected model replied", model: request.model };
       },
       stream: async function* () { yield "Selected model replied"; },
@@ -325,6 +327,11 @@ describe("Agent API", () => {
     const response = await app.inject({ method: "POST", url: "/chat", payload: { message: "Hello", contextType: "none" } });
     expect(response.statusCode).toBe(200);
     expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((model) => model === selected.id)).toBe(true);
+    providerUnavailable = true;
+    const failed = await app.inject({ method: "POST", url: "/chat", payload: { message: "Try again", contextType: "none" } });
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json().error.message).toContain("No active provider credential");
     expect(calls.every((model) => model === selected.id)).toBe(true);
   });
   it("names the selected automatic route when chat inference fails", async () => {
