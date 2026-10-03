@@ -1087,8 +1087,8 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const builderUrl = card.companyId
-    ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.id)}`
-    : `/projects/${encodeURIComponent(card.id)}`;
+    ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.projectId ?? card.id)}`
+    : `/projects/${encodeURIComponent(card.projectId ?? card.id)}`;
 
   useEffect(() => {
     if (!previewOpen) return;
