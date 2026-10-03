@@ -22,7 +22,8 @@ import { AIPreferencesStore } from "../apps/agent-api/src/ai-preferences";
 import { chatInferenceCandidates } from "../apps/agent-api/src/chat-inference-candidates";
 import { buildApp } from "../apps/agent-api/src/app";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
-import { isModelError, ProjectOrchestrator } from "../apps/agent-api/src/project-orchestrator";
+import { isModelError, ProjectOrchestrator, extractCleanProjectName } from "../apps/agent-api/src/project-orchestrator";
+import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 import { ProjectSandboxService } from "../apps/agent-api/src/project-sandbox-service";
 import { ProjectService } from "../apps/agent-api/src/project-service";
 import { LocalProjectWorkspace } from "../apps/agent-api/src/project-workspace";
@@ -421,3 +422,74 @@ describe("Explicit Next.js framework", () => {
     }
   });
 });
+
+describe("Clean Project Naming for Website Builder", () => {
+  it("normalizes 'створи мені сайт, хостінг компанія' to 'Хостінг компанія'", () => {
+    const prompt = "створи мені сайт, хостінг компанія";
+    const decision = classifyProjectIntent({ message: prompt });
+    expect(decision.intent).toBe("CREATE_WEBSITE");
+    expect(decision.targetDetails?.entityName).toBe("Хостінг компанія");
+    expect(extractCleanProjectName(prompt, decision.targetDetails?.entityName)).toBe("Хостінг компанія");
+  });
+
+  it("extracts clean name from multi-line Ukrainian prompt", () => {
+    const prompt = "Створи сучасний сайт для хостинг-компанії.\nВикористай Next.js.\nСторінки: Home, Hosting, Domains, Pricing, Contact.";
+    const name = extractCleanProjectName(prompt);
+    expect(name).toBe("Хостинг-компанії");
+  });
+
+  it("extracts clean name from English create prompt", () => {
+    const prompt = "Create a modern website for CloudScale Hosting with domain lookup";
+    const name = extractCleanProjectName(prompt);
+    expect(name).toBe("CloudScale Hosting with domain lookup");
+  });
+});
+
+describe("DeepSeek 401 uncredentialed provider failover", () => {
+  it("automatically fails over from uncredentialed DeepSeek to 'auto' without throwing model_routing_failed", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const auth: AuthContext = { workspaceId: "deepseek-ws", userId: "deepseek-user", permissions: ["workspace:read", "workspace:write", "business:manage", "tools:execute"] };
+    const company = await store.createCompany(auth, { name: "DeepSeek Hosting" }, "deepseek-comp");
+    const agent = await store.createCompanyAgent(auth, company.id, {
+      name: "DeepSeek Developer",
+      role: "frontend developer",
+      modelId: "deepseek/deepseek-chat",
+      tools: ["project.files.read", "project.files.write"],
+      isActive: true,
+    }, "deepseek-agent");
+    await store.setCompanyMainAgent(auth, company.id, agent.id, company.revision);
+
+    const a2aCalls: string[] = [];
+    const mockAi: AIEngine = {
+      ensureA2AEnabled: async () => undefined,
+      ensureCombo: async () => ({ name: "test-combo" }),
+      listModels: async () => [{ id: "deepseek/deepseek-chat", name: "DeepSeek Chat", modalities: { input: ["text"], output: ["text"] } }],
+      a2aSend: async (req) => {
+        a2aCalls.push(req.model ?? "unknown");
+        if (req.model === "deepseek/deepseek-chat") {
+          throw new Error('NPATI AI A2A message failed with HTTP 500: Skill execution failed: API [401]: {"error":{"message":"No active credentials for provider: deepseek.","type":"authentication_error","code":"invalid_api_key"}}');
+        }
+        return {
+          taskId: "auto-plan-id",
+          content: JSON.stringify({ mode: "single", agentIds: [agent.id], toolRequests: [] }),
+          metadata: {},
+        };
+      },
+      chat: async () => ({ content: "Successfully executed with auto fallback" }),
+    };
+
+    const runtime = new CompanyDelegationRuntime(store, mockAi, 5000);
+    const result = await runtime.execute(auth, company.id, {
+      task: "створи мені сайт, хостінг компанія",
+      mode: "single",
+      preferredAgentId: agent.id,
+    }, "deepseek-test-key");
+
+    expect(result.run.status).toBe("completed");
+    expect(result.run.result).toBe("Successfully executed with auto fallback");
+    expect(a2aCalls).toContain("deepseek/deepseek-chat");
+    expect(a2aCalls).toContain("auto");
+  });
+});
+

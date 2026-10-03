@@ -393,9 +393,22 @@ export class CompanyDelegationRuntime {
       };
       const planned = await (async () => {
         let lastError: unknown;
-        for (const model of planningModels.length ? planningModels : [planningRequest.model]) {
+        const candidateModels = [...new Set([...(planningModels.length ? planningModels : [planningRequest.model]), "auto", "auto/smart"])];
+        for (const model of candidateModels) {
           try { return await this.ai.a2aSend!({ ...planningRequest, model }); }
           catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
+        }
+        if (options.preferredAgentId || input.mode === "single" || !candidates.length) {
+          const fallbackAgentId = options.preferredAgentId ?? main.id;
+          return {
+            taskId: `fallback-plan-${Date.now()}`,
+            content: JSON.stringify({
+              mode: "single",
+              agentIds: [fallbackAgentId],
+              toolRequests: [],
+            }),
+            metadata: { fallback: true, reason: String(lastError) },
+          };
         }
         throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
       })();
@@ -826,7 +839,11 @@ export class CompanyDelegationRuntime {
       const primary = agentModels?.[0] ?? comboModel(agent.modelId), fallback = agentModels?.[1] ?? comboModel(agent.fallbackModelId);
       const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
-      await this.ai.ensureCombo({ name, strategy: "priority", models: agentModels?.length ? agentModels : [...new Set([primary, fallback])],
+      const comboModels = agentModels?.length ? [...agentModels] : [...new Set([primary, fallback])];
+      if (!comboModels.some((m) => m === "auto" || m === "auto/smart" || m.startsWith("auto/"))) {
+        comboModels.push("auto/smart");
+      }
+      await this.ai.ensureCombo({ name, strategy: "priority", models: comboModels,
         description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory, linked),
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs } }, signal);

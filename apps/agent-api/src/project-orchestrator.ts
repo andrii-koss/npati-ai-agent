@@ -32,6 +32,45 @@ export function isModelError(error: unknown): boolean {
   return false;
 }
 
+export function extractCleanProjectName(prompt: string, explicitName?: string): string {
+  if (explicitName && explicitName.trim()) {
+    const trimmed = explicitName.trim().replace(/^["'«]+|["'»]+$/g, "");
+    if (trimmed.length > 0) return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  }
+
+  let cleaned = (prompt || "").trim();
+
+  const commandPatterns = [
+    /^(?:створи(?: мені)?|зроби(?: мені)?|розроби(?: мені)?|побудуй|запусти|згенеруй|відкрий)\s+(?:новий\s+)?(?:сучасний\s+)?(?:адаптивний\s+)?(?:веб-?сайт|сайт|проєкт|проект|лендінг|додаток)(?:\s+(?:для|під|про|компанії))?/iu,
+    /^(?:створи(?:ти)?|зроби(?:ти)?)\s+(?:новий\s+)?(?:веб-?сайт|сайт|проєкт|проект)/iu,
+    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?(?:\s+new)?(?:\s+modern)?(?:\s+responsive)?\s+(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
+  ];
+
+  for (const pattern of commandPatterns) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+
+  cleaned = cleaned.replace(/^[,:;—–\-.\s]+/, "").trim();
+
+  const firstSentence = cleaned.split(/(?:\.\s+|\n+)/)[0]?.trim() || "";
+  if (firstSentence && firstSentence.length >= 2 && firstSentence.length <= 60) {
+    cleaned = firstSentence;
+  }
+
+  cleaned = cleaned.replace(/[,:;—–\-.\s]+$/, "").trim();
+  cleaned = cleaned.replace(/^["'«]+|["'»]+$/g, "").trim();
+
+  if (!cleaned || cleaned.length < 2) {
+    return "Website Project";
+  }
+
+  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  if (cleaned.length > 50) {
+    cleaned = `${cleaned.slice(0, 47)}...`;
+  }
+  return cleaned;
+}
+
 export class ProjectOrchestrator {
   constructor(
     private readonly workspaceStore: WorkspaceStore,
@@ -198,9 +237,10 @@ export class ProjectOrchestrator {
       }
     } else {
       isCreate = true;
-      const name = params.intentDecision.targetDetails?.entityName
-        || (params.prompt.length > 50 ? `${params.prompt.slice(0, 40)}...` : params.prompt)
-        || "Website Project";
+      const name = extractCleanProjectName(
+        params.prompt,
+        params.intentDecision.targetDetails?.entityName,
+      );
       const framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "Next.js";
 
       const { project: created } = await this.projectService.create(ctx, params.companyId, {
