@@ -3,6 +3,7 @@ import { useTranslation } from "./i18n";
 import type { AgentReply, ProjectCardData } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
@@ -1080,9 +1081,56 @@ function AssistantMessageToolbar({
 
 function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const navigate = useNavigate();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
   const builderUrl = card.companyId
     ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.id)}`
     : `/projects/${encodeURIComponent(card.id)}`;
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [previewOpen]);
+
+  async function openPreview() {
+    setPreviewOpen(true);
+    setPreviewError("");
+    if (previewUrl) return;
+    if (!card.companyId) {
+      setPreviewError("Project company is unavailable.");
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const token = getStoredAuthToken();
+      const response = await fetch(`/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/start`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      });
+      const payload = await response.json().catch(() => null) as
+        | { previewUrl?: string; error?: string | { message?: string } }
+        | null;
+      if (!response.ok || !payload?.previewUrl) {
+        const message = typeof payload?.error === "string" ? payload.error : payload?.error?.message;
+        throw new Error(message || "Preview is unavailable.");
+      }
+      setPreviewUrl(payload.previewUrl);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "Preview is unavailable.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   return (
     <div className="project-chat-card-container">
@@ -1100,41 +1148,17 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           <span className={`status-pill status-${card.status}`}>{card.status}</span>
         </div>
         <div className="project-chat-card-meta">
-          <span>Build: <strong className={`build-${card.lastBuildStatus || "ready"}`}>{card.lastBuildStatus || "ready"}</strong></span>
+          <span>Build: <strong className={`build-${card.lastBuildStatus || (card.status === "failed" ? "not-run" : "ready")}`}>{card.lastBuildStatus || (card.status === "failed" ? "not run" : "ready")}</strong></span>
           {card.previewUrl && <span className="preview-live-badge">● Live Preview Active</span>}
         </div>
         <div className="project-chat-card-actions">
-          <button
-            type="button"
-            className="button-primary"
-            onClick={() => navigate(builderUrl)}
-          >
+          <button type="button" className="button-primary" onClick={() => navigate(builderUrl)}>
             Open in Website Builder →
           </button>
-          {card.previewUrl ? (
-            <a
-              href={card.previewUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="button-secondary"
-              style={{ display: "inline-flex", alignItems: "center" }}
-            >
-              Preview ↗
-            </a>
-          ) : (
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={() => navigate(`${builderUrl}?tab=preview`)}
-            >
-              Preview
-            </button>
-          )}
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={() => navigate(`${builderUrl}?tab=changes`)}
-          >
+          <button type="button" className="button-secondary" onClick={() => void openPreview()}>
+            Preview
+          </button>
+          <button type="button" className="button-secondary" onClick={() => navigate(`${builderUrl}?tab=changes`)}>
             Changes
           </button>
           {card.runId && (
@@ -1144,6 +1168,30 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           )}
         </div>
       </div>
+      {previewOpen && createPortal(
+        <div className="project-chat-preview-layer">
+          <button type="button" className="project-chat-preview-backdrop" aria-label="Close preview" onClick={() => setPreviewOpen(false)} />
+          <aside className="project-chat-preview-drawer" role="dialog" aria-modal="true" aria-label={`Preview of ${card.name}`}>
+            <header className="project-chat-preview-header">
+              <div>
+                <strong>{card.name}</strong>
+                <span>{previewUrl ? "Live preview" : "Preview"}</span>
+              </div>
+              <div className="project-chat-preview-header-actions">
+                {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Open in new tab ↗</a>}
+                <button type="button" aria-label="Close preview" onClick={() => setPreviewOpen(false)}>×</button>
+              </div>
+            </header>
+            {previewUrl ? (
+              <iframe title={`${card.name} preview`} src={previewUrl} className="project-chat-preview-frame" />
+            ) : (
+              <div className="project-chat-preview-empty" role="status">
+                {previewLoading ? "Starting preview…" : previewError || "Preview is unavailable."}
+              </div>
+            )}
+          </aside>
+        </div>, document.body
+      )}
     </div>
   );
 }
