@@ -396,6 +396,41 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect((await store.listCompanyAgents(authUserA, company.id))
       .filter((agent) => agent.name === "Website Builder")).toHaveLength(1);
   });
+  it("builds the prepared Next.js website when delegation JSON remains malformed", async () => {
+    let company = await store.createCompany(authUserA, { name: "Hosting Recovery Co" }, "hosting-recovery-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: [], isActive: true,
+    }, "hosting-recovery-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    const failedRuntime = {
+      async execute(ctx: AuthContext, companyId: string, input: { task: string; projectId: string }, key: string) {
+        const { run } = await store.createCompanyAgentRun(ctx, companyId,
+          { task: input.task, requestedMode: "single", projectId: input.projectId }, key);
+        await store.updateCompanyAgentRun(ctx, companyId, run.id, {
+          status: "failed", errorCode: "INVALID_DELEGATION_PLAN",
+          errorMessage: "Main Agent returned malformed delegation JSON",
+        });
+        return store.getCompanyAgentRun(ctx, companyId, run.id);
+      },
+    } as unknown as CompanyDelegationRuntime;
+    const recovering = new ProjectOrchestrator(
+      store, projectService, projectWorkspace, undefined, gitPreviewService, failedRuntime);
+    const result = await recovering.executeWebsiteTask(authUserA, {
+      companyId: company.id, prompt: "Створи мені сайт для хостінга",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга" }),
+      idempotencyKey: "hosting-recovery-website",
+    });
+    expect(result.runDetails.run.status).toBe("completed");
+    expect(result.projectCard.buildStatus).toBe("success");
+    expect(result.previewUrl).toBe("/api/preview-mock/url");
+    expect(result.responseMessage).toContain("стартовий сайт");
+    expect(result.responseMessage).toContain("AI-персоналізацію не завершено");
+    const website = JSON.parse((await projectWorkspace.readFile(authUserA, company.id, result.project.id, "website.config.json")).content);
+    expect(website.pages.map((page: { slug: string }) => page.slug)).toContain("/hosting");
+    expect(JSON.stringify(website.pages[0].blocks)).not.toContain("Створи мені сайт");
+    const originalRuns = await store.listProjectRuns(authUserA, company.id, result.project.id);
+    expect(originalRuns.some((run) => run.errorCode === "INVALID_DELEGATION_PLAN")).toBe(true);
+  });
   it("reports an agent permission failure without marking an unattempted build as failed", async () => {
     let company = await store.createCompany(authUserA, { name: "Permission Co" }, "permission-company");
     const coordinator = await store.createCompanyAgent(authUserA, company.id, {

@@ -185,12 +185,35 @@ function instruction(company: Company, agent: CompanyAgent, manager = false, inc
       : "Complete your assigned responsibility and return concrete work to the next agent.",
   ].filter(Boolean).join("\n\n");
 }
+function delegationJson(content: string): Record<string, unknown> | undefined {
+  for (let start = content.indexOf("{"); start >= 0; start = content.indexOf("{", start + 1)) {
+    let depth = 0, quoted = false, escaped = false;
+    for (let end = start; end < content.length; end++) {
+      const char = content[end];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') quoted = false;
+      } else if (char === '"') quoted = true;
+      else if (char === "{") depth++;
+      else if (char === "}" && --depth === 0) {
+        try {
+          const value = JSON.parse(content.slice(start, end + 1)) as unknown;
+          if (value && typeof value === "object" && !Array.isArray(value) &&
+            ("mode" in value || "agentIds" in value || "toolRequests" in value)) {
+            return value as Record<string, unknown>;
+          }
+        } catch { /* Try the next complete object. */ }
+        break;
+      }
+    }
+  }
+  return undefined;
+}
+
 function parsePlan(content: string, requested: CompanyRunMode): Plan {
-  const source = content.match(/\{[\s\S]*\}/)?.[0];
-  if (!source) throw new CompanyRuntimeError("INVALID_DELEGATION_PLAN", "Main Agent did not return delegation JSON", 502);
-  let value: Record<string, unknown>;
-  try { value = JSON.parse(source) as Record<string, unknown>; }
-  catch { throw new CompanyRuntimeError("INVALID_DELEGATION_PLAN", "Main Agent returned malformed delegation JSON", 502); }
+  const value = delegationJson(content);
+  if (!value) throw new CompanyRuntimeError("INVALID_DELEGATION_PLAN", "Main Agent returned malformed delegation JSON", 502);
   const mode = requested === "auto" ? value.mode : requested;
   if (mode !== "single" && mode !== "pipeline" && mode !== "fusion") throw new CompanyRuntimeError("INVALID_DELEGATION_MODE", "Unsupported delegation mode", 502);
   const agentIds = Array.isArray(value.agentIds) ? value.agentIds.filter((id): id is string => typeof id === "string") : [];
@@ -401,21 +424,72 @@ export class CompanyDelegationRuntime {
           },
         ],
       };
+      const projectWorker = existing.run.projectId && options.preferredAgentId
+        ? candidates.find((agent) => agent.id === options.preferredAgentId)
+        : undefined;
+      if (projectWorker) {
+        planningRequest.messages = [
+          { role: "system", content: protect(
+            instruction(company, main, true, !options.noMemory, linked) +
+            "\n\nPlan this single Project task. Return exactly one valid JSON object with no markdown. " +
+            "Use the assigned agent only. Never invent tool names, Project IDs, file revisions, or file contents."
+          ) },
+          { role: "user", content: protect([
+            `Project ID: ${existing.run.projectId}`,
+            `Assigned agent ID: ${projectWorker.id}`,
+            `Allowed tools: ${projectWorker.tools.map(toolName).join(", ")}`,
+            `Task: ${protectedTask.slice(0, 6000)}`,
+            "Return JSON with mode single, agentIds containing only the assigned agent ID, and toolRequests. " +
+              "Each tool request needs agentId, tool, and input. Project tools need the exact Project ID. " +
+              "For file changes, inspect files first and use the revision returned by the file tool; " +
+              "omit any operation whose required inputs are unknown.",
+          ].join("\n\n")) },
+        ];
+      }
       const planningCandidates = [...planningModels];
       if (!this.strictInferenceRouting) {
         if (!planningCandidates.includes("auto")) planningCandidates.push("auto");
         if (!planningCandidates.includes("auto/smart")) planningCandidates.push("auto/smart");
       }
+      let plannedModel = planningRequest.model;
       const planned = await (async () => {
         let lastError: unknown;
         for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
-          try { return await this.ai.a2aSend!({ ...planningRequest, model }); }
+          try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
           catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
         }
         throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
       })();
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
-      const plan = parsePlan(planned.content, input.mode ?? "auto"), byId = new Map(candidates.map((agent) => [agent.id, agent]));
+      let plan: Plan;
+      try {
+        plan = parsePlan(planned.content, input.mode ?? "auto");
+      } catch (error) {
+        if (!(error instanceof CompanyRuntimeError) || error.code !== "INVALID_DELEGATION_PLAN" ||
+          !existing.run.projectId || !options.preferredAgentId) throw error;
+        if (options.callBudget && --options.callBudget.remaining < 0)
+          throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+        const preferred = candidates.find((agent) => agent.id === options.preferredAgentId);
+        if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
+        const repaired = await this.ai.a2aSend!({
+          ...planningRequest, model: plannedModel,
+          idempotencyKey: `${created.run.id}:plan-repair`,
+          messages: [
+            { role: "system", content: "Return exactly one valid JSON object. No markdown or explanation. Keys: mode, agentIds, toolRequests. mode must be single. Use only the provided agent ID and permitted tools." },
+            { role: "user", content: [
+              `Project ID: ${existing.run.projectId}`,
+              `Agent ID: ${preferred.id}`,
+              `Permitted tools: ${preferred.tools.map(toolName).join(", ")}`,
+              `Task: ${protectedTask.slice(0, 3000)}`,
+              `Previous response to repair: ${planned.content.slice(0, 3000)}`,
+              `Required shape: {"mode":"single","agentIds":["${preferred.id}"],"toolRequests":[]}`,
+            ].join("\n") },
+          ],
+        });
+        plan = parsePlan(repaired.content, "single");
+        await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: repaired.taskId });
+      }
+      const byId = new Map(candidates.map((agent) => [agent.id, agent]));
       if (options.preferredAgentId) {
         const preferred = byId.get(options.preferredAgentId);
         if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
