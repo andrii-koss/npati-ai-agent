@@ -1,4 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
+import { isNonChatSpecialtyModel } from "./normalization";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
@@ -177,12 +178,24 @@ export class OmniRouteEngine implements AIEngine {
 
   async chat(request: ChatRequest): Promise<ChatResult> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
-    const models = [request.model ?? "auto", request.fallbackModel]
+    let candidateModels = [request.model ?? "auto", request.fallbackModel]
       .filter((model): model is string => Boolean(model))
       .filter((model, index, values) => values.indexOf(model) === index);
+
+    // Exclude non-chat specialty models (e.g. embedding models) if valid chat models or auto exist
+    const chatCapable = candidateModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
+    if (chatCapable.length > 0) {
+      candidateModels = chatCapable;
+    } else {
+      candidateModels = ["auto"];
+    }
+
     let lastError = "OmniRoute chat failed";
     const startedAt = Date.now();
-    for (const [index, model] of models.entries()) {
+    for (const [index, model] of candidateModels.entries()) {
+      if (model !== "auto" && !model.startsWith("auto/") && isNonChatSpecialtyModel({ id: model })) {
+        if (index < candidateModels.length - 1) continue;
+      }
       const useResponses = requiresResponsesApi(model);
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
       const responseTools = request.tools?.map((tool) => ({ type: "function", ...tool.function }));
@@ -216,9 +229,10 @@ export class OmniRouteEngine implements AIEngine {
           message = detail.slice(0, 300);
         }
         lastError = `OmniRoute chat failed with HTTP ${response.status}${message ? `: ${message}` : ""}`;
-        const retryable = response.status === 404 || response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500
-          || /quota|rate.?limit|unavailable|model.*(?:missing|disabled|locked)/i.test(message);
-        if (index < models.length - 1 && retryable) continue;
+        const canRetryNext = index < candidateModels.length - 1;
+        const retryable = response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404 || response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500
+          || /unsupported|quota|rate.?limit|unavailable|model.*(?:missing|disabled|locked|does not support|invalid)/i.test(message);
+        if (canRetryNext && retryable) continue;
         throw new Error(lastError);
       }
       const payload = (await response.json()) as {
@@ -255,10 +269,21 @@ export class OmniRouteEngine implements AIEngine {
 
   async *stream(request: ChatRequest): AsyncIterable<string> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
-    const models = [request.model ?? "auto", request.fallbackModel]
+    let candidateModels = [request.model ?? "auto", request.fallbackModel]
       .filter((model): model is string => Boolean(model))
       .filter((model, index, values) => values.indexOf(model) === index);
-    for (const [index, model] of models.entries()) {
+
+    const chatCapable = candidateModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
+    if (chatCapable.length > 0) {
+      candidateModels = chatCapable;
+    } else {
+      candidateModels = ["auto"];
+    }
+
+    for (const [index, model] of candidateModels.entries()) {
+      if (model !== "auto" && !model.startsWith("auto/") && isNonChatSpecialtyModel({ id: model })) {
+        if (index < candidateModels.length - 1) continue;
+      }
       const useResponses = requiresResponsesApi(model);
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
       const responseContent = (content: string | ChatContentPart[]) => Array.isArray(content)
@@ -275,7 +300,10 @@ export class OmniRouteEngine implements AIEngine {
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
-        if (index < models.length - 1 && (response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500)) continue;
+        const canRetryNext = index < candidateModels.length - 1;
+        const retryable = response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404 || response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500
+          || /unsupported|quota|rate.?limit|unavailable|model/i.test(detail);
+        if (canRetryNext && retryable) continue;
         throw new Error(`OmniRoute stream failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`);
       }
       if (!response.body) throw new Error("OmniRoute stream returned no response body");
@@ -333,10 +361,10 @@ export class OmniRouteEngine implements AIEngine {
         reader.releaseLock();
       }
       if (streamError) {
-        if (!yieldedAny && index < models.length - 1) continue;
+        if (!yieldedAny && index < candidateModels.length - 1) continue;
         throw streamError;
       }
-      if (!yieldedAny && index < models.length - 1) {
+      if (!yieldedAny && index < candidateModels.length - 1) {
         continue;
       }
       return;

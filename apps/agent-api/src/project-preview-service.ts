@@ -305,11 +305,12 @@ export class ProjectPreviewService {
     this.sessions.set(projectId, session);
 
     // Update project state in DB
+    const finalFramework = project.framework || detected.framework;
     await this.projects.updatePreview(ctx, companyId, projectId, {
       status: "previewing",
       previewUrl,
       previewPort: devPort,
-      framework: detected.framework,
+      framework: finalFramework,
       lastBuildStatus: "ready",
     });
 
@@ -318,7 +319,7 @@ export class ProjectPreviewService {
       previewUrl,
       token,
       port: devPort,
-      framework: detected.framework,
+      framework: finalFramework,
       command: devCommand,
     };
   }

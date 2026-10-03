@@ -8,13 +8,28 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { CompanyDelegationRuntime } from "./company-runtime";
-import type { ProjectCardData, ProjectActionData, ProjectIntentDecision } from "@npati/shared";
+import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework } from "@npati/shared";
 
 export class ProjectOrchestrationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
     super(message);
     this.name = "ProjectOrchestrationError";
   }
+}
+
+export function isModelError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/InferenceRouteFailure|SelfHealingExhaustedError|OmniRouteError|model_routing_failed|model_unavailable|AI inference failed/i.test(msg)) {
+    return true;
+  }
+  if (/\b(?:401|403|404)\b/i.test(msg) && /\b(?:model|route|provider|unsupported|denied|auth|unauthorized|not found)\b/i.test(msg)) {
+    return true;
+  }
+  if (/\b(?:does not support|unsupported model|no valid candidate)\b/i.test(msg)) {
+    return true;
+  }
+  return false;
 }
 
 export class ProjectOrchestrator {
@@ -176,7 +191,7 @@ export class ProjectOrchestrator {
       const name = params.intentDecision.targetDetails?.entityName
         || (params.prompt.length > 50 ? `${params.prompt.slice(0, 40)}...` : params.prompt)
         || "Website Project";
-      const framework = params.intentDecision.targetDetails?.framework || "Vite";
+      const framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "Next.js";
 
       const { project: created } = await this.projectService.create(ctx, params.companyId, {
         name,
@@ -402,10 +417,18 @@ export class ProjectOrchestrator {
       );
     } catch (runErr) {
       const msg = runErr instanceof Error ? runErr.message : String(runErr);
+      const isModelFail = isModelError(runErr);
       await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
         status: "failed",
-        lastBuildStatus: "failed",
+        lastBuildStatus: isModelFail ? null : "failed",
       });
+      if (isModelFail) {
+        throw new ProjectOrchestrationError(
+          /404|not found/i.test(msg) ? "MODEL_UNAVAILABLE" : "MODEL_ROUTING_FAILED",
+          msg,
+          502
+        );
+      }
       throw runErr;
     }
 
@@ -419,7 +442,12 @@ export class ProjectOrchestrator {
       || params.intentDecision.intent.startsWith("EDIT_")
       || params.intentDecision.intent === "DEBUG_PROJECT";
 
-    if (needsBuild && runDetails.run.status === "failed") lastBuildStatus = "failed";
+    const runErrorMessage = runDetails.run.errorMessage || "";
+    const runFailedDueToModel = isModelError(runErrorMessage);
+
+    if (needsBuild && runDetails.run.status === "failed") {
+      lastBuildStatus = runFailedDueToModel ? null : "failed";
+    }
 
     if (needsBuild && !usedMultiAgent && runDetails.run.status === "completed") {
       await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "building" });
@@ -551,10 +579,12 @@ export class ProjectOrchestrator {
     };
 
     let responseMessage = runDetails.run.result || (isCreate
-      ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Vite"}.`
+      ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
       : `Оновлено проєкт "${project.name}".`);
 
-    if (lastBuildStatus === "failed") {
+    if (runDetails.run.status === "failed" && runFailedDueToModel) {
+      responseMessage += `\n\n⚠️ Model routing failed: ${runErrorMessage.slice(0, 300)}`;
+    } else if (lastBuildStatus === "failed") {
       const failure = buildErrorSummary || runDetails.run.errorMessage || "Preview did not become available.";
       responseMessage += `\n\n⚠️ Build or preview failed: ${failure.slice(0, 300)}`;
     }
@@ -567,10 +597,10 @@ export class ProjectOrchestrator {
       projectAction,
       previewUrl,
       repairAttempts,
-      errorDetails: lastBuildStatus === "failed" ? {
-        step: "build_repair",
+      errorDetails: (lastBuildStatus === "failed" || (runDetails.run.status === "failed" && runFailedDueToModel)) ? {
+        step: runFailedDueToModel ? "model_routing_failed" : "build_repair",
         agentId: selectedAgent.id,
-        tool: "project.terminal.exec",
+        tool: runFailedDueToModel ? "ai.inference" : "project.terminal.exec",
         retryable: false,
       } : undefined,
     };

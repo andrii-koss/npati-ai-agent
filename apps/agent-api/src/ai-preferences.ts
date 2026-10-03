@@ -1,4 +1,4 @@
-import type { AIModelSummary } from '@npati/omniroute-adapter';
+import { type AIModelSummary, isChatCapableModel } from '@npati/omniroute-adapter';
 import type { AuthContext, WorkspaceStore } from '@npati/workspace';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,15 +49,29 @@ function normalize(value: unknown): AIPreferences {
   const parsed = value && typeof value === 'object' ? value as Partial<AIPreferences> : {};
   const models = Array.isArray(parsed.addedModels) ? parsed.addedModels : [];
   const mode = parsed.routing?.mode === 'manual' ? 'manual' : 'automatic';
-  const defaultModelId = typeof parsed.routing?.defaultModelId === 'string' ? parsed.routing.defaultModelId : null;
+  let defaultModelId = typeof parsed.routing?.defaultModelId === 'string' ? parsed.routing.defaultModelId : null;
   const defaults = defaultRouting();
   const preferFree = typeof parsed.routing?.preferFree === 'boolean' ? parsed.routing.preferFree : defaults.preferFree;
   const balanceQualityCost = typeof parsed.routing?.balanceQualityCost === 'boolean' ? parsed.routing.balanceQualityCost : defaults.balanceQualityCost;
   const monthlyBudgetUsd = Number.isFinite(parsed.routing?.monthlyBudgetUsd) ? Math.max(0, Number(parsed.routing?.monthlyBudgetUsd)) : defaults.monthlyBudgetUsd;
   const warningPercent = Number.isFinite(parsed.routing?.warningPercent) ? Math.min(100, Math.max(1, Number(parsed.routing?.warningPercent))) : defaults.warningPercent;
+
+  const chatModels = models.filter((m) => isChatCapableModel(m));
+  if (defaultModelId) {
+    const selectedModel = models.find((m) => m.id === defaultModelId);
+    if (!selectedModel || !isChatCapableModel(selectedModel)) {
+      defaultModelId = chatModels[0]?.id ?? null;
+    }
+  } else if (chatModels.length > 0 && mode === 'manual') {
+    defaultModelId = chatModels[0]?.id ?? null;
+  }
+  const effectiveMode = mode === 'manual' && (!defaultModelId || !chatModels.some((m) => m.id === defaultModelId))
+    ? 'automatic'
+    : mode;
+
   return { addedModels: models, routing: {
     ...defaults,
-    mode,
+    mode: effectiveMode,
     defaultModelId,
     preferFree,
     balanceQualityCost,
@@ -145,7 +159,7 @@ export class AIPreferencesStore {
           addedModels: [...current.addedModels, { ...model, added: true }],
           routing: {
             ...current.routing,
-            defaultModelId: current.routing.defaultModelId ?? model.id,
+            defaultModelId: current.routing.defaultModelId ?? (isChatCapableModel(model) ? model.id : null),
           },
         });
   }
@@ -181,16 +195,22 @@ export class AIPreferencesStore {
 
   setDefault(scope: AuthContext, modelId: string) {
     return this.update(scope, (current) => {
-      if (!current.addedModels.some((model) => model.id === modelId)) throw new Error('Model must be added before it can be the default');
+      const found = current.addedModels.find((model) => model.id === modelId);
+      if (!found) throw new Error('Model must be added before it can be the default');
+      if (!isChatCapableModel(found)) {
+        throw new Error(`Model ${modelId} is not a chat-capable model and cannot be set as default`);
+      }
       return { ...current, routing: { ...current.routing, mode: 'manual', defaultModelId: modelId } };
     });
   }
 
   setRouting(scope: AuthContext, mode: AIMode, defaultModelId?: string | null, policy: Partial<Omit<AIRoutingPreferences, 'mode' | 'defaultModelId' | 'automaticModel'>> = {}) {
     return this.update(scope, (current) => {
-      const selected = defaultModelId ?? current.routing.defaultModelId ?? current.addedModels[0]?.id ?? null;
-      if (mode === 'manual' && (!selected || !current.addedModels.some((model) => model.id === selected))) {
-        throw new Error('Manual mode requires a default model from My Models');
+      const chatModels = current.addedModels.filter((m) => isChatCapableModel(m));
+      const currentDefaultIsChat = current.routing.defaultModelId && chatModels.some((m) => m.id === current.routing.defaultModelId);
+      const selected = defaultModelId ?? (currentDefaultIsChat ? current.routing.defaultModelId : null) ?? chatModels[0]?.id ?? null;
+      if (mode === 'manual' && (!selected || !chatModels.some((model) => model.id === selected))) {
+        throw new Error('Manual mode requires a chat-compatible default model from My Models');
       }
       const preferFree = policy.preferFree ?? current.routing.preferFree;
       const balanceQualityCost = policy.balanceQualityCost ?? current.routing.balanceQualityCost;

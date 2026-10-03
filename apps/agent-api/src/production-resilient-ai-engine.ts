@@ -1,4 +1,4 @@
-import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
+import { isNonChatSpecialtyModel, type AIEngine, type ChatRequest, type ChatResult } from "@npati/omniroute-adapter";
 import { AdaptiveAdmissionQueue, SelfHealingAutoCombo, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 
 function providerFromModel(model: string) {
@@ -26,7 +26,8 @@ function failedAttempt(modelId: string, error: unknown): InferenceRouteAttempt {
 
 export function isRetryableInferenceFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /HTTP (?:404|408|409|429|5\d\d)|quota|rate.?limit|timeout|timed out|unavailable|overload|model.*(?:missing|disabled|locked)|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message);
+  if (/OmniRoute (?:chat|stream) failed with HTTP 401/i.test(message)) return false;
+  return /HTTP (?:400|401|403|404|408|409|429|5\d\d)|quota|rate.?limit|timeout|timed out|unavailable|overload|unsupported|model.*(?:missing|disabled|locked|does not support|invalid)|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message);
 }
 
 class AsyncChunkChannel {
@@ -80,13 +81,20 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
   const defaultQueueTimeoutMs = options.queueTimeoutMs ?? 30_000;
 
   const healChat = async (request: ChatRequest): Promise<ChatResult> => {
-    const models = [
+    const rawModels = [
       request.model ?? "auto",
       request.fallbackModel,
       ...(request.model && request.model !== "auto" && !request.fallbackModel ? ["auto"] : []),
     ]
       .filter((model): model is string => Boolean(model))
       .filter((model, index, values) => values.indexOf(model) === index);
+
+    const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
+    const models = chatCapable.length > 0 ? chatCapable : ["auto"];
+    if (!models.includes("auto")) {
+      models.push("auto");
+    }
+
     const startedAt = Date.now();
     const healed = await SelfHealingAutoCombo.executeWithHealing(
       models.map((model) => ({
@@ -130,13 +138,19 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
       const channel = new AsyncChunkChannel();
       const admission = request.admission;
       const completion = queue.enqueue(async () => {
-        const models = [
+        const rawModels = [
           request.model ?? "auto",
           request.fallbackModel,
           ...(request.model && request.model !== "auto" && !request.fallbackModel ? ["auto"] : []),
         ]
           .filter((model): model is string => Boolean(model))
           .filter((model, index, values) => values.indexOf(model) === index);
+
+        const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
+        const models = chatCapable.length > 0 ? chatCapable : ["auto"];
+        if (!models.includes("auto")) {
+          models.push("auto");
+        }
         let emitted = false;
         let lastError: unknown;
         const failedRoutes: InferenceRouteAttempt[] = [];

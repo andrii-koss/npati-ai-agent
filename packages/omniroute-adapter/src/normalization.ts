@@ -66,8 +66,82 @@ function connectionStatus(connections: ProviderConnectionSummary[]) {
   return connections.length > 0 ? "unknown" as const : "not_connected" as const;
 }
 
+export function isEmbeddingModel(model: ManifestModel | { id?: string; upstreamId?: string; type?: string; supportedEndpoints?: string[]; apiFormat?: string }): boolean {
+  const id = String(model.upstreamId ?? model.id ?? "").toLowerCase();
+  const type = String(model.type ?? "").toLowerCase();
+  const apiFormat = String((model as any).apiFormat ?? (model as any).api_format ?? "").toLowerCase();
+  const endpoints = Array.isArray((model as any).supportedEndpoints) ? (model as any).supportedEndpoints
+    : Array.isArray((model as any).supported_endpoints) ? (model as any).supported_endpoints
+    : [];
+  if (type === "embedding" || type === "embeddings" || apiFormat === "embedding" || apiFormat === "embeddings") return true;
+  if (endpoints.length > 0 && endpoints.every((ep: string) => String(ep).includes("embedding"))) return true;
+  if (/\bembed(?:ding)?s?\b/i.test(id) || /-embed(?:ding)?-/i.test(id) || /_embed(?:ding)?_/i.test(id)) return true;
+  return false;
+}
+
+export function isNonChatSpecialtyModel(model: ManifestModel | { id?: string; upstreamId?: string; type?: string; supportedEndpoints?: string[]; apiFormat?: string }): boolean {
+  const id = String(model.upstreamId ?? model.id ?? "").toLowerCase();
+  const type = String(model.type ?? "").toLowerCase();
+  const apiFormat = String((model as any).apiFormat ?? (model as any).api_format ?? "").toLowerCase();
+  const endpoints = Array.isArray((model as any).supportedEndpoints) ? (model as any).supportedEndpoints
+    : Array.isArray((model as any).supported_endpoints) ? (model as any).supported_endpoints
+    : [];
+
+  const hasChatEndpoint = endpoints.some((ep: string) => /chat|completion|response/i.test(ep));
+  if (hasChatEndpoint) return false;
+
+  if (isEmbeddingModel(model)) return true;
+  if (type === "image" || type === "image_generation" || apiFormat === "image") return true;
+  if (/\b(?:dall-?e|stable-diffusion|midjourney|flux|imagen|sdxl)\b/i.test(id) || /-image-/i.test(id)) return true;
+  if (type === "audio" || type === "tts" || type === "stt" || type === "transcription" || apiFormat === "audio") return true;
+  if (/\b(?:whisper|tts|speech)\b/i.test(id) || /-audio-/i.test(id) || /\btranscription\b/i.test(id)) return true;
+  if (type === "rerank" || apiFormat === "rerank" || /\brerank(?:er)?\b/i.test(id)) return true;
+  if (type === "moderation" || /\bmoderat(?:ion|e)\b/i.test(id)) return true;
+  if (endpoints.length > 0 && !hasChatEndpoint) return true;
+
+  return false;
+}
+
+export function isChatCapableModel(model: ManifestModel | AIModelSummary | { id?: string; upstreamId?: string; capabilities?: string[]; type?: string; supportedEndpoints?: string[]; apiFormat?: string }): boolean {
+  if (isNonChatSpecialtyModel(model as ManifestModel)) return false;
+  if (Array.isArray(model.capabilities) && model.capabilities.length > 0) {
+    if (model.capabilities.includes("chat") || model.capabilities.includes("text") || model.capabilities.includes("coding")) {
+      return !model.capabilities.includes("embedding")
+        && !model.capabilities.includes("image")
+        && !model.capabilities.includes("audio")
+        && !model.capabilities.includes("rerank")
+        && !model.capabilities.includes("moderation");
+    }
+    return false;
+  }
+  return true;
+}
+
 function modelCapabilities(model: ManifestModel): string[] {
-  const result = new Set<string>(["text"]);
+  const result = new Set<string>();
+  const id = String(model.id ?? "").toLowerCase();
+  const isNonChat = isNonChatSpecialtyModel(model);
+
+  if (isEmbeddingModel(model)) {
+    result.add("embedding");
+  } else if (/\b(?:dall-?e|stable-diffusion|midjourney|flux|imagen|sdxl)\b/i.test(id) || model.type === "image") {
+    result.add("image");
+  } else if (/\b(?:whisper|tts|speech)\b/i.test(id) || model.type === "audio") {
+    result.add("audio");
+  } else if (/\brerank(?:er)?\b/i.test(id) || model.type === "rerank") {
+    result.add("rerank");
+  } else if (/\bmoderat(?:ion|e)\b/i.test(id) || model.type === "moderation") {
+    result.add("moderation");
+  }
+
+  if (!isNonChat) {
+    result.add("text");
+    result.add("chat");
+    if (/\b(?:code|coder|coding|dev|script)\b/i.test(id)) {
+      result.add("coding");
+    }
+  }
+
   if (model.supportsReasoning === true) result.add("reasoning");
   if (model.supportsVision === true) result.add("vision");
   if (model.toolCalling === true) result.add("tools");
