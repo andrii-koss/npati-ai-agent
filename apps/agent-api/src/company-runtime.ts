@@ -352,11 +352,13 @@ export class CompanyDelegationRuntime {
       await this.ai.ensureA2AEnabled();
       if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
       const resolvedAddedModels = typeof this.addedModelsResolver === "function" ? (await this.addedModelsResolver(ctx).catch(() => [])) : [];
-      const inferenceModels = chatInferenceCandidates(
-        candidates.map((agent) => agent.modelId).concat(candidates.map((agent) => agent.fallbackModelId)),
-        resolvedAddedModels,
-        await this.ai.listModels?.().catch(() => []) ?? [],
-      );
+      const inferenceModels = this.strictInferenceRouting
+        ? resolvedAddedModels.filter(isChatCapableModel).map((model) => model.id)
+        : chatInferenceCandidates(
+          candidates.map((agent) => agent.modelId).concat(candidates.map((agent) => agent.fallbackModelId)),
+          resolvedAddedModels,
+          await this.ai.listModels?.().catch(() => []) ?? [],
+        );
       if (this.strictInferenceRouting && inferenceModels.length === 0) throw new CompanyRuntimeError("model_unavailable", "No chat-compatible inference model is available for this Project", 503);
       const userAddedModelIds = resolvedAddedModels.map((m) => m.id);
       const planningModels = [...new Set([...userAddedModelIds, main.modelId, main.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))];
@@ -488,7 +490,7 @@ export class CompanyDelegationRuntime {
       if (knowledgeContext) {
         if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         result = await this.ai.chat({
-          model: comboModel(main.modelId), fallbackModel: comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
+          model: this.strictInferenceRouting ? inferenceModels[0] : comboModel(main.modelId), fallbackModel: this.strictInferenceRouting ? undefined : comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
             { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task)) },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
@@ -874,7 +876,7 @@ export class CompanyDelegationRuntime {
         name: fusion, strategy: "fusion",
         models: workers.map((agent) => ({ kind: "combo-ref", comboName: names.get(agent.id)! })),
         config: {
-          nestedComboMode: "execute", judgeModel: comboModel(main.modelId), timeoutMs: this.timeoutMs,
+          nestedComboMode: "execute", judgeModel: this.strictInferenceRouting ? inferenceModels?.[0] : comboModel(main.modelId), timeoutMs: this.timeoutMs,
           fusionTuning: { minPanel: 2, stragglerGraceMs: 4_000, panelHardTimeoutMs: Math.min(90_000, this.timeoutMs), maxPanel: MAX_SELECTED }
         }
       }, signal);

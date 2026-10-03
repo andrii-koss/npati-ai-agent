@@ -174,7 +174,7 @@ export const uk: TranslationSchema = {
       kicker: "Режим AI",
       manualTitle: "Вибрана вручну модель",
       autoTitle: "Автоматичний AI",
-      manualDesc: "NPATI використовує обрану вами модель з можливістю резервного авто-маршрутизатора.",
+      manualDesc: "NPATI використовує лише модель, вибрану в «Мої моделі».",
       autoDesc: "Маршрут Npati: {{route}}",
       automatic: "Автоматично",
       recommended: "Рекомендовано",

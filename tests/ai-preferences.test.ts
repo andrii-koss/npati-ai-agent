@@ -36,7 +36,8 @@ describe('NPATI AI preferences', () => {
     const result = await store.removeProvider(owner, 'openai');
 
     expect(result.addedModels.map((item) => item.id)).toEqual([otherModel.id]);
-    expect(result.routing).toMatchObject({ mode: 'automatic', defaultModelId: null });
+    expect(result.routing).toMatchObject({ mode: 'manual', defaultModelId: otherModel.id });
+    expect((await store.get(owner)).routing.defaultModelId).toBe(otherModel.id);
   });
 
   it('15. selects one default model', async () => {
@@ -44,13 +45,10 @@ describe('NPATI AI preferences', () => {
     expect((await store.get(owner)).routing).toMatchObject({ mode: 'manual', defaultModelId: model.id });
   });
 
-  it('16. stores Automatic mode using the verified auto model', async () => {
-    await store.setRouting(owner, 'automatic');
-    expect((await store.get(owner)).routing).toMatchObject({
-      mode: 'automatic', defaultModelId: null, automaticModel: 'auto/chat', preferFree: true,
-      fallbackOnFailure: true, balanceQualityCost: true, compression: 'stacked', monthlyBudgetUsd: 20,
-      warningPercent: 80, stopPaidWhenLimitReached: true,
-    });
+  it('16. rejects Automatic mode and keeps manual routing', async () => {
+    await store.add(owner, model);
+    await expect(store.setRouting(owner, 'automatic')).rejects.toThrow('disabled');
+    expect((await store.get(owner)).routing).toMatchObject({ mode: 'manual', defaultModelId: model.id, fallbackOnFailure: false });
   });
 
   it('17. requires an added default for Manual mode', async () => {
@@ -71,11 +69,11 @@ describe('NPATI AI preferences', () => {
 
   it('18. persists routing preferences without leaking them to another tenant', async () => {
     await store.add(owner, model);
-    await store.setRouting(owner, 'automatic', null, {
+    await store.setRouting(owner, 'manual', null, {
       preferFree: false, fallbackOnFailure: false, balanceQualityCost: false, compression: 'off',
       monthlyBudgetUsd: 35, warningPercent: 75, stopPaidWhenLimitReached: false,
     });
-    expect((await store.get(owner)).routing).toMatchObject({ automaticModel: 'auto/smart', monthlyBudgetUsd: 35 });
+    expect((await store.get(owner)).routing).toMatchObject({ mode: 'manual', defaultModelId: model.id, fallbackOnFailure: false, monthlyBudgetUsd: 35 });
     expect(await store.get(otherTenant)).toMatchObject({ addedModels: [], routing: { automaticModel: 'auto', monthlyBudgetUsd: 20 } });
   });
 

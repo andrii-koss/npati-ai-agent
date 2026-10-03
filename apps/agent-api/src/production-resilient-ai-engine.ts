@@ -83,16 +83,12 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
     const rawModels = [
       request.model ?? "auto",
       request.fallbackModel,
-      ...(request.model && request.model !== "auto" && !request.fallbackModel ? ["auto"] : []),
     ]
       .filter((model): model is string => Boolean(model))
       .filter((model, index, values) => values.indexOf(model) === index);
 
     const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-    const models = chatCapable.length > 0 ? chatCapable : ["auto"];
-    if (!models.includes("auto")) {
-      models.push("auto");
-    }
+    const models = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
 
     const startedAt = Date.now();
     const healed = await SelfHealingAutoCombo.executeWithHealing(
@@ -140,16 +136,12 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
         const rawModels = [
           request.model ?? "auto",
           request.fallbackModel,
-          ...(request.model && request.model !== "auto" && !request.fallbackModel ? ["auto"] : []),
         ]
           .filter((model): model is string => Boolean(model))
           .filter((model, index, values) => values.indexOf(model) === index);
 
         const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-        const models = chatCapable.length > 0 ? chatCapable : ["auto"];
-        if (!models.includes("auto")) {
-          models.push("auto");
-        }
+        const models = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
         let emitted = false;
         let lastError: unknown;
         const failedRoutes: InferenceRouteAttempt[] = [];

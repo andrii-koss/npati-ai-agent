@@ -1,4 +1,5 @@
 import { buildApp } from "../apps/agent-api/src/app";
+import { AIPreferencesStore } from "../apps/agent-api/src/ai-preferences";
 import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
@@ -298,6 +299,34 @@ describe("Agent API", () => {
     expect(response.body).toContain('"message":"First live tokens"');
   });
 
+  it("uses the selected My Models entry for every chat inference call", async () => {
+    const workspaceStore = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { workspaceId: "manual-ws", userId: "manual-user", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    const preferences = new AIPreferencesStore(workspaceStore);
+    const selected = { id: "deepseek/DeepSeek-V4.1-Flash", upstreamId: "DeepSeek-V4.1-Flash", providerId: "deepseek", providerName: "DeepSeek", name: "DeepSeek-V4.1-Flash", capabilities: ["chat"], added: true, local: false, freeStatus: "unknown" as const };
+    await preferences.add(auth, selected);
+    await preferences.setDefault(auth, selected.id);
+    const calls: string[] = [];
+    const aiEngine = {
+      chat: async (request: ChatRequest) => {
+        calls.push(request.model ?? "missing");
+        expect(request.fallbackModel).toBeUndefined();
+        return { content: "Selected model replied", model: request.model };
+      },
+      stream: async function* () { yield "Selected model replied"; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    } as unknown as AIEngine;
+    const authProvider: AuthProvider = { authenticate: async () => auth };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore, authProvider, aiEngine, marketplace });
+    apps.push(app);
+    const response = await app.inject({ method: "POST", url: "/chat", payload: { message: "Hello", contextType: "none" } });
+    expect(response.statusCode).toBe(200);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((model) => model === selected.id)).toBe(true);
+  });
   it("names the selected automatic route when chat inference fails", async () => {
     const unavailable = new Error("OmniRoute failed with HTTP 502");
     const aiEngine: AIEngine = {
