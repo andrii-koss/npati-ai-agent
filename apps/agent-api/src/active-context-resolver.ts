@@ -48,12 +48,18 @@ export class ActiveContextResolver {
       if (!company) {
         throw new WorkspaceAccessError(`Company not found or access denied: ${validated.companyId}`);
       }
-      const project = await this.store.getProject(auth, validated.companyId, validated.projectId);
-      if (!project || project.companyId !== company.id) {
-        throw new WorkspaceAccessError(`Project not found or does not belong to active company: ${validated.projectId}`);
+      let project: Project | undefined;
+      try {
+        project = await this.store.getProject(auth, validated.companyId, validated.projectId);
+      } catch {
+        project = undefined;
       }
-      if (project.status === "archived") {
-        throw new WorkspaceAccessError(`Project is archived: ${validated.projectId}`);
+      if (!project || project.companyId !== company.id || project.status === "archived") {
+        return this.resolve(auth, {
+          contextType: "company",
+          companyId: company.id,
+          businessId: company.businessId ?? null,
+        });
       }
       let business: Business | undefined;
       if (company.businessId) {

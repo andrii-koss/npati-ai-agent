@@ -1594,13 +1594,16 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
     const activeCompanyForRequest = companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
-    try {
-      const stored = sessionStorage.getItem("npati_active_project");
-      if (stored) {
-        const active = JSON.parse(stored) as { companyId?: string; projectId?: string };
-        if (active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
-      }
-    } catch {}
+    const isNewProjectRequest = /\b(?:створи|створіть|create|build|generate|make|new)\b[^.\n]{0,30}\b(?:сайт|website|проєкт|проект|project|app)\b/iu.test(requestMessage);
+    if (!isNewProjectRequest) {
+      try {
+        const stored = sessionStorage.getItem("npati_active_project");
+        if (stored) {
+          const active = JSON.parse(stored) as { companyId?: string; projectId?: string };
+          if (active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
+        }
+      } catch {}
+    }
     try {
       const result = await streamChat<AgentReply>({
         message: requestMessage,
@@ -1691,6 +1694,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     } catch (reason) {
       flushDeltas();
       const typed = reason as Error & { code?: string };
+      if (typed.message?.includes("Project not found") || (typed as any).code === "WORKSPACE_NOT_FOUND" || (typed as any).status === 404) {
+        try { sessionStorage.removeItem("npati_active_project"); } catch {}
+      }
       if (typed.name === "AbortError") {
         window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
         progressCompleteRef.current = true;
