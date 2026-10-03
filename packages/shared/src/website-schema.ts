@@ -74,6 +74,18 @@ export interface WebsiteAsset {
   uploadedAt: string;
 }
 
+export interface WebsiteDomainConfig {
+  domain: string;
+  isTechnicalDomain?: boolean;
+  path?: string; // defaults to "/"
+  stripPath?: boolean;
+  port: number; // e.g. 3000
+  customEntrypoint?: boolean;
+  entrypoints?: string[]; // e.g. ["web", "websecure"]
+  sslCertificate: boolean;
+  certificateProvider?: "letsencrypt" | "none";
+}
+
 export interface WebsiteDocument {
   version: "1.0";
   id: string;
@@ -84,6 +96,7 @@ export interface WebsiteDocument {
   assets?: WebsiteAsset[];
   globalHeaderCode?: string;
   globalFooterCode?: string;
+  domainConfig?: WebsiteDomainConfig;
   updatedAt: string;
 }
 
@@ -661,6 +674,7 @@ export function createDefaultWebsiteDocument(
     primaryColor?: string;
     includePages?: string[];
     template?: "hosting" | "saas" | "ecommerce" | "portfolio" | "landing" | "blank";
+    domainConfig?: WebsiteDomainConfig;
   } = {}
 ): WebsiteDocument {
   const primary = options.primaryColor || (options.template === "hosting" ? "#2563eb" : "#e11d2e");
@@ -1048,6 +1062,7 @@ export function createDefaultWebsiteDocument(
       },
     ],
     assets: [],
+    domainConfig: options.domainConfig,
     updatedAt: now,
   };
 }
