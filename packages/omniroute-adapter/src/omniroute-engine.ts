@@ -189,7 +189,10 @@ export class OmniRouteEngine implements AIEngine {
     const candidates = requested.flatMap((model) => model === "auto" || model.startsWith("auto/")
       ? available.map((entry) => entry.id)
       : [model]);
-    const compatible = [...new Set(candidates)].filter((id) => id !== "auto" && !id.startsWith("auto/") && ((requested.includes(id) && id.startsWith("npati/")) || isChatCapableModel(metadata.get(id) ?? { id })));
+    const canonicalCandidates = candidates.map((model) => /^deepseek\/(?:DeepSeek-V4\.1-Flash|deepseek-v4\.1-flash|deepseek-v4-flash)$/i.test(model)
+      ? "deepseek/deepseek-flash"
+      : model);
+    const compatible = [...new Set(canonicalCandidates)].filter((id) => id !== "auto" && !id.startsWith("auto/") && ((requested.includes(id) && id.startsWith("npati/")) || isChatCapableModel(metadata.get(id) ?? { id })));
     if (!compatible.length) throw new Error("model_unavailable: no chat-compatible model supports the requested inference interface");
     return compatible;
   }

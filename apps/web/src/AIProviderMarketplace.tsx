@@ -302,9 +302,16 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
   }
 
   return <section className="routing-panel ai-policy-panel">
-    <div className="routing-panel-head"><div><h2>{t("aiMarketplace.routing.manualTitle")}</h2><p>{t(models.some(chatRoutableModel) ? "aiMarketplace.routing.manualDesc" : "aiMarketplace.routing.addModelFirst")}</p></div></div>
+    <div className="routing-panel-head"><div><p className="section-kicker">{t("aiMarketplace.routing.kicker")}</p><h2>{t("aiMarketplace.routing.manualTitle")}</h2><p>{t(models.some(chatRoutableModel) ? "aiMarketplace.routing.manualDesc" : "aiMarketplace.routing.addModelFirst")}</p></div>
+      <div className="mode-switch" aria-label="AI mode" style={{ display: "flex", background: "transparent", padding: 0 }}>
+        <button className="active" disabled={saving || !models.some(chatRoutableModel)} onClick={() => save({ mode: "manual" })}>{t("aiMarketplace.routing.manual")} <small>{models.some(chatRoutableModel) ? t("aiMarketplace.routing.useDefault") : t("aiMarketplace.routing.addModelFirst")}</small></button>
+      </div>
+    </div>
     <div className="ai-policy-grid">
       <div className="ai-policy-options">
+        <label><input type="checkbox" checked={activeRouting.preferFree} disabled /><span><strong>{t("aiMarketplace.routing.preferFreeTitle")}</strong><small>{t("aiMarketplace.routing.preferFreeDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.fallbackOnFailure} disabled /><span><strong>{t("aiMarketplace.routing.fallbackTitle")}</strong><small>{t("aiMarketplace.routing.fallbackDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.balanceQualityCost} disabled /><span><strong>{t("aiMarketplace.routing.balanceTitle")}</strong><small>{t("aiMarketplace.routing.balanceDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>{t("aiMarketplace.routing.compressionTitle")}</strong><small>{t("aiMarketplace.routing.compressionDesc")}</small></span></label>
       </div>
       <form className="ai-budget-settings" onSubmit={saveBudget}>
