@@ -2,6 +2,7 @@ import type { AuthContext, CompanyAgentRunDetails, WorkspaceStore } from "@npati
 import type { CompanyDelegationRuntime } from "./company-runtime";
 import type { ProjectPreviewService } from "./project-preview-service";
 import { SecurityPolicyEngine } from "./security-guardrails";
+import { canBuildWebsite } from "./project-agent-capabilities";
 import {
   executeProjectTaskGraph,
   parseProjectTaskPlan,
@@ -62,11 +63,13 @@ export class ProjectMultiAgentService {
     projectContext: string | undefined,
     idempotencyKey: string,
     improveOnly = false,
+    requireWebsiteTools = false,
   ): Promise<CompanyAgentRunDetails | undefined> {
     const company = await this.store.getCompany(ctx, companyId);
     const agents = await this.store.listCompanyAgents(ctx, companyId);
     const specialists = agents.filter((agent) => agent.isActive && agent.id !== company.mainAgentId &&
-      agent.tools.some((tool) => tool.startsWith("project.")));
+      (requireWebsiteTools && !improveOnly ? canBuildWebsite(agent) : agent.tools.some((tool) => tool.startsWith("project."))));
+    const taskAgents = requireWebsiteTools && !improveOnly ? agents.filter(canBuildWebsite) : agents;
     if (!improveOnly && specialists.length < 2) return undefined;
     if (!company.mainAgentId) throw new Error("Company Main Agent is required for project task planning");
     const edges = await this.store.listCompanyAgentEdges(ctx, companyId);
@@ -119,7 +122,7 @@ export class ProjectMultiAgentService {
           throw new Error("Implementation tasks cannot depend on QA tasks");
       }
       for (const task of tasks) {
-        task.agentId = selectProjectTaskAgent(task.role, agents, edges, company.mainAgentId)?.id;
+        task.agentId = selectProjectTaskAgent(task.role, taskAgents, edges, company.mainAgentId)?.id;
         if (!task.agentId) throw new Error("No active agent available for project task " + task.id);
       }
       await this.store.updateCompanyAgentRun(ctx, companyId, parent.id, {
@@ -193,7 +196,7 @@ export class ProjectMultiAgentService {
             }
             if (!openIssues.length) return "QA passed; preview is available.";
             if (iteration === 1) return "QA finished with open issues: " + openIssues.join("; ");
-            const developer = selectProjectTaskAgent("frontend", agents, edges, company.mainAgentId!);
+            const developer = selectProjectTaskAgent("frontend", taskAgents, edges, company.mainAgentId!);
             if (!developer) throw new Error("Developer Agent unavailable for QA repair");
             const repair = await this.runtime.execute(ctx, companyId, {
               task: [

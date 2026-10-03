@@ -351,7 +351,7 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
       role: "engineer",
       description: "Frontend developer specialist in React and Vite",
       systemInstruction: "Build fast and accessible UI components",
-      tools: ["project.files.read", "project.files.write", "project.terminal.exec"],
+      tools: ["project.files.list", "project.files.search", "project.files.read", "project.files.create", "project.files.write", "project.files.edit", "project.terminal.exec"],
       isActive: true,
     }, "ag2-key");
 
@@ -362,6 +362,69 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(selected?.role).toBe("engineer");
   });
 
+  it("creates a website builder for a default company and never assigns file tools to the coordinator", async () => {
+    let company = await store.createCompany(authUserA, { name: "Hosting Co" }, "hosting-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: ["web.search"], isActive: true,
+    }, "hosting-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    const partial = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Partial Developer", role: "frontend developer",
+      tools: ["project.files.read", "project.files.write"], isActive: true,
+    }, "partial-developer");
+    expect(await orchestrator.selectProjectAgent(authUserA, company.id)).toBeUndefined();
+
+    const intentDecision = classifyProjectIntent({ message: "створи мені сайт хостінг компанія" });
+    const first = await orchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id, prompt: "створи мені сайт хостінг компанія",
+      intentDecision, idempotencyKey: "hosting-website",
+    });
+    const builder = (await store.listCompanyAgents(authUserA, company.id))
+      .find((agent) => agent.name === "Website Builder");
+    expect(builder).toBeDefined();
+    expect(first.runDetails.run.selectedAgentIds).toContain(builder!.id);
+    expect(first.runDetails.run.selectedAgentIds).not.toContain(coordinator.id);
+    expect(first.runDetails.run.selectedAgentIds).not.toContain(partial.id);
+    expect(first.projectCard.buildStatus).toBe("success");
+    expect((await store.getCompanyAgent(authUserA, company.id, coordinator.id)).tools).toEqual(coordinator.tools);
+
+    await orchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id, projectId: first.project.id, prompt: "Update the home page",
+      intentDecision: classifyProjectIntent({ message: "Update the home page", activeProjectId: first.project.id }),
+      idempotencyKey: "hosting-website-edit",
+    });
+    expect((await store.listCompanyAgents(authUserA, company.id))
+      .filter((agent) => agent.name === "Website Builder")).toHaveLength(1);
+  });
+  it("reports an agent permission failure without marking an unattempted build as failed", async () => {
+    let company = await store.createCompany(authUserA, { name: "Permission Co" }, "permission-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: ["web.search"], isActive: true,
+    }, "permission-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    const failedRuntime = {
+      async execute(ctx: AuthContext, companyId: string, input: { task: string; projectId: string }, key: string) {
+        const { run } = await store.createCompanyAgentRun(ctx, companyId,
+          { task: input.task, requestedMode: "single", projectId: input.projectId }, key);
+        await store.updateCompanyAgentRun(ctx, companyId, run.id, {
+          status: "failed", errorCode: "TOOL_FORBIDDEN",
+          errorMessage: 'Agent "Coordinator" may not use project.files.list',
+        });
+        return store.getCompanyAgentRun(ctx, companyId, run.id);
+      },
+    } as unknown as CompanyDelegationRuntime;
+    const failedOrchestrator = new ProjectOrchestrator(
+      store, projectService, projectWorkspace, undefined, gitPreviewService, failedRuntime);
+    const result = await failedOrchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id, prompt: "Create a hosting website",
+      intentDecision: classifyProjectIntent({ message: "Create a hosting website" }),
+      idempotencyKey: "permission-website",
+    });
+    expect(result.responseMessage).toContain("Project agent failed");
+    expect(result.responseMessage).not.toContain("Build or preview failed");
+    expect(result.projectCard.buildStatus).toBeNull();
+    expect(result.errorDetails?.step).toBe("agent_execution");
+  });
   it("creates and updates shared project context (PROJECT.md) with targeted edit rule", async () => {
     const comp = await store.createCompany(authUserA, { name: "Context Co" }, "ctx-co-key");
     const { project } = await projectService.create(authUserA, comp.id, { name: "Targeted Site", type: "website" }, "tgt-proj-key");
