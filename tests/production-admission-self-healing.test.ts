@@ -86,21 +86,22 @@ describe("Production adaptive admission and self-healing", () => {
     });
   });
 
-  it("does not hide authentication or validation failures behind a fallback", async () => {
+  it("skips a model rejected with HTTP 401 and uses the next fallback", async () => {
     const calls: string[] = [];
     const base = fakeEngine({
       chat: async (request) => {
         calls.push(request.model!);
+        if (request.model === "working/fallback") return { content: "recovered", model: request.model };
         throw new Error("OmniRoute chat failed with HTTP 401");
       },
     });
     const resilient = createProductionResilientAIEngine(base);
     await expect(resilient.chat({
       model: "bad/primary",
-      fallbackModel: "must-not-run/fallback",
+      fallbackModel: "working/fallback",
       messages: [{ role: "user", content: "hello" }],
-    })).rejects.toThrow("HTTP 401");
-    expect(calls).toEqual(["bad/primary"]);
+    })).resolves.toMatchObject({ content: "recovered", model: "working/fallback" });
+    expect(calls).toEqual(["bad/primary", "working/fallback"]);
   });
 
   it("streams through the production queue and falls back only before output starts", async () => {

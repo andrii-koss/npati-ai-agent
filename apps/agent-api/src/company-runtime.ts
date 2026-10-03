@@ -1,6 +1,7 @@
 import { classifyTerminalCommand } from "./terminal-command-policy";
 import { createHash } from "node:crypto";
-import type { AIEngine, ChatResult } from "@npati/omniroute-adapter";
+import { isChatCapableModel, type AIEngine, type AIModelSummary, type ChatResult } from "@npati/omniroute-adapter";
+import { chatInferenceCandidates, isUnavailableInferenceError } from "./chat-inference-candidates";
 import type { AuthContext, Business, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, Goal, MemoryItem, WorkspaceStore } from "@npati/workspace";
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
@@ -44,7 +45,7 @@ export class CompanyRuntimeError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 24);
-const comboModel = (value: string | null | undefined) => value == null || value === "auto" ? "auto/smart" : value;
+const comboModel = (value: string | null | undefined) => value == null || value === "auto" || !isChatCapableModel({ id: value }) ? "auto/smart" : value;
 function toolName(value: string) {
   const raw = value.trim().toLowerCase();
   const key = raw.replace(/[ _-]+/g, ".");
@@ -219,6 +220,8 @@ export class CompanyDelegationRuntime {
     private readonly durableApprovals?: DurableApprovalGateway,
     private readonly telemetry?: Pick<AuditRepository, "recordUsage" | "log">,
     private readonly userDocumentRetriever?: (ctx: AuthContext) => Promise<string | undefined>,
+    private readonly addedModelsResolver?: (ctx: AuthContext) => Promise<AIModelSummary[]>,
+    private readonly strictInferenceRouting = false,
   ) {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
@@ -344,8 +347,15 @@ export class CompanyDelegationRuntime {
       const actionPlanningContext=planningMemory.memories.filter(memory=>memory.source==="action_sensitive").map(memory=>memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
       if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
-      const planned = await this.ai.a2aSend({
-        model: main.modelId ?? "auto", timeoutMs: Math.min(60_000, this.timeoutMs), signal,
+      const inferenceModels = chatInferenceCandidates(
+        candidates.map((agent) => agent.modelId).concat(candidates.map((agent) => agent.fallbackModelId)),
+        await this.addedModelsResolver?.(ctx) ?? [],
+        await this.ai.listModels?.().catch(() => []) ?? [],
+      );
+      if (this.strictInferenceRouting && inferenceModels.length === 0) throw new CompanyRuntimeError("model_unavailable", "No chat-compatible inference model is available for this Project", 503);
+      const planningModels = [...new Set([main.modelId, main.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))];
+      const planningRequest: Parameters<NonNullable<AIEngine["a2aSend"]>>[0] = {
+        model: planningModels[0] ?? (main.modelId && isChatCapableModel({ id: main.modelId }) ? main.modelId : "auto"), timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
           { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked)+(actionPlanningContext?"\n\nMandatory action-sensitive rules:\n"+actionPlanningContext:"")) },
@@ -380,7 +390,15 @@ export class CompanyDelegationRuntime {
             "Use pipeline for dependent work and fusion for independent parallel perspectives.",
           ].join("\n\n")) },
         ],
-      });
+      };
+      const planned = await (async () => {
+        let lastError: unknown;
+        for (const model of planningModels.length ? planningModels : [planningRequest.model]) {
+          try { return await this.ai.a2aSend!({ ...planningRequest, model }); }
+          catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
+        }
+        throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
+      })();
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
       const plan = parsePlan(planned.content, input.mode ?? "auto"), byId = new Map(candidates.map((agent) => [agent.id, agent]));
       if (options.preferredAgentId) {
@@ -428,7 +446,7 @@ export class CompanyDelegationRuntime {
         knowledge.memories.length ? "Relevant Company Memory:\n"+knowledge.memories.map(item=>item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n"+knowledge.chunks.map(item=>item.content).join("\n\n---\n\n") : "",
       ].filter(Boolean).join("\n\n");
-      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory, linked);
+      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory, linked, inferenceModels.length ? inferenceModels : undefined);
       const ids = [...new Set([...selected.map((agent) => agent.id), main.id])];
       await this.store.replaceCompanyAgentRunSteps(ctx, companyId, created.run.id, ids.map((id, index) => {
         const agent = byId.get(id) ?? main;
@@ -798,14 +816,17 @@ export class CompanyDelegationRuntime {
     return evidence.join("\n\n");
   }
 
-  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext) {
+  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext, inferenceModels?: string[]) {
     if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "NPATI AI routing combinations are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();
     for (const agent of unique) {
-      const primary = comboModel(agent.modelId), fallback = comboModel(agent.fallbackModelId);
+      const agentModels = inferenceModels?.length
+        ? [...new Set([agent.modelId, agent.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))]
+        : undefined;
+      const primary = agentModels?.[0] ?? comboModel(agent.modelId), fallback = agentModels?.[1] ?? comboModel(agent.fallbackModelId);
       const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
-      await this.ai.ensureCombo({ name, strategy: "priority", models: [...new Set([primary, fallback])],
+      await this.ai.ensureCombo({ name, strategy: "priority", models: agentModels?.length ? agentModels : [...new Set([primary, fallback])],
         description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory, linked),
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs } }, signal);

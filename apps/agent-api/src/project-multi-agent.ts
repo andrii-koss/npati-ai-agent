@@ -150,6 +150,7 @@ export class ProjectMultiAgentService {
           let openIssues: string[] = [];
           for (let iteration = 0; iteration < 2; iteration++) {
             try {
+              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId);
               await this.preview.startPreview(ctx, companyId, projectId);
             } catch (error) {
               openIssues = ["Preview/build failed: " + clean(error instanceof Error ? error.message : "Unknown error", 300)];
@@ -179,7 +180,7 @@ export class ProjectMultiAgentService {
                 ].join("\n"),
                 mode: "single", preferredAgentId: task.agentId, projectId, allowedProjectId: projectId, noMemory: true, callBudget: budget,
               }, idempotencyKey + ":qa:" + iteration);
-              if (qaRun.run.status !== "completed") throw new Error("QA Agent failed");
+              if (qaRun.run.status !== "completed") throw new Error(qaRun.run.errorMessage ?? "QA Agent failed");
               const agentIssues = issuesFromResult(qaRun.run.result ?? "");
               openIssues = [...new Set([...openIssues, ...agentIssues])];
             }
@@ -197,7 +198,7 @@ export class ProjectMultiAgentService {
               ].join("\n"),
               mode: "single", preferredAgentId: developer.id, projectId, allowedProjectId: projectId, noMemory: true, callBudget: budget,
             }, idempotencyKey + ":qa-repair:" + iteration);
-            if (repair.run.status !== "completed") throw new Error("Developer Agent could not repair QA issues");
+            if (repair.run.status !== "completed") throw new Error(repair.run.errorMessage ?? "Developer Agent could not repair QA issues");
             openIssues = [];
           }
           return "QA completed";
@@ -278,6 +279,7 @@ export class ProjectMultiAgentService {
 
             // Build verification
             try {
+              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId);
               await this.preview.startPreview(ctx, companyId, projectId);
               await this.store.appendCompanyAgentRunEvent(ctx, companyId, parent.id, {
                 eventKey: "project-build:" + task.id,
@@ -348,6 +350,7 @@ export class ProjectMultiAgentService {
       await executeProjectTaskGraph(tasks, execute, onStatus, 3, this.leaseManager, projectId);
       const failed = tasks.filter((task) => task.status === "failed" || task.status === "waiting");
       const hasBudgetFailure = tasks.some((t) => t.error?.includes("model call limit reached") || t.error?.includes("budget"));
+      const hasModelFailure = tasks.some((t) => /model_routing_failed|model_unavailable|chat-compatible|AI inference failed|HTTP (?:401|403|404)/i.test(t.error ?? ""));
       let result: string;
       if (improveOnly) {
         const findings = tasks.map((task) => task.role + ": " + clean(task.result ?? task.error ?? task.status, 600)).join("\n");
@@ -363,16 +366,17 @@ export class ProjectMultiAgentService {
       }
       await this.store.updateCompanyAgentRun(ctx, companyId, parent.id, {
         status: failed.length ? "failed" : "completed", result,
-        errorCode: failed.length ? (hasBudgetFailure ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED") : undefined,
+        errorCode: failed.length ? (hasModelFailure ? "model_routing_failed" : hasBudgetFailure ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED") : undefined,
         errorMessage: failed.length ? failed.map((task) => task.id + ": " + (task.error ?? task.status)).join("; ").slice(0, 500) : undefined,
       });
       return this.store.getCompanyAgentRun(ctx, companyId, parent.id);
     } catch (error) {
+      const isModel = /model_routing_failed|model_unavailable|chat-compatible|AI inference failed|HTTP (?:401|403|404)/i.test(error instanceof Error ? error.message : String(error));
       const isBudget = (error as { code?: string }).code === "MODEL_CALL_BUDGET_EXCEEDED" ||
         (error instanceof Error && error.message.includes("model call limit reached"));
       await this.store.updateCompanyAgentRun(ctx, companyId, parent.id, {
         status: "failed",
-        errorCode: isBudget ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED",
+        errorCode: isModel ? "model_routing_failed" : isBudget ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED",
         errorMessage: clean(error instanceof Error ? error.message : "Project task failed", 500),
       });
       return this.store.getCompanyAgentRun(ctx, companyId, parent.id);

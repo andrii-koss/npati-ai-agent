@@ -20,7 +20,7 @@ export class ProjectOrchestrationError extends Error {
 export function isModelError(error: unknown): boolean {
   if (!error) return false;
   const msg = error instanceof Error ? error.message : String(error);
-  if (/InferenceRouteFailure|SelfHealingExhaustedError|OmniRouteError|model_routing_failed|model_unavailable|AI inference failed/i.test(msg)) {
+  if (/InferenceRouteFailure|SelfHealingExhaustedError|OmniRouteError|model_routing_failed|model_unavailable|No chat-compatible inference model|AI inference failed/i.test(msg)) {
     return true;
   }
   if (/\b(?:401|403|404)\b/i.test(msg) && /\b(?:model|route|provider|unsupported|denied|auth|unauthorized|not found)\b/i.test(msg)) {
@@ -134,6 +134,19 @@ export class ProjectOrchestrator {
     return content;
   }
 
+  private async scaffoldNextProject(ctx: AuthContext, companyId: string, projectId: string) {
+    const files: Record<string, string> = {
+      "package.json": JSON.stringify({ name: "npati-next-website", private: true, scripts: { dev: "next dev --hostname 0.0.0.0", build: "next build", start: "next start --hostname 0.0.0.0" }, dependencies: { next: "latest", react: "latest", "react-dom": "latest" }, devDependencies: { typescript: "latest", "@types/react": "latest", "@types/node": "latest" } }, null, 2) + "\n",
+      "app/layout.tsx": 'import "./globals.css";\nexport default function RootLayout({ children }: { children: React.ReactNode }) { return <html lang="uk"><body>{children}</body></html>; }\n',
+      "app/page.tsx": 'export default function Home() { return <main><h1>Hosting</h1><p>Modern hosting for your next project.</p></main>; }\n',
+      "app/globals.css": 'body { margin: 0; font-family: system-ui, sans-serif; } main { padding: 3rem; }\n',
+      "tsconfig.json": JSON.stringify({ compilerOptions: { target: "ES2017", lib: ["dom", "dom.iterable", "esnext"], allowJs: true, skipLibCheck: true, strict: true, noEmit: true, esModuleInterop: true, module: "esnext", moduleResolution: "bundler", resolveJsonModule: true, isolatedModules: true, jsx: "preserve", incremental: true, plugins: [{ name: "next" }] }, include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"], exclude: ["node_modules"] }, null, 2) + "\n",
+    };
+    for (const [filePath, content] of Object.entries(files)) {
+      try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
+      catch { await this.projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
+    }
+  }
   /**
    * Retrieves the shared PROJECT.md if present.
    */
@@ -199,6 +212,8 @@ export class ProjectOrchestrator {
         type: "website",
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
       project = await this.projectService.updatePreview(ctx, params.companyId, created.id, { framework });
+
+      if (framework === "Next.js") await this.scaffoldNextProject(ctx, params.companyId, project.id);
 
       // Initialize PROJECT.md
       await this.initSharedProjectContext(ctx, params.companyId, project.id, {
@@ -432,6 +447,13 @@ export class ProjectOrchestrator {
       throw runErr;
     }
 
+    if (project.framework === "Next.js" && runDetails.run.status === "completed") {
+      const manifest = JSON.parse((await this.projectWorkspace.readFile(ctx, params.companyId, project.id, "package.json")).content) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; scripts?: Record<string, string> };
+      if ((!manifest.dependencies?.next && !manifest.devDependencies?.next) || !/\bnext\b/.test(manifest.scripts?.dev ?? "") || !/\bnext\b/.test(manifest.scripts?.build ?? "")) {
+        await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "failed", lastBuildStatus: null });
+        throw new ProjectOrchestrationError("FRAMEWORK_MISMATCH", "Next.js was requested, but the generated Project does not contain Next.js", 422);
+      }
+    }
     // 5. Build Repair Loop (Max 3 attempts)
     let lastBuildStatus: "success" | "failed" | null = null;
     let buildErrorSummary = "";
@@ -443,7 +465,7 @@ export class ProjectOrchestrator {
       || params.intentDecision.intent === "DEBUG_PROJECT";
 
     const runErrorMessage = runDetails.run.errorMessage || "";
-    const runFailedDueToModel = isModelError(runErrorMessage);
+    const runFailedDueToModel = isModelError(runErrorMessage) || /model_routing_failed|model_unavailable/i.test(runDetails.run.errorCode ?? "");
 
     if (needsBuild && runDetails.run.status === "failed") {
       lastBuildStatus = runFailedDueToModel ? null : "failed";
@@ -459,7 +481,8 @@ export class ProjectOrchestrator {
       while (repairAttempts < maxAttempts && !buildPassed) {
         repairAttempts++;
         try {
-          // Attempt dev server / preview start or test compilation
+          // Verify the production build before starting the development preview.
+          if (typeof this.previewService.buildProject === "function") await this.previewService.buildProject(ctx, params.companyId, project.id);
           const preview = await this.previewService.startPreview(ctx, params.companyId, project.id);
           if (preview.previewUrl) {
             buildPassed = true;
@@ -547,7 +570,7 @@ export class ProjectOrchestrator {
     } catch {}
 
     if (usedMultiAgent && needsBuild && runDetails.run.status === "completed") lastBuildStatus = previewUrl ? "success" : "failed";
-    const finalStatus = lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
+    const finalStatus = runDetails.run.status === "failed" || lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
     project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
       status: finalStatus,
       lastBuildStatus,

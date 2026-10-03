@@ -867,7 +867,8 @@ export function buildApp(config: AppConfig = {}) {
       ]);
       return {chunks:knowledge.chunks,memories:[...knowledge.memories,...scoped.map(item=>({content:item.title+": "+item.content}))]};
     } : undefined,undefined,undefined,(ctx,companyId)=>guardrailPolicies.get(ctx,companyId),approvalsRepo,auditRepo,
-    async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown);
+    async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown,
+    async (ctx) => (await aiPreferences.get(ctx)).addedModels, baseAiEngine instanceof OmniRouteEngine);
   const projectOrchestrator = new ProjectOrchestrator(
     workspaceStore,
     projectService,

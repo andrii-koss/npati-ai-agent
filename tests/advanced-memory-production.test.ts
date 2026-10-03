@@ -21,7 +21,7 @@ describe("advanced memory production contracts",()=>{
  });
  it("injects action-sensitive memory before delegation planning",()=>{
   const runtime=readFileSync(new URL("../apps/agent-api/src/company-runtime.ts",import.meta.url),"utf8");
-  expect(runtime.indexOf("const actionPlanningContext")).toBeLessThan(runtime.indexOf("const planned = await this.ai.a2aSend"));
+  expect(runtime.indexOf("const actionPlanningContext")).toBeLessThan(runtime.indexOf("const planningRequest"));
   expect(runtime).toContain("Mandatory action-sensitive rules");
   expect(runtime).toContain("plan.toolRequests.map(request=>request.tool)");
  });
