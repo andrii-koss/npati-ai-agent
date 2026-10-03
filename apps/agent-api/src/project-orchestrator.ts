@@ -638,10 +638,12 @@ export class ProjectOrchestrator {
 
     // 6. Update Project Status & Preview URL
     let previewUrl: string | undefined;
-    try {
-      const pStatus = await this.previewService.getPreviewStatus(ctx, params.companyId, project.id);
-      previewUrl = pStatus.previewUrl || undefined;
-    } catch {}
+    if (runDetails.run.status === "completed" && lastBuildStatus !== "failed") {
+      try {
+        const pStatus = await this.previewService.getPreviewStatus(ctx, params.companyId, project.id);
+        previewUrl = pStatus.previewUrl || undefined;
+      } catch {}
+    }
 
     if (usedMultiAgent && needsBuild && runDetails.run.status === "completed") lastBuildStatus = previewUrl ? "success" : "failed";
     const finalStatus = runDetails.run.status === "failed" || lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
