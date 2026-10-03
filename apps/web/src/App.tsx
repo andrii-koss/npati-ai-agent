@@ -49,7 +49,7 @@ function resolveNpatiAvatarUrl(value?: string | null): string | null {
 }
 
 
-const navigation = ["Websites", "Settings"];
+const navigation = ["Settings"];
 type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
 const legacyChatStorageResetMarker = "npati_legacy_chat_storage_removed_2026_09_06_v1";
 function clearLegacyLocalChatsOnce() {
@@ -1246,18 +1246,6 @@ function SettingsPage() {
     description: string;
   }> = [
     {
-      to: "/settings/websites",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="2" y1="12" x2="22" y2="12" />
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-        </svg>
-      ),
-      title: "Website Builder",
-      description: language === "uk" ? "Створюйте та редагуйте сайти на Next.js та за допомогою AI." : "Create, customize, and manage responsive websites with Next.js and AI.",
-    },
-    {
       to: "/settings/ai",
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1303,6 +1291,18 @@ function SettingsPage() {
       ),
       title: t("settings.cards.company.title"),
       description: t("settings.cards.company.desc"),
+    },
+    {
+      to: "/settings/websites",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      ),
+      title: "Website Builder",
+      description: language === "uk" ? "Створюйте та редагуйте сайти на Next.js та за допомогою AI." : "Create, customize, and manage responsive websites with Next.js and AI.",
     },
     {
       to: "/settings/capabilities",
