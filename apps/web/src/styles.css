@@ -18279,3 +18279,748 @@ body:has(.npati-dialog-backdrop) .sidebar {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   NPATI Fullscreen Website Builder (Design-Mockup Match)
+   ========================================================================== */
+.npati-fullscreen-editor-shell {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #111111;
+}
+
+.npati-builder-topbar {
+  height: 56px;
+  background: #ffffff;
+  border-bottom: 1px solid #e4e4e7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  gap: 12px;
+  flex-shrink: 0;
+  z-index: 50;
+}
+
+.npati-builder-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.npati-builder-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-back-btn:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.npati-builder-site-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 140ms ease;
+}
+
+.npati-builder-site-title:hover {
+  background: #f1f5f9;
+}
+
+.npati-builder-framework-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.npati-builder-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+  margin-left: 4px;
+}
+
+.npati-builder-save-status.saved {
+  color: #10b981;
+}
+
+.npati-builder-save-status.saving {
+  color: #f59e0b;
+}
+
+.npati-builder-save-status.unsaved {
+  color: #94a3b8;
+}
+
+.npati-builder-topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.npati-builder-device-segmented {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid #e2e8f0;
+}
+
+.npati-builder-device-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-device-btn:hover {
+  color: #0f172a;
+}
+
+.npati-builder-device-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.npati-builder-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.npati-builder-icon-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 8px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-icon-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.npati-builder-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.npati-builder-publish-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  border: 1px solid #0f172a !important;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.npati-builder-publish-btn:hover:not(:disabled) {
+  background: #e11d2e !important;
+  border-color: #e11d2e !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(225, 29, 46, 0.25);
+}
+
+/* Builder Main Workspace */
+.npati-builder-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+/* Left Panel */
+.npati-builder-left-panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-right: 1px solid #e4e4e7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.npati-builder-nav-tabs {
+  display: flex;
+  border-bottom: 1px solid #e4e4e7;
+  background: #ffffff;
+  padding: 0 8px;
+}
+
+.npati-builder-nav-tab {
+  flex: 1;
+  text-align: center;
+  padding: 12px 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: color 140ms ease;
+}
+
+.npati-builder-nav-tab:hover {
+  color: #0f172a;
+}
+
+.npati-builder-nav-tab.active {
+  color: #e11d2e;
+  font-weight: 600;
+}
+
+.npati-builder-nav-tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  background: #e11d2e;
+  border-radius: 2px 2px 0 0;
+}
+
+.npati-builder-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Page List items */
+.npati-builder-page-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.npati-builder-page-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  transition: all 140ms ease;
+  border: 1px solid transparent;
+}
+
+.npati-builder-page-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.npati-builder-page-item.active {
+  background: #fef2f2;
+  color: #e11d2e;
+  border-color: #fee2e2;
+  font-weight: 600;
+}
+
+.npati-builder-add-page-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-add-page-btn:hover {
+  background: #fef2f2;
+  color: #e11d2e;
+  border-color: #fca5a5;
+}
+
+/* Sections Structure Hierarchy */
+.npati-builder-sections-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+
+.npati-builder-sections-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.npati-builder-sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.npati-builder-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #334155;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-section-row:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.npati-builder-section-row.active {
+  background: #fef2f2;
+  border-color: #e11d2e;
+  color: #e11d2e;
+  font-weight: 600;
+}
+
+.npati-builder-section-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.npati-builder-section-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.npati-builder-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.7;
+}
+
+.npati-builder-section-row:hover .npati-builder-section-actions,
+.npati-builder-section-row.active .npati-builder-section-actions {
+  opacity: 1;
+}
+
+.npati-builder-row-action-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  padding: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.npati-builder-row-action-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f172a;
+}
+
+.npati-builder-row-action-btn.danger:hover {
+  background: #fee2e2;
+  color: #e11d2e;
+}
+
+/* Center Canvas */
+.npati-builder-canvas-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #f1f5f9;
+  overflow-y: auto;
+  padding: 24px;
+  position: relative;
+}
+
+.npati-builder-canvas-card {
+  background: #ffffff;
+  min-height: 100%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Visual Block Overlay on Canvas */
+.npati-builder-canvas-block {
+  position: relative;
+  cursor: pointer;
+  transition: outline 140ms ease;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+
+.npati-builder-canvas-block:hover {
+  outline: 1px dashed #cbd5e1;
+}
+
+.npati-builder-canvas-block.selected {
+  outline: 2px solid #e11d2e !important;
+  outline-offset: -2px;
+  z-index: 10;
+}
+
+.npati-builder-selected-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #e11d2e;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(225, 29, 46, 0.35);
+  z-index: 20;
+  pointer-events: auto;
+}
+
+/* Right Panel (Inspector) */
+.npati-builder-right-panel {
+  width: 340px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-left: 1px solid #e4e4e7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.npati-builder-inspector-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e4e4e7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.npati-builder-inspector-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.npati-builder-inspector-block-title strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.npati-builder-inspector-block-title small {
+  font-size: 12px;
+  color: #64748b;
+  margin-left: 4px;
+}
+
+.npati-builder-subtab-segmented {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 3px;
+  margin: 12px 16px 0 16px;
+}
+
+.npati-builder-subtab-btn {
+  flex: 1;
+  text-align: center;
+  border: none;
+  background: transparent;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-subtab-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.npati-builder-inspector-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Form controls in Inspector */
+.npati-builder-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npati-builder-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.npati-builder-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-sizing: border-box;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.npati-builder-input:focus {
+  outline: none;
+  border-color: #e11d2e;
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.12);
+}
+
+.npati-builder-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.npati-builder-textarea:focus {
+  outline: none;
+  border-color: #e11d2e;
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.12);
+}
+
+.npati-builder-select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color 140ms ease;
+}
+
+.npati-builder-select:focus {
+  outline: none;
+  border-color: #e11d2e;
+  box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.12);
+}
+
+/* Alignment group */
+.npati-builder-align-group {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.npati-builder-align-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-align-btn.active {
+  background: #ffffff;
+  color: #e11d2e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Color row */
+.npati-builder-color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.npati-builder-color-picker-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.npati-builder-color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.npati-builder-color-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: #475569;
+  text-transform: uppercase;
+}
+
+/* Slide-over Drawer for AI / Files / Checkpoints */
+.npati-builder-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 10000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.npati-builder-drawer {
+  width: 440px;
+  max-width: 90vw;
+  height: 100%;
+  background: #ffffff;
+  box-shadow: -4px 0 25px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: npatiDrawerSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes npatiDrawerSlideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.npati-builder-drawer-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e4e4e7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.npati-builder-drawer-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.npati-builder-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
