@@ -19233,6 +19233,29 @@ body:has(.npati-dialog-backdrop) .sidebar {
   flex-direction: column;
 }
 
+.npati-builder-static-preview {
+  display: block;
+  width: 100%;
+  min-height: 800px;
+  flex: 1;
+  border: 0;
+  background: #fff;
+}
+
+.npati-builder-static-preview-error {
+  padding: 32px;
+  color: #b91c1c;
+}
+
+.npati-builder-static-mode-note {
+  width: min(100%, 1240px);
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+}
 /* Visual Block Overlay on Canvas */
 .npati-builder-canvas-block {
   position: relative;

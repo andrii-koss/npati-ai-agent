@@ -1132,6 +1132,13 @@ export function WebsiteEditor() {
 
   // Core Document State
   const [doc, setDoc] = useState<WebsiteDocument | null>(null);
+  const [staticHtml, setStaticHtml] = useState<string | null>(null);
+  const [staticIndexHtml, setStaticIndexHtml] = useState<string | null>(null);
+  const [staticIndexRevision, setStaticIndexRevision] = useState<string | null>(null);
+  const [staticPagePath, setStaticPagePath] = useState("index.html");
+  const [staticPreviewActive, setStaticPreviewActive] = useState(false);
+  const [staticPreviewError, setStaticPreviewError] = useState("");
+  const [visualConfigUnavailable, setVisualConfigUnavailable] = useState(false);
   const [activePageId, setActivePageId] = useState<string>("page-home");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>("block-hero");
 
@@ -1242,24 +1249,80 @@ export function WebsiteEditor() {
     }
   };
 
+  // Static websites are rendered from the same HTML files that chat Preview opens.
+  const loadStaticPage = async (filePath: string) => {
+    if (!/^(?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.html$/i.test(filePath)) {
+      setStaticPreviewError("Invalid website page.");
+      return;
+    }
+    setStaticHtml(null);
+    setStaticPreviewError("");
+    try {
+      const page = await apiGet<{ content: string; revision: string }>(base + "/files/read?path=" + encodeURIComponent(filePath));
+      setStaticPagePath(filePath);
+      setStaticHtml(page.content);
+      if (filePath === "index.html") {
+        setStaticIndexHtml(page.content);
+        setStaticIndexRevision(page.revision);
+      }
+    } catch (error) {
+      setStaticPreviewError(error instanceof Error ? error.message : "Website page is unavailable.");
+    }
+  };
+
+  const loadStaticPreview = async () => {
+    setStaticPreviewActive(true);
+    await loadStaticPage("index.html");
+  };
+
+  const handleStaticFrameLoad = (event: React.SyntheticEvent<HTMLIFrameElement>) => {
+    event.currentTarget.contentDocument?.addEventListener("click", (clickEvent) => {
+      const target = clickEvent.target as Element | null;
+      const link = typeof target?.closest === "function" ? target.closest("a[href]") : null;
+      const href = link?.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      const resolved = new URL(href, "https://npati-project.local/" + staticPagePath);
+      if (resolved.origin !== "https://npati-project.local") return;
+      const requested = resolved.pathname.replace(/^\/+|\/+$/g, "") || "index";
+      const filePath = requested.endsWith(".html") ? requested : requested + ".html";
+      if (!/^(?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.html$/i.test(filePath)) return;
+      clickEvent.preventDefault();
+      void loadStaticPage(filePath);
+    });
+  };
   // Load project & website config
   const loadProject = async () => {
     if (!companyId || !projectId) return;
     setLoading(true);
+    setSaveStatus("saved");
+    setStaticHtml(null);
+    setStaticIndexHtml(null);
+    setStaticIndexRevision(null);
+    setStaticPreviewActive(false);
+    setStaticPreviewError("");
+    setVisualConfigUnavailable(false);
+    setPreviewMode("visual");
     try {
       try {
-        const fileRes = await apiGet<{ content: string }>(`${base}/files/read?path=website.config.json`);
+        const fileRes = await apiGet<{ content: string }>(base + "/files/read?path=website.config.json");
         const parsed = JSON.parse(fileRes.content) as WebsiteDocument;
+        if (!Array.isArray(parsed.pages)) throw new Error("Invalid website configuration");
 
-        // If parsed doc has no blocks, enrich with mockup template
-        if (!parsed.pages[0]?.blocks?.length) {
+        if (parsed.framework === "static") {
+          setDoc(parsed);
+          setActivePageId(parsed.pages[0]?.id || "page-home");
+          setSelectedBlockId(parsed.pages[0]?.blocks[1]?.id || parsed.pages[0]?.blocks[0]?.id || null);
+          setHistory([parsed]);
+          setHistoryIndex(0);
+          await loadStaticPreview();
+        } else if (!parsed.pages[0]?.blocks?.length) {
           const mockupDoc = buildMockupDocument(parsed.name, parsed.framework === "vite" ? "vite" : "nextjs");
           setDoc(mockupDoc);
           setActivePageId(mockupDoc.pages[0]?.id || "page-home");
           setSelectedBlockId(mockupDoc.pages[0]?.blocks[1]?.id || "block-hero");
           setHistory([mockupDoc]);
           setHistoryIndex(0);
-          await saveDocumentToProject(mockupDoc);
+          setVisualConfigUnavailable(true);
         } else {
           setDoc(parsed);
           if (parsed.pages[0]) {
@@ -1270,20 +1333,31 @@ export function WebsiteEditor() {
           setHistoryIndex(0);
         }
       } catch {
-        const proj = await apiGet<any>(base);
-        const mockupDoc = buildMockupDocument(
-          proj.name || "My Business Website",
-          proj.framework?.toLowerCase().includes("vite") ? "vite" : "nextjs"
-        );
-        setDoc(mockupDoc);
-        setActivePageId(mockupDoc.pages[0]?.id || "page-home");
-        setSelectedBlockId(mockupDoc.pages[0]?.blocks[1]?.id || "block-hero");
-        setHistory([mockupDoc]);
-        setHistoryIndex(0);
-        await saveDocumentToProject(mockupDoc);
+        const proj = await apiGet<{ name?: string; framework?: string }>(base);
+        if (/^(?:html\/css|static)$/i.test(proj.framework || "")) {
+          const fallbackDoc = createDefaultWebsiteDocument(proj.name || "Website", "static", { template: "blank" });
+          setDoc(fallbackDoc);
+          setActivePageId(fallbackDoc.pages[0]?.id || "page-home");
+          setSelectedBlockId(null);
+          setHistory([fallbackDoc]);
+          setHistoryIndex(0);
+          await loadStaticPreview();
+        } else {
+          const mockupDoc = buildMockupDocument(
+            proj.name || "My Business Website",
+            proj.framework?.toLowerCase().includes("vite") ? "vite" : "nextjs"
+          );
+          setDoc(mockupDoc);
+          setActivePageId(mockupDoc.pages[0]?.id || "page-home");
+          setSelectedBlockId(mockupDoc.pages[0]?.blocks[1]?.id || "block-hero");
+          setHistory([mockupDoc]);
+          setHistoryIndex(0);
+          setVisualConfigUnavailable(true);
+        }
       }
 
-      await refreshPreview();
+      const status = await refreshPreview();
+      if (status?.isRunning) setPreviewMode("sandbox");
       await loadFiles();
     } catch (err: any) {
       void alertModal({ title: "Load Error", message: err.message || "Failed to load website" });
@@ -1291,12 +1365,12 @@ export function WebsiteEditor() {
       setLoading(false);
     }
   };
-
   const refreshPreview = async () => {
     try {
       const status = await apiGet<PreviewStatusResponse>(`${base}/preview/status`);
       setPreviewStatus(status);
-    } catch {}
+      return status;
+    } catch { return null; }
   };
 
   const loadFiles = async () => {
@@ -1334,25 +1408,45 @@ export function WebsiteEditor() {
   const saveDocumentToProject = async (documentToSave?: WebsiteDocument) => {
     const targetDoc = documentToSave || doc;
     if (!targetDoc) return;
+    const adapter = getWebsiteAdapter(targetDoc.framework);
+    const synced = adapter.syncDocument(targetDoc);
+    if (targetDoc.framework === "static" && staticIndexHtml && staticIndexHtml !== synced["index.html"]) {
+      const confirmed = await confirmModal({
+        title: language === "uk" ? "Замінити HTML сайту?" : "Replace the website HTML?",
+        message: language === "uk"
+          ? "Візуальний конструктор згенерує index.html із блоків конфігурації та замінить HTML, створений агентом. Продовжити?"
+          : "The visual editor will generate index.html from its blocks and replace the HTML created by the agent. Continue?",
+      });
+      if (!confirmed) return;
+    }
     setSaveStatus("saving");
     try {
-      const adapter = getWebsiteAdapter(targetDoc.framework);
-      const synced = adapter.syncDocument(targetDoc);
-
-      await apiPost(`${base}/files/write`, {
+      for (const [filePath, content] of Object.entries(synced)) {
+        if (filePath === "website.config.json") continue;
+        const saved = await apiPost<{ revision?: string }>(base + "/files/write", {
+          path: filePath,
+          content,
+          ...(targetDoc.framework === "static" && filePath === "index.html" && staticIndexRevision
+            ? { expectedRevision: staticIndexRevision }
+            : {}),
+        });
+        if (targetDoc.framework === "static" && filePath === "index.html") {
+          setStaticIndexRevision(saved.revision ?? null);
+        }
+      }
+      await apiPost(base + "/files/write", {
         path: "website.config.json",
         content: JSON.stringify(targetDoc, null, 2) + "\n",
       });
-
-      for (const [filePath, content] of Object.entries(synced)) {
-        if (filePath !== "website.config.json") {
-          try {
-            await apiPost(`${base}/files/write`, { path: filePath, content });
-          } catch {}
-        }
+      if (targetDoc.framework === "static") {
+        setStaticHtml(synced["index.html"] ?? null);
+        setStaticIndexHtml(synced["index.html"] ?? null);
+        setStaticPagePath("index.html");
+        setStaticPreviewError("");
+        setStaticPreviewActive(true);
       }
-
       setSaveStatus("saved");
+      setVisualConfigUnavailable(false);
       setIframeKey((k) => k + 1);
     } catch (err: any) {
       setSaveStatus("unsaved");
@@ -1798,8 +1892,8 @@ export function WebsiteEditor() {
           </div>
 
           <span className="npati-builder-framework-badge">
-            <span style={{ fontSize: "10px", opacity: 0.7, marginRight: "2px" }}>NEX</span>
-            {doc?.framework === "vite" ? "VITE" : "NEXT.JS"}
+            <span style={{ fontSize: "10px", opacity: 0.7, marginRight: "2px" }}>{doc?.framework === "static" ? "HTM" : "NEX"}</span>
+            {doc?.framework === "static" ? "HTML/CSS" : doc?.framework === "vite" ? "VITE" : "NEXT.JS"}
           </span>
 
           <div className={`npati-builder-save-status ${saveStatus}`}>
@@ -1876,7 +1970,7 @@ export function WebsiteEditor() {
             type="button"
             className="npati-builder-save-btn"
             onClick={() => void saveDocumentToProject()}
-            disabled={saveStatus === "saving"}
+            disabled={saveStatus === "saving" || visualConfigUnavailable || (doc?.framework === "static" && staticPreviewActive)}
             title={language === "uk" ? "Зберегти зміни" : "Save changes"}
           >
             <IconSave />
@@ -1889,7 +1983,7 @@ export function WebsiteEditor() {
             className={`npati-builder-preview-btn ${previewMode === "sandbox" ? "active" : ""}`}
             onClick={() => {
               if (doc?.framework === "static") {
-                setPreviewMode("visual");
+                setStaticPreviewActive((active) => !active);
                 return;
               }
               if (previewStatus?.isRunning) {
@@ -1901,7 +1995,7 @@ export function WebsiteEditor() {
             title="Toggle Live Preview"
           >
             <IconEye />
-            <span>{previewMode === "sandbox" ? (language === "uk" ? "Конструктор" : "Visual View") : (language === "uk" ? "Перегляд" : "Preview")}</span>
+            <span>{doc?.framework === "static" ? (staticPreviewActive ? (language === "uk" ? "Конструктор" : "Visual editor") : (language === "uk" ? "Перегляд сайту" : "Site preview")) : previewMode === "sandbox" ? (language === "uk" ? "Конструктор" : "Visual View") : (language === "uk" ? "Перегляд" : "Preview")}</span>
           </button>
 
           {/* PUBLISH BUTTON */}
@@ -2429,6 +2523,13 @@ export function WebsiteEditor() {
         {/* CENTER LIVE CANVAS                                                      */}
         {/* ----------------------------------------------------------------------- */}
         <main className="npati-builder-canvas-wrapper">
+          {doc?.framework === "static" && !staticPreviewActive && (
+            <div className="npati-builder-static-mode-note" role="note">
+              {language === "uk"
+                ? "Візуальний конструктор показує блоки конфігурації. Перегляд сайту показує фактичний index.html; збереження блоків замінить цей HTML."
+                : "The visual editor shows configuration blocks. Site preview shows the actual index.html; saving blocks will replace that HTML."}
+            </div>
+          )}
           <div
             className="npati-builder-canvas-card"
             style={{
@@ -2437,7 +2538,21 @@ export function WebsiteEditor() {
             }}
           >
             {/* If sandbox mode is chosen and sandbox preview is active */}
-            {previewMode === "sandbox" && previewStatus?.previewUrl ? (
+            {doc?.framework === "static" && staticPreviewActive ? (
+              staticHtml !== null ? (
+                <iframe
+                  srcDoc={staticHtml}
+                  title="Website HTML preview"
+                  className="npati-builder-static-preview"
+                  onLoad={handleStaticFrameLoad}
+                  sandbox="allow-same-origin"
+                />
+              ) : (
+                <div className="npati-builder-static-preview-error" role="status">
+                  {staticPreviewError || "Loading index.html…"}
+                </div>
+              )
+            ) : previewMode === "sandbox" && previewStatus?.previewUrl ? (
               <iframe
                 key={iframeKey}
                 src={previewStatus.previewUrl}
@@ -2445,6 +2560,15 @@ export function WebsiteEditor() {
                 style={{ width: "100%", height: "100%", minHeight: "800px", border: "none" }}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               />
+            ) : visualConfigUnavailable ? (
+              <div className="npati-builder-static-preview-error" role="status">
+                <p>{language === "uk"
+                  ? "Для цього проєкту немає готового макета конструктора. Файли сайту залишилися без змін."
+                  : "This project has no visual editor layout. Its source files have not been changed."}</p>
+                <button type="button" className="button-secondary" onClick={() => setVisualConfigUnavailable(false)}>
+                  {language === "uk" ? "Створити макет конструктора" : "Create visual editor layout"}
+                </button>
+              </div>
             ) : (
               /* Rich Interactive Visual Canvas with In-line text editing */
               <div style={{ display: "flex", flexDirection: "column", width: "100%", minHeight: "100%" }}>
