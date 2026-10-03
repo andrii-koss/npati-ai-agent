@@ -419,8 +419,8 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     const recovering = new ProjectOrchestrator(
       store, projectService, projectWorkspace, undefined, gitPreviewService, failedRuntime);
     const result = await recovering.executeWebsiteTask(authUserA, {
-      companyId: company.id, prompt: "Створи мені сайт для хостінга",
-      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга" }),
+      companyId: company.id, prompt: "Створи мені сайт для хостінга на Next.js",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга на Next.js" }),
       idempotencyKey: "hosting-recovery-website",
     });
     expect(result.runDetails.run.status).toBe("completed");
@@ -522,6 +522,31 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(projectRuns[0].status).toBe("completed");
   });
 
+  it("creates a plain HTML hosting site without a sandbox when no framework is requested", async () => {
+    let company = await store.createCompany(authUserA, { name: "Simple Hosting Co" }, "simple-hosting-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: [], isActive: true,
+    }, "simple-hosting-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    mockPreviewStartError = "Sandbox runner is not configured";
+
+    const result = await orchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id,
+      prompt: "Створи мені сайт, для хостінга",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт, для хостінга" }),
+      idempotencyKey: "simple-hosting-website",
+    });
+
+    expect(result.project.framework).toBe("HTML/CSS");
+    expect(result.runDetails.run.status).toBe("completed");
+    expect(result.projectCard.buildStatus).toBe("success");
+    expect(previewAttempts).toBe(0);
+    expect(result.responseMessage).toContain("HTML/CSS сайт");
+    const home = await projectWorkspace.readFile(authUserA, company.id, result.project.id, "index.html");
+    expect(home.content).toContain("<html lang=\"uk\">");
+    expect(home.content).toContain("id=\"pricing\"");
+    expect(home.content).not.toContain("next dev");
+  });
   it("reports missing preview infrastructure without claiming the website is ready", async () => {
     let company = await store.createCompany(authUserA, { name: "Hosting Sandbox Co" }, "hosting-sandbox-company");
     const coordinator = await store.createCompanyAgent(authUserA, company.id, {
@@ -532,8 +557,8 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
 
     const result = await orchestrator.executeWebsiteTask(authUserA, {
       companyId: company.id,
-      prompt: "Створи мені сайт для хостінга",
-      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга" }),
+      prompt: "Створи мені сайт для хостінга на Next.js",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга на Next.js" }),
       idempotencyKey: "hosting-sandbox-website",
     });
 

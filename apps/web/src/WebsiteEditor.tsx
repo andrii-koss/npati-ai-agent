@@ -1888,6 +1888,10 @@ export function WebsiteEditor() {
             type="button"
             className={`npati-builder-preview-btn ${previewMode === "sandbox" ? "active" : ""}`}
             onClick={() => {
+              if (doc?.framework === "static") {
+                setPreviewMode("visual");
+                return;
+              }
               if (previewStatus?.isRunning) {
                 setPreviewMode((m) => (m === "visual" ? "sandbox" : "visual"));
               } else {

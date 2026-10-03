@@ -19651,3 +19651,56 @@ body:has(.npati-dialog-backdrop) .sidebar {
   overflow-y: auto;
   padding: 20px;
 }
+
+/* Keep the chat visible beside the project preview. */
+body:has(.project-chat-preview-layer) .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body:has(.project-chat-preview-layer) .sidebar {
+  display: none;
+}
+
+body:has(.project-chat-preview-layer) .workspace-content.chat-workspace-content {
+  grid-column: 1;
+}
+
+body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
+body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat {
+  width: calc(48vw - 28px);
+  margin-right: 0;
+}
+
+.project-chat-preview-layer {
+  pointer-events: none;
+}
+
+.project-chat-preview-backdrop {
+  display: none;
+}
+
+.project-chat-preview-drawer {
+  top: 12px;
+  right: 12px;
+  width: calc(52vw - 12px);
+  height: calc(100% - 24px);
+  pointer-events: auto;
+  border: 1px solid #dedede;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+@media (max-width: 800px) {
+  body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
+  body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat {
+    width: 100%;
+  }
+
+  .project-chat-preview-drawer {
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+}

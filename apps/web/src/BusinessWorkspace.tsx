@@ -1,7 +1,7 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { AgentReply, ProjectCardData } from "@npati/shared";
-import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
@@ -1083,6 +1083,7 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const navigate = useNavigate();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
+  const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const builderUrl = card.companyId
@@ -1098,10 +1099,40 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [previewOpen]);
 
+  async function loadStaticPreviewPage(filePath: string) {
+    if (!/^(?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.html$/i.test(filePath)) {
+      throw new Error("Invalid preview page.");
+    }
+    const token = getStoredAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers.authorization = `Bearer ${token}`;
+    const filesUrl = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/files/read?path=${encodeURIComponent(filePath)}`;
+    const response = await fetch(filesUrl, { headers });
+    const file = await response.json().catch(() => null) as { content?: string; error?: { message?: string } } | null;
+    if (!response.ok || !file?.content) throw new Error(file?.error?.message || `${filePath} is unavailable.`);
+    setPreviewHtml(file.content);
+  }
+
+  function handleStaticPreviewLoad(event: SyntheticEvent<HTMLIFrameElement>) {
+    event.currentTarget.contentDocument?.addEventListener("click", (clickEvent) => {
+      const target = clickEvent.target as Element | null;
+      const link = typeof target?.closest === "function" ? target.closest("a[href]") : null;
+      const href = link?.getAttribute("href");
+      if (!href || href.startsWith("#") || /^[a-z]+:\/\//i.test(href)) return;
+      const filePath = href.startsWith("/") ? `${href.slice(1).replace(/\/$/, "") || "index"}.html` : href;
+      if (!/^(?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.html$/i.test(filePath)) return;
+      clickEvent.preventDefault();
+      void loadStaticPreviewPage(filePath).catch((error) => {
+        setPreviewHtml("");
+        setPreviewError(error instanceof Error ? error.message : "Preview page is unavailable.");
+      });
+    });
+  }
   async function openPreview() {
     setPreviewOpen(true);
     setPreviewError("");
     setPreviewUrl("");
+    setPreviewHtml("");
     if (!card.companyId) {
       setPreviewError("Project company is unavailable.");
       return;
@@ -1112,6 +1143,10 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
       const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
       const headers: Record<string, string> = {};
       if (token) headers.authorization = `Bearer ${token}`;
+      if (card.framework === "HTML/CSS") {
+        await loadStaticPreviewPage("index.html");
+        return;
+      }
       const statusResponse = await fetch(`${endpoint}/status`, { headers });
       const status = await statusResponse.json().catch(() => null) as
         | { isRunning?: boolean }
@@ -1182,19 +1217,20 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
       </div>
       {previewOpen && createPortal(
         <div className="project-chat-preview-layer">
-          <button type="button" className="project-chat-preview-backdrop" aria-label="Close preview" onClick={() => setPreviewOpen(false)} />
-          <aside className="project-chat-preview-drawer" role="dialog" aria-modal="true" aria-label={`Preview of ${card.name}`}>
+          <aside className="project-chat-preview-drawer" role="complementary" aria-label={`Preview of ${card.name}`}>
             <header className="project-chat-preview-header">
               <div>
                 <strong>{card.name}</strong>
-                <span>{previewUrl ? "Live preview" : "Preview"}</span>
+                <span>Preview</span>
               </div>
               <div className="project-chat-preview-header-actions">
                 {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Open in new tab ↗</a>}
                 <button type="button" aria-label="Close preview" onClick={() => setPreviewOpen(false)}>×</button>
               </div>
             </header>
-            {previewUrl ? (
+            {previewHtml ? (
+              <iframe title={`${card.name} preview`} srcDoc={previewHtml} sandbox="allow-same-origin" onLoad={handleStaticPreviewLoad} className="project-chat-preview-frame" />
+            ) : previewUrl ? (
               <iframe title={`${card.name} preview`} src={previewUrl} className="project-chat-preview-frame" />
             ) : (
               <div className="project-chat-preview-empty" role="status">
