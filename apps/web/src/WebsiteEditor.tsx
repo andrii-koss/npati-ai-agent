@@ -242,35 +242,35 @@ function IconAlignRight() {
   );
 }
 
-function IconHome() {
+function IconHome({ size = 14 }: { size?: number } = {}) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
       <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   );
 }
 
-function IconFile() {
+function IconFile({ size = 14 }: { size?: number } = {}) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
       <polyline points="14 2 14 8 20 8" />
     </svg>
   );
 }
 
-function IconSparkles() {
+function IconSparkles({ size = 15 }: { size?: number } = {}) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
     </svg>
   );
 }
 
-function IconSettings() {
+function IconSettings({ size = 14 }: { size?: number } = {}) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -312,44 +312,44 @@ function IconEdit() {
   );
 }
 
-function IconTag() {
+function IconTag({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
       <path d="M7 7h.01" />
     </svg>
   );
 }
 
-function IconPhone() {
+function IconPhone({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
     </svg>
   );
 }
 
-function IconBriefcase() {
+function IconBriefcase({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect width="20" height="14" x="2" y="7" rx="2" ry="2" />
       <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
     </svg>
   );
 }
 
-function IconUser() {
+function IconUser({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
   );
 }
 
-function IconGlobe() {
+function IconGlobe({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="10" />
       <line x1="2" x2="22" y1="12" y2="12" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -357,25 +357,330 @@ function IconGlobe() {
   );
 }
 
-function IconMail() {
+function IconMail({ size = 14 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect width="20" height="16" x="2" y="4" rx="2" />
       <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
     </svg>
   );
 }
 
-function RenderPageIcon({ icon, isHome }: { icon?: string; isHome?: boolean }) {
-  if (isHome || icon === "home") return <IconHome />;
-  if (icon === "tag" || icon === "pricing") return <IconTag />;
-  if (icon === "phone" || icon === "contact") return <IconPhone />;
-  if (icon === "bag" || icon === "services") return <IconBriefcase />;
-  if (icon === "user" || icon === "about") return <IconUser />;
-  if (icon === "globe") return <IconGlobe />;
-  if (icon === "mail") return <IconMail />;
-  if (icon === "sparkles") return <IconSparkles />;
-  return <IconFile />;
+function IconRocket({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
+      <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </svg>
+  );
+}
+
+function IconStar({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+function IconHelp({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function IconShield({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function IconBook({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+
+function IconCode({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+
+function IconChart({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  );
+}
+
+function IconCalendar({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
+function IconChat({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function IconAward({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="7" />
+      <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
+    </svg>
+  );
+}
+
+function IconMapPin({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function IconHeart({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+    </svg>
+  );
+}
+
+function IconBell({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+function IconImage({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  );
+}
+
+function IconCart({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="21" r="1" />
+      <circle cx="19" cy="21" r="1" />
+      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+    </svg>
+  );
+}
+
+function IconCompass({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+  );
+}
+
+function IconBox({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function IconMegaphone({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m3 11 18-5v12L3 13v-2z" />
+      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </svg>
+  );
+}
+
+function IconLock({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function IconUsers({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function IconCpu({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="16" height="16" x="4" y="4" rx="2" />
+      <rect width="6" height="6" x="9" y="9" />
+      <path d="M15 2v2" /><path d="M15 20v2" /><path d="M2 15h2" /><path d="M2 9h2" />
+      <path d="M20 15h2" /><path d="M20 9h2" /><path d="M9 2v2" /><path d="M9 20v2" />
+    </svg>
+  );
+}
+
+function IconZap({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+const PAGE_ICON_OPTIONS = [
+  { id: "home", label: "Home" },
+  { id: "file", label: "Page" },
+  { id: "user", label: "About" },
+  { id: "bag", label: "Services" },
+  { id: "tag", label: "Pricing" },
+  { id: "phone", label: "Contact" },
+  { id: "book", label: "Blog" },
+  { id: "cart", label: "Store" },
+  { id: "sparkles", label: "Features" },
+  { id: "rocket", label: "Launch" },
+  { id: "star", label: "Reviews" },
+  { id: "help", label: "FAQ" },
+  { id: "chart", label: "Stats" },
+  { id: "calendar", label: "Events" },
+  { id: "chat", label: "Community" },
+  { id: "award", label: "Portfolio" },
+  { id: "map-pin", label: "Location" },
+  { id: "globe", label: "Web" },
+  { id: "mail", label: "Newsletter" },
+  { id: "shield", label: "Security" },
+  { id: "lock", label: "Privacy" },
+  { id: "code", label: "API" },
+  { id: "box", label: "Products" },
+  { id: "users", label: "Careers" },
+  { id: "cpu", label: "Tech" },
+  { id: "zap", label: "Speed" },
+  { id: "image", label: "Gallery" },
+  { id: "bell", label: "Updates" },
+  { id: "heart", label: "Support" },
+  { id: "compass", label: "Explore" },
+  { id: "megaphone", label: "News" },
+  { id: "settings", label: "Settings" },
+];
+
+function RenderPageIcon({ icon, isHome, size = 14 }: { icon?: string; isHome?: boolean; size?: number }) {
+  if (isHome || icon === "home") return <IconHome size={size} />;
+  switch (icon) {
+    case "tag":
+    case "pricing":
+      return <IconTag size={size} />;
+    case "phone":
+    case "contact":
+      return <IconPhone size={size} />;
+    case "bag":
+    case "services":
+      return <IconBriefcase size={size} />;
+    case "user":
+    case "about":
+      return <IconUser size={size} />;
+    case "globe":
+    case "domains":
+      return <IconGlobe size={size} />;
+    case "mail":
+      return <IconMail size={size} />;
+    case "sparkles":
+      return <IconSparkles size={size} />;
+    case "rocket":
+      return <IconRocket size={size} />;
+    case "star":
+      return <IconStar size={size} />;
+    case "help":
+    case "faq":
+      return <IconHelp size={size} />;
+    case "shield":
+      return <IconShield size={size} />;
+    case "book":
+    case "blog":
+      return <IconBook size={size} />;
+    case "code":
+    case "api":
+      return <IconCode size={size} />;
+    case "chart":
+      return <IconChart size={size} />;
+    case "calendar":
+      return <IconCalendar size={size} />;
+    case "chat":
+      return <IconChat size={size} />;
+    case "award":
+      return <IconAward size={size} />;
+    case "map-pin":
+      return <IconMapPin size={size} />;
+    case "heart":
+      return <IconHeart size={size} />;
+    case "bell":
+      return <IconBell size={size} />;
+    case "image":
+      return <IconImage size={size} />;
+    case "cart":
+      return <IconCart size={size} />;
+    case "compass":
+      return <IconCompass size={size} />;
+    case "box":
+      return <IconBox size={size} />;
+    case "megaphone":
+      return <IconMegaphone size={size} />;
+    case "lock":
+      return <IconLock size={size} />;
+    case "users":
+      return <IconUsers size={size} />;
+    case "cpu":
+      return <IconCpu size={size} />;
+    case "zap":
+      return <IconZap size={size} />;
+    case "settings":
+      return <IconSettings />;
+    default:
+      return <IconFile size={size} />;
+  }
 }
 
 function IconSectionSymbol({ type }: { type: string }) {
@@ -727,7 +1032,9 @@ export function WebsiteEditor() {
   // Popover menus & page modal
   const [openPageMenuId, setOpenPageMenuId] = useState<string | null>(null);
   const [openBlockMenuId, setOpenBlockMenuId] = useState<string | null>(null);
+  const [inspectorBlockMenuOpen, setInspectorBlockMenuOpen] = useState(false);
   const [addSectionMenuOpen, setAddSectionMenuOpen] = useState(false);
+  const [iconSearch, setIconSearch] = useState("");
   const [pageModal, setPageModal] = useState<{
     isOpen: boolean;
     mode: "add" | "edit";
@@ -894,6 +1201,7 @@ export function WebsiteEditor() {
       }
       setOpenPageMenuId(null);
       setOpenBlockMenuId(null);
+      setInspectorBlockMenuOpen(false);
       setAddSectionMenuOpen(false);
     };
     document.addEventListener("click", handleClickOutside);
@@ -2469,23 +2777,118 @@ export function WebsiteEditor() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                <div style={{ position: "relative" }}>
                   <button
                     type="button"
-                    className="npati-builder-row-action-btn"
-                    onClick={() => handleDuplicateBlock(selectedBlock.id)}
-                    title="Duplicate block"
+                    className="npati-builder-more-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInspectorBlockMenuOpen((prev) => !prev);
+                    }}
+                    title="Block Actions"
                   >
-                    <IconCopy />
+                    <IconMore />
                   </button>
-                  <button
-                    type="button"
-                    className="npati-builder-row-action-btn danger"
-                    onClick={() => void handleDeleteBlock(selectedBlock.id)}
-                    title="Delete block"
-                  >
-                    <IconTrash />
-                  </button>
+
+                  {inspectorBlockMenuOpen && (
+                    <div className="npati-builder-action-popover" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item"
+                        onClick={async () => {
+                          setInspectorBlockMenuOpen(false);
+                          const newName = await promptModal({
+                            message: language === "uk" ? "Введіть нову назву для секції:" : "Enter new name for section:",
+                            defaultValue: selectedBlock.name || selectedBlock.type,
+                          });
+                          if (newName && newName.trim()) {
+                            handleUpdateBlockProp("_sectionName", newName.trim());
+                            if (activePage && doc) {
+                              const updatedBlocks = activePage.blocks.map((blk) =>
+                                blk.id === selectedBlock.id ? { ...blk, name: newName.trim() } : blk
+                              );
+                              const updatedPages = doc.pages.map((pg) =>
+                                pg.id === activePage.id ? { ...pg, blocks: updatedBlocks } : pg
+                              );
+                              pushDocumentChange({ ...doc, pages: updatedPages });
+                            }
+                          }
+                        }}
+                      >
+                        <IconEdit />
+                        <span>{language === "uk" ? "Перейменувати" : "Rename"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item"
+                        onClick={() => {
+                          setInspectorBlockMenuOpen(false);
+                          handleMoveBlock(selectedBlock.id, "up");
+                        }}
+                        disabled={activePage?.blocks.findIndex((x) => x.id === selectedBlock.id) === 0}
+                      >
+                        <IconArrowUp />
+                        <span>{language === "uk" ? "Підняти вгору" : "Move Up"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item"
+                        onClick={() => {
+                          setInspectorBlockMenuOpen(false);
+                          handleMoveBlock(selectedBlock.id, "down");
+                        }}
+                        disabled={
+                          activePage?.blocks.findIndex((x) => x.id === selectedBlock.id) ===
+                          (activePage?.blocks.length || 0) - 1
+                        }
+                      >
+                        <IconArrowDown />
+                        <span>{language === "uk" ? "Опустити вниз" : "Move Down"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item"
+                        onClick={() => {
+                          setInspectorBlockMenuOpen(false);
+                          handleDuplicateBlock(selectedBlock.id);
+                        }}
+                      >
+                        <IconCopy />
+                        <span>{language === "uk" ? "Скопіювати" : "Duplicate"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item"
+                        onClick={() => {
+                          setInspectorBlockMenuOpen(false);
+                          handleToggleHideBlock(selectedBlock.id);
+                        }}
+                      >
+                        {selectedBlock.isHidden ? <IconEye /> : <IconEyeOff />}
+                        <span>
+                          {selectedBlock.isHidden
+                            ? (language === "uk" ? "Показати" : "Show")
+                            : (language === "uk" ? "Сховати" : "Hide")}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="npati-builder-popover-item danger"
+                        onClick={() => {
+                          setInspectorBlockMenuOpen(false);
+                          void handleDeleteBlock(selectedBlock.id);
+                        }}
+                      >
+                        <IconTrash />
+                        <span>{language === "uk" ? "Видалити" : "Delete"}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3379,28 +3782,41 @@ export function WebsiteEditor() {
               </div>
 
               <div className="npati-builder-form-group">
-                <label className="npati-builder-form-label">
-                  {language === "uk" ? "Виберіть іконку" : "Select Icon"}
-                </label>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                  <label className="npati-builder-form-label" style={{ marginBottom: 0 }}>
+                    {language === "uk" ? "Виберіть іконку" : "Select Icon"}
+                  </label>
+                  <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 500 }}>
+                    {
+                      PAGE_ICON_OPTIONS.filter((ic) =>
+                        !iconSearch || ic.label.toLowerCase().includes(iconSearch.toLowerCase()) || ic.id.includes(iconSearch.toLowerCase())
+                      ).length
+                    }{" "}
+                    {language === "uk" ? "доступно" : "available"}
+                  </span>
+                </div>
+
+                <input
+                  type="text"
+                  className="npati-builder-input"
+                  placeholder={language === "uk" ? "Пошук іконки (Home, Services, Blog, FAQ...)" : "Search icon (Home, Services, Blog, FAQ...)"}
+                  value={iconSearch}
+                  onChange={(e) => setIconSearch(e.target.value)}
+                  style={{ marginBottom: "6px", fontSize: "12px", padding: "7px 10px" }}
+                />
+
                 <div className="npati-builder-icon-grid">
-                  {[
-                    { id: "home", label: "Home" },
-                    { id: "file", label: "Doc" },
-                    { id: "user", label: "About" },
-                    { id: "bag", label: "Services" },
-                    { id: "tag", label: "Pricing" },
-                    { id: "phone", label: "Contact" },
-                    { id: "globe", label: "Web" },
-                    { id: "mail", label: "Mail" },
-                    { id: "sparkles", label: "Features" },
-                  ].map((ic) => (
+                  {PAGE_ICON_OPTIONS.filter((ic) =>
+                    !iconSearch || ic.label.toLowerCase().includes(iconSearch.toLowerCase()) || ic.id.includes(iconSearch.toLowerCase())
+                  ).map((ic) => (
                     <button
                       key={ic.id}
                       type="button"
                       className={`npati-builder-icon-option ${pageModal.icon === ic.id ? "active" : ""}`}
                       onClick={() => setPageModal((p) => ({ ...p, icon: ic.id }))}
+                      title={ic.label}
                     >
-                      <RenderPageIcon icon={ic.id} />
+                      <RenderPageIcon icon={ic.id} size={15} />
                       <span>{ic.label}</span>
                     </button>
                   ))}
@@ -3410,7 +3826,7 @@ export function WebsiteEditor() {
             <div className="npati-builder-modal-footer">
               <button
                 type="button"
-                className="button-ghost"
+                className="button-secondary"
                 onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}
               >
                 {language === "uk" ? "Скасувати" : "Cancel"}
