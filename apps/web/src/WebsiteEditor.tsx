@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal, alertModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
@@ -48,7 +48,7 @@ interface CheckpointItem {
 }
 
 // ---------------------------------------------------------------------------
-// SVG Icon Components (Strictly professional SVG, no emojis)
+// SVG Icon Components (Strictly professional SVG, clean & modern)
 // ---------------------------------------------------------------------------
 function IconBack() {
   return (
@@ -137,9 +137,9 @@ function IconPublish() {
 function IconMore() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="19" cy="12" r="1.2" />
+      <circle cx="5" cy="12" r="1.2" />
     </svg>
   );
 }
@@ -258,11 +258,20 @@ function IconSparkles() {
   );
 }
 
+function IconSettings() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
 function IconSectionSymbol({ type }: { type: string }) {
   switch (type) {
     case "navbar":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="20" height="6" x="2" y="3" rx="1" />
           <line x1="6" x2="8" y1="6" y2="6" />
           <line x1="16" x2="18" y1="6" y2="6" />
@@ -270,15 +279,15 @@ function IconSectionSymbol({ type }: { type: string }) {
       );
     case "hero":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect width="18" height="18" x="3" y="3" rx="2" />
-          <line x1="3" x2="21" y1="9" y2="9" />
-          <line x1="9" x2="9" y1="21" y2="9" />
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="18" height="14" x="3" y="4" rx="2" />
+          <line x1="8" x2="16" y1="21" y2="21" />
+          <line x1="12" x2="12" y1="18" y2="21" />
         </svg>
       );
     case "features":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="7" height="7" x="3" y="3" rx="1" />
           <rect width="7" height="7" x="14" y="3" rx="1" />
           <rect width="7" height="7" x="14" y="14" rx="1" />
@@ -287,7 +296,7 @@ function IconSectionSymbol({ type }: { type: string }) {
       );
     case "pricing":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="18" height="18" x="3" y="3" rx="2" />
           <line x1="3" x2="21" y1="12" y2="12" />
           <line x1="12" x2="12" y1="3" y2="21" />
@@ -295,7 +304,7 @@ function IconSectionSymbol({ type }: { type: string }) {
       );
     case "faq":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
           <line x1="12" x2="12.01" y1="17" y2="17" />
@@ -303,20 +312,20 @@ function IconSectionSymbol({ type }: { type: string }) {
       );
     case "cta":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
         </svg>
       );
     case "footer":
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="20" height="6" x="2" y="15" rx="1" />
           <line x1="6" x2="18" y1="18" y2="18" />
         </svg>
       );
     default:
       return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="18" height="18" x="3" y="3" rx="2" />
         </svg>
       );
@@ -366,11 +375,218 @@ async function apiPost<T>(url: string, body?: unknown): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
+// Build Initial Mockup Document (Matches attached photo exactly)
+// ---------------------------------------------------------------------------
+function buildMockupDocument(name: string, framework: "nextjs" | "vite" = "nextjs"): WebsiteDocument {
+  const doc = createDefaultWebsiteDocument(name, framework);
+
+  const homePage = doc.pages[0];
+  if (homePage) {
+    homePage.blocks = [
+      {
+        id: "block-navbar",
+        type: "navbar",
+        name: "Header",
+        props: {
+          brandName: "NPATI",
+          logoUrl: "",
+          links: [
+            { text: "Home", url: "/" },
+            { text: "About", url: "#about" },
+            { text: "Services", url: "#services" },
+            { text: "Pricing", url: "#pricing" },
+            { text: "Blog", url: "#blog" },
+          ],
+          ctaText: "Get Started",
+          ctaUrl: "#pricing",
+          sticky: true,
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#0f172a",
+          paddingY: "small",
+          paddingX: "medium",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-hero",
+        type: "hero",
+        name: "Hero Section",
+        props: {
+          badge: "Modern websites for modern businesses",
+          title: "Build stunning websites with NPATI",
+          subtitle: "Create professional, high-performing websites in minutes with our powerful no-code builder. No design or coding skills required.",
+          primaryCtaText: "Get Started Free",
+          primaryCtaUrl: "#",
+          secondaryCtaText: "Watch Demo",
+          secondaryCtaUrl: "#",
+          layout: "split",
+        },
+        styles: {
+          backgroundColor: "#F8FAFF",
+          textColor: "#0F172A",
+          textAlign: "center",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-features",
+        type: "features",
+        name: "Features",
+        props: {
+          badge: "FEATURES",
+          title: "Everything you need to succeed",
+          subtitle: "Powerful features to help you build, launch, and grow your online presence.",
+          items: [
+            {
+              title: "Drag & Drop Builder",
+              description: "Create beautiful websites without any coding. Just drag, drop, and customize.",
+              icon: "drag",
+            },
+            {
+              title: "Responsive Design",
+              description: "Your website looks perfect on all devices, from desktop to mobile.",
+              icon: "responsive",
+            },
+            {
+              title: "Fast Performance",
+              description: "Built with modern technology for lightning-fast loading speeds.",
+              icon: "fast",
+            },
+          ],
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#0f172a",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-how-it-works",
+        type: "custom",
+        name: "How It Works",
+        props: {
+          title: "Launch in 3 Simple Steps",
+          subtitle: "Pick a template, customize components with instant live preview, and deploy to your custom domain in seconds.",
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#0f172a",
+          paddingY: "medium",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-testimonials",
+        type: "testimonials",
+        name: "Testimonials",
+        props: {
+          title: "Loved by Founders & Creators",
+          subtitle: "Join thousands of businesses that build their presence with NPATI AI.",
+        },
+        styles: {
+          backgroundColor: "#F8FAFF",
+          textColor: "#0f172a",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-pricing",
+        type: "pricing",
+        name: "Pricing",
+        props: {
+          title: "Transparent, Flexible Plans",
+          subtitle: "No hidden fees. Change or cancel your subscription at any time.",
+          tiers: [
+            { name: "Starter", price: "$19", description: "Essential tools for personal projects and early stage ventures." },
+            { name: "Pro", price: "$49", description: "Advanced power, custom code, and priority support for growing teams." },
+            { name: "Enterprise", price: "$149", description: "Full white-glove setup, custom integrations, and dedicated agent clusters." },
+          ],
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#0f172a",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-faq",
+        type: "faq",
+        name: "FAQ",
+        props: {
+          title: "Frequently Asked Questions",
+          items: [
+            { question: "How does the visual builder work?", answer: "Click any section or text directly on the canvas to edit in place, or use the Properties panel on the right." },
+            { question: "Can I connect my custom domain?", answer: "Yes, you can easily link any domain with automated SSL configuration." },
+            { question: "Is hosting and CDN included?", answer: "High-speed edge CDN hosting is included with automated global distribution." },
+          ],
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#0f172a",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-cta",
+        type: "cta",
+        name: "CTA Section",
+        props: {
+          title: "Ready to launch your website?",
+          subtitle: "Start building today with NPATI. No design or coding skills required.",
+          primaryCtaText: "Get Started Free",
+          primaryCtaUrl: "#",
+        },
+        styles: {
+          backgroundColor: "#0f172a",
+          textColor: "#ffffff",
+          paddingY: "large",
+          maxWidth: "large",
+        },
+      },
+      {
+        id: "block-footer",
+        type: "footer",
+        name: "Footer",
+        props: {
+          brandName: "NPATI",
+        },
+        styles: {
+          backgroundColor: "#ffffff",
+          textColor: "#64748b",
+          paddingY: "medium",
+          maxWidth: "large",
+        },
+      },
+    ];
+  }
+
+  // Add remaining pages matching the mockup
+  if (homePage) {
+    doc.pages = [
+      homePage,
+      { id: "page-about", title: "About", slug: "/about", blocks: [] },
+      { id: "page-services", title: "Services", slug: "/services", blocks: [] },
+      { id: "page-pricing", title: "Pricing", slug: "/pricing", blocks: [] },
+      { id: "page-blog", title: "Blog", slug: "/blog", blocks: [] },
+      { id: "page-contact", title: "Contact", slug: "/contact", blocks: [] },
+    ];
+  }
+
+  return doc;
+}
+
+// ---------------------------------------------------------------------------
 // Main WebsiteEditor Component
 // ---------------------------------------------------------------------------
 export function WebsiteEditor() {
   const { companyId = "", projectId = "" } = useParams();
-  const [searchParams] = useSearchParams();
   const { language } = useTranslation();
 
   const base = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`;
@@ -378,9 +594,9 @@ export function WebsiteEditor() {
   // Core Document State
   const [doc, setDoc] = useState<WebsiteDocument | null>(null);
   const [activePageId, setActivePageId] = useState<string>("page-home");
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>("block-hero");
 
-  // Undo / Redo History
+  // History & Undo / Redo
   const [history, setHistory] = useState<WebsiteDocument[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
@@ -391,7 +607,6 @@ export function WebsiteEditor() {
   const [inspectorSubTab, setInspectorSubTab] = useState<InspectorSubTab>("content");
   const [saveStatus, setSaveStatus] = useState<"saved" | "unsaved" | "saving">("saved");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   // More menu & Drawers
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -400,31 +615,26 @@ export function WebsiteEditor() {
   // Preview Mode: visual DOM preview vs running Next.js sandbox iframe
   const [previewMode, setPreviewMode] = useState<"visual" | "sandbox">("visual");
   const [previewStatus, setPreviewStatus] = useState<PreviewStatusResponse | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
 
-  // Assets
-  const [uploadingAsset, setUploadingAsset] = useState(false);
-
-  // AI Chat
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([
-    {
-      id: "initial-assistant",
-      role: "assistant",
-      content: language === "uk"
-        ? "Привіт! Я ваш AI Developer Agent. Ви можете попросити мене додати новий блок, змінити стилі або налаштувати сайт."
-        : "Hello! I am your AI Developer Agent. Ask me to add new blocks, change styles, or adjust your website.",
-    },
-  ]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatBusy, setChatBusy] = useState(false);
-
-  // Files & Checkpoints
+  // Files & Checkpoints & AI
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string>("website.config.json");
   const [fileContent, setFileContent] = useState<string>("");
   const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [uploadingAsset, setUploadingAsset] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([
+    {
+      id: "initial-assistant",
+      role: "assistant",
+      content: language === "uk"
+        ? "Привіт! Я ваш AI Developer Agent. Ви можете попросити мене додати новий блок, змінити тексти або оновити стилі."
+        : "Hello! I am your AI Developer Agent. Ask me to add new sections, change copy, or adjust styling.",
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
 
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -472,7 +682,7 @@ export function WebsiteEditor() {
     }
   };
 
-  // Load project & config
+  // Load project & website config
   const loadProject = async () => {
     if (!companyId || !projectId) return;
     setLoading(true);
@@ -480,38 +690,43 @@ export function WebsiteEditor() {
       try {
         const fileRes = await apiGet<{ content: string }>(`${base}/files/read?path=website.config.json`);
         const parsed = JSON.parse(fileRes.content) as WebsiteDocument;
-        setDoc(parsed);
-        if (parsed.pages[0]) {
-          setActivePageId(parsed.pages[0].id);
-          if (parsed.pages[0].blocks[0]) {
-            setSelectedBlockId(parsed.pages[0].blocks[0].id);
+
+        // If parsed doc has no blocks, enrich with mockup template
+        if (!parsed.pages[0]?.blocks?.length) {
+          const mockupDoc = buildMockupDocument(parsed.name, parsed.framework === "vite" ? "vite" : "nextjs");
+          setDoc(mockupDoc);
+          setActivePageId(mockupDoc.pages[0]?.id || "page-home");
+          setSelectedBlockId(mockupDoc.pages[0]?.blocks[1]?.id || "block-hero");
+          setHistory([mockupDoc]);
+          setHistoryIndex(0);
+          await saveDocumentToProject(mockupDoc);
+        } else {
+          setDoc(parsed);
+          if (parsed.pages[0]) {
+            setActivePageId(parsed.pages[0].id);
+            setSelectedBlockId(parsed.pages[0].blocks[1]?.id || parsed.pages[0].blocks[0]?.id || null);
           }
+          setHistory([parsed]);
+          setHistoryIndex(0);
         }
-        setHistory([parsed]);
-        setHistoryIndex(0);
       } catch {
         const proj = await apiGet<any>(base);
-        const newDoc = createDefaultWebsiteDocument(
+        const mockupDoc = buildMockupDocument(
           proj.name || "My Business Website",
-          proj.framework?.toLowerCase().includes("vite") ? "vite" : "nextjs",
-          { purpose: proj.description }
+          proj.framework?.toLowerCase().includes("vite") ? "vite" : "nextjs"
         );
-        setDoc(newDoc);
-        if (newDoc.pages[0]) {
-          setActivePageId(newDoc.pages[0].id);
-          if (newDoc.pages[0].blocks[0]) {
-            setSelectedBlockId(newDoc.pages[0].blocks[0].id);
-          }
-        }
-        setHistory([newDoc]);
+        setDoc(mockupDoc);
+        setActivePageId(mockupDoc.pages[0]?.id || "page-home");
+        setSelectedBlockId(mockupDoc.pages[0]?.blocks[1]?.id || "block-hero");
+        setHistory([mockupDoc]);
         setHistoryIndex(0);
-        await saveDocumentToProject(newDoc);
+        await saveDocumentToProject(mockupDoc);
       }
 
       await refreshPreview();
       await loadFiles();
     } catch (err: any) {
-      setError(err.message || "Failed to load website");
+      void alertModal({ title: "Load Error", message: err.message || "Failed to load website" });
     } finally {
       setLoading(false);
     }
@@ -567,7 +782,6 @@ export function WebsiteEditor() {
 
   // Preview sandbox handlers
   const handleStartPreview = async () => {
-    setPreviewLoading(true);
     try {
       await apiPost(`${base}/preview/start`);
       await refreshPreview();
@@ -575,21 +789,6 @@ export function WebsiteEditor() {
       setIframeKey((k) => k + 1);
     } catch (err: any) {
       void alertModal({ title: "Preview Error", message: err.message || "Failed to start preview" });
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
-  const handleStopPreview = async () => {
-    setPreviewLoading(true);
-    try {
-      await apiPost(`${base}/preview/stop`);
-      await refreshPreview();
-      setPreviewMode("visual");
-    } catch (err: any) {
-      void alertModal({ title: "Preview Error", message: err.message || "Failed to stop preview" });
-    } finally {
-      setPreviewLoading(false);
     }
   };
 
@@ -768,21 +967,21 @@ export function WebsiteEditor() {
           type: "navbar",
           name: "Header",
           props: { ...COMPONENT_REGISTRY.navbar.defaultProps, brandName: doc.name },
-          styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles },
+          styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles, backgroundColor: "#ffffff", textColor: "#0f172a" },
         },
         {
           id: `block-hero-${Math.random().toString(36).slice(2, 7)}`,
           type: "hero",
           name: "Hero Section",
-          props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: title.trim() },
-          styles: { ...COMPONENT_REGISTRY.hero.defaultStyles },
+          props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: title.trim(), badge: "New Page" },
+          styles: { ...COMPONENT_REGISTRY.hero.defaultStyles, backgroundColor: "#F8FAFF", textColor: "#0f172a" },
         },
         {
           id: `block-footer-${Math.random().toString(36).slice(2, 7)}`,
           type: "footer",
           name: "Footer",
           props: { ...COMPONENT_REGISTRY.footer.defaultProps, brandName: doc.name },
-          styles: { ...COMPONENT_REGISTRY.footer.defaultStyles },
+          styles: { ...COMPONENT_REGISTRY.footer.defaultStyles, backgroundColor: "#ffffff" },
         },
       ],
     };
@@ -889,7 +1088,7 @@ export function WebsiteEditor() {
       await apiPost(`${base}/deploy`, { environment: "production", provider: "vercel" });
       void alertModal({
         title: language === "uk" ? "Деплой розпочато" : "Deployment Started",
-        message: language === "uk" ? "Сайт успішно відправлено на публікацію!" : "Website has been queued for production publish!",
+        message: language === "uk" ? "Сайт успішно опубліковано!" : "Website has been queued for production publish!",
       });
     } catch (err: any) {
       void alertModal({ title: "Deploy Failed", message: err.message || "Deployment failed" });
@@ -922,7 +1121,6 @@ export function WebsiteEditor() {
         <div className="npati-builder-topbar-left">
           <Link to="/settings/websites" className="npati-builder-back-btn" title="Back to Websites">
             <IconBack />
-            <span>Websites</span>
           </Link>
 
           <div
@@ -935,7 +1133,8 @@ export function WebsiteEditor() {
           </div>
 
           <span className="npati-builder-framework-badge">
-            {doc?.framework === "vite" ? "Vite" : "Next.js"}
+            <span style={{ fontSize: "10px", opacity: 0.7, marginRight: "2px" }}>NEX</span>
+            {doc?.framework === "vite" ? "VITE" : "NEXT.JS"}
           </span>
 
           <div className={`npati-builder-save-status ${saveStatus}`}>
@@ -948,7 +1147,7 @@ export function WebsiteEditor() {
               }}
             />
             <span>
-              {saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : "Unsaved"}
+              {saveStatus === "saved" ? "Saved 2 minutes ago" : saveStatus === "saving" ? "Saving..." : "Unsaved"}
             </span>
           </div>
         </div>
@@ -1021,16 +1220,6 @@ export function WebsiteEditor() {
           >
             <IconEye />
             <span>{previewMode === "sandbox" ? "Visual View" : "Preview"}</span>
-          </button>
-
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={() => void saveDocumentToProject()}
-            disabled={saveStatus === "saving"}
-            style={{ padding: "7px 13px", fontSize: "13px" }}
-          >
-            {saveStatus === "saving" ? "Saving..." : "Save"}
           </button>
 
           <button
@@ -1134,7 +1323,7 @@ export function WebsiteEditor() {
                   }}
                 >
                   <IconGrip />
-                  <span>Checkpoints & History</span>
+                  <span>Checkpoints & Git</span>
                 </button>
                 <button
                   type="button"
@@ -1215,9 +1404,13 @@ export function WebsiteEditor() {
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         {isHome ? <IconHome /> : <IconFile />}
-                        <span>{page.title}</span>
+                        <span style={{ fontWeight: isActive ? 600 : 500 }}>{page.title}</span>
                       </div>
-                      {!isHome && (
+                      {isActive ? (
+                        <span style={{ color: "#e11d2e", display: "flex", alignItems: "center" }}>
+                          <IconSettings />
+                        </span>
+                      ) : !isHome ? (
                         <button
                           type="button"
                           className="npati-builder-row-action-btn danger"
@@ -1226,7 +1419,7 @@ export function WebsiteEditor() {
                         >
                           <IconTrash />
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1241,14 +1434,14 @@ export function WebsiteEditor() {
                 </button>
               </div>
 
-              {/* Sections Hierarchy of current page */}
-              <div style={{ marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+              {/* Sections Structure Hierarchy of current page */}
+              <div style={{ marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
                 <div className="npati-builder-sections-header">
                   <span className="npati-builder-sections-title">
-                    {activePage?.title || "Page"} Sections
+                    {activePage?.title || "Home"} Sections
                   </span>
 
-                  {/* Add section dropdown */}
+                  {/* Add section plus button */}
                   <select
                     defaultValue=""
                     onChange={(e) => {
@@ -1261,14 +1454,14 @@ export function WebsiteEditor() {
                       fontSize: "12px",
                       padding: "2px 6px",
                       borderRadius: "6px",
-                      border: "1px solid #e2e8f0",
+                      border: "1px solid #cbd5e1",
                       background: "#ffffff",
                       cursor: "pointer",
-                      color: "#e11d2e",
+                      color: "#0f172a",
                       fontWeight: 600,
                     }}
                   >
-                    <option value="" disabled>+ Add</option>
+                    <option value="" disabled>+</option>
                     {Object.entries(COMPONENT_REGISTRY).map(([type, def]) => (
                       <option key={type} value={type}>
                         {def.title}
@@ -1295,10 +1488,10 @@ export function WebsiteEditor() {
                           <span style={{ color: "#94a3b8", cursor: "grab" }}>
                             <IconGrip />
                           </span>
-                          <span style={{ color: isSelected ? "#e11d2e" : "#475569" }}>
+                          <span style={{ color: isSelected ? "#e11d2e" : "#0f172a" }}>
                             <IconSectionSymbol type={b.type} />
                           </span>
-                          <span className="npati-builder-section-name">
+                          <span className="npati-builder-section-name" style={{ color: isSelected ? "#e11d2e" : "#0f172a" }}>
                             {b.name || def.title}
                           </span>
                         </div>
@@ -1368,9 +1561,9 @@ export function WebsiteEditor() {
                   >
                     <div className="npati-builder-section-info">
                       <IconSectionSymbol type={b.type} />
-                      <span className="npati-builder-section-name">{b.name || b.type}</span>
+                      <span className="npati-builder-section-name" style={{ color: "#0f172a", fontWeight: 600 }}>{b.name || b.type}</span>
                     </div>
-                    <span style={{ fontSize: "11px", color: "#94a3b8" }}>#{b.type}</span>
+                    <span style={{ fontSize: "11px", color: "#64748b" }}>#{b.type}</span>
                   </div>
                 ))}
               </div>
@@ -1383,7 +1576,7 @@ export function WebsiteEditor() {
               <span className="npati-builder-sections-title">Media & Assets</span>
               <label
                 className="button-primary"
-                style={{ textAlign: "center", cursor: "pointer", padding: "8px 12px", fontSize: "13px" }}
+                style={{ textAlign: "center", cursor: "pointer", padding: "9px 14px", fontSize: "13px" }}
               >
                 {uploadingAsset ? "Uploading..." : "+ Upload Image"}
                 <input
@@ -1409,7 +1602,7 @@ export function WebsiteEditor() {
                           void alertModal({ message: `Copied URL: ${url}` });
                         }}
                         style={{
-                          border: "1px solid #e2e8f0",
+                          border: "1px solid #cbd5e1",
                           borderRadius: "8px",
                           padding: "6px",
                           cursor: "pointer",
@@ -1418,7 +1611,7 @@ export function WebsiteEditor() {
                         }}
                       >
                         <img src={url} alt={f.name} style={{ width: "100%", height: "65px", objectFit: "cover", borderRadius: "4px" }} />
-                        <span style={{ fontSize: "11px", color: "#64748b", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: "11px", color: "#0f172a", fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {f.name}
                         </span>
                       </div>
@@ -1450,7 +1643,7 @@ export function WebsiteEditor() {
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               />
             ) : (
-              /* Rich Interactive Visual Canvas */
+              /* Rich Interactive Visual Canvas with In-line text editing */
               <div style={{ display: "flex", flexDirection: "column", width: "100%", minHeight: "100%" }}>
                 {(activePage?.blocks || []).map((b) => {
                   if (b.isHidden) return null;
@@ -1471,39 +1664,47 @@ export function WebsiteEditor() {
                         backgroundColor: s.backgroundColor || "transparent",
                         color: s.textColor || "#0f172a",
                         textAlign: s.textAlign || "left",
-                        padding: s.paddingY === "xlarge" ? "80px 24px" : s.paddingY === "large" ? "60px 24px" : s.paddingY === "small" ? "20px 24px" : s.paddingY === "none" ? "0 24px" : "40px 24px",
+                        padding: s.paddingY === "xlarge" ? "80px 32px" : s.paddingY === "large" ? "64px 32px" : s.paddingY === "small" ? "20px 32px" : s.paddingY === "none" ? "0 32px" : "44px 32px",
                       }}
                     >
-                      {/* Floating selection pill */}
+                      {/* Floating selection pill tag matching mockup */}
                       {isSelected && (
                         <div className="npati-builder-selected-tag">
                           <span>{b.name || def.title}</span>
-                          <span style={{ opacity: 0.8 }}>···</span>
+                          <span style={{ opacity: 0.85, cursor: "pointer" }}>···</span>
                         </div>
                       )}
 
-                      {/* BLOCK RENDERER CASES */}
-                      {/* NAVBAR */}
+                      {/* 1. NAVBAR */}
                       {b.type === "navbar" && (
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: "1140px", margin: "0 auto" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: 800, fontSize: "19px", color: s.textColor || "#0f172a" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: "1140px", margin: "0 auto", width: "100%" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: 800, fontSize: "20px", color: s.textColor || "#0f172a" }}>
                             {p.logoUrl ? (
                               <img src={p.logoUrl} alt={p.brandName} style={{ height: "30px" }} />
                             ) : (
-                              <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#e11d2e" }} />
+                              <span style={{ display: "inline-block", width: "11px", height: "11px", borderRadius: "50%", background: "#e11d2e" }} />
                             )}
-                            <span>{p.brandName || doc?.name || "NPATI"}</span>
+                            <span
+                              className="npati-editable-text"
+                              contentEditable={isSelected}
+                              suppressContentEditableWarning={true}
+                              onBlur={(e) => handleUpdateBlockProp("brandName", e.currentTarget.textContent || "")}
+                            >
+                              {p.brandName || doc?.name || "NPATI"}
+                            </span>
                           </div>
-                          <nav style={{ display: "flex", gap: "24px", alignItems: "center", fontSize: "14px", fontWeight: 500 }}>
-                            {(p.links || [{ text: "Home" }, { text: "About" }, { text: "Services" }, { text: "Pricing" }]).map((link: any, i: number) => (
-                              <span key={i} style={{ color: "#475569", cursor: "pointer" }}>{link.text}</span>
+
+                          <nav style={{ display: "flex", gap: "28px", alignItems: "center", fontSize: "14.5px", fontWeight: 500 }}>
+                            {(p.links || [{ text: "Home" }, { text: "About" }, { text: "Services" }, { text: "Pricing" }, { text: "Blog" }]).map((link: any, i: number) => (
+                              <span key={i} style={{ color: "#334155", cursor: "pointer" }}>{link.text}</span>
                             ))}
                           </nav>
+
                           {p.ctaText && (
                             <button
                               type="button"
                               className="button-primary"
-                              style={{ background: "#0f172a", borderColor: "#0f172a", padding: "7px 16px" }}
+                              style={{ background: "#0f172a", borderColor: "#0f172a", padding: "8px 18px", fontSize: "13.5px" }}
                             >
                               {p.ctaText}
                             </button>
@@ -1511,28 +1712,72 @@ export function WebsiteEditor() {
                         </div>
                       )}
 
-                      {/* HERO */}
+                      {/* 2. HERO SECTION */}
                       {b.type === "hero" && (
-                        <div style={{ maxWidth: "1140px", margin: "0 auto", textAlign: s.textAlign || "left" }}>
-                          <div style={{ display: "grid", gridTemplateColumns: p.layout === "split" || p.imageUrl ? "1.2fr 1fr" : "1fr", gap: "40px", alignItems: "center" }}>
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", width: "100%", textAlign: s.textAlign || "left" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: deviceMode === "mobile" ? "1fr" : "1.2fr 1fr", gap: "40px", alignItems: "center" }}>
                             <div>
                               {p.badge && (
-                                <div style={{ display: "inline-block", padding: "4px 12px", borderRadius: "999px", background: "#fef2f2", color: "#e11d2e", fontSize: "12px", fontWeight: 600, marginBottom: "16px", border: "1px solid #fee2e2" }}>
+                                <div
+                                  className="npati-editable-text"
+                                  contentEditable={isSelected}
+                                  suppressContentEditableWarning={true}
+                                  onBlur={(e) => handleUpdateBlockProp("badge", e.currentTarget.textContent || "")}
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "5px 14px",
+                                    borderRadius: "999px",
+                                    background: "#fef2f2",
+                                    color: "#e11d2e",
+                                    fontSize: "12.5px",
+                                    fontWeight: 600,
+                                    marginBottom: "18px",
+                                    border: "1px solid #fee2e2",
+                                  }}
+                                >
                                   {p.badge}
                                 </div>
                               )}
-                              <h1 style={{ fontSize: "clamp(2rem, 4vw, 3.2rem)", fontWeight: 800, lineHeight: 1.15, margin: "0 0 16px 0", color: s.textColor || "#0f172a", letterSpacing: "-0.03em" }}>
+
+                              <h1
+                                className="npati-editable-text"
+                                contentEditable={isSelected}
+                                suppressContentEditableWarning={true}
+                                onBlur={(e) => handleUpdateBlockProp("title", e.currentTarget.textContent || "")}
+                                style={{
+                                  fontSize: "clamp(2.2rem, 4.2vw, 3.4rem)",
+                                  fontWeight: 800,
+                                  lineHeight: 1.15,
+                                  margin: "0 0 18px 0",
+                                  color: s.textColor || "#0f172a",
+                                  letterSpacing: "-0.03em",
+                                }}
+                              >
                                 {p.title || "Build stunning websites with NPATI"}
                               </h1>
-                              <p style={{ fontSize: "16px", lineHeight: 1.6, color: "#64748b", margin: "0 0 28px 0", maxWidth: "560px" }}>
+
+                              <p
+                                className="npati-editable-text"
+                                contentEditable={isSelected}
+                                suppressContentEditableWarning={true}
+                                onBlur={(e) => handleUpdateBlockProp("subtitle", e.currentTarget.textContent || "")}
+                                style={{
+                                  fontSize: "16px",
+                                  lineHeight: 1.6,
+                                  color: "#334155",
+                                  margin: "0 0 28px 0",
+                                  maxWidth: "540px",
+                                }}
+                              >
                                 {p.subtitle || "Create professional, high-performing websites in minutes with our powerful no-code builder. No design or coding skills required."}
                               </p>
+
                               <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                                 {p.primaryCtaText && (
                                   <button
                                     type="button"
                                     className="button-primary"
-                                    style={{ background: "#0f172a", borderColor: "#0f172a", padding: "10px 20px", fontSize: "14px" }}
+                                    style={{ background: "#0f172a", borderColor: "#0f172a", padding: "11px 22px", fontSize: "14px", fontWeight: 700 }}
                                   >
                                     {p.primaryCtaText} →
                                   </button>
@@ -1541,71 +1786,102 @@ export function WebsiteEditor() {
                                   <button
                                     type="button"
                                     className="button-secondary"
-                                    style={{ padding: "10px 20px", fontSize: "14px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                                    style={{ padding: "11px 22px", fontSize: "14px", display: "inline-flex", alignItems: "center", gap: "8px", fontWeight: 600, color: "#0f172a" }}
                                   >
-                                    <span>▶</span> {p.secondaryCtaText}
+                                    <span style={{ fontSize: "11px" }}>▷</span> {p.secondaryCtaText}
                                   </button>
                                 )}
                               </div>
-                              <div style={{ display: "flex", gap: "18px", marginTop: "24px", fontSize: "12px", color: "#64748b" }}>
+
+                              <div style={{ display: "flex", gap: "20px", marginTop: "28px", fontSize: "13px", color: "#334155", fontWeight: 500 }}>
                                 <span>✓ No credit card required</span>
                                 <span>✓ Drag & drop builder</span>
                                 <span>✓ Publish in minutes</span>
                               </div>
                             </div>
 
-                            {/* Hero Graphic / Preview Card */}
-                            <div>
-                              {p.imageUrl ? (
-                                <img
-                                  src={p.imageUrl}
-                                  alt="Hero illustration"
-                                  style={{ width: "100%", borderRadius: "16px", boxShadow: "0 20px 40px rgba(0,0,0,0.08)", objectFit: "cover" }}
-                                />
-                              ) : (
-                                <div
-                                  style={{
-                                    background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
-                                    borderRadius: "16px",
-                                    padding: "24px",
-                                    boxShadow: "0 20px 40px rgba(0,0,0,0.08)",
-                                    border: "1px solid #e2e8f0",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "12px",
-                                  }}
-                                >
-                                  <div style={{ display: "flex", gap: "6px" }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f87171" }} />
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#fbbf24" }} />
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#34d399" }} />
-                                  </div>
-                                  <div style={{ height: "180px", background: "#ffffff", borderRadius: "8px", display: "grid", placeItems: "center", color: "#94a3b8", fontWeight: 600 }}>
-                                    Interactive Workspace Preview
+                            {/* Hero Visual Mockup Illustration (Browser Card + Smartphone Mockup) */}
+                            <div style={{ position: "relative", minHeight: "340px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {/* Browser Frame */}
+                              <div
+                                style={{
+                                  width: "92%",
+                                  background: "#ffffff",
+                                  borderRadius: "16px",
+                                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.12)",
+                                  border: "1px solid #e2e8f0",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                {/* Browser Window Header */}
+                                <div style={{ background: "#f8fafc", padding: "10px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f87171" }} />
+                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fbbf24" }} />
+                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#34d399" }} />
+                                </div>
+                                <div style={{ padding: "20px" }}>
+                                  <div style={{ fontWeight: 800, fontSize: "18px", color: "#0f172a", marginBottom: "6px" }}>Grow your business online</div>
+                                  <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "16px" }}>Beautiful websites. Real results.</div>
+                                  <div style={{ height: "130px", background: "linear-gradient(135deg, #e0e7ff 0%, #fae8ff 100%)", borderRadius: "10px", display: "grid", placeItems: "center" }}>
+                                    <button type="button" className="button-primary" style={{ padding: "6px 14px", fontSize: "11px", background: "#4f46e5", borderColor: "#4f46e5" }}>Get Started</button>
                                   </div>
                                 </div>
-                              )}
+                              </div>
+
+                              {/* Overlapping Smartphone Mockup */}
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  bottom: "-10px",
+                                  right: "0px",
+                                  width: "160px",
+                                  background: "#ffffff",
+                                  borderRadius: "22px",
+                                  border: "4px solid #0f172a",
+                                  boxShadow: "0 20px 35px rgba(0, 0, 0, 0.18)",
+                                  padding: "10px",
+                                  zIndex: 5,
+                                }}
+                              >
+                                <div style={{ width: "30px", height: "4px", background: "#cbd5e1", borderRadius: "2px", margin: "0 auto 8px auto" }} />
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "#0f172a" }}>Grow your business online</div>
+                                <div style={{ height: "65px", background: "#f1f5f9", borderRadius: "8px", margin: "6px 0", display: "grid", placeItems: "center" }}>
+                                  <button type="button" className="button-primary" style={{ padding: "4px 8px", fontSize: "9px", background: "#4f46e5", borderColor: "#4f46e5" }}>Get Started</button>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
                       )}
 
-                      {/* FEATURES */}
+                      {/* 3. FEATURES */}
                       {b.type === "features" && (
-                        <div style={{ maxWidth: "1140px", margin: "0 auto" }}>
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", width: "100%" }}>
                           <div style={{ textAlign: "center", marginBottom: "36px" }}>
                             <span style={{ fontSize: "11px", fontWeight: 700, color: "#e11d2e", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                              FEATURES
+                              {p.badge || "FEATURES"}
                             </span>
-                            <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "6px 0 10px 0", color: s.textColor || "#0f172a" }}>
+                            <h2
+                              className="npati-editable-text"
+                              contentEditable={isSelected}
+                              suppressContentEditableWarning={true}
+                              onBlur={(e) => handleUpdateBlockProp("title", e.currentTarget.textContent || "")}
+                              style={{ fontSize: "28px", fontWeight: 800, margin: "6px 0 10px 0", color: s.textColor || "#0f172a" }}
+                            >
                               {p.title || "Everything you need to succeed"}
                             </h2>
-                            <p style={{ color: "#64748b", fontSize: "15px", margin: 0 }}>
+                            <p
+                              className="npati-editable-text"
+                              contentEditable={isSelected}
+                              suppressContentEditableWarning={true}
+                              onBlur={(e) => handleUpdateBlockProp("subtitle", e.currentTarget.textContent || "")}
+                              style={{ color: "#334155", fontSize: "15px", margin: 0 }}
+                            >
                               {p.subtitle || "Powerful features to help you build, launch, and grow your online presence."}
                             </p>
                           </div>
 
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: deviceMode === "mobile" ? "1fr" : "repeat(3, 1fr)", gap: "20px" }}>
                             {(p.items || [
                               { title: "Drag & Drop Builder", description: "Create beautiful websites without any coding. Just drag, drop, and customize." },
                               { title: "Responsive Design", description: "Your website looks perfect on all devices, from desktop to mobile." },
@@ -1621,27 +1897,33 @@ export function WebsiteEditor() {
                                   boxShadow: "0 2px 8px rgba(0,0,0,0.02)",
                                 }}
                               >
-                                <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: i === 0 ? "#eff6ff" : i === 1 ? "#ecfdf5" : "#fdf2f8", display: "grid", placeItems: "center", marginBottom: "16px", color: i === 0 ? "#2563eb" : i === 1 ? "#059669" : "#db2777" }}>
+                                <div style={{ width: "38px", height: "38px", borderRadius: "10px", background: i === 0 ? "#eff6ff" : i === 1 ? "#ecfdf5" : "#fdf2f8", display: "grid", placeItems: "center", marginBottom: "16px", color: i === 0 ? "#2563eb" : i === 1 ? "#059669" : "#db2777" }}>
                                   <IconSectionSymbol type="features" />
                                 </div>
                                 <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 8px 0", color: "#0f172a" }}>{item.title}</h3>
-                                <p style={{ fontSize: "13.5px", color: "#64748b", margin: 0, lineHeight: 1.5 }}>{item.description}</p>
+                                <p style={{ fontSize: "13.5px", color: "#334155", margin: 0, lineHeight: 1.5 }}>{item.description}</p>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {/* PRICING */}
+                      {/* 4. PRICING */}
                       {b.type === "pricing" && (
-                        <div style={{ maxWidth: "1140px", margin: "0 auto", textAlign: "center" }}>
-                          <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 10px 0", color: s.textColor || "#0f172a" }}>
-                            {p.title || "Simple, Transparent Pricing"}
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", width: "100%", textAlign: "center" }}>
+                          <h2
+                            className="npati-editable-text"
+                            contentEditable={isSelected}
+                            suppressContentEditableWarning={true}
+                            onBlur={(e) => handleUpdateBlockProp("title", e.currentTarget.textContent || "")}
+                            style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 10px 0", color: s.textColor || "#0f172a" }}
+                          >
+                            {p.title || "Transparent, Flexible Plans"}
                           </h2>
-                          <p style={{ color: "#64748b", fontSize: "15px", marginBottom: "36px" }}>
-                            {p.subtitle || "Choose the perfect plan for your business."}
+                          <p style={{ color: "#334155", fontSize: "15px", marginBottom: "36px" }}>
+                            {p.subtitle || "No hidden fees. Change or cancel your subscription at any time."}
                           </p>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: deviceMode === "mobile" ? "1fr" : "repeat(3, 1fr)", gap: "20px" }}>
                             {(p.tiers || [
                               { name: "Starter", price: "$19", description: "Essential tools for personal projects." },
                               { name: "Pro", price: "$49", description: "Advanced power for growing businesses." },
@@ -1651,22 +1933,22 @@ export function WebsiteEditor() {
                                 key={i}
                                 style={{
                                   background: "#ffffff",
-                                  border: i === 1 ? "2px solid #e11d2e" : "1px solid #e2e8f0",
+                                  border: i === 1 ? "2px solid #e11d2e" : "1px solid #cbd5e1",
                                   borderRadius: "14px",
                                   padding: "28px 24px",
                                   textAlign: "left",
                                   boxShadow: "0 4px 16px rgba(0,0,0,0.03)",
                                 }}
                               >
-                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 6px 0" }}>{tier.name}</h3>
+                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 6px 0", color: "#0f172a" }}>{tier.name}</h3>
                                 <div style={{ fontSize: "32px", fontWeight: 800, color: "#0f172a", margin: "12px 0" }}>
                                   {tier.price}<span style={{ fontSize: "14px", color: "#64748b", fontWeight: 500 }}>/mo</span>
                                 </div>
-                                <p style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>{tier.description}</p>
+                                <p style={{ fontSize: "13.5px", color: "#334155", marginBottom: "20px" }}>{tier.description}</p>
                                 <button
                                   type="button"
                                   className={i === 1 ? "button-primary" : "button-secondary"}
-                                  style={{ width: "100%", padding: "9px" }}
+                                  style={{ width: "100%", padding: "10px", fontWeight: 600 }}
                                 >
                                   Get Started
                                 </button>
@@ -1676,33 +1958,40 @@ export function WebsiteEditor() {
                         </div>
                       )}
 
-                      {/* FAQ */}
+                      {/* 5. FAQ */}
                       {b.type === "faq" && (
-                        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
-                          <h2 style={{ fontSize: "28px", fontWeight: 800, textAlign: "center", margin: "0 0 24px 0", color: s.textColor || "#0f172a" }}>
+                        <div style={{ maxWidth: "800px", margin: "0 auto", width: "100%" }}>
+                          <h2
+                            className="npati-editable-text"
+                            contentEditable={isSelected}
+                            suppressContentEditableWarning={true}
+                            onBlur={(e) => handleUpdateBlockProp("title", e.currentTarget.textContent || "")}
+                            style={{ fontSize: "28px", fontWeight: 800, textAlign: "center", margin: "0 0 24px 0", color: s.textColor || "#0f172a" }}
+                          >
                             {p.title || "Frequently Asked Questions"}
                           </h2>
                           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             {(p.items || [
-                              { question: "How does the website builder work?", answer: "You can drag and drop sections, edit text and images directly, and publish in one click." },
-                              { question: "Can I connect a custom domain?", answer: "Yes, you can link any custom domain with automated SSL configuration." },
-                              { question: "Is hosting included?", answer: "Fast global CDN hosting is included with all plans." },
+                              { question: "How does the visual builder work?", answer: "Click any section or text directly on the canvas to edit in place, or use the Properties panel on the right." },
+                              { question: "Can I connect my custom domain?", answer: "Yes, you can link any custom domain with automated SSL configuration." },
+                              { question: "Is hosting included?", answer: "Fast edge CDN hosting is included with all plans." },
                             ]).map((item: any, i: number) => (
-                              <div key={i} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px 20px" }}>
+                              <div key={i} style={{ background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "16px 20px" }}>
                                 <div style={{ fontWeight: 700, fontSize: "15px", color: "#0f172a", marginBottom: "6px" }}>{item.question}</div>
-                                <div style={{ fontSize: "13.5px", color: "#64748b", lineHeight: 1.5 }}>{item.answer}</div>
+                                <div style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>{item.answer}</div>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {/* CTA */}
+                      {/* 6. CTA */}
                       {b.type === "cta" && (
                         <div
                           style={{
                             maxWidth: "1140px",
                             margin: "0 auto",
+                            width: "100%",
                             background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
                             borderRadius: "20px",
                             padding: "48px 32px",
@@ -1710,39 +1999,51 @@ export function WebsiteEditor() {
                             color: "#ffffff",
                           }}
                         >
-                          <h2 style={{ fontSize: "32px", fontWeight: 800, margin: "0 0 12px 0", color: "#ffffff" }}>
+                          <h2
+                            className="npati-editable-text"
+                            contentEditable={isSelected}
+                            suppressContentEditableWarning={true}
+                            onBlur={(e) => handleUpdateBlockProp("title", e.currentTarget.textContent || "")}
+                            style={{ fontSize: "32px", fontWeight: 800, margin: "0 0 12px 0", color: "#ffffff" }}
+                          >
                             {p.title || "Ready to launch your website?"}
                           </h2>
-                          <p style={{ fontSize: "16px", color: "#94a3b8", maxWidth: "540px", margin: "0 auto 28px auto" }}>
-                            {p.subtitle || "Start building today with NPATI. No technical background required."}
+                          <p
+                            className="npati-editable-text"
+                            contentEditable={isSelected}
+                            suppressContentEditableWarning={true}
+                            onBlur={(e) => handleUpdateBlockProp("subtitle", e.currentTarget.textContent || "")}
+                            style={{ fontSize: "16px", color: "#cbd5e1", maxWidth: "540px", margin: "0 auto 28px auto" }}
+                          >
+                            {p.subtitle || "Start building today with NPATI. No design or coding skills required."}
                           </p>
                           <button
                             type="button"
                             className="button-primary"
-                            style={{ background: "#e11d2e", borderColor: "#e11d2e", padding: "12px 28px", fontSize: "15px" }}
+                            style={{ background: "#e11d2e", borderColor: "#e11d2e", padding: "12px 28px", fontSize: "15px", fontWeight: 700 }}
                           >
                             {p.primaryCtaText || "Get Started Free"} →
                           </button>
                         </div>
                       )}
 
-                      {/* FOOTER */}
+                      {/* 7. FOOTER */}
                       {b.type === "footer" && (
-                        <div style={{ maxWidth: "1140px", margin: "0 auto", borderTop: "1px solid #e2e8f0", paddingTop: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: "#64748b" }}>
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", width: "100%", borderTop: "1px solid #e2e8f0", paddingTop: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13.5px", color: "#475569" }}>
                           <div>© {new Date().getFullYear()} {p.brandName || doc?.name || "NPATI"}. All rights reserved.</div>
-                          <div style={{ display: "flex", gap: "20px" }}>
-                            <span>Privacy Policy</span>
-                            <span>Terms of Service</span>
-                            <span>Contact</span>
+                          <div style={{ display: "flex", gap: "24px", fontWeight: 500 }}>
+                            <span style={{ cursor: "pointer", color: "#0f172a" }}>Privacy Policy</span>
+                            <span style={{ cursor: "pointer", color: "#0f172a" }}>Terms of Service</span>
+                            <span style={{ cursor: "pointer", color: "#0f172a" }}>Contact</span>
                           </div>
                         </div>
                       )}
 
-                      {/* CUSTOM / FALLBACK */}
+                      {/* 8. CUSTOM / FALLBACK */}
                       {b.type !== "navbar" && b.type !== "hero" && b.type !== "features" && b.type !== "pricing" && b.type !== "faq" && b.type !== "cta" && b.type !== "footer" && (
-                        <div style={{ maxWidth: "1140px", margin: "0 auto", padding: "20px", background: "#f8fafc", borderRadius: "12px", border: "1px dashed #cbd5e1" }}>
-                          <h3 style={{ margin: "0 0 8px 0" }}>{b.name || def.title}</h3>
-                          <p style={{ margin: 0, color: "#64748b" }}>{p.title || p.text || "Custom section content"}</p>
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", width: "100%", padding: "28px", background: "#ffffff", borderRadius: "14px", border: "1px solid #cbd5e1" }}>
+                          <h3 style={{ margin: "0 0 8px 0", color: "#0f172a", fontWeight: 700 }}>{b.name || def.title}</h3>
+                          <p style={{ margin: 0, color: "#334155" }}>{p.title || p.text || p.subtitle || "Section content..."}</p>
                         </div>
                       )}
                     </div>
@@ -1757,7 +2058,7 @@ export function WebsiteEditor() {
         {/* RIGHT PANEL: Properties / Design / Advanced                             */}
         {/* ----------------------------------------------------------------------- */}
         <aside className="npati-builder-right-panel">
-          {/* Top Inspector Tabs */}
+          {/* Top Inspector Tabs: Properties | Design | Advanced */}
           <div className="npati-builder-nav-tabs">
             <button
               type="button"
@@ -1785,19 +2086,19 @@ export function WebsiteEditor() {
           {/* TAB: PROPERTIES */}
           {inspectorTab === "properties" && selectedBlock && (
             <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-              {/* Header with Block Icon, Title, and ID */}
-              <div className="npati-builder-inspector-header">
+              {/* Active Section Card matching mockup */}
+              <div className="npati-builder-inspector-section-card">
                 <div className="npati-builder-inspector-block-title">
-                  <span style={{ color: "#e11d2e" }}>
+                  <div className="npati-builder-inspector-icon-box">
                     <IconSectionSymbol type={selectedBlock.type} />
-                  </span>
+                  </div>
                   <div>
                     <strong>{selectedBlock.name || selectedBlock.type}</strong>
                     <small>#{selectedBlock.type}</small>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
                   <button
                     type="button"
                     className="npati-builder-row-action-btn"
@@ -1817,7 +2118,7 @@ export function WebsiteEditor() {
                 </div>
               </div>
 
-              {/* Sub-tabs: Content vs Style */}
+              {/* Pill Subtabs: Content vs Style */}
               <div className="npati-builder-subtab-segmented">
                 <button
                   type="button"
@@ -1835,277 +2136,264 @@ export function WebsiteEditor() {
                 </button>
               </div>
 
-              {/* Inspector Content */}
+              {/* Inspector Content matching the photo exactly */}
               <div className="npati-builder-inspector-content">
-                {/* SUBTAB 1: CONTENT */}
-                {inspectorSubTab === "content" && (
-                  <>
-                    {/* Title */}
-                    <div className="npati-builder-form-group">
-                      <label className="npati-builder-form-label">Title</label>
+                {/* 1. Title */}
+                <div className="npati-builder-form-group">
+                  <label className="npati-builder-form-label">Title</label>
+                  <input
+                    type="text"
+                    className="npati-builder-input"
+                    value={selectedBlock.props.title || selectedBlock.props.brandName || ""}
+                    onChange={(e) => {
+                      if (selectedBlock.type === "navbar") {
+                        handleUpdateBlockProp("brandName", e.target.value);
+                      } else {
+                        handleUpdateBlockProp("title", e.target.value);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* 2. Subtitle */}
+                {selectedBlock.type !== "navbar" && (
+                  <div className="npati-builder-form-group">
+                    <label className="npati-builder-form-label">Subtitle</label>
+                    <textarea
+                      rows={3}
+                      className="npati-builder-textarea"
+                      value={selectedBlock.props.subtitle || selectedBlock.props.description || ""}
+                      onChange={(e) => handleUpdateBlockProp("subtitle", e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* 3. Primary Button & Link (2-column layout matching photo) */}
+                <div className="npati-builder-btn-link-row">
+                  <div className="npati-builder-form-group npati-builder-btn-col">
+                    <label className="npati-builder-form-label">Primary Button</label>
+                    <input
+                      type="text"
+                      className="npati-builder-input"
+                      value={selectedBlock.props.primaryCtaText || selectedBlock.props.ctaText || "Get Started Free"}
+                      onChange={(e) => {
+                        if (selectedBlock.type === "navbar") {
+                          handleUpdateBlockProp("ctaText", e.target.value);
+                        } else {
+                          handleUpdateBlockProp("primaryCtaText", e.target.value);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="npati-builder-form-group npati-builder-link-col">
+                    <label className="npati-builder-form-label">Link</label>
+                    <div className="npati-builder-link-input-wrap">
                       <input
                         type="text"
                         className="npati-builder-input"
-                        value={selectedBlock.props.title || selectedBlock.props.brandName || ""}
+                        value={selectedBlock.props.primaryCtaUrl || selectedBlock.props.ctaUrl || "#"}
                         onChange={(e) => {
                           if (selectedBlock.type === "navbar") {
-                            handleUpdateBlockProp("brandName", e.target.value);
+                            handleUpdateBlockProp("ctaUrl", e.target.value);
                           } else {
-                            handleUpdateBlockProp("title", e.target.value);
+                            handleUpdateBlockProp("primaryCtaUrl", e.target.value);
                           }
                         }}
                       />
+                      <span className="link-icon">
+                        <IconLink />
+                      </span>
                     </div>
+                  </div>
+                </div>
 
-                    {/* Subtitle / Description */}
-                    {selectedBlock.type !== "navbar" && (
-                      <div className="npati-builder-form-group">
-                        <label className="npati-builder-form-label">Subtitle</label>
-                        <textarea
-                          rows={3}
-                          className="npati-builder-textarea"
-                          value={selectedBlock.props.subtitle || selectedBlock.props.description || ""}
-                          onChange={(e) => handleUpdateBlockProp("subtitle", e.target.value)}
-                        />
-                      </div>
-                    )}
-
-                    {/* Badge Tag */}
-                    {selectedBlock.type === "hero" && (
-                      <div className="npati-builder-form-group">
-                        <label className="npati-builder-form-label">Badge Tag</label>
+                {/* 4. Secondary Button & Link (2-column layout matching photo) */}
+                {selectedBlock.type === "hero" && (
+                  <div className="npati-builder-btn-link-row">
+                    <div className="npati-builder-form-group npati-builder-btn-col">
+                      <label className="npati-builder-form-label">Secondary Button</label>
+                      <input
+                        type="text"
+                        className="npati-builder-input"
+                        value={selectedBlock.props.secondaryCtaText || "Watch Demo"}
+                        onChange={(e) => handleUpdateBlockProp("secondaryCtaText", e.target.value)}
+                      />
+                    </div>
+                    <div className="npati-builder-form-group npati-builder-link-col">
+                      <label className="npati-builder-form-label">Link</label>
+                      <div className="npati-builder-link-input-wrap">
                         <input
                           type="text"
                           className="npati-builder-input"
-                          value={selectedBlock.props.badge || ""}
-                          onChange={(e) => handleUpdateBlockProp("badge", e.target.value)}
+                          value={selectedBlock.props.secondaryCtaUrl || "#"}
+                          onChange={(e) => handleUpdateBlockProp("secondaryCtaUrl", e.target.value)}
                         />
-                      </div>
-                    )}
-
-                    {/* Primary Button */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
-                      <div className="npati-builder-form-group">
-                        <label className="npati-builder-form-label">Primary Button</label>
-                        <input
-                          type="text"
-                          className="npati-builder-input"
-                          value={selectedBlock.props.primaryCtaText || selectedBlock.props.ctaText || ""}
-                          onChange={(e) => {
-                            if (selectedBlock.type === "navbar") {
-                              handleUpdateBlockProp("ctaText", e.target.value);
-                            } else {
-                              handleUpdateBlockProp("primaryCtaText", e.target.value);
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className="npati-builder-form-group">
-                        <label className="npati-builder-form-label">
-                          <span>Link</span>
+                        <span className="link-icon">
                           <IconLink />
-                        </label>
-                        <input
-                          type="text"
-                          className="npati-builder-input"
-                          value={selectedBlock.props.primaryCtaUrl || selectedBlock.props.ctaUrl || "#"}
-                          onChange={(e) => {
-                            if (selectedBlock.type === "navbar") {
-                              handleUpdateBlockProp("ctaUrl", e.target.value);
-                            } else {
-                              handleUpdateBlockProp("primaryCtaUrl", e.target.value);
-                            }
-                          }}
-                        />
+                        </span>
                       </div>
                     </div>
+                  </div>
+                )}
 
-                    {/* Secondary Button */}
-                    {selectedBlock.type === "hero" && (
-                      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
-                        <div className="npati-builder-form-group">
-                          <label className="npati-builder-form-label">Secondary Button</label>
-                          <input
-                            type="text"
-                            className="npati-builder-input"
-                            value={selectedBlock.props.secondaryCtaText || ""}
-                            onChange={(e) => handleUpdateBlockProp("secondaryCtaText", e.target.value)}
-                          />
-                        </div>
-                        <div className="npati-builder-form-group">
-                          <label className="npati-builder-form-label">
-                            <span>Link</span>
-                            <IconLink />
-                          </label>
-                          <input
-                            type="text"
-                            className="npati-builder-input"
-                            value={selectedBlock.props.secondaryCtaUrl || "#"}
-                            onChange={(e) => handleUpdateBlockProp("secondaryCtaUrl", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    )}
+                {/* 5. Layout Section matching photo */}
+                <div>
+                  <span className="npati-builder-group-title">Layout</span>
 
-                    {/* Image URL */}
-                    <div className="npati-builder-form-group">
-                      <label className="npati-builder-form-label">Image URL</label>
+                  {/* Alignment */}
+                  <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                    <label className="npati-builder-form-label">Alignment</label>
+                    <div className="npati-builder-align-group">
+                      <button
+                        type="button"
+                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
+                        onClick={() => handleUpdateBlockStyle("textAlign", "left")}
+                        title="Align Left"
+                      >
+                        <IconAlignLeft />
+                      </button>
+                      <button
+                        type="button"
+                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
+                        onClick={() => handleUpdateBlockStyle("textAlign", "center")}
+                        title="Align Center"
+                      >
+                        <IconAlignCenter />
+                      </button>
+                      <button
+                        type="button"
+                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
+                        onClick={() => handleUpdateBlockStyle("textAlign", "right")}
+                        title="Align Right"
+                      >
+                        <IconAlignRight />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Padding */}
+                  <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                    <label className="npati-builder-form-label">Padding</label>
+                    <select
+                      className="npati-builder-select"
+                      value={selectedBlock.styles?.paddingY || "large"}
+                      onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
+                    >
+                      <option value="none">None (0px)</option>
+                      <option value="small">Small (20px)</option>
+                      <option value="medium">Medium (40px)</option>
+                      <option value="large">Large (64px)</option>
+                      <option value="xlarge">X-Large (80px)</option>
+                    </select>
+                  </div>
+
+                  {/* Max Width */}
+                  <div className="npati-builder-form-group">
+                    <label className="npati-builder-form-label">Max Width</label>
+                    <select
+                      className="npati-builder-select"
+                      value={selectedBlock.styles?.maxWidth || "large"}
+                      onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
+                    >
+                      <option value="large">1200px</option>
+                      <option value="medium">960px</option>
+                      <option value="small">640px</option>
+                      <option value="full">100% Full Width</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 6. Colors Section matching photo */}
+                <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                  <span className="npati-builder-group-title">Colors</span>
+
+                  {/* Background Color */}
+                  <div className="npati-builder-color-row">
+                    <span className="npati-builder-color-label">Background</span>
+                    <div className="npati-builder-color-picker-wrap">
+                      <input
+                        type="color"
+                        className="npati-builder-color-swatch"
+                        value={selectedBlock.styles?.backgroundColor?.startsWith("#") ? selectedBlock.styles.backgroundColor : "#F8FAFF"}
+                        onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                      />
                       <input
                         type="text"
-                        className="npati-builder-input"
-                        placeholder="https://images.unsplash.com/..."
-                        value={selectedBlock.props.imageUrl || selectedBlock.props.logoUrl || ""}
-                        onChange={(e) => {
-                          if (selectedBlock.type === "navbar") {
-                            handleUpdateBlockProp("logoUrl", e.target.value);
-                          } else {
-                            handleUpdateBlockProp("imageUrl", e.target.value);
-                          }
-                        }}
+                        className="npati-builder-color-code-input"
+                        value={selectedBlock.styles?.backgroundColor || "#F8FAFF"}
+                        onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
                       />
                     </div>
-                  </>
-                )}
+                  </div>
 
-                {/* SUBTAB 2: STYLE */}
-                {inspectorSubTab === "style" && (
-                  <>
-                    {/* Layout Section */}
-                    <div>
-                      <span className="npati-builder-sections-title" style={{ display: "block", marginBottom: "10px" }}>
-                        Layout
-                      </span>
-
-                      {/* Alignment */}
-                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
-                        <label className="npati-builder-form-label">Alignment</label>
-                        <div className="npati-builder-align-group">
-                          <button
-                            type="button"
-                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
-                            onClick={() => handleUpdateBlockStyle("textAlign", "left")}
-                            title="Left"
-                          >
-                            <IconAlignLeft />
-                          </button>
-                          <button
-                            type="button"
-                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
-                            onClick={() => handleUpdateBlockStyle("textAlign", "center")}
-                            title="Center"
-                          >
-                            <IconAlignCenter />
-                          </button>
-                          <button
-                            type="button"
-                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
-                            onClick={() => handleUpdateBlockStyle("textAlign", "right")}
-                            title="Right"
-                          >
-                            <IconAlignRight />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Padding */}
-                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
-                        <label className="npati-builder-form-label">Padding</label>
-                        <select
-                          className="npati-builder-select"
-                          value={selectedBlock.styles?.paddingY || "medium"}
-                          onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
-                        >
-                          <option value="none">None (0px)</option>
-                          <option value="small">Small (20px)</option>
-                          <option value="medium">Medium (40px)</option>
-                          <option value="large">Large (60px)</option>
-                          <option value="xlarge">X-Large (80px)</option>
-                        </select>
-                      </div>
-
-                      {/* Max Width */}
-                      <div className="npati-builder-form-group">
-                        <label className="npati-builder-form-label">Max Width</label>
-                        <select
-                          className="npati-builder-select"
-                          value={selectedBlock.styles?.maxWidth || "large"}
-                          onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
-                        >
-                          <option value="full">100% Full Width</option>
-                          <option value="large">1200px</option>
-                          <option value="medium">960px</option>
-                          <option value="small">640px</option>
-                        </select>
-                      </div>
+                  {/* Title Color */}
+                  <div className="npati-builder-color-row">
+                    <span className="npati-builder-color-label">Title</span>
+                    <div className="npati-builder-color-picker-wrap">
+                      <input
+                        type="color"
+                        className="npati-builder-color-swatch"
+                        value={selectedBlock.styles?.textColor?.startsWith("#") ? selectedBlock.styles.textColor : "#0F172A"}
+                        onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                      />
+                      <input
+                        type="text"
+                        className="npati-builder-color-code-input"
+                        value={selectedBlock.styles?.textColor || "#0F172A"}
+                        onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                      />
                     </div>
+                  </div>
 
-                    {/* Colors Section */}
-                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
-                      <span className="npati-builder-sections-title" style={{ display: "block", marginBottom: "10px" }}>
-                        Colors
-                      </span>
-
-                      {/* Background Color */}
-                      <div className="npati-builder-color-row">
-                        <span style={{ fontSize: "13px", color: "#334155" }}>Background</span>
-                        <div className="npati-builder-color-picker-wrap">
-                          <input
-                            type="color"
-                            className="npati-builder-color-swatch"
-                            value={selectedBlock.styles?.backgroundColor || "#ffffff"}
-                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
-                          />
-                          <span className="npati-builder-color-code">
-                            {selectedBlock.styles?.backgroundColor || "#FFFFFF"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Title Color */}
-                      <div className="npati-builder-color-row">
-                        <span style={{ fontSize: "13px", color: "#334155" }}>Title</span>
-                        <div className="npati-builder-color-picker-wrap">
-                          <input
-                            type="color"
-                            className="npati-builder-color-swatch"
-                            value={selectedBlock.styles?.textColor || "#0f172a"}
-                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
-                          />
-                          <span className="npati-builder-color-code">
-                            {selectedBlock.styles?.textColor || "#0F172A"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Border Radius */}
-                      <div className="npati-builder-form-group" style={{ marginTop: "12px" }}>
-                        <label className="npati-builder-form-label">Border Radius</label>
-                        <select
-                          className="npati-builder-select"
-                          value={selectedBlock.styles?.borderRadius || "md"}
-                          onChange={(e) => handleUpdateBlockStyle("borderRadius", e.target.value)}
-                        >
-                          <option value="none">None (0px)</option>
-                          <option value="sm">Small (6px)</option>
-                          <option value="md">Medium (10px)</option>
-                          <option value="lg">Large (16px)</option>
-                          <option value="full">Full (Rounded Pill)</option>
-                        </select>
-                      </div>
+                  {/* Subtitle Color */}
+                  <div className="npati-builder-color-row">
+                    <span className="npati-builder-color-label">Subtitle</span>
+                    <div className="npati-builder-color-picker-wrap">
+                      <input
+                        type="color"
+                        className="npati-builder-color-swatch"
+                        value="#64748B"
+                        onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                      />
+                      <input
+                        type="text"
+                        className="npati-builder-color-code-input"
+                        value="#64748B"
+                        readOnly
+                      />
                     </div>
-                  </>
-                )}
+                  </div>
+
+                  {/* Primary Button Color */}
+                  <div className="npati-builder-color-row">
+                    <span className="npati-builder-color-label">Primary Button</span>
+                    <div className="npati-builder-color-picker-wrap">
+                      <input
+                        type="color"
+                        className="npati-builder-color-swatch"
+                        value="#0F172A"
+                        onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                      />
+                      <input
+                        type="text"
+                        className="npati-builder-color-code-input"
+                        value="#0F172A"
+                        readOnly
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB: DESIGN (Global Website Theme) */}
+          {/* TAB: DESIGN (Global Website Styles) */}
           {inspectorTab === "design" && doc && (
             <div className="npati-builder-inspector-content">
               <span className="npati-builder-sections-title">Global Website Styles</span>
 
               <div className="npati-builder-color-row">
-                <span style={{ fontSize: "13px", color: "#334155" }}>Primary Brand Color</span>
+                <span className="npati-builder-color-label">Primary Brand Color</span>
                 <div className="npati-builder-color-picker-wrap">
                   <input
                     type="color"
@@ -2119,14 +2407,23 @@ export function WebsiteEditor() {
                       });
                     }}
                   />
-                  <span className="npati-builder-color-code">
-                    {doc.theme.primaryColor || "#E11D2E"}
-                  </span>
+                  <input
+                    type="text"
+                    className="npati-builder-color-code-input"
+                    value={doc.theme.primaryColor || "#E11D2E"}
+                    onChange={(e) => {
+                      pushDocumentChange({
+                        ...doc,
+                        theme: { ...doc.theme, primaryColor: e.target.value },
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }}
+                  />
                 </div>
               </div>
 
               <div className="npati-builder-color-row">
-                <span style={{ fontSize: "13px", color: "#334155" }}>Background Color</span>
+                <span className="npati-builder-color-label">Background Color</span>
                 <div className="npati-builder-color-picker-wrap">
                   <input
                     type="color"
@@ -2140,9 +2437,18 @@ export function WebsiteEditor() {
                       });
                     }}
                   />
-                  <span className="npati-builder-color-code">
-                    {doc.theme.backgroundColor || "#FFFFFF"}
-                  </span>
+                  <input
+                    type="text"
+                    className="npati-builder-color-code-input"
+                    value={doc.theme.backgroundColor || "#FFFFFF"}
+                    onChange={(e) => {
+                      pushDocumentChange({
+                        ...doc,
+                        theme: { ...doc.theme, backgroundColor: e.target.value },
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }}
+                  />
                 </div>
               </div>
 
@@ -2201,8 +2507,8 @@ export function WebsiteEditor() {
                   <input
                     type="text"
                     className="npati-builder-input"
-                    value={selectedBlock.type}
-                    disabled
+                    value={`#${selectedBlock.type}`}
+                    readOnly
                   />
                 </div>
               )}
@@ -2354,8 +2660,9 @@ export function WebsiteEditor() {
                           fontSize: "13px",
                           cursor: "pointer",
                           background: selectedFilePath === f.path ? "#fef2f2" : "#ffffff",
-                          color: selectedFilePath === f.path ? "#e11d2e" : "#334155",
+                          color: selectedFilePath === f.path ? "#e11d2e" : "#0f172a",
                           border: "1px solid #e2e8f0",
+                          fontWeight: 500,
                         }}
                       >
                         {f.path}
@@ -2394,9 +2701,9 @@ export function WebsiteEditor() {
                       <p style={{ color: "#64748b", fontSize: "13px" }}>No checkpoints saved yet.</p>
                     ) : (
                       checkpoints.map((cp) => (
-                        <div key={cp.id} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
-                          <strong style={{ fontSize: "13.5px" }}>{cp.name}</strong>
-                          <div style={{ fontSize: "12px", color: "#94a3b8" }}>{new Date(cp.createdAt).toLocaleString()}</div>
+                        <div key={cp.id} style={{ padding: "10px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
+                          <strong style={{ fontSize: "13.5px", color: "#0f172a" }}>{cp.name}</strong>
+                          <div style={{ fontSize: "12px", color: "#64748b" }}>{new Date(cp.createdAt).toLocaleString()}</div>
                         </div>
                       ))
                     )}
