@@ -7,6 +7,7 @@ import {
   createDefaultWebsiteDocument,
   getWebsiteAdapter,
   type WebsiteDocument,
+  type WebsiteDomainConfig,
 } from "@npati/shared";
 import {
   chooseAvailableCompanyId,
@@ -160,6 +161,23 @@ const copy = {
     drawerSubtitle: "Select a starter block template and customize your project details.",
     sectionTemplate: "1. Choose Starter Blocks & Template",
     sectionDetails: "2. Website Details",
+    sectionDomain: "3. Domain & SSL / Network",
+    domainTitle: "Domain",
+    domainDesc: "In this section you can edit a domain",
+    domainWarning: "Whenever you make changes to domains, remember to redeploy your compose to apply the changes.",
+    domainLabel: "Domain",
+    domainPlaceholder: "ai.npati.com",
+    technicalDomainNotice: "If no domain is entered, a temporary technical domain will be assigned automatically",
+    pathLabel: "Path",
+    pathDesc: 'The path where your application expects to receive requests internally (defaults to "/")',
+    stripPathLabel: "Remove the external path from the request before forwarding to the application",
+    portLabel: "Port",
+    portDesc: "The port where your application is running inside the container (e.g., 3000 for Node.js, 80 for Nginx, 8080 for Java)",
+    customEntrypointLabel: "Use custom entrypoint for domain",
+    customEntrypointDesc: '"web" and/or "websecure" is used by default.',
+    sslLabel: "Automatically provision SSL Certificate.",
+    letsEncryptTitle: "Let's Encrypt",
+    letsEncryptDesc: "Let's Encrypt auto-provisions a certificate automatically for this host.",
     nameLabel: "Website Name",
     descLabel: "Purpose & Description",
     frameworkLabel: "Framework",
@@ -205,6 +223,23 @@ const copy = {
     drawerSubtitle: "Оберіть структуру блоків та вкажіть назву сайту.",
     sectionTemplate: "1. Оберіть структуру блоків та шаблон",
     sectionDetails: "2. Налаштування проєкту",
+    sectionDomain: "3. Домен, порт та SSL-сертифікат",
+    domainTitle: "Домен",
+    domainDesc: "У цьому розділі ви можете налаштувати прив'язку домену",
+    domainWarning: "Кожного разу при зміні доменів не забудьте перерозгорнути compose, щоб застосувати зміни.",
+    domainLabel: "Домен",
+    domainPlaceholder: "ai.npati.com",
+    technicalDomainNotice: "Якщо домен не вказано, автоматично буде створено технічний домен",
+    pathLabel: "Шлях (Path)",
+    pathDesc: 'Шлях, за яким застосунок очікує отримувати внутрішні запити (за замовчуванням "/")',
+    stripPathLabel: "Видалити зовнішній шлях із запиту перед перенаправленням до застосунку",
+    portLabel: "Порт (Port)",
+    portDesc: "Порт, на якому працює застосунок усередині контейнера (наприклад, 3000 для Node.js, 80 для Nginx, 8080 для Java)",
+    customEntrypointLabel: "Використовувати власну точку входу для домену",
+    customEntrypointDesc: 'За замовчуванням використовуються "web" та/або "websecure".',
+    sslLabel: "Автоматично згенерувати SSL-сертифікат.",
+    letsEncryptTitle: "Let's Encrypt",
+    letsEncryptDesc: "Let's Encrypt автоматично генерує та оновлює сертифікат для цього хоста.",
     nameLabel: "Назва сайту",
     descLabel: "Призначення та опис",
     frameworkLabel: "Фреймворк",
@@ -262,7 +297,23 @@ export function WebsiteBuilderDashboard() {
   const [description, setDescription] = useState(TEMPLATES[0]?.defaultDesc ?? "Modern cloud hosting company");
   const [framework, setFramework] = useState("Next.js");
   const [type, setType] = useState<"website" | "landing_page" | "web_app">("website");
+  const [domain, setDomain] = useState("");
+  const [internalPath, setInternalPath] = useState("/");
+  const [stripPath, setStripPath] = useState(false);
+  const [containerPort, setContainerPort] = useState(3000);
+  const [useCustomEntrypoint, setUseCustomEntrypoint] = useState(false);
+  const [customEntrypoint, setCustomEntrypoint] = useState("web, websecure");
+  const [autoSsl, setAutoSsl] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  // Sync default container port with framework selection
+  useEffect(() => {
+    if (framework.toLowerCase().includes("vite")) {
+      setContainerPort(80);
+    } else {
+      setContainerPort(3000);
+    }
+  }, [framework]);
 
   // Load Companies
   useEffect(() => {
@@ -351,6 +402,28 @@ export function WebsiteBuilderDashboard() {
     if (!name.trim() || !companyId || busy) return;
     setBusy(true);
     try {
+      // Determine domain: use custom domain if provided, otherwise generate temporary technical preview domain
+      const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "site";
+      const userDomainTrimmed = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const technicalDomain = `${slug}-${randomSuffix}.preview.npati.com`;
+      const finalDomain = userDomainTrimmed || technicalDomain;
+      const isTechnical = !userDomainTrimmed;
+
+      const domainConfig: WebsiteDomainConfig = {
+        domain: finalDomain,
+        isTechnicalDomain: isTechnical,
+        path: internalPath.trim() || "/",
+        stripPath,
+        port: Number(containerPort) || (framework.toLowerCase().includes("vite") ? 80 : 3000),
+        customEntrypoint: useCustomEntrypoint,
+        entrypoints: useCustomEntrypoint
+          ? customEntrypoint.split(",").map((s) => s.trim()).filter(Boolean)
+          : ["web", "websecure"],
+        sslCertificate: autoSsl,
+        certificateProvider: autoSsl ? "letsencrypt" : "none",
+      };
+
       const created = await apiFetch<WebsiteProject>(
         `/companies/${encodeURIComponent(companyId)}/projects`,
         {
@@ -360,11 +433,14 @@ export function WebsiteBuilderDashboard() {
             name: name.trim(),
             description: description.trim(),
             type,
+            deploymentUrl: `https://${finalDomain}`,
+            previewUrl: `https://${finalDomain}`,
+            previewPort: domainConfig.port,
           }),
         }
       );
 
-      // Initialize website document using the selected template
+      // Initialize website document using the selected template and domain configuration
       const isVite = framework.toLowerCase().includes("vite");
       const doc: WebsiteDocument = createDefaultWebsiteDocument(
         name.trim(),
@@ -372,11 +448,28 @@ export function WebsiteBuilderDashboard() {
         {
           purpose: description.trim(),
           template: selectedTemplate,
+          domainConfig,
         }
       );
 
       const adapter = getWebsiteAdapter(doc.framework);
       const files = adapter.scaffoldProject(doc);
+
+      // Save domain and deployment configuration file in project files
+      files["deployment.json"] = JSON.stringify(
+        {
+          domain: finalDomain,
+          isTechnicalDomain: isTechnical,
+          path: domainConfig.path,
+          stripPath: domainConfig.stripPath,
+          port: domainConfig.port,
+          entrypoints: domainConfig.entrypoints,
+          ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2
+      );
 
       // Write initial scaffold files into the workspace
       for (const [filePath, content] of Object.entries(files)) {
@@ -751,6 +844,23 @@ export function WebsiteBuilderDashboard() {
                             />
                             {isPreviewing ? t.liveStatus : t.readyStatus}
                           </span>
+
+                          {(site.deploymentUrl || site.previewUrl) && (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                padding: "2px 8px",
+                                borderRadius: "6px",
+                                background: "#f8fafc",
+                                color: "#0f172a",
+                                border: "1px solid #e2e8f0",
+                              }}
+                              title="Domain"
+                            >
+                              🌐 {(site.deploymentUrl || site.previewUrl || "").replace(/^https?:\/\//, "")}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -874,7 +984,6 @@ export function WebsiteBuilderDashboard() {
           <aside
             className="company-drawer"
             onMouseDown={(e) => e.stopPropagation()}
-            style={{ width: "min(680px, 100vw)" }}
           >
             <header>
               <div>
@@ -937,8 +1046,7 @@ export function WebsiteBuilderDashboard() {
                         }}
                       >
                         <div>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "24px" }}>{tpl.icon}</span>
+                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "6px" }}>
                             <span
                               style={{
                                 fontSize: "11px",
@@ -1027,6 +1135,187 @@ export function WebsiteBuilderDashboard() {
                       <option value="web_app">{t.typeWebApp}</option>
                     </select>
                   </label>
+                </div>
+              </section>
+
+              {/* Section 3: Domain, Port & SSL */}
+              <section>
+                <h3>{t.sectionDomain}</h3>
+                <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748b" }}>
+                  {t.domainDesc}
+                </p>
+
+                {/* Info / Notice Banner */}
+                <div
+                  style={{
+                    background: "#f0f9ff",
+                    border: "1px solid #bae6fd",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    fontSize: "12.5px",
+                    color: "#0369a1",
+                    lineHeight: 1.45,
+                    marginBottom: "16px",
+                    display: "flex",
+                    gap: "8px",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <span style={{ fontSize: "15px" }}>ℹ️</span>
+                  <div>{t.domainWarning}</div>
+                </div>
+
+                {/* 1. Domain */}
+                <label>
+                  <span>{t.domainLabel}</span>
+                  <input
+                    type="text"
+                    placeholder="ai.npati.com"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                  />
+                  <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
+                    {domain.trim()
+                      ? `Target domain: https://${domain.trim().replace(/^https?:\/\//, "")}`
+                      : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
+                  </span>
+                </label>
+
+                {/* 2. Path */}
+                <div style={{ marginTop: "12px" }}>
+                  <label>
+                    <span>{t.pathLabel}</span>
+                    <input
+                      type="text"
+                      placeholder="/"
+                      value={internalPath}
+                      onChange={(e) => setInternalPath(e.target.value)}
+                    />
+                    <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
+                      {t.pathDesc}
+                    </span>
+                  </label>
+
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", marginTop: "8px" }}>
+                    <input
+                      type="checkbox"
+                      checked={stripPath}
+                      onChange={(e) => setStripPath(e.target.checked)}
+                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
+                    />
+                    <span style={{ fontSize: "12.5px", color: "#334155", fontWeight: 500 }}>
+                      {t.stripPathLabel}
+                    </span>
+                  </label>
+                </div>
+
+                {/* 3. Port */}
+                <div style={{ marginTop: "12px" }}>
+                  <label>
+                    <span>{t.portLabel}</span>
+                    <input
+                      type="number"
+                      placeholder={framework.toLowerCase().includes("vite") ? "80" : "3000"}
+                      value={containerPort}
+                      onChange={(e) => setContainerPort(Number(e.target.value) || 0)}
+                    />
+                    <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
+                      {t.portDesc}
+                    </span>
+                  </label>
+                </div>
+
+                {/* 4. Custom Entrypoint */}
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={useCustomEntrypoint}
+                      onChange={(e) => setUseCustomEntrypoint(e.target.checked)}
+                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
+                    />
+                    <span style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>
+                      {t.customEntrypointLabel}
+                    </span>
+                  </label>
+                  <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "24px" }}>
+                    {t.customEntrypointDesc}
+                  </span>
+
+                  {useCustomEntrypoint && (
+                    <input
+                      type="text"
+                      placeholder="web, websecure"
+                      value={customEntrypoint}
+                      onChange={(e) => setCustomEntrypoint(e.target.value)}
+                      style={{ marginLeft: "24px", marginTop: "4px" }}
+                    />
+                  )}
+                </div>
+
+                {/* 5. SSL Certificate */}
+                <div
+                  style={{
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "14px",
+                    background: "#f8fafc",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    marginTop: "14px",
+                  }}
+                >
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={autoSsl}
+                      onChange={(e) => setAutoSsl(e.target.checked)}
+                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
+                    />
+                    <span style={{ fontSize: "13px", color: "#0f172a", fontWeight: 700 }}>
+                      {t.sslLabel}
+                    </span>
+                  </label>
+
+                  {autoSsl && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                        padding: "10px 12px",
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "28px",
+                          height: "28px",
+                          borderRadius: "6px",
+                          background: "#ecfdf5",
+                          color: "#059669",
+                          display: "grid",
+                          placeItems: "center",
+                          flexShrink: 0,
+                          fontWeight: 700,
+                          fontSize: "14px",
+                        }}
+                      >
+                        🔒
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                          {t.letsEncryptTitle}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                          {t.letsEncryptDesc}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </section>
 
