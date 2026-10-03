@@ -199,3 +199,4 @@ export * from "./project-deploy-capabilities";
 export * from "./project-qa-capabilities";
 export * from "./website-schema";
 export * from "./website-renderer";
+export * from "./static-website-renderer";

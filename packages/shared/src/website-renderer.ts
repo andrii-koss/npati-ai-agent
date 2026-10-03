@@ -1,3 +1,4 @@
+import { StaticHtmlAdapter } from "./static-website-renderer";
 import type { WebsiteDocument, WebsiteBlock } from "./website-schema";
 
 export interface WebsiteRendererAdapter {
@@ -731,6 +732,7 @@ export class ViteAdapter implements WebsiteRendererAdapter {
 }
 
 export function getWebsiteAdapter(framework?: string): WebsiteRendererAdapter {
+  if (framework === "static") return new StaticHtmlAdapter();
   if (framework === "vite") return new ViteAdapter();
   return new NextJsAdapter();
 }

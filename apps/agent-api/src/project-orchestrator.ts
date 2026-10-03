@@ -9,7 +9,7 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { CompanyDelegationRuntime } from "./company-runtime";
-import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework, createDefaultWebsiteDocument, NextJsAdapter } from "@npati/shared";
+import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework, createDefaultWebsiteDocument, getWebsiteAdapter } from "@npati/shared";
 
 export class ProjectOrchestrationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
@@ -189,10 +189,10 @@ export class ProjectOrchestrator {
     return content;
   }
 
-  private async scaffoldNextProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, prompt?: string) {
+  private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: "nextjs" | "static", prompt?: string) {
     const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
-    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { template });
-    const adapter = new NextJsAdapter();
+    const doc = createDefaultWebsiteDocument(projectName, framework, { template });
+    const adapter = getWebsiteAdapter(framework);
     const files = adapter.scaffoldProject(doc);
     for (const [filePath, content] of Object.entries(files)) {
       try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
@@ -214,7 +214,7 @@ export class ProjectOrchestrator {
   private async recordScaffoldFallback(
     ctx: AuthContext, companyId: string, project: Project, idempotencyKey: string,
   ): Promise<CompanyAgentRunDetails> {
-    const result = `Створено стартовий сайт "${project.name}" на базі Next.js. AI-персоналізацію не завершено; базовий сайт доступний для перегляду й редагування.`;
+    const result = `Створено стартовий сайт "${project.name}" на базі ${project.framework}. AI-персоналізацію не завершено; базовий сайт доступний для перегляду й редагування.`;
     const { run } = await this.workspaceStore.createCompanyAgentRun(ctx, companyId, {
       task: `Create starter website: ${project.name}`, requestedMode: "single", projectId: project.id,
     }, `${idempotencyKey}:scaffold-fallback`);
@@ -275,7 +275,7 @@ export class ProjectOrchestrator {
         params.prompt,
         params.intentDecision.targetDetails?.entityName,
       );
-      const framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "Next.js";
+      const framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "HTML/CSS";
 
       const { project: created } = await this.projectService.create(ctx, params.companyId, {
         name,
@@ -284,7 +284,7 @@ export class ProjectOrchestrator {
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
       project = await this.projectService.updatePreview(ctx, params.companyId, created.id, { framework });
 
-      if (framework === "Next.js") await this.scaffoldNextProject(ctx, params.companyId, project.id, project.name, params.prompt);
+      if (framework === "Next.js" || framework === "HTML/CSS") await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", params.prompt);
 
       // Initialize PROJECT.md
       await this.initSharedProjectContext(ctx, params.companyId, project.id, {
@@ -303,6 +303,7 @@ export class ProjectOrchestrator {
       "1. Always search and read relevant files BEFORE editing. Do not blindly overwrite entire files or recreate the whole project.",
       "2. Make surgical, minimal modifications to fulfill the user request precisely.",
       "3. Keep all working pages, styles, assets, and configurations functional.",
+      project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
       sharedContext ? `\n[Shared Project Context (PROJECT.md)]:\n${sharedContext.slice(0, 2000)}` : "",
       `\nUser Task: ${params.prompt}`,
     ].filter(Boolean).join("\n");
@@ -477,7 +478,7 @@ export class ProjectOrchestrator {
         undefined,
         this.qaService,
       );
-      const multiResult = ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
+      const multiResult = project.framework !== "HTML/CSS" && ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
         ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT", true)
         : undefined;
       usedMultiAgent = Boolean(multiResult);
@@ -493,8 +494,9 @@ export class ProjectOrchestrator {
         idempotencyKey
       );
     } catch (runErr) {
-      if (isCreate && project.framework === "Next.js" &&
-        (runErr as { code?: string }).code === "INVALID_DELEGATION_PLAN") {
+      if (isCreate && (project.framework === "Next.js" || project.framework === "HTML/CSS") &&
+        ((runErr as { code?: string }).code === "INVALID_DELEGATION_PLAN" ||
+          (project.framework === "HTML/CSS" && /sandbox runner is not configured|sandbox_unavailable/i.test(runErr instanceof Error ? runErr.message : String(runErr))))) {
         runDetails = await this.recordScaffoldFallback(ctx, params.companyId, project, idempotencyKey);
       } else {
         const msg = runErr instanceof Error ? runErr.message : String(runErr);
@@ -514,8 +516,9 @@ export class ProjectOrchestrator {
       }
     }
 
-    if (isCreate && project.framework === "Next.js" &&
-      runDetails.run.status === "failed" && runDetails.run.errorCode === "INVALID_DELEGATION_PLAN") {
+    if (isCreate && (project.framework === "Next.js" || project.framework === "HTML/CSS") &&
+      runDetails.run.status === "failed" && (runDetails.run.errorCode === "INVALID_DELEGATION_PLAN" ||
+        (project.framework === "HTML/CSS" && /sandbox runner is not configured|sandbox_unavailable/i.test(runDetails.run.errorMessage ?? "")))) {
       runDetails = await this.recordScaffoldFallback(ctx, params.companyId, project, idempotencyKey);
       usedMultiAgent = false;
     }
@@ -544,7 +547,19 @@ export class ProjectOrchestrator {
       lastBuildStatus = null;
     }
 
-    if (needsBuild && !usedMultiAgent && runDetails.run.status === "completed") {
+    if (needsBuild && project.framework === "HTML/CSS" && runDetails.run.status === "completed") {
+      try {
+        const home = await this.projectWorkspace.readFile(ctx, params.companyId, project.id, "index.html");
+        if (!/<html[\s>]/i.test(home.content) || !/<body[\s>]/i.test(home.content)) throw new Error("index.html is not a complete HTML page");
+        lastBuildStatus = "success";
+      } catch (error) {
+        buildErrorSummary = error instanceof Error ? error.message : String(error);
+        lastBuildStatus = "failed";
+        await this.workspaceStore.updateCompanyAgentRun(ctx, params.companyId, runDetails.run.id, { status: "failed", errorMessage: buildErrorSummary });
+        runDetails = await this.workspaceStore.getCompanyAgentRun(ctx, params.companyId, runDetails.run.id);
+      }
+    }
+    if (needsBuild && project.framework !== "HTML/CSS" && !usedMultiAgent && runDetails.run.status === "completed") {
       await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "building" });
 
       const maxAttempts = 3;
@@ -638,7 +653,7 @@ export class ProjectOrchestrator {
 
     // 6. Update Project Status & Preview URL
     let previewUrl: string | undefined;
-    if (runDetails.run.status === "completed" && lastBuildStatus !== "failed") {
+    if (project.framework !== "HTML/CSS" && runDetails.run.status === "completed" && lastBuildStatus !== "failed") {
       try {
         const pStatus = await this.previewService.getPreviewStatus(ctx, params.companyId, project.id);
         previewUrl = pStatus.previewUrl || undefined;
@@ -681,7 +696,9 @@ export class ProjectOrchestrator {
       ? isCreate && lastBuildStatus === "failed"
         ? `Файли сайту "${project.name}" збережено, але перегляд не запущено.`
         : `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
-      : runDetails.run.result || (isCreate
+      : project.framework === "HTML/CSS" && isCreate
+        ? `${runDetails.run.result?.includes("AI-персоналізацію не завершено") ? runDetails.run.result + " " : `Створено HTML/CSS сайт "${project.name}". `}Натисніть Preview, щоб побачити сторінку в чаті.`
+        : runDetails.run.result || (isCreate
         ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
         : `Оновлено проєкт "${project.name}".`);
 

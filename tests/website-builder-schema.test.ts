@@ -120,6 +120,21 @@ describe("Website Builder Document Model & Adapters", () => {
     expect(synced["tsconfig.json"]).toBe(initialFiles["tsconfig.json"]);
   });
 
+  it("generates safe, standalone HTML pages for a static hosting site", () => {
+    const doc = createDefaultWebsiteDocument('Cloud <Host>', 'static', { template: 'hosting' });
+    const adapter = getWebsiteAdapter('static');
+    const files = adapter.scaffoldProject(doc);
+
+    expect(adapter.framework).toBe('static');
+    expect(files['package.json']).toBeUndefined();
+    expect(files['index.html']).toContain('<html lang="uk">');
+    expect(files['index.html']).toContain('id="pricing"');
+    expect(files['index.html']).toContain('Cloud &lt;Host&gt;');
+    expect(files['index.html']).not.toContain('<Host>');
+    expect(files['pricing.html']).toContain('<html lang="uk">');
+    doc.pages[0].blocks.find((block) => block.type === 'hero')!.props.title = 'Updated hosting site';
+    expect(adapter.syncDocument(doc)['index.html']).toContain('Updated hosting site');
+  });
   it("supports ViteAdapter via getWebsiteAdapter factory", () => {
     const nextAdapter = getWebsiteAdapter("nextjs");
     expect(nextAdapter.framework).toBe("nextjs");
