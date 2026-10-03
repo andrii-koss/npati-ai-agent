@@ -49,6 +49,7 @@ export interface WebsitePage {
   id: string;
   title: string;
   slug: string; // e.g. "/" or "pricing" or "contact"
+  icon?: string;
   seo?: WebsitePageSeo;
   blocks: WebsiteBlock[];
 }
