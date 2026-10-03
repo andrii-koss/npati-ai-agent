@@ -83,19 +83,26 @@ export class ProjectMultiAgentService {
           id: role, title: "Analyze project " + role, role, dependsOn: [], paths: [], status: "queued" as const,
         }));
       } else {
-        const planRun = await this.runtime.execute(ctx, companyId, {
-          task: [
-            "Plan website implementation tasks. Return JSON only: {\"tasks\":[{\"id\":\"short_id\",\"title\":\"specific work\",\"role\":\"design|frontend|seo|qa|security\",\"depends_on\":[\"id\"],\"paths\":[\"relative/file/or/directory\"]}]}",
-            "Use dependencies and precise file scopes. Design precedes implementation; QA follows implementation. SEO can run after page structure.",
-            "Planning only. Do not call tools or edit files.",
-            "Project Context: " + clean(projectContext ?? "", 2000),
-            "Request: " + clean(prompt, 2000),
-          ].join("\n"),
-          mode: "single", preferredAgentId: company.mainAgentId, projectId,
-          noMemory: true, suppressTools: true, callBudget: budget,
-        }, idempotencyKey + ":plan");
-        if (planRun.run.status !== "completed") throw new Error("Main Agent could not create a project task plan");
-        tasks = parseProjectTaskPlan(planRun.run.result ?? "", prompt);
+        let planResult = "";
+        try {
+          const planRun = await this.runtime.execute(ctx, companyId, {
+            task: [
+              "Plan website implementation tasks. Return JSON only: {\"tasks\":[{\"id\":\"short_id\",\"title\":\"specific work\",\"role\":\"design|frontend|seo|qa|security\",\"depends_on\":[\"id\"],\"paths\":[\"relative/file/or/directory\"]}]}",
+              "Use dependencies and precise file scopes. Design precedes implementation; QA follows implementation. SEO can run after page structure.",
+              "Planning only. Do not call tools or edit files.",
+              "Project Context: " + clean(projectContext ?? "", 2000),
+              "Request: " + clean(prompt, 2000),
+            ].join("\n"),
+            mode: "single", preferredAgentId: company.mainAgentId, projectId,
+            noMemory: true, suppressTools: true, callBudget: budget,
+          }, idempotencyKey + ":plan");
+          if (planRun.run.status === "completed") {
+            planResult = planRun.run.result ?? "";
+          }
+        } catch {
+          // If Main Agent fails planning (e.g. LLM model routing issue), gracefully fallback to standard tasks
+        }
+        tasks = parseProjectTaskPlan(planResult, prompt);
         if (!tasks.some((task) => task.role === "qa")) {
           tasks.push({ id: "qa", title: "Build, preview, test, and review the implementation", role: "qa",
             dependsOn: tasks.map((task) => task.id), paths: [], status: "queued" });
