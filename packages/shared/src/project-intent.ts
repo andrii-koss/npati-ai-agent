@@ -74,23 +74,21 @@ const COMMIT_REGEX = /(?:зроби коміт|закоміть|git commit|commi
 const DEPLOY_REGEX = /(?:задеплой(?:ти)?|опублікуй(?: сайт)?|виклади на хостинг|deploy (?:(?:the |this |a )?(?:site|website|project|app)|to )|publish (?:the |this |a )?(?:site|website|project)|deploy)/i;
 
 function extractEntityName(message: string): string | undefined {
-  const match = message.match(/(?:for|для|назва|called|named|під назвою)\s+["'«]?([^"'»\n.,!?]+)["'»]?/i)
-    || message.match(/(?:створи(?: мені)?|зроби(?: мені)?|create(?: me)?|build)\s+(?:новий\s+)?(?:адаптивний\s+)?(?:сучасний\s+)?(?:сайт|веб-?сайт|website|landing)\s*[,:]\s*["'«]?([^"'»\n.!?]+)["'»]?/i);
-  if (!match) return undefined;
-  const name = match[1]?.trim();
-  return name ? name.charAt(0).toUpperCase() + name.slice(1) : undefined;
+  const match = message.match(/(?:for|для|назва|called|named|під назвою)\s+["'«]?([^"'»\n.,!?]+)["'»]?/i);
+  return match ? match[1]?.trim() : undefined;
 }
 
-export function extractFramework(message: string): string | undefined {
-  if (/\bnext(?:\.js|js)?\b/i.test(message) || /next\.js/i.test(message)) return "Next.js";
-  if (/\bvite\b/i.test(message)) return "Vite";
-  if (/\bastro\b/i.test(message)) return "Astro";
-  if (/\bnuxt(?:\.js|js)?\b/i.test(message)) return "Nuxt";
-  if (/\bremix\b/i.test(message)) return "Remix";
-  if (/\bsvelte(?:kit)?\b/i.test(message)) return "SvelteKit";
-  if (/\breact\b/i.test(message)) return "React";
-  if (/\bvue(?:\.js|js)?\b/i.test(message)) return "Vue";
-  if (/\bhtml\b|\bcss\b|\bstatic\b/i.test(message)) return "HTML/CSS";
+function extractFramework(message: string): string | undefined {
+  const lower = message.toLowerCase();
+  if (lower.includes("next.js") || lower.includes("nextjs") || lower.includes("next")) return "Next.js";
+  if (lower.includes("vite")) return "Vite";
+  if (lower.includes("astro")) return "Astro";
+  if (lower.includes("nuxt")) return "Nuxt";
+  if (lower.includes("remix")) return "Remix";
+  if (lower.includes("svelte")) return "SvelteKit";
+  if (lower.includes("react")) return "React";
+  if (lower.includes("vue")) return "Vue";
+  if (lower.includes("html") || lower.includes("static")) return "HTML/CSS";
   return undefined;
 }
 

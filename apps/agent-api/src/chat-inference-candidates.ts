@@ -14,5 +14,5 @@ export function chatInferenceCandidates(
 
 export function isUnavailableInferenceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /\b(?:401|403|404|500|502|503)\b|unsupported|not a chat model|model_unavailable|model.*(?:missing|not found|disabled|invalid)|auth|unauthorized|no active credentials|invalid_api_key|authentication_error/i.test(message);
+  return /\b(?:401|403|404)\b|unsupported|not a chat model|model_unavailable|model.*(?:missing|not found|disabled|invalid)|auth|unauthorized/i.test(message);
 }
