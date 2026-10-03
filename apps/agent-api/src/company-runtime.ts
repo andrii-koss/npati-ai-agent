@@ -351,13 +351,15 @@ export class CompanyDelegationRuntime {
       const actionPlanningContext = planningMemory.memories.filter(memory => memory.source === "action_sensitive").map(memory => memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
       if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+      const resolvedAddedModels = typeof this.addedModelsResolver === "function" ? (await this.addedModelsResolver(ctx).catch(() => [])) : [];
       const inferenceModels = chatInferenceCandidates(
         candidates.map((agent) => agent.modelId).concat(candidates.map((agent) => agent.fallbackModelId)),
-        await this.addedModelsResolver?.(ctx) ?? [],
+        resolvedAddedModels,
         await this.ai.listModels?.().catch(() => []) ?? [],
       );
       if (this.strictInferenceRouting && inferenceModels.length === 0) throw new CompanyRuntimeError("model_unavailable", "No chat-compatible inference model is available for this Project", 503);
-      const planningModels = [...new Set([main.modelId, main.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))];
+      const userAddedModelIds = resolvedAddedModels.map((m) => m.id);
+      const planningModels = [...new Set([...userAddedModelIds, main.modelId, main.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))];
       const planningRequest: Parameters<NonNullable<AIEngine["a2aSend"]>>[0] = {
         model: planningModels[0] ?? (main.modelId && isChatCapableModel({ id: main.modelId }) ? main.modelId : "auto"), timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
@@ -397,9 +399,14 @@ export class CompanyDelegationRuntime {
           },
         ],
       };
+      const planningCandidates = [...planningModels];
+      if (!this.strictInferenceRouting) {
+        if (!planningCandidates.includes("auto")) planningCandidates.push("auto");
+        if (!planningCandidates.includes("auto/smart")) planningCandidates.push("auto/smart");
+      }
       const planned = await (async () => {
         let lastError: unknown;
-        for (const model of planningModels.length ? planningModels : [planningRequest.model]) {
+        for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
           try { return await this.ai.a2aSend!({ ...planningRequest, model }); }
           catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
         }
@@ -844,8 +851,13 @@ export class CompanyDelegationRuntime {
       const primary = agentModels?.[0] ?? comboModel(agent.modelId), fallback = agentModels?.[1] ?? comboModel(agent.fallbackModelId);
       const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
+      const comboCandidateModels = agentModels?.length ? [...agentModels] : [...new Set([primary, fallback])];
+      if (!this.strictInferenceRouting) {
+        if (!comboCandidateModels.includes("auto")) comboCandidateModels.push("auto");
+        if (!comboCandidateModels.includes("auto/smart")) comboCandidateModels.push("auto/smart");
+      }
       await this.ai.ensureCombo({
-        name, strategy: "priority", models: agentModels?.length ? agentModels : [...new Set([primary, fallback])],
+        name, strategy: "priority", models: comboCandidateModels,
         description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory, linked),
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }

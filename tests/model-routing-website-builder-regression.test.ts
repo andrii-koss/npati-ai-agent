@@ -123,9 +123,14 @@ describe("Model Routing & Website Builder Regression Tests", () => {
 
       const embeddingModel: AIModelSummary = {
         id: "openai/text-embedding-ada-002",
-        name: "text-embedding-ada-002",
+        upstreamId: "text-embedding-ada-002",
         providerId: "openai",
+        providerName: "OpenAI",
+        name: "text-embedding-ada-002",
         capabilities: ["embedding"],
+        added: true,
+        local: false,
+        freeStatus: "paid",
       };
 
       const result = await prefs.add(auth, embeddingModel);
@@ -144,15 +149,25 @@ describe("Model Routing & Website Builder Regression Tests", () => {
 
       const chatModel: AIModelSummary = {
         id: "oc/north-mini-code-free",
-        name: "north-mini-code-free",
+        upstreamId: "north-mini-code-free",
         providerId: "opencode",
+        providerName: "OpenCode",
+        name: "north-mini-code-free",
         capabilities: ["text", "chat", "coding"],
+        added: true,
+        local: false,
+        freeStatus: "free",
       };
       const embeddingModel: AIModelSummary = {
         id: "openai/text-embedding-ada-002",
-        name: "text-embedding-ada-002",
+        upstreamId: "text-embedding-ada-002",
         providerId: "openai",
+        providerName: "OpenAI",
+        name: "text-embedding-ada-002",
         capabilities: ["embedding"],
+        added: true,
+        local: false,
+        freeStatus: "paid",
       };
 
       // Manually store legacy preference with embedding model as defaultModelId
@@ -477,7 +492,7 @@ describe("DeepSeek 401 uncredentialed provider failover", () => {
         };
       },
       chat: async () => ({ content: "Successfully executed with auto fallback" }),
-    };
+    } as unknown as AIEngine;
 
     const runtime = new CompanyDelegationRuntime(store, mockAi, 5000);
     const result = await runtime.execute(auth, company.id, {
@@ -486,6 +501,7 @@ describe("DeepSeek 401 uncredentialed provider failover", () => {
       preferredAgentId: agent.id,
     }, "deepseek-test-key");
 
+    if (result.run.status !== "completed") console.log("DEEPSEEK RUN ERROR:", result.run.errorCode, result.run.errorMessage);
     expect(result.run.status).toBe("completed");
     expect(result.run.result).toBe("Successfully executed with auto fallback");
     expect(a2aCalls).toContain("deepseek/deepseek-chat");
