@@ -2,6 +2,7 @@ import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { ProjectMultiAgentService } from "./project-multi-agent";
+import { WEBSITE_FILE_TOOLS, canBuildWebsite } from "./project-agent-capabilities";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -86,14 +87,14 @@ export class ProjectOrchestrator {
 
   /**
    * Selects an agent for project development tasks based on capabilities, role, and instructions.
-   * NEVER checks agent.name. Falls back to company.mainAgentId.
+   * NEVER checks agent.name. Only agents with the website file tools are eligible.
    */
-  async selectProjectAgent(ctx: AuthContext, companyId: string, requiredCapabilities: string[] = ["project.files.read", "project.files.write"]): Promise<CompanyAgent | undefined> {
+  async selectProjectAgent(ctx: AuthContext, companyId: string, requiredCapabilities: string[] = [...WEBSITE_FILE_TOOLS]): Promise<CompanyAgent | undefined> {
     const company = await this.workspaceStore.getCompany(ctx, companyId);
     if (!company) throw new ProjectOrchestrationError("COMPANY_NOT_FOUND", `Company ${companyId} not found`, 404);
 
     const agents = await this.workspaceStore.listCompanyAgents(ctx, companyId);
-    const activeAgents = agents.filter((a) => a.isActive);
+    const activeAgents = agents.filter((a) => a.isActive && requiredCapabilities.every((cap) => a.tools?.includes(cap)));
 
     const DEVELOPER_KEYWORDS = /(?:developer|engineer|frontend|fullstack|software|web|coder|programmer|розробник|програміст|верстальник|фронтенд)/i;
 
@@ -124,15 +125,29 @@ export class ProjectOrchestrator {
       }
     }
 
-    // Fallback to Main Agent if no developer scored positively
-    if (!bestAgent || highestScore <= 0) {
-      if (company.mainAgentId) {
-        const main = activeAgents.find((a) => a.id === company.mainAgentId);
-        if (main) return main;
-      }
-    }
-
     return bestAgent;
+  }
+
+  private async ensureWebsiteAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
+    const existing = await this.selectProjectAgent(ctx, companyId);
+    if (existing) return existing;
+    const company = await this.workspaceStore.getCompany(ctx, companyId);
+    const main = company.mainAgentId
+      ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId)
+      : undefined;
+    const agent = await this.workspaceStore.createCompanyAgent(ctx, companyId, {
+      name: "Website Builder",
+      role: "Frontend developer",
+      description: "Builds and repairs websites requested in chat.",
+      systemInstruction: "Inspect the project files, implement the requested website, and verify the result.",
+      modelId: main?.modelId,
+      tools: [...WEBSITE_FILE_TOOLS, "project.terminal.exec", "project.terminal.process", "project.preview.start", "project.preview.status"],
+      isActive: true,
+    }, "website-builder-agent-v1");
+    if (!canBuildWebsite(agent) || !agent.isActive) {
+      throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required website project tools.", 400);
+    }
+    return agent;
   }
 
   /**
@@ -223,6 +238,11 @@ export class ProjectOrchestrator {
       retryable: boolean;
     };
   }> {
+    const isRepositoryAction = params.intentDecision.intent === "COMMIT_PROJECT" || params.intentDecision.intent === "CONNECT_REPOSITORY";
+    const selectedAgent = isRepositoryAction
+      ? await this.selectProjectAgent(ctx, params.companyId, [])
+        ?? await this.workspaceStore.getCompanyAgent(ctx, params.companyId, (await this.workspaceStore.getCompany(ctx, params.companyId)).mainAgentId!)
+      : await this.ensureWebsiteAgent(ctx, params.companyId);
     // 1. Resolve or Create Project
     let project: Project;
     let isCreate = false;
@@ -260,17 +280,8 @@ export class ProjectOrchestrator {
       });
     }
 
-    // 2. Select Agent by capabilities & role (NOT agent.name)
-    const selectedAgent = await this.selectProjectAgent(ctx, params.companyId);
-    if (!selectedAgent) {
-      throw new ProjectOrchestrationError(
-        "NO_QUALIFIED_AGENT",
-        "No active agent with project capabilities (project.files, project.terminal) was found in this company.",
-        400
-      );
-    }
+    // 2. Prepare Prompt with Targeted Edits Rule & Shared Context
 
-    // 3. Prepare Prompt with Targeted Edits Rule & Shared Context
     const sharedContext = await this.getSharedProjectContext(ctx, params.companyId, project.id);
     const guidelinesHeader = [
       `[PROJECT MANDATE: "${project.name}"]`,
@@ -453,7 +464,7 @@ export class ProjectOrchestrator {
         this.qaService,
       );
       const multiResult = ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
-        ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT")
+        ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT", true)
         : undefined;
       usedMultiAgent = Boolean(multiResult);
       runDetails = multiResult ?? await this.companyRuntime.execute(
@@ -505,7 +516,7 @@ export class ProjectOrchestrator {
     const runFailedDueToModel = isModelError(runErrorMessage) || /model_routing_failed|model_unavailable/i.test(runDetails.run.errorCode ?? "");
 
     if (needsBuild && runDetails.run.status === "failed") {
-      lastBuildStatus = runFailedDueToModel ? null : "failed";
+      lastBuildStatus = null;
     }
 
     if (needsBuild && !usedMultiAgent && runDetails.run.status === "completed") {
@@ -638,12 +649,16 @@ export class ProjectOrchestrator {
       runId: runDetails.run.id,
     };
 
-    let responseMessage = runDetails.run.result || (isCreate
-      ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
-      : `Оновлено проєкт "${project.name}".`);
+    let responseMessage = runDetails.run.status === "failed"
+      ? `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
+      : runDetails.run.result || (isCreate
+        ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
+        : `Оновлено проєкт "${project.name}".`);
 
     if (runDetails.run.status === "failed" && runFailedDueToModel) {
       responseMessage += `\n\n⚠️ Model routing failed: ${runErrorMessage.slice(0, 300)}`;
+    } else if (runDetails.run.status === "failed" && !buildErrorSummary) {
+      responseMessage += `\n\n⚠️ Project agent failed: ${(runErrorMessage || "The project task did not complete.").slice(0, 300)}`;
     } else if (lastBuildStatus === "failed") {
       const failure = buildErrorSummary || runDetails.run.errorMessage || "Preview did not become available.";
       responseMessage += `\n\n⚠️ Build or preview failed: ${failure.slice(0, 300)}`;
@@ -657,10 +672,10 @@ export class ProjectOrchestrator {
       projectAction,
       previewUrl,
       repairAttempts,
-      errorDetails: (lastBuildStatus === "failed" || (runDetails.run.status === "failed" && runFailedDueToModel)) ? {
-        step: runFailedDueToModel ? "model_routing_failed" : "build_repair",
+      errorDetails: (lastBuildStatus === "failed" || runDetails.run.status === "failed") ? {
+        step: runFailedDueToModel ? "model_routing_failed" : lastBuildStatus === "failed" ? "build_repair" : "agent_execution",
         agentId: selectedAgent.id,
-        tool: runFailedDueToModel ? "ai.inference" : "project.terminal.exec",
+        tool: runFailedDueToModel ? "ai.inference" : lastBuildStatus === "failed" ? "project.terminal.exec" : undefined,
         retryable: false,
       } : undefined,
     };
