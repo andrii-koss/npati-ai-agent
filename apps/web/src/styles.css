@@ -18636,7 +18636,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
   padding: 7px 10px;
   font-size: 13px;
   font-weight: 500;
-  color: #64748b;
+  color: #0f172a;
   border: none;
   background: transparent;
   border-radius: 7px;
@@ -18681,81 +18681,16 @@ body:has(.npati-dialog-backdrop) .sidebar {
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #334155;
-  cursor: pointer;
-  transition: all 140ms ease;
-  border: 1px solid transparent;
-}
-
-.npati-builder-page-item:hover {
-  background: #f1f5f9;
   color: #0f172a;
-}
-
-.npati-builder-page-item.active {
-  background: #fef2f2;
-  color: #e11d2e;
-  border-color: #fee2e2;
-  font-weight: 600;
-}
-
-.npati-builder-add-page-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 8px;
-  background: transparent;
-  color: #64748b;
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.npati-builder-add-page-btn:hover {
-  background: #fef2f2;
-  color: #e11d2e;
-  border-color: #fca5a5;
-}
-
-/* Sections Structure Hierarchy */
-.npati-builder-sections-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 6px;
-}
-
-.npati-builder-sections-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.npati-builder-sections-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.npati-builder-page-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #334155;
   cursor: pointer;
   transition: all 140ms ease;
   border: 1px solid transparent;
   user-select: none;
+}
+
+.npati-builder-page-item svg {
+  color: #0f172a;
+  flex-shrink: 0;
 }
 
 .npati-builder-page-item:hover {
@@ -18770,6 +18705,10 @@ body:has(.npati-dialog-backdrop) .sidebar {
   font-weight: 600;
 }
 
+.npati-builder-page-item.active svg {
+  color: var(--npati-red, #d83438);
+}
+
 .npati-builder-page-settings-btn {
   width: 24px;
   height: 24px;
@@ -18778,11 +18717,15 @@ body:has(.npati-dialog-backdrop) .sidebar {
   justify-content: center;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: #0f172a;
   border-radius: 5px;
   cursor: pointer;
   transition: all 120ms ease;
   padding: 0;
+}
+
+.npati-builder-page-settings-btn svg {
+  color: #0f172a;
 }
 
 .npati-builder-page-settings-btn:hover {
@@ -18792,6 +18735,40 @@ body:has(.npati-dialog-backdrop) .sidebar {
 
 .npati-builder-page-item.active .npati-builder-page-settings-btn {
   color: var(--npati-red, #d83438);
+}
+
+.npati-builder-page-item.active .npati-builder-page-settings-btn svg {
+  color: var(--npati-red, #d83438);
+}
+
+.npati-builder-add-page-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: transparent;
+  color: #0f172a;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.npati-builder-add-page-btn svg {
+  color: #0f172a;
+}
+
+.npati-builder-add-page-btn:hover {
+  background: #fef2f2;
+  color: #e11d2e;
+  border-color: #fca5a5;
+}
+
+.npati-builder-add-page-btn:hover svg {
+  color: #e11d2e;
 }
 
 /* Sections Structure Hierarchy */
@@ -18821,13 +18798,17 @@ body:has(.npati-dialog-backdrop) .sidebar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #94a3b8;
   background: #ffffff;
   border-radius: 6px;
   color: #0f172a;
   cursor: pointer;
   transition: all 140ms ease;
   padding: 0;
+}
+
+.npati-builder-add-section-btn svg {
+  color: #0f172a;
 }
 
 .npati-builder-add-section-btn:hover {
@@ -18850,7 +18831,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 13px;
-  color: #334155;
+  color: #0f172a;
   background: #ffffff;
   border: 1px solid #eef2f6;
   cursor: pointer;
@@ -18878,16 +18859,34 @@ body:has(.npati-dialog-backdrop) .sidebar {
 }
 
 .npati-builder-drag-handle {
-  color: #94a3b8;
+  color: #0f172a;
   cursor: grab;
   display: flex;
   align-items: center;
 }
 
+.npati-builder-drag-handle svg {
+  color: #0f172a;
+}
+
+.npati-builder-section-row.active .npati-builder-drag-handle,
+.npati-builder-section-row.active .npati-builder-drag-handle svg {
+  color: var(--npati-red, #d83438);
+}
+
 .npati-builder-section-icon {
   display: flex;
   align-items: center;
-  color: inherit;
+  color: #0f172a;
+}
+
+.npati-builder-section-icon svg {
+  color: #0f172a;
+}
+
+.npati-builder-section-row.active .npati-builder-section-icon,
+.npati-builder-section-row.active .npati-builder-section-icon svg {
+  color: var(--npati-red, #d83438);
 }
 
 .npati-builder-section-name {
@@ -18895,7 +18894,13 @@ body:has(.npati-dialog-backdrop) .sidebar {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;
-  font-weight: inherit;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.npati-builder-section-row.active .npati-builder-section-name {
+  color: var(--npati-red, #d83438);
+  font-weight: 600;
 }
 
 .npati-builder-more-btn {
@@ -18906,16 +18911,25 @@ body:has(.npati-dialog-backdrop) .sidebar {
   justify-content: center;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: #0f172a;
   border-radius: 5px;
   cursor: pointer;
   transition: all 120ms ease;
   padding: 0;
 }
 
+.npati-builder-more-btn svg {
+  color: #0f172a;
+}
+
 .npati-builder-more-btn:hover {
   background: rgba(0, 0, 0, 0.06);
   color: #0f172a;
+}
+
+.npati-builder-section-row.active .npati-builder-more-btn,
+.npati-builder-section-row.active .npati-builder-more-btn svg {
+  color: var(--npati-red, #d83438);
 }
 
 /* Dropdown Popovers */
@@ -19122,17 +19136,21 @@ body:has(.npati-dialog-backdrop) .sidebar {
   transform: scale(1.15);
 }
 
-/* Thin sleek custom scrollbars across NPATI builder and modals */
+/* Thin sleek custom scrollbars across the entire NPATI builder, all panels, canvas, and modals */
+.npati-fullscreen-editor-shell,
+.npati-fullscreen-editor-shell *,
 .npati-builder-root,
 .npati-builder-root *,
 .npati-builder-modal-backdrop,
 .npati-builder-modal-backdrop *,
 .npati-builder-modal,
 .npati-builder-modal * {
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin !important;
+  scrollbar-color: #cbd5e1 transparent !important;
 }
 
+.npati-fullscreen-editor-shell::-webkit-scrollbar,
+.npati-fullscreen-editor-shell *::-webkit-scrollbar,
 .npati-builder-root::-webkit-scrollbar,
 .npati-builder-root *::-webkit-scrollbar,
 .npati-builder-modal-backdrop::-webkit-scrollbar,
@@ -19141,6 +19159,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .npati-builder-modal *::-webkit-scrollbar,
 .npati-builder-icon-grid::-webkit-scrollbar,
 .npati-builder-canvas-wrapper::-webkit-scrollbar,
+.npati-builder-tab-content::-webkit-scrollbar,
+.npati-builder-inspector-content::-webkit-scrollbar,
 .npati-builder-left-panel::-webkit-scrollbar,
 .npati-builder-right-panel::-webkit-scrollbar,
 .npati-builder-sections-list::-webkit-scrollbar {
@@ -19148,6 +19168,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   height: 5px !important;
 }
 
+.npati-fullscreen-editor-shell::-webkit-scrollbar-track,
+.npati-fullscreen-editor-shell *::-webkit-scrollbar-track,
 .npati-builder-root::-webkit-scrollbar-track,
 .npati-builder-root *::-webkit-scrollbar-track,
 .npati-builder-modal-backdrop::-webkit-scrollbar-track,
@@ -19157,6 +19179,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   background: transparent !important;
 }
 
+.npati-fullscreen-editor-shell::-webkit-scrollbar-thumb,
+.npati-fullscreen-editor-shell *::-webkit-scrollbar-thumb,
 .npati-builder-root::-webkit-scrollbar-thumb,
 .npati-builder-root *::-webkit-scrollbar-thumb,
 .npati-builder-modal-backdrop::-webkit-scrollbar-thumb,
@@ -19164,11 +19188,15 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .npati-builder-modal::-webkit-scrollbar-thumb,
 .npati-builder-modal *::-webkit-scrollbar-thumb,
 .npati-builder-icon-grid::-webkit-scrollbar-thumb,
-.npati-builder-canvas-wrapper::-webkit-scrollbar-thumb {
+.npati-builder-canvas-wrapper::-webkit-scrollbar-thumb,
+.npati-builder-tab-content::-webkit-scrollbar-thumb,
+.npati-builder-inspector-content::-webkit-scrollbar-thumb {
   background: #cbd5e1 !important;
   border-radius: 9999px !important;
 }
 
+.npati-fullscreen-editor-shell::-webkit-scrollbar-thumb:hover,
+.npati-fullscreen-editor-shell *::-webkit-scrollbar-thumb:hover,
 .npati-builder-root::-webkit-scrollbar-thumb:hover,
 .npati-builder-root *::-webkit-scrollbar-thumb:hover,
 .npati-builder-modal-backdrop::-webkit-scrollbar-thumb:hover,
@@ -19176,7 +19204,9 @@ body:has(.npati-dialog-backdrop) .sidebar {
 .npati-builder-modal::-webkit-scrollbar-thumb:hover,
 .npati-builder-modal *::-webkit-scrollbar-thumb:hover,
 .npati-builder-icon-grid::-webkit-scrollbar-thumb:hover,
-.npati-builder-canvas-wrapper::-webkit-scrollbar-thumb:hover {
+.npati-builder-canvas-wrapper::-webkit-scrollbar-thumb:hover,
+.npati-builder-tab-content::-webkit-scrollbar-thumb:hover,
+.npati-builder-inspector-content::-webkit-scrollbar-thumb:hover {
   background: #94a3b8 !important;
 }
 
@@ -19299,7 +19329,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
 
 .npati-builder-inspector-block-title small {
   font-size: 12px;
-  color: #64748b;
+  color: #0f172a;
+  font-weight: 500;
   display: block;
   margin-top: 2px;
 }
@@ -19323,7 +19354,7 @@ body:has(.npati-dialog-backdrop) .sidebar {
   border-radius: 7px;
   font-size: 13px;
   font-weight: 500;
-  color: #64748b;
+  color: #0f172a;
   cursor: pointer;
   transition: all 140ms ease;
   user-select: none;

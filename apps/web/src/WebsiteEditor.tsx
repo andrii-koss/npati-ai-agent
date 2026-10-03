@@ -146,17 +146,17 @@ function IconPublish() {
 
 function IconMore() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="1.2" />
-      <circle cx="19" cy="12" r="1.2" />
-      <circle cx="5" cy="12" r="1.2" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.1" />
+      <circle cx="19" cy="12" r="2.1" />
+      <circle cx="5" cy="12" r="2.1" />
     </svg>
   );
 }
 
 function IconPlus() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <line x1="12" x2="12" y1="5" y2="19" />
       <line x1="5" x2="19" y1="12" y2="12" />
     </svg>
@@ -165,13 +165,13 @@ function IconPlus() {
 
 function IconGrip() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="9" cy="12" r="1" />
-      <circle cx="9" cy="5" r="1" />
-      <circle cx="9" cy="19" r="1" />
-      <circle cx="15" cy="12" r="1" />
-      <circle cx="15" cy="5" r="1" />
-      <circle cx="15" cy="19" r="1" />
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="12" r="1.6" />
+      <circle cx="9" cy="6" r="1.6" />
+      <circle cx="9" cy="18" r="1.6" />
+      <circle cx="15" cy="12" r="1.6" />
+      <circle cx="15" cy="6" r="1.6" />
+      <circle cx="15" cy="18" r="1.6" />
     </svg>
   );
 }
@@ -1777,7 +1777,7 @@ export function WebsiteEditor() {
   }
 
   return (
-    <div className="npati-fullscreen-editor-shell">
+    <div className="npati-fullscreen-editor-shell npati-builder-root">
       {/* ========================================================================= */}
       {/* TOP APPLICATION BAR                                                       */}
       {/* ========================================================================= */}
@@ -2111,7 +2111,7 @@ export function WebsiteEditor() {
                           }}
                           title="Page Settings"
                         >
-                          <IconSettings />
+                          <IconMore />
                         </button>
 
                         {openPageMenuId === page.id && (
@@ -2362,7 +2362,7 @@ export function WebsiteEditor() {
                       <IconSectionSymbol type={b.type} />
                       <span className="npati-builder-section-name" style={{ color: "#0f172a", fontWeight: 600 }}>{b.name || b.type}</span>
                     </div>
-                    <span style={{ fontSize: "11px", color: "#64748b" }}>#{b.type}</span>
+                    <span style={{ fontSize: "11px", color: "#0f172a" }}>#{b.type}</span>
                   </div>
                 ))}
               </div>
