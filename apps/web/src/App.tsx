@@ -1052,6 +1052,19 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
 
 
 
+function FullscreenRoute({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading && !isAuthenticated) {
+    return <div className="workspace" />;
+  }
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  }
+  return <div className="npati-fullscreen-editor-shell">{children}</div>;
+}
+
 function Workspace({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
@@ -1460,8 +1473,8 @@ export function App() {
             <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
             <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
             <Route path="/settings/websites" element={<Workspace><WebsiteBuilderDashboard /></Workspace>} />
-            <Route path="/settings/websites/:companyId/:projectId" element={<Workspace><WebsiteEditor /></Workspace>} />
-            <Route path="/projects/:companyId/:projectId" element={<Workspace><WebsiteEditor /></Workspace>} />
+            <Route path="/settings/websites/:companyId/:projectId" element={<FullscreenRoute><WebsiteEditor /></FullscreenRoute>} />
+            <Route path="/projects/:companyId/:projectId" element={<FullscreenRoute><WebsiteEditor /></FullscreenRoute>} />
             <Route path="/projects/:projectId" element={<LegacyProjectRedirect />} />
             <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />

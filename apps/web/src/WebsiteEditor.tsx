@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { confirmModal, promptModal } from "./ConfirmDialog";
+import { confirmModal, promptModal, alertModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
   COMPONENT_REGISTRY,
@@ -15,7 +15,10 @@ import {
 } from "@npati/shared";
 
 type DeviceMode = "desktop" | "tablet" | "mobile";
-type EditorTab = "blocks" | "pages" | "theme" | "assets" | "chat" | "history" | "code" | "changes" | "seo" | "deploy";
+type LeftPanelTab = "pages" | "layers" | "assets";
+type InspectorTab = "properties" | "design" | "advanced";
+type InspectorSubTab = "content" | "style";
+type ActiveDrawer = null | "ai" | "files" | "history" | "seo";
 
 interface PreviewStatusResponse {
   status: string;
@@ -44,15 +47,285 @@ interface CheckpointItem {
   createdAt: string;
 }
 
-interface DeploymentItem {
-  id: string;
-  provider: string;
-  environment: string;
-  status: string;
-  targetUrl?: string;
-  createdAt: string;
+// ---------------------------------------------------------------------------
+// SVG Icon Components (Strictly professional SVG, no emojis)
+// ---------------------------------------------------------------------------
+function IconBack() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 19-7-7 7-7" />
+      <path d="M19 12H5" />
+    </svg>
+  );
 }
 
+function IconDesktop() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <line x1="8" x2="16" y1="21" y2="21" />
+      <line x1="12" x2="12" y1="17" y2="21" />
+    </svg>
+  );
+}
+
+function IconTablet() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="16" height="20" x="4" y="2" rx="2" />
+      <line x1="12" x2="12.01" y1="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconMobile() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="14" height="20" x="5" y="2" rx="2" />
+      <line x1="12" x2="12.01" y1="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconUndo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+
+function IconRedo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
+function IconEye() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconEyeOff() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" x2="22" y1="2" y2="22" />
+    </svg>
+  );
+}
+
+function IconPublish() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
+function IconMore() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+      <circle cx="5" cy="12" r="1" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" x2="12" y1="5" y2="19" />
+      <line x1="5" x2="19" y1="12" y2="12" />
+    </svg>
+  );
+}
+
+function IconGrip() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="9" cy="5" r="1" />
+      <circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="15" cy="5" r="1" />
+      <circle cx="15" cy="19" r="1" />
+    </svg>
+  );
+}
+
+function IconCopy() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  );
+}
+
+function IconChevronDown() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function IconLink() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function IconAlignLeft() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="21" x2="3" y1="6" y2="6" />
+      <line x1="15" x2="3" y1="12" y2="12" />
+      <line x1="17" x2="3" y1="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconAlignCenter() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" x2="6" y1="6" y2="6" />
+      <line x1="21" x2="3" y1="12" y2="12" />
+      <line x1="18" x2="6" y1="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconAlignRight() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="21" x2="3" y1="6" y2="6" />
+      <line x1="21" x2="9" y1="12" y2="12" />
+      <line x1="21" x2="7" y1="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconHome() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
+
+function IconFile() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  );
+}
+
+function IconSparkles() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+  );
+}
+
+function IconSectionSymbol({ type }: { type: string }) {
+  switch (type) {
+    case "navbar":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="20" height="6" x="2" y="3" rx="1" />
+          <line x1="6" x2="8" y1="6" y2="6" />
+          <line x1="16" x2="18" y1="6" y2="6" />
+        </svg>
+      );
+    case "hero":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+          <line x1="3" x2="21" y1="9" y2="9" />
+          <line x1="9" x2="9" y1="21" y2="9" />
+        </svg>
+      );
+    case "features":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="7" height="7" x="3" y="3" rx="1" />
+          <rect width="7" height="7" x="14" y="3" rx="1" />
+          <rect width="7" height="7" x="14" y="14" rx="1" />
+          <rect width="7" height="7" x="3" y="14" rx="1" />
+        </svg>
+      );
+    case "pricing":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+          <line x1="3" x2="21" y1="12" y2="12" />
+          <line x1="12" x2="12" y1="3" y2="21" />
+        </svg>
+      );
+    case "faq":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" x2="12.01" y1="17" y2="17" />
+        </svg>
+      );
+    case "cta":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </svg>
+      );
+    case "footer":
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="20" height="6" x="2" y="15" rx="1" />
+          <line x1="6" x2="18" y1="18" y2="18" />
+        </svg>
+      );
+    default:
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+        </svg>
+      );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// API Helpers
+// ---------------------------------------------------------------------------
 function authHeaders() {
   const value = new Headers();
   const token = getStoredAuthToken();
@@ -92,6 +365,9 @@ async function apiPost<T>(url: string, body?: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+// ---------------------------------------------------------------------------
+// Main WebsiteEditor Component
+// ---------------------------------------------------------------------------
 export function WebsiteEditor() {
   const { companyId = "", projectId = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -99,52 +375,69 @@ export function WebsiteEditor() {
 
   const base = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`;
 
-  // Core Document Model state
+  // Core Document State
   const [doc, setDoc] = useState<WebsiteDocument | null>(null);
   const [activePageId, setActivePageId] = useState<string>("page-home");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
-  // Undo / Redo history stack
+  // Undo / Redo History
   const [history, setHistory] = useState<WebsiteDocument[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
-  // UI state
-  const [activeTab, setActiveTab] = useState<EditorTab>((searchParams.get("tab") as EditorTab) || "blocks");
+  // Layout & UI State
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
+  const [leftTab, setLeftTab] = useState<LeftPanelTab>("pages");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("properties");
+  const [inspectorSubTab, setInspectorSubTab] = useState<InspectorSubTab>("content");
   const [saveStatus, setSaveStatus] = useState<"saved" | "unsaved" | "saving">("saved");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Preview state
+  // More menu & Drawers
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
+
+  // Preview Mode: visual DOM preview vs running Next.js sandbox iframe
+  const [previewMode, setPreviewMode] = useState<"visual" | "sandbox">("visual");
   const [previewStatus, setPreviewStatus] = useState<PreviewStatusResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
 
-  // Assets state
+  // Assets
   const [uploadingAsset, setUploadingAsset] = useState(false);
 
-  // Chat state
+  // AI Chat
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([
     {
       id: "initial-assistant",
       role: "assistant",
       content: language === "uk"
-        ? "Привіт! Я ваш AI Developer Agent. Ви можете попросити мене додати нову секцію, змінити стилі або налаштувати сайт."
-        : "Hello! I am your AI Developer Agent. Ask me to add new sections, change styles, or adjust your website.",
+        ? "Привіт! Я ваш AI Developer Agent. Ви можете попросити мене додати новий блок, змінити стилі або налаштувати сайт."
+        : "Hello! I am your AI Developer Agent. Ask me to add new blocks, change styles, or adjust your website.",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
 
-  // Code & Files state
+  // Files & Checkpoints
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string>("website.config.json");
   const [fileContent, setFileContent] = useState<string>("");
-
-  // History & Checkpoints state
   const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
-  const [deployments, setDeployments] = useState<DeploymentItem[]>([]);
   const [isDeploying, setIsDeploying] = useState(false);
+
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close more menu on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
 
   // Push new state to undo/redo history
   const pushDocumentChange = useCallback((newDoc: WebsiteDocument) => {
@@ -179,39 +472,43 @@ export function WebsiteEditor() {
     }
   };
 
-  // Load project & website.config.json
+  // Load project & config
   const loadProject = async () => {
     if (!companyId || !projectId) return;
     setLoading(true);
     try {
-      // 1. Check if website.config.json exists
       try {
         const fileRes = await apiGet<{ content: string }>(`${base}/files/read?path=website.config.json`);
         const parsed = JSON.parse(fileRes.content) as WebsiteDocument;
         setDoc(parsed);
-        if (parsed.pages[0]) setActivePageId(parsed.pages[0].id);
+        if (parsed.pages[0]) {
+          setActivePageId(parsed.pages[0].id);
+          if (parsed.pages[0].blocks[0]) {
+            setSelectedBlockId(parsed.pages[0].blocks[0].id);
+          }
+        }
         setHistory([parsed]);
         setHistoryIndex(0);
       } catch {
-        // If not found, create default document from project metadata
         const proj = await apiGet<any>(base);
         const newDoc = createDefaultWebsiteDocument(
-          proj.name || "My Website",
+          proj.name || "My Business Website",
           proj.framework?.toLowerCase().includes("vite") ? "vite" : "nextjs",
           { purpose: proj.description }
         );
         setDoc(newDoc);
-        if (newDoc.pages[0]) setActivePageId(newDoc.pages[0].id);
+        if (newDoc.pages[0]) {
+          setActivePageId(newDoc.pages[0].id);
+          if (newDoc.pages[0].blocks[0]) {
+            setSelectedBlockId(newDoc.pages[0].blocks[0].id);
+          }
+        }
         setHistory([newDoc]);
         setHistoryIndex(0);
-        // Persist initial scaffold
         await saveDocumentToProject(newDoc);
       }
 
-      // 2. Load preview status
       await refreshPreview();
-
-      // 3. Load files
       await loadFiles();
     } catch (err: any) {
       setError(err.message || "Failed to load website");
@@ -224,25 +521,21 @@ export function WebsiteEditor() {
     try {
       const status = await apiGet<PreviewStatusResponse>(`${base}/preview/status`);
       setPreviewStatus(status);
-    } catch {
-      // preview might not be configured
-    }
+    } catch {}
   };
 
   const loadFiles = async () => {
     try {
       const res = await apiGet<{ files: FileEntry[] }>(`${base}/files/tree`);
       setFiles(res.files || []);
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
   useEffect(() => {
     void loadProject();
   }, [companyId, projectId]);
 
-  // Save document to project workspace
+  // Save document to backend
   const saveDocumentToProject = async (documentToSave?: WebsiteDocument) => {
     const targetDoc = documentToSave || doc;
     if (!targetDoc) return;
@@ -251,13 +544,11 @@ export function WebsiteEditor() {
       const adapter = getWebsiteAdapter(targetDoc.framework);
       const synced = adapter.syncDocument(targetDoc);
 
-      // Write website.config.json
       await apiPost(`${base}/files/write`, {
         path: "website.config.json",
         content: JSON.stringify(targetDoc, null, 2) + "\n",
       });
 
-      // Write synced globals.css & page files
       for (const [filePath, content] of Object.entries(synced)) {
         if (filePath !== "website.config.json") {
           try {
@@ -270,19 +561,20 @@ export function WebsiteEditor() {
       setIframeKey((k) => k + 1);
     } catch (err: any) {
       setSaveStatus("unsaved");
-      alert(err.message || "Failed to save website");
+      void alertModal({ title: "Save Error", message: err.message || "Failed to save website" });
     }
   };
 
-  // Preview controls
+  // Preview sandbox handlers
   const handleStartPreview = async () => {
     setPreviewLoading(true);
     try {
       await apiPost(`${base}/preview/start`);
       await refreshPreview();
+      setPreviewMode("sandbox");
       setIframeKey((k) => k + 1);
     } catch (err: any) {
-      alert(err.message || "Failed to start preview");
+      void alertModal({ title: "Preview Error", message: err.message || "Failed to start preview" });
     } finally {
       setPreviewLoading(false);
     }
@@ -293,14 +585,15 @@ export function WebsiteEditor() {
     try {
       await apiPost(`${base}/preview/stop`);
       await refreshPreview();
+      setPreviewMode("visual");
     } catch (err: any) {
-      alert(err.message || "Failed to stop preview");
+      void alertModal({ title: "Preview Error", message: err.message || "Failed to stop preview" });
     } finally {
       setPreviewLoading(false);
     }
   };
 
-  // Active page & blocks
+  // Active page & selected block
   const activePage = useMemo(() => {
     if (!doc) return null;
     return doc.pages.find((p) => p.id === activePageId) || doc.pages[0] || null;
@@ -311,7 +604,23 @@ export function WebsiteEditor() {
     return activePage.blocks.find((b) => b.id === selectedBlockId) || null;
   }, [activePage, selectedBlockId]);
 
-  // Block manipulation
+  // Rename site
+  const handleRenameSite = async () => {
+    if (!doc) return;
+    const next = await promptModal({
+      title: language === "uk" ? "Перейменувати сайт" : "Rename Website",
+      message: language === "uk" ? "Нова назва сайту:" : "New website name:",
+      defaultValue: doc.name,
+    });
+    if (!next || !next.trim() || next.trim() === doc.name) return;
+    pushDocumentChange({
+      ...doc,
+      name: next.trim(),
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  // Add block
   const handleAddBlock = (type: WebsiteBlockType) => {
     if (!doc || !activePage) return;
     const def = COMPONENT_REGISTRY[type];
@@ -339,8 +648,10 @@ export function WebsiteEditor() {
 
     pushDocumentChange(newDoc);
     setSelectedBlockId(newBlock.id);
+    setInspectorTab("properties");
   };
 
+  // Reorder block
   const handleMoveBlock = (blockId: string, direction: "up" | "down") => {
     if (!doc || !activePage) return;
     const blocks = [...activePage.blocks];
@@ -364,6 +675,7 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
+  // Duplicate block
   const handleDuplicateBlock = (blockId: string) => {
     if (!doc || !activePage) return;
     const blocks = [...activePage.blocks];
@@ -383,14 +695,25 @@ export function WebsiteEditor() {
     setSelectedBlockId(clone.id);
   };
 
-  const handleDeleteBlock = (blockId: string) => {
+  // Delete block
+  const handleDeleteBlock = async (blockId: string) => {
     if (!doc || !activePage) return;
+    const ok = await confirmModal({
+      title: language === "uk" ? "Видалити блок?" : "Delete block?",
+      message: language === "uk" ? "Цей блок буде видалено зі сторінки." : "This block will be removed from the page.",
+      isDanger: true,
+    });
+    if (!ok) return;
+
     const blocks = activePage.blocks.filter((b) => b.id !== blockId);
     const updatedPages = doc.pages.map((p) => (p.id === activePage.id ? { ...p, blocks } : p));
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
-    if (selectedBlockId === blockId) setSelectedBlockId(null);
+    if (selectedBlockId === blockId) {
+      setSelectedBlockId(blocks[0]?.id || null);
+    }
   };
 
+  // Toggle hide block
   const handleToggleHideBlock = (blockId: string) => {
     if (!doc || !activePage) return;
     const blocks = activePage.blocks.map((b) => (b.id === blockId ? { ...b, isHidden: !b.isHidden } : b));
@@ -398,6 +721,7 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
+  // Update block prop
   const handleUpdateBlockProp = (key: string, value: any) => {
     if (!doc || !activePage || !selectedBlock) return;
     const blocks = activePage.blocks.map((b) => {
@@ -411,6 +735,7 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
+  // Update block style
   const handleUpdateBlockStyle = (styleKey: keyof BlockStyles, value: any) => {
     if (!doc || !activePage || !selectedBlock) return;
     const blocks = activePage.blocks.map((b) => {
@@ -424,10 +749,13 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
-  // Page management
+  // Add Page
   const handleAddPage = async () => {
     if (!doc) return;
-    const title = await promptModal({ message: language === "uk" ? "Назва нової сторінки:" : "New page title:" });
+    const title = await promptModal({
+      title: language === "uk" ? "Нова сторінка" : "New Page",
+      message: language === "uk" ? "Введіть назву нової сторінки:" : "Enter new page title:",
+    });
     if (!title || !title.trim()) return;
     const slug = "/" + title.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     const newPage: WebsitePage = {
@@ -438,14 +766,14 @@ export function WebsiteEditor() {
         {
           id: `block-navbar-${Math.random().toString(36).slice(2, 7)}`,
           type: "navbar",
-          name: "Navigation",
+          name: "Header",
           props: { ...COMPONENT_REGISTRY.navbar.defaultProps, brandName: doc.name },
           styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles },
         },
         {
           id: `block-hero-${Math.random().toString(36).slice(2, 7)}`,
           type: "hero",
-          name: title.trim(),
+          name: "Hero Section",
           props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: title.trim() },
           styles: { ...COMPONENT_REGISTRY.hero.defaultStyles },
         },
@@ -466,22 +794,33 @@ export function WebsiteEditor() {
     };
     pushDocumentChange(newDoc);
     setActivePageId(newPage.id);
+    setSelectedBlockId(newPage.blocks[1]?.id || newPage.blocks[0]?.id || null);
   };
 
+  // Delete page
   const handleDeletePage = async (pageId: string) => {
     if (!doc) return;
     if (doc.pages.length <= 1) {
-      alert("Cannot delete the only page of the website.");
+      void alertModal({ message: "Cannot delete the only page of the website." });
       return;
     }
-    if (!(await confirmModal({ message: language === "uk" ? "Видалити цю сторінку?" : "Delete this page?", isDanger: true }))) return;
+    const ok = await confirmModal({
+      title: language === "uk" ? "Видалити сторінку?" : "Delete Page?",
+      message: language === "uk" ? "Ви впевнені, що хочете видалити цю сторінку?" : "Are you sure you want to delete this page?",
+      isDanger: true,
+    });
+    if (!ok) return;
+
     const updatedPages = doc.pages.filter((p) => p.id !== pageId);
     const newDoc: WebsiteDocument = { ...doc, pages: updatedPages, updatedAt: new Date().toISOString() };
     pushDocumentChange(newDoc);
-    if (activePageId === pageId && updatedPages[0]) setActivePageId(updatedPages[0].id);
+    if (activePageId === pageId && updatedPages[0]) {
+      setActivePageId(updatedPages[0].id);
+      setSelectedBlockId(updatedPages[0].blocks[0]?.id || null);
+    }
   };
 
-  // Asset upload
+  // Upload asset
   const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -497,14 +836,12 @@ export function WebsiteEditor() {
           );
 
           if (selectedBlock) {
-            // Automatically insert into active block image if applicable
             handleUpdateBlockProp("imageUrl", uploaded.url);
           }
-
-          alert(language === "uk" ? `Файл ${uploaded.name} завантажено!` : `File ${uploaded.name} uploaded!`);
           await loadFiles();
+          void alertModal({ message: language === "uk" ? `Файл ${uploaded.name} завантажено!` : `File ${uploaded.name} uploaded!` });
         } catch (err: any) {
-          alert(err.message || "Failed to upload asset");
+          void alertModal({ title: "Upload Failed", message: err.message || "Failed to upload asset" });
         } finally {
           setUploadingAsset(false);
         }
@@ -515,7 +852,7 @@ export function WebsiteEditor() {
     }
   };
 
-  // AI Chat
+  // Send AI Chat
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || chatBusy) return;
@@ -525,10 +862,7 @@ export function WebsiteEditor() {
     setChatBusy(true);
 
     try {
-      const res = await apiPost<any>(`${base}/runs`, {
-        task: userMsg,
-      });
-
+      const res = await apiPost<any>(`${base}/runs`, { task: userMsg });
       setChatMessages((prev) => [
         ...prev,
         {
@@ -537,8 +871,6 @@ export function WebsiteEditor() {
           content: res.message || res.result || (language === "uk" ? "Зміни застосовано до проєкту!" : "Changes applied to project!"),
         },
       ]);
-
-      // Reload config & preview
       await loadProject();
     } catch (err: any) {
       setChatMessages((prev) => [
@@ -550,167 +882,145 @@ export function WebsiteEditor() {
     }
   };
 
-  // Checkpoints
-  const handleCreateCheckpoint = async () => {
-    const name = await promptModal({ message: language === "uk" ? "Назва контрольної точки:" : "Checkpoint name:" });
-    if (!name || !name.trim()) return;
-    try {
-      await apiPost(`${base}/checkpoints`, { name: name.trim() });
-      const res = await apiGet<{ checkpoints: CheckpointItem[] }>(`${base}/checkpoints`);
-      setCheckpoints(res.checkpoints || []);
-      alert(language === "uk" ? "Точку збережено!" : "Checkpoint saved!");
-    } catch (err: any) {
-      alert(err.message || "Failed to create checkpoint");
-    }
-  };
-
-  // Deploy
+  // Deploy to Production
   const handleDeploy = async () => {
     setIsDeploying(true);
     try {
       await apiPost(`${base}/deploy`, { environment: "production", provider: "vercel" });
-      alert(language === "uk" ? "Деплой запущено!" : "Deployment triggered!");
+      void alertModal({
+        title: language === "uk" ? "Деплой розпочато" : "Deployment Started",
+        message: language === "uk" ? "Сайт успішно відправлено на публікацію!" : "Website has been queued for production publish!",
+      });
     } catch (err: any) {
-      alert(err.message || "Deploy failed");
+      void alertModal({ title: "Deploy Failed", message: err.message || "Deployment failed" });
     } finally {
       setIsDeploying(false);
     }
   };
 
-  // Device styles for preview iframe
-  const deviceWidth = deviceMode === "mobile" ? "375px" : deviceMode === "tablet" ? "768px" : "100%";
+  // Device width for canvas preview
+  const canvasWidth = deviceMode === "mobile" ? "375px" : deviceMode === "tablet" ? "768px" : "100%";
 
   if (loading) {
     return (
-      <div style={{ padding: "4rem", textAlign: "center", color: "var(--muted-color, #8b949e)" }}>
-        <p>Loading Website Editor...</p>
+      <div className="npati-fullscreen-editor-shell" style={{ display: "grid", placeItems: "center" }}>
+        <div style={{ textAlign: "center", color: "#64748b" }}>
+          <div style={{ width: "36px", height: "36px", border: "3px solid #e2e8f0", borderTopColor: "#e11d2e", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px auto" }} />
+          <p style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a" }}>Loading Website Builder...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      className="website-editor-root"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "calc(100vh - 60px)",
-        background: "var(--background-color, #090d16)",
-        color: "var(--text-color, #f0f6fc)",
-        overflow: "hidden",
-      }}
-    >
-      {/* Top Application Bar */}
-      <header
-        style={{
-          height: "56px",
-          borderBottom: "1px solid var(--border-color, rgba(255,255,255,0.1))",
-          background: "var(--surface-color, #0f141c)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 1rem",
-          gap: "1rem",
-          zIndex: 40,
-        }}
-      >
-        {/* Left: Back & Project Title */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <Link
-            to="/settings/websites"
-            className="button-secondary"
-            style={{ padding: "0.35rem 0.65rem", fontSize: "0.85rem", textDecoration: "none" }}
-            title="Back to Websites Dashboard"
-          >
-            ← Websites
+    <div className="npati-fullscreen-editor-shell">
+      {/* ========================================================================= */}
+      {/* TOP APPLICATION BAR                                                       */}
+      {/* ========================================================================= */}
+      <header className="npati-builder-topbar">
+        {/* Left: Back button, Website name, Framework badge, Saved status */}
+        <div className="npati-builder-topbar-left">
+          <Link to="/settings/websites" className="npati-builder-back-btn" title="Back to Websites">
+            <IconBack />
+            <span>Websites</span>
           </Link>
-          <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>{doc?.name || "Website"}</span>
-          <span className="status-pill status-ready" style={{ fontSize: "0.75rem" }}>
+
+          <div
+            className="npati-builder-site-title"
+            onClick={() => void handleRenameSite()}
+            title="Click to rename website"
+          >
+            <span>{doc?.name || "My Business Website"}</span>
+            <IconChevronDown />
+          </div>
+
+          <span className="npati-builder-framework-badge">
             {doc?.framework === "vite" ? "Vite" : "Next.js"}
           </span>
-          <span
-            style={{
-              fontSize: "0.78rem",
-              color: saveStatus === "saved" ? "#10b981" : saveStatus === "saving" ? "#f59e0b" : "#94a3b8",
-            }}
-          >
-            {saveStatus === "saved" ? "● Saved" : saveStatus === "saving" ? "Saving..." : "○ Unsaved"}
-          </span>
+
+          <div className={`npati-builder-save-status ${saveStatus}`}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: saveStatus === "saved" ? "#10b981" : saveStatus === "saving" ? "#f59e0b" : "#94a3b8",
+              }}
+            />
+            <span>
+              {saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : "Unsaved"}
+            </span>
+          </div>
         </div>
 
-        {/* Center: Device Mode Switcher */}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: "8px", padding: "2px" }}>
-          <button
-            type="button"
-            className={`btn-device ${deviceMode === "desktop" ? "active" : ""}`}
-            onClick={() => setDeviceMode("desktop")}
-            style={{
-              background: deviceMode === "desktop" ? "rgba(255,255,255,0.15)" : "transparent",
-              border: "none",
-              color: "inherit",
-              padding: "0.35rem 0.75rem",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
-          >
-            💻 Desktop
-          </button>
-          <button
-            type="button"
-            className={`btn-device ${deviceMode === "tablet" ? "active" : ""}`}
-            onClick={() => setDeviceMode("tablet")}
-            style={{
-              background: deviceMode === "tablet" ? "rgba(255,255,255,0.15)" : "transparent",
-              border: "none",
-              color: "inherit",
-              padding: "0.35rem 0.75rem",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
-          >
-            📱 Tablet
-          </button>
-          <button
-            type="button"
-            className={`btn-device ${deviceMode === "mobile" ? "active" : ""}`}
-            onClick={() => setDeviceMode("mobile")}
-            style={{
-              background: deviceMode === "mobile" ? "rgba(255,255,255,0.15)" : "transparent",
-              border: "none",
-              color: "inherit",
-              padding: "0.35rem 0.75rem",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
-          >
-            📱 Mobile
-          </button>
+        {/* Center: Device Mode Switcher (Desktop / Tablet / Mobile) */}
+        <div className="npati-builder-topbar-center">
+          <div className="npati-builder-device-segmented">
+            <button
+              type="button"
+              className={`npati-builder-device-btn ${deviceMode === "desktop" ? "active" : ""}`}
+              onClick={() => setDeviceMode("desktop")}
+              title="Desktop viewport"
+            >
+              <IconDesktop />
+              <span>Desktop</span>
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-device-btn ${deviceMode === "tablet" ? "active" : ""}`}
+              onClick={() => setDeviceMode("tablet")}
+              title="Tablet viewport"
+            >
+              <IconTablet />
+              <span>Tablet</span>
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-device-btn ${deviceMode === "mobile" ? "active" : ""}`}
+              onClick={() => setDeviceMode("mobile")}
+              title="Mobile viewport"
+            >
+              <IconMobile />
+              <span>Mobile</span>
+            </button>
+          </div>
         </div>
 
-        {/* Right: Actions (Undo/Redo, Save, Preview, Deploy) */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        {/* Right: Actions (Undo, Redo, Preview, Save, Publish, More Menu) */}
+        <div className="npati-builder-topbar-right">
           <button
             type="button"
-            className="button-secondary"
+            className="npati-builder-icon-btn"
             onClick={undo}
             disabled={historyIndex <= 0}
             title="Undo"
-            style={{ padding: "0.35rem 0.65rem", fontSize: "0.85rem" }}
           >
-            ↩
+            <IconUndo />
           </button>
           <button
             type="button"
-            className="button-secondary"
+            className="npati-builder-icon-btn"
             onClick={redo}
             disabled={historyIndex >= history.length - 1}
             title="Redo"
-            style={{ padding: "0.35rem 0.65rem", fontSize: "0.85rem" }}
           >
-            ↪
+            <IconRedo />
+          </button>
+
+          <button
+            type="button"
+            className={`npati-builder-back-btn ${previewMode === "sandbox" ? "active" : ""}`}
+            onClick={() => {
+              if (previewStatus?.isRunning) {
+                setPreviewMode((m) => (m === "visual" ? "sandbox" : "visual"));
+              } else {
+                void handleStartPreview();
+              }
+            }}
+            title="Toggle Live Preview"
+          >
+            <IconEye />
+            <span>{previewMode === "sandbox" ? "Visual View" : "Preview"}</span>
           </button>
 
           <button
@@ -718,414 +1028,1089 @@ export function WebsiteEditor() {
             className="button-secondary"
             onClick={() => void saveDocumentToProject()}
             disabled={saveStatus === "saving"}
-            style={{ padding: "0.35rem 0.85rem", fontSize: "0.85rem" }}
+            style={{ padding: "7px 13px", fontSize: "13px" }}
           >
-            💾 Save
+            {saveStatus === "saving" ? "Saving..." : "Save"}
           </button>
-
-          {previewStatus?.isRunning ? (
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={() => void handleStopPreview()}
-              disabled={previewLoading}
-              style={{ padding: "0.35rem 0.75rem", fontSize: "0.85rem" }}
-            >
-              ⏹ Stop
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={() => void handleStartPreview()}
-              disabled={previewLoading}
-              style={{ padding: "0.35rem 0.75rem", fontSize: "0.85rem" }}
-            >
-              ▶ Preview
-            </button>
-          )}
-
-          {previewStatus?.previewUrl && (
-            <a
-              href={previewStatus.previewUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="button-secondary"
-              style={{ padding: "0.35rem 0.75rem", fontSize: "0.85rem", textDecoration: "none" }}
-            >
-              ↗ Open
-            </a>
-          )}
 
           <button
             type="button"
-            className="button-primary"
+            className="npati-builder-publish-btn"
             onClick={() => void handleDeploy()}
             disabled={isDeploying}
-            style={{ padding: "0.35rem 0.95rem", fontSize: "0.85rem" }}
           >
-            🚀 Deploy
+            <IconPublish />
+            <span>{isDeploying ? "Publishing..." : "Publish"}</span>
           </button>
+
+          {/* More options menu */}
+          <div style={{ position: "relative" }} ref={moreMenuRef}>
+            <button
+              type="button"
+              className="npati-builder-icon-btn"
+              onClick={() => setMoreMenuOpen((o) => !o)}
+              title="More Options"
+            >
+              <IconMore />
+            </button>
+
+            {moreMenuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: "6px",
+                  width: "210px",
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  boxShadow: "0 10px 30px rgba(0, 0, 0, 0.12)",
+                  border: "1px solid #e2e8f0",
+                  padding: "6px",
+                  zIndex: 100,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "2px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("ai"); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <IconSparkles />
+                  <span>AI Developer Agent</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("files"); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <IconFile />
+                  <span>Project Files & Code</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("history"); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <IconGrip />
+                  <span>Checkpoints & History</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMoreMenuOpen(false); setInspectorTab("advanced"); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <IconPublish />
+                  <span>SEO & Meta Tags</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Main 3-Column Workspace */}
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Left Navigation Bar (Tab icons) */}
-        <aside
-          style={{
-            width: "60px",
-            borderRight: "1px solid var(--border-color, rgba(255,255,255,0.1))",
-            background: "var(--surface-color, #0f141c)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            padding: "0.75rem 0",
-            gap: "0.5rem",
-          }}
-        >
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "blocks" ? "active" : ""}`}
-            onClick={() => setActiveTab("blocks")}
-            title="Blocks & Components"
-            style={{
-              background: activeTab === "blocks" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "blocks" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🧱
-          </button>
+      {/* ========================================================================= */}
+      {/* MAIN 3-PANEL BODY                                                         */}
+      {/* ========================================================================= */}
+      <div className="npati-builder-body">
+        {/* ----------------------------------------------------------------------- */}
+        {/* LEFT PANEL: Pages / Layers / Assets                                     */}
+        {/* ----------------------------------------------------------------------- */}
+        <aside className="npati-builder-left-panel">
+          {/* Top Tabs */}
+          <div className="npati-builder-nav-tabs">
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${leftTab === "pages" ? "active" : ""}`}
+              onClick={() => setLeftTab("pages")}
+            >
+              Pages
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${leftTab === "layers" ? "active" : ""}`}
+              onClick={() => setLeftTab("layers")}
+            >
+              Layers
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${leftTab === "assets" ? "active" : ""}`}
+              onClick={() => setLeftTab("assets")}
+            >
+              Assets
+            </button>
+          </div>
 
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "pages" ? "active" : ""}`}
-            onClick={() => setActiveTab("pages")}
-            title="Pages"
-            style={{
-              background: activeTab === "pages" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "pages" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            📑
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "theme" ? "active" : ""}`}
-            onClick={() => setActiveTab("theme")}
-            title="Styles & Colors"
-            style={{
-              background: activeTab === "theme" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "theme" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🎨
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "assets" ? "active" : ""}`}
-            onClick={() => setActiveTab("assets")}
-            title="Assets & Media"
-            style={{
-              background: activeTab === "assets" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "assets" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🖼️
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
-            onClick={() => setActiveTab("chat")}
-            title="AI Chat Assistant"
-            style={{
-              background: activeTab === "chat" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "chat" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🤖
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "code" ? "active" : ""}`}
-            onClick={() => setActiveTab("code")}
-            title="Code & Files"
-            style={{
-              background: activeTab === "code" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "code" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            📁
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "seo" ? "active" : ""}`}
-            onClick={() => setActiveTab("seo")}
-            title="SEO Settings"
-            style={{
-              background: activeTab === "seo" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "seo" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🔍
-          </button>
-
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "history" ? "active" : ""}`}
-            onClick={() => setActiveTab("history")}
-            title="History & Checkpoints"
-            style={{
-              background: activeTab === "history" ? "rgba(59, 130, 246, 0.2)" : "transparent",
-              color: activeTab === "history" ? "#60a5fa" : "inherit",
-              border: "none",
-              borderRadius: "8px",
-              padding: "0.6rem",
-              fontSize: "1.2rem",
-              cursor: "pointer",
-            }}
-          >
-            🕒
-          </button>
-        </aside>
-
-        {/* Left Side Panel (Content depending on activeTab) */}
-        <aside
-          style={{
-            width: "300px",
-            borderRight: "1px solid var(--border-color, rgba(255,255,255,0.1))",
-            background: "var(--surface-color, #0f141c)",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-          }}
-        >
-          {/* TAB 1: BLOCKS / OUTLINE */}
-          {activeTab === "blocks" && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>Blocks Outline</h3>
-                <span style={{ fontSize: "0.8rem", color: "var(--muted-color, #8b949e)" }}>
-                  {activePage?.blocks.length || 0} blocks
-                </span>
-              </div>
-
-              {/* Add Block Dropdown */}
-              <div style={{ marginBottom: "1rem" }}>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      handleAddBlock(e.target.value as WebsiteBlockType);
-                      e.target.value = "";
-                    }
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "0.55rem",
-                    borderRadius: "6px",
-                    background: "rgba(59, 130, 246, 0.15)",
-                    color: "#60a5fa",
-                    border: "1px solid rgba(59, 130, 246, 0.3)",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="" disabled>+ Add Section / Block...</option>
-                  {Object.entries(COMPONENT_REGISTRY).map(([type, def]) => (
-                    <option key={type} value={type}>
-                      {def.icon} {def.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Block List with reordering */}
-              <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                {(activePage?.blocks || []).map((b, idx) => {
-                  const isSelected = selectedBlockId === b.id;
-                  const def = COMPONENT_REGISTRY[b.type] || COMPONENT_REGISTRY.custom;
-
-                  return (
-                    <div
-                      key={b.id}
-                      onClick={() => setSelectedBlockId(b.id)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "0.55rem 0.75rem",
-                        borderRadius: "6px",
-                        background: isSelected ? "rgba(59, 130, 246, 0.2)" : "rgba(255,255,255,0.03)",
-                        border: isSelected ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.06)",
-                        cursor: "pointer",
-                        opacity: b.isHidden ? 0.5 : 1,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", overflow: "hidden" }}>
-                        <span>{def.icon}</span>
-                        <span style={{ fontSize: "0.85rem", fontWeight: isSelected ? 600 : 400, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                          {b.name || def.title}
-                        </span>
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "up"); }}
-                          disabled={idx === 0}
-                          style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: "2px" }}
-                          title="Move Up"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "down"); }}
-                          disabled={idx === (activePage?.blocks.length || 0) - 1}
-                          style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: "2px" }}
-                          title="Move Down"
-                        >
-                          ▼
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleToggleHideBlock(b.id); }}
-                          style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: "2px" }}
-                          title={b.isHidden ? "Show" : "Hide"}
-                        >
-                          {b.isHidden ? "👁️‍🗨️" : "👁️"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleDuplicateBlock(b.id); }}
-                          style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: "2px" }}
-                          title="Duplicate"
-                        >
-                          📋
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleDeleteBlock(b.id); }}
-                          style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", padding: "2px" }}
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: PAGES */}
-          {activeTab === "pages" && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>Pages</h3>
-                <button
-                  type="button"
-                  className="button-primary"
-                  onClick={() => void handleAddPage()}
-                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.8rem" }}
-                >
-                  + Add Page
-                </button>
-              </div>
-
-              <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {/* TAB: PAGES */}
+          {leftTab === "pages" && (
+            <div className="npati-builder-tab-content">
+              {/* Pages List */}
+              <div className="npati-builder-page-list">
                 {(doc?.pages || []).map((page) => {
                   const isActive = page.id === activePageId;
+                  const isHome = page.slug === "/" || page.id === "page-home";
                   return (
                     <div
                       key={page.id}
-                      onClick={() => setActivePageId(page.id)}
-                      style={{
-                        padding: "0.75rem",
-                        borderRadius: "8px",
-                        background: isActive ? "rgba(59, 130, 246, 0.2)" : "rgba(255,255,255,0.03)",
-                        border: isActive ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.06)",
-                        cursor: "pointer",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
+                      className={`npati-builder-page-item ${isActive ? "active" : ""}`}
+                      onClick={() => {
+                        setActivePageId(page.id);
+                        if (page.blocks[0]) setSelectedBlockId(page.blocks[0].id);
                       }}
                     >
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{page.title}</div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--muted-color, #8b949e)" }}>{page.slug}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {isHome ? <IconHome /> : <IconFile />}
+                        <span>{page.title}</span>
                       </div>
-
-                      {page.slug !== "/" && (
+                      {!isHome && (
                         <button
                           type="button"
+                          className="npati-builder-row-action-btn danger"
                           onClick={(e) => { e.stopPropagation(); void handleDeletePage(page.id); }}
-                          style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer" }}
                           title="Delete Page"
                         >
-                          ✕
+                          <IconTrash />
                         </button>
                       )}
                     </div>
                   );
                 })}
+
+                <button
+                  type="button"
+                  className="npati-builder-add-page-btn"
+                  onClick={() => void handleAddPage()}
+                >
+                  <IconPlus />
+                  <span>Add Page</span>
+                </button>
+              </div>
+
+              {/* Sections Hierarchy of current page */}
+              <div style={{ marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                <div className="npati-builder-sections-header">
+                  <span className="npati-builder-sections-title">
+                    {activePage?.title || "Page"} Sections
+                  </span>
+
+                  {/* Add section dropdown */}
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleAddBlock(e.target.value as WebsiteBlockType);
+                        e.target.value = "";
+                      }
+                    }}
+                    style={{
+                      fontSize: "12px",
+                      padding: "2px 6px",
+                      borderRadius: "6px",
+                      border: "1px solid #e2e8f0",
+                      background: "#ffffff",
+                      cursor: "pointer",
+                      color: "#e11d2e",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <option value="" disabled>+ Add</option>
+                    {Object.entries(COMPONENT_REGISTRY).map(([type, def]) => (
+                      <option key={type} value={type}>
+                        {def.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="npati-builder-sections-list">
+                  {(activePage?.blocks || []).map((b, idx) => {
+                    const isSelected = selectedBlockId === b.id;
+                    const def = COMPONENT_REGISTRY[b.type] || COMPONENT_REGISTRY.custom;
+                    return (
+                      <div
+                        key={b.id}
+                        className={`npati-builder-section-row ${isSelected ? "active" : ""}`}
+                        onClick={() => {
+                          setSelectedBlockId(b.id);
+                          setInspectorTab("properties");
+                        }}
+                        style={{ opacity: b.isHidden ? 0.45 : 1 }}
+                      >
+                        <div className="npati-builder-section-info">
+                          <span style={{ color: "#94a3b8", cursor: "grab" }}>
+                            <IconGrip />
+                          </span>
+                          <span style={{ color: isSelected ? "#e11d2e" : "#475569" }}>
+                            <IconSectionSymbol type={b.type} />
+                          </span>
+                          <span className="npati-builder-section-name">
+                            {b.name || def.title}
+                          </span>
+                        </div>
+
+                        <div className="npati-builder-section-actions">
+                          <button
+                            type="button"
+                            className="npati-builder-row-action-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "up"); }}
+                            disabled={idx === 0}
+                            title="Move Up"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            className="npati-builder-row-action-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "down"); }}
+                            disabled={idx === (activePage?.blocks.length || 0) - 1}
+                            title="Move Down"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            className="npati-builder-row-action-btn"
+                            onClick={(e) => { e.stopPropagation(); handleToggleHideBlock(b.id); }}
+                            title={b.isHidden ? "Show Section" : "Hide Section"}
+                          >
+                            {b.isHidden ? <IconEyeOff /> : <IconEye />}
+                          </button>
+                          <button
+                            type="button"
+                            className="npati-builder-row-action-btn"
+                            onClick={(e) => { e.stopPropagation(); handleDuplicateBlock(b.id); }}
+                            title="Duplicate"
+                          >
+                            <IconCopy />
+                          </button>
+                          <button
+                            type="button"
+                            className="npati-builder-row-action-btn danger"
+                            onClick={(e) => { e.stopPropagation(); void handleDeleteBlock(b.id); }}
+                            title="Delete"
+                          >
+                            <IconTrash />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 3: THEME & GLOBAL STYLES */}
-          {activeTab === "theme" && doc && (
-            <div style={{ padding: "1rem", overflowY: "auto" }}>
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "1rem" }}>Global Theme & Colors</h3>
+          {/* TAB: LAYERS */}
+          {leftTab === "layers" && (
+            <div className="npati-builder-tab-content">
+              <span className="npati-builder-sections-title">Document Structure</span>
+              <div className="npati-builder-sections-list">
+                {(activePage?.blocks || []).map((b) => (
+                  <div
+                    key={b.id}
+                    className={`npati-builder-section-row ${selectedBlockId === b.id ? "active" : ""}`}
+                    onClick={() => { setSelectedBlockId(b.id); setInspectorTab("properties"); }}
+                  >
+                    <div className="npati-builder-section-info">
+                      <IconSectionSymbol type={b.type} />
+                      <span className="npati-builder-section-name">{b.name || b.type}</span>
+                    </div>
+                    <span style={{ fontSize: "11px", color: "#94a3b8" }}>#{b.type}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Primary Brand Color</label>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          {/* TAB: ASSETS */}
+          {leftTab === "assets" && (
+            <div className="npati-builder-tab-content">
+              <span className="npati-builder-sections-title">Media & Assets</span>
+              <label
+                className="button-primary"
+                style={{ textAlign: "center", cursor: "pointer", padding: "8px 12px", fontSize: "13px" }}
+              >
+                {uploadingAsset ? "Uploading..." : "+ Upload Image"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => void handleUploadAsset(e)}
+                  style={{ display: "none" }}
+                  disabled={uploadingAsset}
+                />
+              </label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
+                {files
+                  .filter((f) => f.path.match(/\.(png|jpg|jpeg|svg|webp|gif)$/i))
+                  .map((f) => {
+                    const url = `/${f.path.replace(/^public\//, "")}`;
+                    return (
+                      <div
+                        key={f.path}
+                        onClick={() => {
+                          if (selectedBlock) handleUpdateBlockProp("imageUrl", url);
+                          navigator.clipboard.writeText(url);
+                          void alertModal({ message: `Copied URL: ${url}` });
+                        }}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          padding: "6px",
+                          cursor: "pointer",
+                          background: "#ffffff",
+                          textAlign: "center",
+                        }}
+                      >
+                        <img src={url} alt={f.name} style={{ width: "100%", height: "65px", objectFit: "cover", borderRadius: "4px" }} />
+                        <span style={{ fontSize: "11px", color: "#64748b", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {f.name}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+        </aside>
+
+        {/* ----------------------------------------------------------------------- */}
+        {/* CENTER LIVE CANVAS                                                      */}
+        {/* ----------------------------------------------------------------------- */}
+        <main className="npati-builder-canvas-wrapper">
+          <div
+            className="npati-builder-canvas-card"
+            style={{
+              width: canvasWidth,
+              maxWidth: deviceMode === "desktop" ? "1240px" : canvasWidth,
+            }}
+          >
+            {/* If sandbox mode is chosen and sandbox preview is active */}
+            {previewMode === "sandbox" && previewStatus?.previewUrl ? (
+              <iframe
+                key={iframeKey}
+                src={previewStatus.previewUrl}
+                title="Website Live Preview"
+                style={{ width: "100%", height: "100%", minHeight: "800px", border: "none" }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              />
+            ) : (
+              /* Rich Interactive Visual Canvas */
+              <div style={{ display: "flex", flexDirection: "column", width: "100%", minHeight: "100%" }}>
+                {(activePage?.blocks || []).map((b) => {
+                  if (b.isHidden) return null;
+                  const isSelected = selectedBlockId === b.id;
+                  const def = COMPONENT_REGISTRY[b.type] || COMPONENT_REGISTRY.custom;
+                  const p = b.props || {};
+                  const s = b.styles || {};
+
+                  return (
+                    <div
+                      key={b.id}
+                      className={`npati-builder-canvas-block ${isSelected ? "selected" : ""}`}
+                      onClick={() => {
+                        setSelectedBlockId(b.id);
+                        setInspectorTab("properties");
+                      }}
+                      style={{
+                        backgroundColor: s.backgroundColor || "transparent",
+                        color: s.textColor || "#0f172a",
+                        textAlign: s.textAlign || "left",
+                        padding: s.paddingY === "xlarge" ? "80px 24px" : s.paddingY === "large" ? "60px 24px" : s.paddingY === "small" ? "20px 24px" : s.paddingY === "none" ? "0 24px" : "40px 24px",
+                      }}
+                    >
+                      {/* Floating selection pill */}
+                      {isSelected && (
+                        <div className="npati-builder-selected-tag">
+                          <span>{b.name || def.title}</span>
+                          <span style={{ opacity: 0.8 }}>···</span>
+                        </div>
+                      )}
+
+                      {/* BLOCK RENDERER CASES */}
+                      {/* NAVBAR */}
+                      {b.type === "navbar" && (
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: "1140px", margin: "0 auto" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: 800, fontSize: "19px", color: s.textColor || "#0f172a" }}>
+                            {p.logoUrl ? (
+                              <img src={p.logoUrl} alt={p.brandName} style={{ height: "30px" }} />
+                            ) : (
+                              <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: "#e11d2e" }} />
+                            )}
+                            <span>{p.brandName || doc?.name || "NPATI"}</span>
+                          </div>
+                          <nav style={{ display: "flex", gap: "24px", alignItems: "center", fontSize: "14px", fontWeight: 500 }}>
+                            {(p.links || [{ text: "Home" }, { text: "About" }, { text: "Services" }, { text: "Pricing" }]).map((link: any, i: number) => (
+                              <span key={i} style={{ color: "#475569", cursor: "pointer" }}>{link.text}</span>
+                            ))}
+                          </nav>
+                          {p.ctaText && (
+                            <button
+                              type="button"
+                              className="button-primary"
+                              style={{ background: "#0f172a", borderColor: "#0f172a", padding: "7px 16px" }}
+                            >
+                              {p.ctaText}
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* HERO */}
+                      {b.type === "hero" && (
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", textAlign: s.textAlign || "left" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: p.layout === "split" || p.imageUrl ? "1.2fr 1fr" : "1fr", gap: "40px", alignItems: "center" }}>
+                            <div>
+                              {p.badge && (
+                                <div style={{ display: "inline-block", padding: "4px 12px", borderRadius: "999px", background: "#fef2f2", color: "#e11d2e", fontSize: "12px", fontWeight: 600, marginBottom: "16px", border: "1px solid #fee2e2" }}>
+                                  {p.badge}
+                                </div>
+                              )}
+                              <h1 style={{ fontSize: "clamp(2rem, 4vw, 3.2rem)", fontWeight: 800, lineHeight: 1.15, margin: "0 0 16px 0", color: s.textColor || "#0f172a", letterSpacing: "-0.03em" }}>
+                                {p.title || "Build stunning websites with NPATI"}
+                              </h1>
+                              <p style={{ fontSize: "16px", lineHeight: 1.6, color: "#64748b", margin: "0 0 28px 0", maxWidth: "560px" }}>
+                                {p.subtitle || "Create professional, high-performing websites in minutes with our powerful no-code builder. No design or coding skills required."}
+                              </p>
+                              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+                                {p.primaryCtaText && (
+                                  <button
+                                    type="button"
+                                    className="button-primary"
+                                    style={{ background: "#0f172a", borderColor: "#0f172a", padding: "10px 20px", fontSize: "14px" }}
+                                  >
+                                    {p.primaryCtaText} →
+                                  </button>
+                                )}
+                                {p.secondaryCtaText && (
+                                  <button
+                                    type="button"
+                                    className="button-secondary"
+                                    style={{ padding: "10px 20px", fontSize: "14px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                                  >
+                                    <span>▶</span> {p.secondaryCtaText}
+                                  </button>
+                                )}
+                              </div>
+                              <div style={{ display: "flex", gap: "18px", marginTop: "24px", fontSize: "12px", color: "#64748b" }}>
+                                <span>✓ No credit card required</span>
+                                <span>✓ Drag & drop builder</span>
+                                <span>✓ Publish in minutes</span>
+                              </div>
+                            </div>
+
+                            {/* Hero Graphic / Preview Card */}
+                            <div>
+                              {p.imageUrl ? (
+                                <img
+                                  src={p.imageUrl}
+                                  alt="Hero illustration"
+                                  style={{ width: "100%", borderRadius: "16px", boxShadow: "0 20px 40px rgba(0,0,0,0.08)", objectFit: "cover" }}
+                                />
+                              ) : (
+                                <div
+                                  style={{
+                                    background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
+                                    borderRadius: "16px",
+                                    padding: "24px",
+                                    boxShadow: "0 20px 40px rgba(0,0,0,0.08)",
+                                    border: "1px solid #e2e8f0",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "12px",
+                                  }}
+                                >
+                                  <div style={{ display: "flex", gap: "6px" }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f87171" }} />
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#fbbf24" }} />
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#34d399" }} />
+                                  </div>
+                                  <div style={{ height: "180px", background: "#ffffff", borderRadius: "8px", display: "grid", placeItems: "center", color: "#94a3b8", fontWeight: 600 }}>
+                                    Interactive Workspace Preview
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* FEATURES */}
+                      {b.type === "features" && (
+                        <div style={{ maxWidth: "1140px", margin: "0 auto" }}>
+                          <div style={{ textAlign: "center", marginBottom: "36px" }}>
+                            <span style={{ fontSize: "11px", fontWeight: 700, color: "#e11d2e", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                              FEATURES
+                            </span>
+                            <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "6px 0 10px 0", color: s.textColor || "#0f172a" }}>
+                              {p.title || "Everything you need to succeed"}
+                            </h2>
+                            <p style={{ color: "#64748b", fontSize: "15px", margin: 0 }}>
+                              {p.subtitle || "Powerful features to help you build, launch, and grow your online presence."}
+                            </p>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                            {(p.items || [
+                              { title: "Drag & Drop Builder", description: "Create beautiful websites without any coding. Just drag, drop, and customize." },
+                              { title: "Responsive Design", description: "Your website looks perfect on all devices, from desktop to mobile." },
+                              { title: "Fast Performance", description: "Built with modern technology for lightning-fast loading speeds." },
+                            ]).map((item: any, i: number) => (
+                              <div
+                                key={i}
+                                style={{
+                                  background: "#ffffff",
+                                  border: "1px solid #e2e8f0",
+                                  borderRadius: "14px",
+                                  padding: "24px",
+                                  boxShadow: "0 2px 8px rgba(0,0,0,0.02)",
+                                }}
+                              >
+                                <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: i === 0 ? "#eff6ff" : i === 1 ? "#ecfdf5" : "#fdf2f8", display: "grid", placeItems: "center", marginBottom: "16px", color: i === 0 ? "#2563eb" : i === 1 ? "#059669" : "#db2777" }}>
+                                  <IconSectionSymbol type="features" />
+                                </div>
+                                <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 8px 0", color: "#0f172a" }}>{item.title}</h3>
+                                <p style={{ fontSize: "13.5px", color: "#64748b", margin: 0, lineHeight: 1.5 }}>{item.description}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* PRICING */}
+                      {b.type === "pricing" && (
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", textAlign: "center" }}>
+                          <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 10px 0", color: s.textColor || "#0f172a" }}>
+                            {p.title || "Simple, Transparent Pricing"}
+                          </h2>
+                          <p style={{ color: "#64748b", fontSize: "15px", marginBottom: "36px" }}>
+                            {p.subtitle || "Choose the perfect plan for your business."}
+                          </p>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                            {(p.tiers || [
+                              { name: "Starter", price: "$19", description: "Essential tools for personal projects." },
+                              { name: "Pro", price: "$49", description: "Advanced power for growing businesses." },
+                              { name: "Enterprise", price: "$149", description: "Full white-glove setup and dedicated support." },
+                            ]).map((tier: any, i: number) => (
+                              <div
+                                key={i}
+                                style={{
+                                  background: "#ffffff",
+                                  border: i === 1 ? "2px solid #e11d2e" : "1px solid #e2e8f0",
+                                  borderRadius: "14px",
+                                  padding: "28px 24px",
+                                  textAlign: "left",
+                                  boxShadow: "0 4px 16px rgba(0,0,0,0.03)",
+                                }}
+                              >
+                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 6px 0" }}>{tier.name}</h3>
+                                <div style={{ fontSize: "32px", fontWeight: 800, color: "#0f172a", margin: "12px 0" }}>
+                                  {tier.price}<span style={{ fontSize: "14px", color: "#64748b", fontWeight: 500 }}>/mo</span>
+                                </div>
+                                <p style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>{tier.description}</p>
+                                <button
+                                  type="button"
+                                  className={i === 1 ? "button-primary" : "button-secondary"}
+                                  style={{ width: "100%", padding: "9px" }}
+                                >
+                                  Get Started
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* FAQ */}
+                      {b.type === "faq" && (
+                        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+                          <h2 style={{ fontSize: "28px", fontWeight: 800, textAlign: "center", margin: "0 0 24px 0", color: s.textColor || "#0f172a" }}>
+                            {p.title || "Frequently Asked Questions"}
+                          </h2>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            {(p.items || [
+                              { question: "How does the website builder work?", answer: "You can drag and drop sections, edit text and images directly, and publish in one click." },
+                              { question: "Can I connect a custom domain?", answer: "Yes, you can link any custom domain with automated SSL configuration." },
+                              { question: "Is hosting included?", answer: "Fast global CDN hosting is included with all plans." },
+                            ]).map((item: any, i: number) => (
+                              <div key={i} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px 20px" }}>
+                                <div style={{ fontWeight: 700, fontSize: "15px", color: "#0f172a", marginBottom: "6px" }}>{item.question}</div>
+                                <div style={{ fontSize: "13.5px", color: "#64748b", lineHeight: 1.5 }}>{item.answer}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CTA */}
+                      {b.type === "cta" && (
+                        <div
+                          style={{
+                            maxWidth: "1140px",
+                            margin: "0 auto",
+                            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+                            borderRadius: "20px",
+                            padding: "48px 32px",
+                            textAlign: "center",
+                            color: "#ffffff",
+                          }}
+                        >
+                          <h2 style={{ fontSize: "32px", fontWeight: 800, margin: "0 0 12px 0", color: "#ffffff" }}>
+                            {p.title || "Ready to launch your website?"}
+                          </h2>
+                          <p style={{ fontSize: "16px", color: "#94a3b8", maxWidth: "540px", margin: "0 auto 28px auto" }}>
+                            {p.subtitle || "Start building today with NPATI. No technical background required."}
+                          </p>
+                          <button
+                            type="button"
+                            className="button-primary"
+                            style={{ background: "#e11d2e", borderColor: "#e11d2e", padding: "12px 28px", fontSize: "15px" }}
+                          >
+                            {p.primaryCtaText || "Get Started Free"} →
+                          </button>
+                        </div>
+                      )}
+
+                      {/* FOOTER */}
+                      {b.type === "footer" && (
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", borderTop: "1px solid #e2e8f0", paddingTop: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: "#64748b" }}>
+                          <div>© {new Date().getFullYear()} {p.brandName || doc?.name || "NPATI"}. All rights reserved.</div>
+                          <div style={{ display: "flex", gap: "20px" }}>
+                            <span>Privacy Policy</span>
+                            <span>Terms of Service</span>
+                            <span>Contact</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CUSTOM / FALLBACK */}
+                      {b.type !== "navbar" && b.type !== "hero" && b.type !== "features" && b.type !== "pricing" && b.type !== "faq" && b.type !== "cta" && b.type !== "footer" && (
+                        <div style={{ maxWidth: "1140px", margin: "0 auto", padding: "20px", background: "#f8fafc", borderRadius: "12px", border: "1px dashed #cbd5e1" }}>
+                          <h3 style={{ margin: "0 0 8px 0" }}>{b.name || def.title}</h3>
+                          <p style={{ margin: 0, color: "#64748b" }}>{p.title || p.text || "Custom section content"}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* ----------------------------------------------------------------------- */}
+        {/* RIGHT PANEL: Properties / Design / Advanced                             */}
+        {/* ----------------------------------------------------------------------- */}
+        <aside className="npati-builder-right-panel">
+          {/* Top Inspector Tabs */}
+          <div className="npati-builder-nav-tabs">
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${inspectorTab === "properties" ? "active" : ""}`}
+              onClick={() => setInspectorTab("properties")}
+            >
+              Properties
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${inspectorTab === "design" ? "active" : ""}`}
+              onClick={() => setInspectorTab("design")}
+            >
+              Design
+            </button>
+            <button
+              type="button"
+              className={`npati-builder-nav-tab ${inspectorTab === "advanced" ? "active" : ""}`}
+              onClick={() => setInspectorTab("advanced")}
+            >
+              Advanced
+            </button>
+          </div>
+
+          {/* TAB: PROPERTIES */}
+          {inspectorTab === "properties" && selectedBlock && (
+            <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+              {/* Header with Block Icon, Title, and ID */}
+              <div className="npati-builder-inspector-header">
+                <div className="npati-builder-inspector-block-title">
+                  <span style={{ color: "#e11d2e" }}>
+                    <IconSectionSymbol type={selectedBlock.type} />
+                  </span>
+                  <div>
+                    <strong>{selectedBlock.name || selectedBlock.type}</strong>
+                    <small>#{selectedBlock.type}</small>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <button
+                    type="button"
+                    className="npati-builder-row-action-btn"
+                    onClick={() => handleDuplicateBlock(selectedBlock.id)}
+                    title="Duplicate block"
+                  >
+                    <IconCopy />
+                  </button>
+                  <button
+                    type="button"
+                    className="npati-builder-row-action-btn danger"
+                    onClick={() => void handleDeleteBlock(selectedBlock.id)}
+                    title="Delete block"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-tabs: Content vs Style */}
+              <div className="npati-builder-subtab-segmented">
+                <button
+                  type="button"
+                  className={`npati-builder-subtab-btn ${inspectorSubTab === "content" ? "active" : ""}`}
+                  onClick={() => setInspectorSubTab("content")}
+                >
+                  Content
+                </button>
+                <button
+                  type="button"
+                  className={`npati-builder-subtab-btn ${inspectorSubTab === "style" ? "active" : ""}`}
+                  onClick={() => setInspectorSubTab("style")}
+                >
+                  Style
+                </button>
+              </div>
+
+              {/* Inspector Content */}
+              <div className="npati-builder-inspector-content">
+                {/* SUBTAB 1: CONTENT */}
+                {inspectorSubTab === "content" && (
+                  <>
+                    {/* Title */}
+                    <div className="npati-builder-form-group">
+                      <label className="npati-builder-form-label">Title</label>
+                      <input
+                        type="text"
+                        className="npati-builder-input"
+                        value={selectedBlock.props.title || selectedBlock.props.brandName || ""}
+                        onChange={(e) => {
+                          if (selectedBlock.type === "navbar") {
+                            handleUpdateBlockProp("brandName", e.target.value);
+                          } else {
+                            handleUpdateBlockProp("title", e.target.value);
+                          }
+                        }}
+                      />
+                    </div>
+
+                    {/* Subtitle / Description */}
+                    {selectedBlock.type !== "navbar" && (
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Subtitle</label>
+                        <textarea
+                          rows={3}
+                          className="npati-builder-textarea"
+                          value={selectedBlock.props.subtitle || selectedBlock.props.description || ""}
+                          onChange={(e) => handleUpdateBlockProp("subtitle", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Badge Tag */}
+                    {selectedBlock.type === "hero" && (
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Badge Tag</label>
+                        <input
+                          type="text"
+                          className="npati-builder-input"
+                          value={selectedBlock.props.badge || ""}
+                          onChange={(e) => handleUpdateBlockProp("badge", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Primary Button */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Primary Button</label>
+                        <input
+                          type="text"
+                          className="npati-builder-input"
+                          value={selectedBlock.props.primaryCtaText || selectedBlock.props.ctaText || ""}
+                          onChange={(e) => {
+                            if (selectedBlock.type === "navbar") {
+                              handleUpdateBlockProp("ctaText", e.target.value);
+                            } else {
+                              handleUpdateBlockProp("primaryCtaText", e.target.value);
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">
+                          <span>Link</span>
+                          <IconLink />
+                        </label>
+                        <input
+                          type="text"
+                          className="npati-builder-input"
+                          value={selectedBlock.props.primaryCtaUrl || selectedBlock.props.ctaUrl || "#"}
+                          onChange={(e) => {
+                            if (selectedBlock.type === "navbar") {
+                              handleUpdateBlockProp("ctaUrl", e.target.value);
+                            } else {
+                              handleUpdateBlockProp("primaryCtaUrl", e.target.value);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Secondary Button */}
+                    {selectedBlock.type === "hero" && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
+                        <div className="npati-builder-form-group">
+                          <label className="npati-builder-form-label">Secondary Button</label>
+                          <input
+                            type="text"
+                            className="npati-builder-input"
+                            value={selectedBlock.props.secondaryCtaText || ""}
+                            onChange={(e) => handleUpdateBlockProp("secondaryCtaText", e.target.value)}
+                          />
+                        </div>
+                        <div className="npati-builder-form-group">
+                          <label className="npati-builder-form-label">
+                            <span>Link</span>
+                            <IconLink />
+                          </label>
+                          <input
+                            type="text"
+                            className="npati-builder-input"
+                            value={selectedBlock.props.secondaryCtaUrl || "#"}
+                            onChange={(e) => handleUpdateBlockProp("secondaryCtaUrl", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Image URL */}
+                    <div className="npati-builder-form-group">
+                      <label className="npati-builder-form-label">Image URL</label>
+                      <input
+                        type="text"
+                        className="npati-builder-input"
+                        placeholder="https://images.unsplash.com/..."
+                        value={selectedBlock.props.imageUrl || selectedBlock.props.logoUrl || ""}
+                        onChange={(e) => {
+                          if (selectedBlock.type === "navbar") {
+                            handleUpdateBlockProp("logoUrl", e.target.value);
+                          } else {
+                            handleUpdateBlockProp("imageUrl", e.target.value);
+                          }
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* SUBTAB 2: STYLE */}
+                {inspectorSubTab === "style" && (
+                  <>
+                    {/* Layout Section */}
+                    <div>
+                      <span className="npati-builder-sections-title" style={{ display: "block", marginBottom: "10px" }}>
+                        Layout
+                      </span>
+
+                      {/* Alignment */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Alignment</label>
+                        <div className="npati-builder-align-group">
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "left")}
+                            title="Left"
+                          >
+                            <IconAlignLeft />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "center")}
+                            title="Center"
+                          >
+                            <IconAlignCenter />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "right")}
+                            title="Right"
+                          >
+                            <IconAlignRight />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Padding */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Padding</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.paddingY || "medium"}
+                          onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
+                        >
+                          <option value="none">None (0px)</option>
+                          <option value="small">Small (20px)</option>
+                          <option value="medium">Medium (40px)</option>
+                          <option value="large">Large (60px)</option>
+                          <option value="xlarge">X-Large (80px)</option>
+                        </select>
+                      </div>
+
+                      {/* Max Width */}
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Max Width</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.maxWidth || "large"}
+                          onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
+                        >
+                          <option value="full">100% Full Width</option>
+                          <option value="large">1200px</option>
+                          <option value="medium">960px</option>
+                          <option value="small">640px</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Colors Section */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                      <span className="npati-builder-sections-title" style={{ display: "block", marginBottom: "10px" }}>
+                        Colors
+                      </span>
+
+                      {/* Background Color */}
+                      <div className="npati-builder-color-row">
+                        <span style={{ fontSize: "13px", color: "#334155" }}>Background</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.backgroundColor || "#ffffff"}
+                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                          />
+                          <span className="npati-builder-color-code">
+                            {selectedBlock.styles?.backgroundColor || "#FFFFFF"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Title Color */}
+                      <div className="npati-builder-color-row">
+                        <span style={{ fontSize: "13px", color: "#334155" }}>Title</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.textColor || "#0f172a"}
+                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                          />
+                          <span className="npati-builder-color-code">
+                            {selectedBlock.styles?.textColor || "#0F172A"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Border Radius */}
+                      <div className="npati-builder-form-group" style={{ marginTop: "12px" }}>
+                        <label className="npati-builder-form-label">Border Radius</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.borderRadius || "md"}
+                          onChange={(e) => handleUpdateBlockStyle("borderRadius", e.target.value)}
+                        >
+                          <option value="none">None (0px)</option>
+                          <option value="sm">Small (6px)</option>
+                          <option value="md">Medium (10px)</option>
+                          <option value="lg">Large (16px)</option>
+                          <option value="full">Full (Rounded Pill)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: DESIGN (Global Website Theme) */}
+          {inspectorTab === "design" && doc && (
+            <div className="npati-builder-inspector-content">
+              <span className="npati-builder-sections-title">Global Website Styles</span>
+
+              <div className="npati-builder-color-row">
+                <span style={{ fontSize: "13px", color: "#334155" }}>Primary Brand Color</span>
+                <div className="npati-builder-color-picker-wrap">
                   <input
                     type="color"
-                    value={doc.theme.primaryColor}
+                    className="npati-builder-color-swatch"
+                    value={doc.theme.primaryColor || "#e11d2e"}
                     onChange={(e) => {
                       pushDocumentChange({
                         ...doc,
@@ -1133,29 +2118,20 @@ export function WebsiteEditor() {
                         updatedAt: new Date().toISOString(),
                       });
                     }}
-                    style={{ border: "none", width: "36px", height: "36px", borderRadius: "6px", cursor: "pointer" }}
                   />
-                  <input
-                    type="text"
-                    value={doc.theme.primaryColor}
-                    onChange={(e) => {
-                      pushDocumentChange({
-                        ...doc,
-                        theme: { ...doc.theme, primaryColor: e.target.value },
-                        updatedAt: new Date().toISOString(),
-                      });
-                    }}
-                    style={{ flex: 1, padding: "0.4rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                  />
+                  <span className="npati-builder-color-code">
+                    {doc.theme.primaryColor || "#E11D2E"}
+                  </span>
                 </div>
               </div>
 
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Background Color</label>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <div className="npati-builder-color-row">
+                <span style={{ fontSize: "13px", color: "#334155" }}>Background Color</span>
+                <div className="npati-builder-color-picker-wrap">
                   <input
                     type="color"
-                    value={doc.theme.backgroundColor}
+                    className="npati-builder-color-swatch"
+                    value={doc.theme.backgroundColor || "#ffffff"}
                     onChange={(e) => {
                       pushDocumentChange({
                         ...doc,
@@ -1163,27 +2139,18 @@ export function WebsiteEditor() {
                         updatedAt: new Date().toISOString(),
                       });
                     }}
-                    style={{ border: "none", width: "36px", height: "36px", borderRadius: "6px", cursor: "pointer" }}
                   />
-                  <input
-                    type="text"
-                    value={doc.theme.backgroundColor}
-                    onChange={(e) => {
-                      pushDocumentChange({
-                        ...doc,
-                        theme: { ...doc.theme, backgroundColor: e.target.value },
-                        updatedAt: new Date().toISOString(),
-                      });
-                    }}
-                    style={{ flex: 1, padding: "0.4rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                  />
+                  <span className="npati-builder-color-code">
+                    {doc.theme.backgroundColor || "#FFFFFF"}
+                  </span>
                 </div>
               </div>
 
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Font Family</label>
+              <div className="npati-builder-form-group">
+                <label className="npati-builder-form-label">Font Family</label>
                 <select
-                  value={doc.theme.fontFamily}
+                  className="npati-builder-select"
+                  value={doc.theme.fontFamily || "inter"}
                   onChange={(e) => {
                     pushDocumentChange({
                       ...doc,
@@ -1191,20 +2158,20 @@ export function WebsiteEditor() {
                       updatedAt: new Date().toISOString(),
                     });
                   }}
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
                 >
-                  <option value="system">System Default</option>
-                  <option value="inter">Inter (Modern Sans)</option>
+                  <option value="inter">Inter (Modern Clean)</option>
                   <option value="roboto">Roboto</option>
-                  <option value="geist">Geist</option>
+                  <option value="geist">Geist Sans</option>
                   <option value="playfair">Playfair Display (Editorial)</option>
+                  <option value="system">System Default</option>
                 </select>
               </div>
 
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Border Radius</label>
+              <div className="npati-builder-form-group">
+                <label className="npati-builder-form-label">Global Border Radius</label>
                 <select
-                  value={doc.theme.borderRadius}
+                  className="npati-builder-select"
+                  value={doc.theme.borderRadius || "md"}
                   onChange={(e) => {
                     pushDocumentChange({
                       ...doc,
@@ -1212,474 +2179,234 @@ export function WebsiteEditor() {
                       updatedAt: new Date().toISOString(),
                     });
                   }}
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
                 >
                   <option value="none">Square (0px)</option>
                   <option value="sm">Small (6px)</option>
                   <option value="md">Medium (10px)</option>
                   <option value="lg">Large (16px)</option>
-                  <option value="full">Rounded (Pill)</option>
+                  <option value="full">Pill (9999px)</option>
                 </select>
               </div>
             </div>
           )}
 
-          {/* TAB 4: ASSETS & MEDIA */}
-          {activeTab === "assets" && (
-            <div style={{ padding: "1rem", overflowY: "auto", display: "flex", flexDirection: "column", height: "100%" }}>
-              <div style={{ marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "0.5rem" }}>Media & Assets</h3>
-                <label
-                  className="button-primary"
-                  style={{ display: "block", textAlign: "center", cursor: "pointer", padding: "0.5rem" }}
-                >
-                  {uploadingAsset ? "Uploading..." : "+ Upload Image"}
+          {/* TAB: ADVANCED */}
+          {inspectorTab === "advanced" && (
+            <div className="npati-builder-inspector-content">
+              <span className="npati-builder-sections-title">Advanced Settings</span>
+
+              {selectedBlock && (
+                <div className="npati-builder-form-group">
+                  <label className="npati-builder-form-label">Section ID (Anchor)</label>
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => void handleUploadAsset(e)}
-                    style={{ display: "none" }}
-                    disabled={uploadingAsset}
+                    type="text"
+                    className="npati-builder-input"
+                    value={selectedBlock.type}
+                    disabled
                   />
-                </label>
-              </div>
+                </div>
+              )}
 
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                <p style={{ fontSize: "0.8rem", color: "var(--muted-color, #8b949e)", marginBottom: "0.75rem" }}>
-                  Uploaded assets are stored in <code>public/assets</code>. Click on any image URL to copy or insert.
-                </p>
-
-                {files.filter((f) => f.path.match(/\.(png|jpg|jpeg|svg|webp|gif)$/i)).length === 0 ? (
-                  <p style={{ fontSize: "0.85rem", fontStyle: "italic", color: "var(--muted-color, #8b949e)" }}>
-                    No media files uploaded yet.
-                  </p>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-                    {files
-                      .filter((f) => f.path.match(/\.(png|jpg|jpeg|svg|webp|gif)$/i))
-                      .map((f) => {
-                        const url = `/${f.path.replace(/^public\//, "")}`;
-                        return (
-                          <div
-                            key={f.path}
-                            onClick={() => {
-                              if (selectedBlock) handleUpdateBlockProp("imageUrl", url);
-                              navigator.clipboard.writeText(url);
-                              alert(`Copied URL: ${url}`);
-                            }}
-                            style={{
-                              border: "1px solid rgba(255,255,255,0.1)",
-                              borderRadius: "6px",
-                              padding: "4px",
-                              cursor: "pointer",
-                              textAlign: "center",
-                            }}
-                          >
-                            <img src={url} alt={f.name} style={{ width: "100%", height: "70px", objectFit: "cover", borderRadius: "4px" }} />
-                            <small style={{ fontSize: "0.7rem", display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                              {f.name}
-                            </small>
-                          </div>
+              {activePage && doc && (
+                <>
+                  <div className="npati-builder-form-group">
+                    <label className="npati-builder-form-label">Page Meta Title</label>
+                    <input
+                      type="text"
+                      className="npati-builder-input"
+                      value={activePage.seo?.title || ""}
+                      onChange={(e) => {
+                        const updatedPages = doc.pages.map((p) =>
+                          p.id === activePage.id ? { ...p, seo: { ...(p.seo || {}), title: e.target.value } } : p
                         );
-                      })}
+                        pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
+                      }}
+                    />
                   </div>
-                )}
-              </div>
-            </div>
-          )}
 
-          {/* TAB 5: AI CHAT */}
-          {activeTab === "chat" && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-              <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid rgba(255,255,255,0.08)", fontWeight: 700 }}>
-                🤖 AI Developer Agent
-              </div>
-
-              <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                {chatMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    style={{
-                      alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
-                      background: msg.role === "user" ? "var(--primary-color, #3b82f6)" : "rgba(255,255,255,0.06)",
-                      color: "#fff",
-                      borderRadius: "10px",
-                      padding: "0.6rem 0.85rem",
-                      maxWidth: "85%",
-                      fontSize: "0.85rem",
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {msg.content}
+                  <div className="npati-builder-form-group">
+                    <label className="npati-builder-form-label">Meta Description</label>
+                    <textarea
+                      rows={3}
+                      className="npati-builder-textarea"
+                      value={activePage.seo?.description || ""}
+                      onChange={(e) => {
+                        const updatedPages = doc.pages.map((p) =>
+                          p.id === activePage.id ? { ...p, seo: { ...(p.seo || {}), description: e.target.value } } : p
+                        );
+                        pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
+                      }}
+                    />
                   </div>
-                ))}
-              </div>
+                </>
+              )}
 
-              <form onSubmit={(e) => void handleSendChat(e)} style={{ padding: "0.75rem", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                <input
-                  type="text"
-                  placeholder="Ask AI to modify site..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={chatBusy}
-                  style={{
-                    width: "100%",
-                    padding: "0.55rem 0.75rem",
-                    borderRadius: "6px",
-                    background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#fff",
-                    fontSize: "0.85rem",
-                  }}
-                />
-              </form>
-            </div>
-          )}
-
-          {/* TAB 6: CODE & FILES */}
-          {activeTab === "code" && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "1rem" }}>
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "0.75rem" }}>Project Files</h3>
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {files.map((f) => (
-                  <div
-                    key={f.path}
-                    onClick={async () => {
-                      setSelectedFilePath(f.path);
-                      try {
-                        const content = await apiGet<{ content: string }>(`${base}/files/read?path=${encodeURIComponent(f.path)}`);
-                        setFileContent(content.content);
-                      } catch {}
-                    }}
-                    style={{
-                      padding: "0.35rem 0.5rem",
-                      fontSize: "0.8rem",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      background: selectedFilePath === f.path ? "rgba(59, 130, 246, 0.2)" : "transparent",
-                    }}
-                  >
-                    {f.type === "directory" ? "📁" : "📄"} {f.path}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 7: SEO */}
-          {activeTab === "seo" && activePage && doc && (
-            <div style={{ padding: "1rem", overflowY: "auto" }}>
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "1rem" }}>Page SEO Settings</h3>
-
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Page Title</label>
-                <input
-                  type="text"
-                  value={activePage.seo?.title || ""}
-                  onChange={(e) => {
-                    const updatedPages = doc.pages.map((p) =>
-                      p.id === activePage.id ? { ...p, seo: { ...(p.seo || {}), title: e.target.value } } : p
-                    );
-                    pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
-                  }}
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                />
-              </div>
-
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Meta Description</label>
-                <textarea
-                  rows={3}
-                  value={activePage.seo?.description || ""}
-                  onChange={(e) => {
-                    const updatedPages = doc.pages.map((p) =>
-                      p.id === activePage.id ? { ...p, seo: { ...(p.seo || {}), description: e.target.value } } : p
-                    );
-                    pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
-                  }}
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* TAB 8: HISTORY & CHECKPOINTS */}
-          {activeTab === "history" && (
-            <div style={{ padding: "1rem", overflowY: "auto", display: "flex", flexDirection: "column", height: "100%" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>Checkpoints</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setActiveDrawer("files")}
+                  style={{ textAlign: "left", display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <IconFile />
+                  <span>Inspect Code & Files</span>
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setActiveDrawer("history")}
+                  style={{ textAlign: "left", display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <IconGrip />
+                  <span>View Checkpoints</span>
+                </button>
                 <button
                   type="button"
                   className="button-primary"
-                  onClick={() => void handleCreateCheckpoint()}
-                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.8rem" }}
+                  onClick={() => setActiveDrawer("ai")}
+                  style={{ textAlign: "left", display: "flex", alignItems: "center", gap: "8px" }}
                 >
-                  + Save Point
+                  <IconSparkles />
+                  <span>Ask AI Assistant</span>
                 </button>
-              </div>
-
-              <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {checkpoints.length === 0 ? (
-                  <p style={{ fontSize: "0.85rem", color: "var(--muted-color, #8b949e)" }}>No checkpoints yet.</p>
-                ) : (
-                  checkpoints.map((cp) => (
-                    <div
-                      key={cp.id}
-                      style={{
-                        padding: "0.6rem",
-                        borderRadius: "6px",
-                        background: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{cp.name}</div>
-                      <small style={{ color: "var(--muted-color, #8b949e)", fontSize: "0.75rem" }}>
-                        {new Date(cp.createdAt).toLocaleTimeString()} · {cp.fileCount} files
-                      </small>
-                    </div>
-                  ))
-                )}
               </div>
             </div>
           )}
         </aside>
+      </div>
 
-        {/* Center Live Canvas / IFrame Viewport */}
-        <main
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            background: "#05080f",
-            position: "relative",
-            overflow: "hidden",
-            padding: "1rem",
-          }}
-        >
-          {previewStatus?.isRunning && previewStatus?.previewUrl ? (
-            <div
-              style={{
-                width: deviceWidth,
-                height: "100%",
-                background: "#000",
-                borderRadius: deviceMode === "desktop" ? "0" : "12px",
-                overflow: "hidden",
-                boxShadow: deviceMode === "desktop" ? "none" : "0 20px 40px rgba(0,0,0,0.8)",
-                transition: "width 0.3s ease",
-                border: deviceMode === "desktop" ? "none" : "2px solid rgba(255,255,255,0.15)",
-              }}
-            >
-              <iframe
-                key={iframeKey}
-                src={previewStatus.previewUrl}
-                title="Website Live Preview"
-                style={{ width: "100%", height: "100%", border: "none" }}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              />
-            </div>
-          ) : (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                textAlign: "center",
-                padding: "2rem",
-              }}
-            >
-              <span style={{ fontSize: "3rem", marginBottom: "1rem" }}>🌐</span>
-              <h3 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "0.5rem" }}>Live Preview is Stopped</h3>
-              <p style={{ color: "var(--muted-color, #8b949e)", maxWidth: "400px", marginBottom: "1.5rem", fontSize: "0.9rem" }}>
-                Start the sandbox dev server to preview your Next.js application live as you make visual changes.
-              </p>
+      {/* ========================================================================= */}
+      {/* SECONDARY DRAWERS (AI CHAT / FILES / HISTORY)                             */}
+      {/* ========================================================================= */}
+      {activeDrawer && (
+        <div className="npati-builder-drawer-backdrop" onClick={() => setActiveDrawer(null)}>
+          <div className="npati-builder-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="npati-builder-drawer-header">
+              <h3>
+                {activeDrawer === "ai" && <><IconSparkles /> AI Developer Agent</>}
+                {activeDrawer === "files" && <><IconFile /> Project Files</>}
+                {activeDrawer === "history" && <><IconGrip /> Checkpoints & Git</>}
+              </h3>
               <button
                 type="button"
-                className="button-primary"
-                onClick={() => void handleStartPreview()}
-                disabled={previewLoading}
-                style={{ padding: "0.6rem 1.25rem", fontSize: "0.95rem" }}
+                className="npati-builder-row-action-btn"
+                onClick={() => setActiveDrawer(null)}
+                style={{ fontSize: "18px", color: "#64748b" }}
               >
-                {previewLoading ? "Starting Sandbox..." : "▶ Start Live Preview"}
-              </button>
-            </div>
-          )}
-        </main>
-
-        {/* Right Properties Inspector Panel (shown when a block is selected) */}
-        {selectedBlock && (
-          <aside
-            style={{
-              width: "320px",
-              borderLeft: "1px solid var(--border-color, rgba(255,255,255,0.1))",
-              background: "var(--surface-color, #0f141c)",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem 1rem", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <div>
-                <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>
-                  {COMPONENT_REGISTRY[selectedBlock.type]?.icon || "🧱"} {selectedBlock.name || selectedBlock.type}
-                </span>
-                <small style={{ display: "block", color: "var(--muted-color, #8b949e)", fontSize: "0.75rem" }}>
-                  Properties Inspector
-                </small>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedBlockId(null)}
-                style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontSize: "1.2rem" }}
-              >
-                ×
+                ✕
               </button>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
-              {/* Dynamic Property Inputs based on COMPONENT_REGISTRY */}
-              {(COMPONENT_REGISTRY[selectedBlock.type]?.propertySchema || []).map((field) => {
-                const val = selectedBlock.props[field.key] ?? field.defaultValue ?? "";
-
-                if (field.type === "string" || field.type === "link" || field.type === "image") {
-                  return (
-                    <div key={field.key} style={{ marginBottom: "1rem" }}>
-                      <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.3rem" }}>
-                        {field.label}
-                      </label>
-                      <input
-                        type="text"
-                        value={val}
-                        onChange={(e) => handleUpdateBlockProp(field.key, e.target.value)}
-                        style={{ width: "100%", padding: "0.45rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                      />
-                    </div>
-                  );
-                }
-
-                if (field.type === "textarea") {
-                  return (
-                    <div key={field.key} style={{ marginBottom: "1rem" }}>
-                      <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.3rem" }}>
-                        {field.label}
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={val}
-                        onChange={(e) => handleUpdateBlockProp(field.key, e.target.value)}
-                        style={{ width: "100%", padding: "0.45rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                      />
-                    </div>
-                  );
-                }
-
-                if (field.type === "boolean") {
-                  return (
-                    <div key={field.key} style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(val)}
-                        onChange={(e) => handleUpdateBlockProp(field.key, e.target.checked)}
-                      />
-                      <label style={{ fontSize: "0.85rem" }}>{field.label}</label>
-                    </div>
-                  );
-                }
-
-                if (field.type === "select") {
-                  return (
-                    <div key={field.key} style={{ marginBottom: "1rem" }}>
-                      <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.3rem" }}>
-                        {field.label}
-                      </label>
-                      <select
-                        value={val}
-                        onChange={(e) => handleUpdateBlockProp(field.key, e.target.value)}
-                        style={{ width: "100%", padding: "0.45rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                      >
-                        {(field.options || []).map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                }
-
-                return null;
-              })}
-
-              {/* Block Style Controls */}
-              <div style={{ marginTop: "1.5rem", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1rem" }}>
-                <h4 style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-color, #8b949e)" }}>
-                  Style & Layout
-                </h4>
-
-                <div style={{ marginBottom: "1rem" }}>
-                  <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Text Alignment</label>
-                  <div style={{ display: "flex", gap: "0.4rem" }}>
-                    {(["left", "center", "right"] as const).map((align) => (
-                      <button
-                        key={align}
-                        type="button"
-                        className="button-secondary"
-                        onClick={() => handleUpdateBlockStyle("textAlign", align)}
+            <div className="npati-builder-drawer-body">
+              {/* DRAWER: AI CHAT */}
+              {activeDrawer === "ai" && (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                  <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", marginBottom: "12px" }}>
+                    {chatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
                         style={{
-                          flex: 1,
-                          padding: "0.35rem",
-                          background: selectedBlock.styles?.textAlign === align ? "rgba(59, 130, 246, 0.25)" : undefined,
-                          borderColor: selectedBlock.styles?.textAlign === align ? "#3b82f6" : undefined,
-                          fontSize: "0.8rem",
+                          alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                          background: msg.role === "user" ? "#0f172a" : "#f1f5f9",
+                          color: msg.role === "user" ? "#ffffff" : "#0f172a",
+                          borderRadius: "10px",
+                          padding: "10px 14px",
+                          maxWidth: "85%",
+                          fontSize: "13.5px",
+                          lineHeight: 1.5,
                         }}
                       >
-                        {align}
-                      </button>
+                        {msg.content}
+                      </div>
                     ))}
                   </div>
-                </div>
 
-                <div style={{ marginBottom: "1rem" }}>
-                  <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Padding Vertical</label>
-                  <select
-                    value={selectedBlock.styles?.paddingY || "medium"}
-                    onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
-                    style={{ width: "100%", padding: "0.45rem", borderRadius: "6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                  >
-                    <option value="none">None</option>
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
-                    <option value="xlarge">Extra Large</option>
-                  </select>
-                </div>
-
-                <div style={{ marginBottom: "1rem" }}>
-                  <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem" }}>Background Color</label>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <form onSubmit={(e) => void handleSendChat(e)}>
                     <input
-                      type="color"
-                      value={selectedBlock.styles?.backgroundColor || "#090d16"}
-                      onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
-                      style={{ border: "none", width: "32px", height: "32px", borderRadius: "6px", cursor: "pointer" }}
+                      type="text"
+                      className="npati-builder-input"
+                      placeholder="Ask AI to modify sections, change styles..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      disabled={chatBusy}
                     />
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => handleUpdateBlockStyle("backgroundColor", "transparent")}
-                      style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
-                    >
-                      Clear / Transparent
-                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* DRAWER: FILES */}
+              {activeDrawer === "files" && (
+                <div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "16px" }}>
+                    {files.map((f) => (
+                      <div
+                        key={f.path}
+                        onClick={async () => {
+                          setSelectedFilePath(f.path);
+                          try {
+                            const res = await apiGet<{ content: string }>(`${base}/files/read?path=${encodeURIComponent(f.path)}`);
+                            setFileContent(res.content);
+                          } catch {}
+                        }}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          cursor: "pointer",
+                          background: selectedFilePath === f.path ? "#fef2f2" : "#ffffff",
+                          color: selectedFilePath === f.path ? "#e11d2e" : "#334155",
+                          border: "1px solid #e2e8f0",
+                        }}
+                      >
+                        {f.path}
+                      </div>
+                    ))}
+                  </div>
+
+                  {fileContent && (
+                    <pre style={{ background: "#0f172a", color: "#f8fafc", padding: "12px", borderRadius: "8px", fontSize: "12px", overflowX: "auto", maxHeight: "300px" }}>
+                      {fileContent}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {/* DRAWER: HISTORY */}
+              {activeDrawer === "history" && (
+                <div>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    style={{ width: "100%", marginBottom: "16px" }}
+                    onClick={async () => {
+                      const name = await promptModal({ message: "Checkpoint name:" });
+                      if (!name) return;
+                      await apiPost(`${base}/checkpoints`, { name: name.trim() });
+                      const res = await apiGet<{ checkpoints: CheckpointItem[] }>(`${base}/checkpoints`);
+                      setCheckpoints(res.checkpoints || []);
+                    }}
+                  >
+                    + Create Checkpoint
+                  </button>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {checkpoints.length === 0 ? (
+                      <p style={{ color: "#64748b", fontSize: "13px" }}>No checkpoints saved yet.</p>
+                    ) : (
+                      checkpoints.map((cp) => (
+                        <div key={cp.id} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                          <strong style={{ fontSize: "13.5px" }}>{cp.name}</strong>
+                          <div style={{ fontSize: "12px", color: "#94a3b8" }}>{new Date(cp.createdAt).toLocaleString()}</div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
-          </aside>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
