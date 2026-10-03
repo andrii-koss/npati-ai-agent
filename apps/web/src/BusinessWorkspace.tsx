@@ -1101,7 +1101,7 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
   async function openPreview() {
     setPreviewOpen(true);
     setPreviewError("");
-    if (previewUrl) return;
+    setPreviewUrl("");
     if (!card.companyId) {
       setPreviewError("Project company is unavailable.");
       return;
@@ -1109,12 +1109,24 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
     setPreviewLoading(true);
     try {
       const token = getStoredAuthToken();
-      const response = await fetch(`/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/start`, {
+      const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
+      const headers: Record<string, string> = {};
+      if (token) headers.authorization = `Bearer ${token}`;
+      const statusResponse = await fetch(`${endpoint}/status`, { headers });
+      const status = await statusResponse.json().catch(() => null) as
+        | { isRunning?: boolean }
+        | null;
+      if (statusResponse.ok && status?.isRunning) {
+        const tokenResponse = await fetch(`${endpoint}/token`, { headers });
+        const freshToken = await tokenResponse.json().catch(() => null) as { token?: string } | null;
+        if (tokenResponse.ok && freshToken?.token) {
+          setPreviewUrl(`${endpoint}/proxy/?token=${encodeURIComponent(freshToken.token)}`);
+          return;
+        }
+      }
+      const response = await fetch(`${endpoint}/start`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "content-type": "application/json", ...headers },
         body: "{}",
       });
       const payload = await response.json().catch(() => null) as

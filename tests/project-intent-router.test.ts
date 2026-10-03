@@ -17,7 +17,7 @@ import { ActiveContextResolver } from "../apps/agent-api/src/active-context-reso
 import { ProjectOrchestrator } from "../apps/agent-api/src/project-orchestrator";
 import { ProjectGitService } from "../apps/agent-api/src/project-git-service";
 import type { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
-import type { ProjectPreviewService } from "../apps/agent-api/src/project-preview-service";
+import { PreviewError, type ProjectPreviewService } from "../apps/agent-api/src/project-preview-service";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -240,6 +240,9 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
       async startPreview(_ctx: AuthContext, _companyId: string, _projectId: string) {
         previewAttempts++;
         if (mockPreviewStartError) {
+          if (mockPreviewStartError === "Sandbox runner is not configured") {
+            throw new PreviewError("sandbox_unavailable", mockPreviewStartError, 503);
+          }
           throw new Error(mockPreviewStartError);
         }
         return {
@@ -517,6 +520,30 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(projectRuns.length).toBe(1);
     expect(projectRuns[0].projectId).toBe(result.project.id);
     expect(projectRuns[0].status).toBe("completed");
+  });
+
+  it("reports missing preview infrastructure without claiming the website is ready", async () => {
+    let company = await store.createCompany(authUserA, { name: "Hosting Sandbox Co" }, "hosting-sandbox-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: [], isActive: true,
+    }, "hosting-sandbox-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    mockPreviewStartError = "Sandbox runner is not configured";
+
+    const result = await orchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id,
+      prompt: "Створи мені сайт для хостінга",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт для хостінга" }),
+      idempotencyKey: "hosting-sandbox-website",
+    });
+
+    expect(previewAttempts).toBe(1);
+    expect(result.runDetails.run.status).toBe("failed");
+    expect(result.projectCard.buildStatus).toBe("failed");
+    expect(result.previewUrl).toBeUndefined();
+    expect(result.responseMessage).toContain("перегляд не запущено");
+    expect(result.responseMessage).toContain("Sandbox runner is not configured");
+    expect(result.responseMessage).not.toContain("Task completed successfully");
   });
 
   it("repair loop stops after 3 attempts when build keeps failing", async () => {
