@@ -1,4 +1,8 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import crypto from "node:crypto";
+const createHash = crypto?.createHash;
+const createHmac = crypto?.createHmac;
+const randomUUID = crypto?.randomUUID || (() => globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+
 import type { CapabilityRisk } from "./capabilities";
 
 export type RiskLevel = CapabilityRisk; // "low" | "moderate" | "high" | "critical"

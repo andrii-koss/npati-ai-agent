@@ -2445,7 +2445,7 @@ ${localized.next}`;
     beforeDeleteCompany,
     beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
   });
-  registerProjectRoutes(app, projectService, authProvider);
+  registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);

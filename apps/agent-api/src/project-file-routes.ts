@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectFileError, type ProjectWorkspace } from "./project-workspace";
@@ -32,5 +32,60 @@ export function registerProjectFileRoutes(app: FastifyInstance, workspace: Proje
   app.get<{ Params: Params; Querystring: Query }>("/companies/:companyId/projects/:projectId/files/search", async (request, reply) => {
     try { return { files: await workspace.searchFiles(await authorize(auth, request), request.params.companyId, request.params.projectId, request.query.query ?? "", request.query.workspaceId) }; }
     catch (error) { return fail(reply, error); }
+  });
+  app.post<{ Params: Params; Body: { path: string; content: string; expectedRevision?: string } }>("/companies/:companyId/projects/:projectId/files/write", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request);
+      const { companyId, projectId } = request.params;
+      const { path: filePath, content, expectedRevision } = request.body || {};
+      if (!filePath || typeof filePath !== "string") {
+        return reply.code(400).send({ error: { code: "invalid_path", message: "File path is required" } });
+      }
+      try {
+        const existing = await workspace.readFile(context, companyId, projectId, filePath);
+        const res = await workspace.writeFile(context, companyId, projectId, filePath, content ?? "", expectedRevision || existing.revision);
+        return reply.code(200).send(res);
+      } catch (err: any) {
+        if (err?.code === "file_not_found" || err?.status === 404) {
+          const res = await workspace.createFile(context, companyId, projectId, filePath, content ?? "");
+          return reply.code(201).send(res);
+        }
+        throw err;
+      }
+    } catch (error) { return fail(reply, error); }
+  });
+  app.delete<{ Params: Params; Querystring: { path?: string }; Body?: { path?: string } }>("/companies/:companyId/projects/:projectId/files", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request);
+      const { companyId, projectId } = request.params;
+      const filePath = request.query?.path || (request.body as any)?.path;
+      if (!filePath || typeof filePath !== "string") {
+        return reply.code(400).send({ error: { code: "invalid_path", message: "File path is required" } });
+      }
+      await workspace.deleteFile(context, companyId, projectId, filePath);
+      return reply.code(204).send();
+    } catch (error) { return fail(reply, error); }
+  });
+  app.post<{ Params: Params; Body: { name: string; base64Data: string; targetDir?: string } }>("/companies/:companyId/projects/:projectId/files/upload", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request);
+      const { companyId, projectId } = request.params;
+      const { name, base64Data, targetDir = "public/assets" } = request.body || {};
+      if (!name || !base64Data) {
+        return reply.code(400).send({ error: { code: "invalid_upload", message: "Name and base64Data are required" } });
+      }
+      const cleanName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filePath = `${targetDir.replace(/\/$/, "")}/${cleanName}`;
+      const rawBase64 = base64Data.replace(/^data:[^;]+;base64,/, "");
+      const content = Buffer.from(rawBase64, "base64").toString("binary");
+      try {
+        const existing = await workspace.readFile(context, companyId, projectId, filePath);
+        await workspace.writeFile(context, companyId, projectId, filePath, content, existing.revision);
+      } catch {
+        await workspace.createFile(context, companyId, projectId, filePath, content);
+      }
+      const publicUrl = filePath.startsWith("public/") ? filePath.replace(/^public/, "") : `/${filePath}`;
+      return reply.code(201).send({ path: filePath, url: publicUrl, name: cleanName });
+    } catch (error) { return fail(reply, error); }
   });
 }
