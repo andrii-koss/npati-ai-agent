@@ -185,6 +185,13 @@ export interface OmniRouteResilienceSnapshot {
 export interface ModelInfo {
   id: string;
   name?: string;
+  type?: string;
+  apiFormat?: string;
+  capabilities?: string[];
+  supportedEndpoints?: string[];
+  outputModalities?: string[];
+  ownedBy?: string;
+  parent?: string | null;
 }
 
 export interface WebSearchInput {

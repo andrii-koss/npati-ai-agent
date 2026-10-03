@@ -26,7 +26,6 @@ function failedAttempt(modelId: string, error: unknown): InferenceRouteAttempt {
 
 export function isRetryableInferenceFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/OmniRoute (?:chat|stream) failed with HTTP 401/i.test(message)) return false;
   return /HTTP (?:400|401|403|404|408|409|429|5\d\d)|quota|rate.?limit|timeout|timed out|unavailable|overload|unsupported|model.*(?:missing|disabled|locked|does not support|invalid)|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message);
 }
 

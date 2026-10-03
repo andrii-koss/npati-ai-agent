@@ -87,9 +87,6 @@ export function isNonChatSpecialtyModel(model: ManifestModel | { id?: string; up
     : Array.isArray((model as any).supported_endpoints) ? (model as any).supported_endpoints
     : [];
 
-  const hasChatEndpoint = endpoints.some((ep: string) => /chat|completion|response/i.test(ep));
-  if (hasChatEndpoint) return false;
-
   if (isEmbeddingModel(model)) return true;
   if (type === "image" || type === "image_generation" || apiFormat === "image") return true;
   if (/\b(?:dall-?e|stable-diffusion|midjourney|flux|imagen|sdxl)\b/i.test(id) || /-image-/i.test(id)) return true;
@@ -97,6 +94,11 @@ export function isNonChatSpecialtyModel(model: ManifestModel | { id?: string; up
   if (/\b(?:whisper|tts|speech)\b/i.test(id) || /-audio-/i.test(id) || /\btranscription\b/i.test(id)) return true;
   if (type === "rerank" || apiFormat === "rerank" || /\brerank(?:er)?\b/i.test(id)) return true;
   if (type === "moderation" || /\bmoderat(?:ion|e)\b/i.test(id)) return true;
+  const capabilities = (model as { capabilities?: unknown }).capabilities;
+  if (Array.isArray(capabilities) && capabilities.some((capability) => ["embedding", "image", "audio", "rerank", "moderation"].includes(String(capability).toLowerCase()))) return true;
+  if (capabilities && typeof capabilities === "object" && !Array.isArray(capabilities) && Object.entries(capabilities).some(([key, enabled]) => enabled === true && ["embedding", "image", "audio", "rerank", "moderation"].includes(key.toLowerCase()))) return true;
+  const hasChatEndpoint = endpoints.some((ep: string) => /chat|response|messages/i.test(ep));
+  if (hasChatEndpoint) return false;
   if (endpoints.length > 0 && !hasChatEndpoint) return true;
 
   return false;
@@ -104,6 +106,19 @@ export function isNonChatSpecialtyModel(model: ManifestModel | { id?: string; up
 
 export function isChatCapableModel(model: ManifestModel | AIModelSummary | { id?: string; upstreamId?: string; capabilities?: string[]; type?: string; supportedEndpoints?: string[]; apiFormat?: string }): boolean {
   if (isNonChatSpecialtyModel(model as ManifestModel)) return false;
+  const metadata = model as { id?: string; ownedBy?: string; owned_by?: string; parent?: string | null; outputModalities?: string[]; output_modalities?: string[]; apiFormat?: string; api_format?: string };
+  if ((metadata.ownedBy ?? metadata.owned_by)?.toLowerCase() === "combo") return false;
+  if (metadata.parent) return false;
+  const output = metadata.outputModalities ?? metadata.output_modalities;
+  if (output?.length && !output.includes("text")) return false;
+  const format = (metadata.apiFormat ?? metadata.api_format)?.toLowerCase();
+  if (format && /^(?:embeddings?|images?|image-generation|audio|tts|stt|transcription|rerank|moderation|completions?)$/.test(format)) return false;
+  const endpoints = (model as { supportedEndpoints?: string[]; supported_endpoints?: string[] }).supportedEndpoints
+    ?? (model as { supported_endpoints?: string[] }).supported_endpoints;
+  if (Array.isArray(endpoints) && endpoints.length > 0 && !endpoints.some((endpoint) => /chat|response|messages/i.test(endpoint))) return false;
+  const type = String((model as { type?: string }).type ?? "").toLowerCase();
+  if (type === "completion" && !endpoints?.some((endpoint) => /chat|response|messages/i.test(endpoint))) return false;
+  if (type && !["chat", "text", "llm", "language", "completion", "coding", "code"].includes(type)) return false;
   if (Array.isArray(model.capabilities) && model.capabilities.length > 0) {
     if (model.capabilities.includes("chat") || model.capabilities.includes("text") || model.capabilities.includes("coding")) {
       return !model.capabilities.includes("embedding")
@@ -120,7 +135,7 @@ export function isChatCapableModel(model: ManifestModel | AIModelSummary | { id?
 function modelCapabilities(model: ManifestModel): string[] {
   const result = new Set<string>();
   const id = String(model.id ?? "").toLowerCase();
-  const isNonChat = isNonChatSpecialtyModel(model);
+  const isNonChat = !isChatCapableModel(model);
 
   if (isEmbeddingModel(model)) {
     result.add("embedding");

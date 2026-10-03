@@ -175,6 +175,24 @@ export class ProjectPreviewService {
     this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
   }
 
+  async buildProject(ctx: AuthContext, companyId: string, projectId: string): Promise<void> {
+    if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
+    const files = await this.workspace.listFiles(ctx, companyId, projectId);
+    const stack = await detectProjectStack(files, async (filePath) => (await this.workspace.readFile(ctx, companyId, projectId, filePath)).content);
+    const paths = new Set(files.map((file) => file.path));
+    if (!paths.has("package.json")) return;
+    const manifest = JSON.parse((await this.workspace.readFile(ctx, companyId, projectId, "package.json")).content) as { scripts?: Record<string, string> };
+    if (!manifest.scripts?.build) return;
+    const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci"
+      : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
+      : `${stack.packageManager} install`;
+    try {
+      await this.sandbox.execute(ctx, companyId, { projectId, command: install, agentId: "system", approved: true });
+      await this.sandbox.execute(ctx, companyId, { projectId, command: `${stack.packageManager} run build`, agentId: "system", approved: true });
+    } catch (error) {
+      throw new PreviewError("build_failed", error instanceof Error ? error.message : String(error), 409);
+    }
+  }
   generateToken(
     payload: Omit<PreviewTokenPayload, "expiresAt">,
     ttlMs = 15 * 60 * 1000,

@@ -1,5 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
-import { isNonChatSpecialtyModel } from "./normalization";
+import { isChatCapableModel } from "./normalization";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
@@ -13,8 +13,12 @@ function mcpJson(text: string) {
   return JSON.parse(source) as { result?: { content?: Array<{ type?: string; text?: string }> }; error?: { message?: string } };
 }
 
-function requiresResponsesApi(model?: string) {
-  return /^openai\/gpt-5\.6(?:$|-)/i.test(model ?? "");
+function requiresResponsesApi(model?: ModelInfo) {
+  const format = model?.apiFormat?.toLowerCase();
+  if (format === "responses" || format === "openai-responses") return true;
+  if (format === "chat-completions") return false;
+  const endpoints = model?.supportedEndpoints ?? [];
+  return endpoints.some((endpoint) => /responses/i.test(endpoint)) && !endpoints.some((endpoint) => /chat/i.test(endpoint));
 }
 
 function responsesText(payload: {
@@ -144,6 +148,7 @@ function normalizeM4aContainer(data: Uint8Array, filename: string) {
   return normalized;
 }
 export class OmniRouteEngine implements AIEngine {
+  private readonly chatModelMetadata = new Map<string, ModelInfo>();
   private readonly baseUrl?: string;
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
@@ -176,27 +181,25 @@ export class OmniRouteEngine implements AIEngine {
 
   supportsNativeTools() { return true; }
 
+  private async chatCandidates(primary?: string, fallback?: string): Promise<string[]> {
+    const requested = [primary ?? "auto", fallback].filter((model): model is string => Boolean(model));
+    const discover = requested.some((model) => model === "auto" || model.startsWith("auto/"));
+    const available = discover && this.chatModelMetadata.size === 0 ? await this.listModels().catch(() => []) : [...this.chatModelMetadata.values()];
+    const metadata = new Map(available.map((model) => [model.id, model]));
+    const candidates = requested.flatMap((model) => model === "auto" || model.startsWith("auto/")
+      ? available.map((entry) => entry.id)
+      : [model]);
+    const compatible = [...new Set(candidates)].filter((id) => id !== "auto" && !id.startsWith("auto/") && ((requested.includes(id) && id.startsWith("npati/")) || isChatCapableModel(metadata.get(id) ?? { id })));
+    if (!compatible.length) throw new Error("model_unavailable: no chat-compatible model supports the requested inference interface");
+    return compatible;
+  }
   async chat(request: ChatRequest): Promise<ChatResult> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
-    let candidateModels = [request.model ?? "auto", request.fallbackModel]
-      .filter((model): model is string => Boolean(model))
-      .filter((model, index, values) => values.indexOf(model) === index);
-
-    // Exclude non-chat specialty models (e.g. embedding models) if valid chat models or auto exist
-    const chatCapable = candidateModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-    if (chatCapable.length > 0) {
-      candidateModels = chatCapable;
-    } else {
-      candidateModels = ["auto"];
-    }
-
+    const candidateModels = await this.chatCandidates(request.model, request.fallbackModel);
     let lastError = "OmniRoute chat failed";
     const startedAt = Date.now();
     for (const [index, model] of candidateModels.entries()) {
-      if (model !== "auto" && !model.startsWith("auto/") && isNonChatSpecialtyModel({ id: model })) {
-        if (index < candidateModels.length - 1) continue;
-      }
-      const useResponses = requiresResponsesApi(model);
+      const useResponses = requiresResponsesApi(this.chatModelMetadata.get(model));
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
       const responseTools = request.tools?.map((tool) => ({ type: "function", ...tool.function }));
       const body = useResponses
@@ -269,22 +272,9 @@ export class OmniRouteEngine implements AIEngine {
 
   async *stream(request: ChatRequest): AsyncIterable<string> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
-    let candidateModels = [request.model ?? "auto", request.fallbackModel]
-      .filter((model): model is string => Boolean(model))
-      .filter((model, index, values) => values.indexOf(model) === index);
-
-    const chatCapable = candidateModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-    if (chatCapable.length > 0) {
-      candidateModels = chatCapable;
-    } else {
-      candidateModels = ["auto"];
-    }
-
+    const candidateModels = await this.chatCandidates(request.model, request.fallbackModel);
     for (const [index, model] of candidateModels.entries()) {
-      if (model !== "auto" && !model.startsWith("auto/") && isNonChatSpecialtyModel({ id: model })) {
-        if (index < candidateModels.length - 1) continue;
-      }
-      const useResponses = requiresResponsesApi(model);
+      const useResponses = requiresResponsesApi(this.chatModelMetadata.get(model));
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
       const responseContent = (content: string | ChatContentPart[]) => Array.isArray(content)
         ? content.map((part) => part.type === "text"
@@ -579,8 +569,23 @@ export class OmniRouteEngine implements AIEngine {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) return [];
-    const payload = (await response.json()) as { data?: Array<{ id: string; name?: string }> };
-    return payload.data ?? [];
+    const payload = (await response.json()) as { data?: Array<Record<string, unknown>> };
+    const models = (payload.data ?? []).filter((model) => typeof model.id === "string").map((model) => ({
+      id: model.id as string,
+      name: typeof model.name === "string" ? model.name : undefined,
+      type: typeof model.type === "string" ? model.type : undefined,
+      apiFormat: typeof (model.api_format ?? model.apiFormat) === "string" ? (model.api_format ?? model.apiFormat) as string : undefined,
+      capabilities: Array.isArray(model.capabilities) ? model.capabilities.filter((item): item is string => typeof item === "string")
+        : model.capabilities && typeof model.capabilities === "object" ? Object.entries(model.capabilities).filter(([, enabled]) => enabled === true).map(([name]) => name) : undefined,
+      outputModalities: Array.isArray(model.output_modalities ?? model.outputModalities)
+        ? ((model.output_modalities ?? model.outputModalities) as unknown[]).filter((item): item is string => typeof item === "string") : undefined,
+      ownedBy: typeof model.owned_by === "string" ? model.owned_by : undefined,
+      parent: typeof model.parent === "string" ? model.parent : null,
+      supportedEndpoints: Array.isArray(model.supported_endpoints ?? model.supportedEndpoints)
+        ? ((model.supported_endpoints ?? model.supportedEndpoints) as unknown[]).filter((item): item is string => typeof item === "string") : undefined,
+    }));
+    for (const model of models) this.chatModelMetadata.set(model.id, model);
+    return models;
   }
 
   async getModel(id: string): Promise<ModelInfo | undefined> {

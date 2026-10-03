@@ -2,6 +2,12 @@ import { OmniRouteEngine } from "@npati/omniroute-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
+async function seedModels(engine: OmniRouteEngine, models: Array<{ id: string; type?: string; supported_endpoints?: string[] }>) {
+  const providerFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: models }), { status: 200 })));
+  await engine.listModels();
+  vi.stubGlobal("fetch", providerFetch);
+}
 
 describe("OmniRoute adapter", () => {
   it("uses the verified upstream monitoring endpoint", async () => {
@@ -67,6 +73,7 @@ describe("OmniRoute adapter", () => {
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await seedModels(engine, [{ id: "openai/gpt-5.6-luna", type: "chat", supported_endpoints: ["/v1/responses"] }]);
 
     await expect(engine.chat({
       model: "openai/gpt-5.6-luna",
@@ -131,6 +138,7 @@ describe("OmniRoute adapter", () => {
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await seedModels(engine, [{ id: "openai/gpt-5.6-luna", type: "chat", supported_endpoints: ["/v1/responses"] }]);
     const tools = [{ type: "function" as const, function: { name: "web_search", description: "Search public sources", parameters: { type: "object" } } }];
 
     await expect(engine.chat({
@@ -223,6 +231,7 @@ describe("OmniRoute adapter", () => {
     const fetchMock=vi.fn().mockResolvedValue(new Response(body,{status:200,headers:{"content-type":"text/event-stream"}}));
     vi.stubGlobal("fetch",fetchMock);
     const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+    await seedModels(engine, [{ id: "openai/gpt-5.6-luna", type: "chat", supported_endpoints: ["/v1/responses"] }]);
 
     const chunks:string[]=[];for await(const chunk of engine.stream({model:"openai/gpt-5.6-luna",messages:[{role:"user",content:"Hello"}]}))chunks.push(chunk);
 
@@ -235,6 +244,7 @@ describe("OmniRoute adapter", () => {
     const body=`data: ${JSON.stringify({choices:[{delta:{content:source}}]})}\n\ndata: [DONE]\n\n`;
     vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body,{status:200,headers:{"content-type":"text/event-stream"}})));
     const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+    await seedModels(engine, [{ id: "openai/gpt-4o", type: "chat", supported_endpoints: ["/v1/chat/completions"] }]);
 
     const chunks:string[]=[];for await(const chunk of engine.stream({messages:[{role:"user",content:"Long"}]}))chunks.push(chunk);
 
@@ -245,10 +255,12 @@ describe("OmniRoute adapter", () => {
 
   it("cancels the upstream provider request when the caller aborts", async () => {
     const fetchMock=vi.fn((_url:string,init?:RequestInit)=>new Promise<Response>((_resolve,reject)=>{
-      init?.signal?.addEventListener("abort",()=>reject(init.signal?.reason),{once:true});
+      if (init?.signal?.aborted) reject(init.signal.reason);
+      else init?.signal?.addEventListener("abort",()=>reject(init.signal?.reason),{once:true});
     }));
     vi.stubGlobal("fetch",fetchMock);
     const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+    await seedModels(engine, [{ id: "openai/gpt-4o", type: "chat", supported_endpoints: ["/v1/chat/completions"] }]);
     const controller=new AbortController();
     const next=engine.stream({messages:[{role:"user",content:"Cancel"}],signal:controller.signal})[Symbol.asyncIterator]().next();
 
@@ -266,6 +278,7 @@ describe("OmniRoute adapter", () => {
       }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await seedModels(engine, [{ id: "gemini/free-model", type: "chat", supported_endpoints: ["/v1/chat/completions"] }]);
 
     await expect(engine.chat({
       model: "openai/gpt-4o",
@@ -280,7 +293,7 @@ describe("OmniRoute adapter", () => {
         "x-omniroute-compression": "default",
         "x-omniroute-no-memory": "true",
       }),
-      body: JSON.stringify({ model: "auto/chat:free", messages: [{ role: "user", content: "Hello" }] }),
+      body: JSON.stringify({ model: "gemini/free-model", messages: [{ role: "user", content: "Hello" }] }),
     }));
   });
 
@@ -291,6 +304,7 @@ describe("OmniRoute adapter", () => {
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await seedModels(engine, [{ id: "openai/gpt-5.6-luna", type: "chat", supported_endpoints: ["/v1/responses"] }]);
 
     await engine.chat({
       model: "openai/gpt-5.6-luna",
@@ -416,4 +430,25 @@ describe("OmniRoute adapter", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("http://omniroute:20128/api/v1/rerank");
   });
 
+});
+
+describe("OmniRoute capability routing", () => {
+  it("never sends an embedding to chat and skips an unsupported chat model", async () => {
+    const requests: string[] = [];
+    const providerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/v1/models")) return new Response(JSON.stringify({ data: [
+        { id: "provider/embedder", type: "embedding", supported_endpoints: ["/v1/embeddings"] },
+        { id: "provider/unavailable", type: "chat", supported_endpoints: ["/v1/chat/completions"] },
+        { id: "provider/working", type: "chat", supported_endpoints: ["/v1/chat/completions"] },
+      ] }), { status: 200 });
+      const model = JSON.parse(String(init?.body)).model as string;
+      requests.push(model);
+      if (model === "provider/unavailable") return new Response(JSON.stringify({ error: { message: "unsupported model" } }), { status: 404 });
+      return new Response(JSON.stringify({ model, choices: [{ message: { content: "ready" } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await expect(engine.chat({ model: "auto", messages: [{ role: "user", content: "build site" }] })).resolves.toMatchObject({ content: "ready", model: "provider/working" });
+    expect(requests).toEqual(["provider/unavailable", "provider/working"]);
+  });
 });

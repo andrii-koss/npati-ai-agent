@@ -249,6 +249,12 @@ function getCachedModels(): Model[] {
 // Kept in code without deletion so it can be re-enabled at any time.
 const SHOW_AUTOMATIC_AI_ROUTE = false;
 
+function chatRoutableModel(model: Model): boolean {
+  const capabilities = new Set(model.capabilities.map((value) => value.toLowerCase()));
+  return ["chat", "text", "coding"].some((value) => capabilities.has(value))
+    && !["embedding", "image", "audio", "rerank", "moderation"].some((value) => capabilities.has(value));
+}
+
 function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; models: Model[]; onChange: (routing: Routing) => void }) {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
@@ -349,7 +355,7 @@ function MyModels({ models, routing, onChanged }: { models: Model[]; routing: Ro
         <ProviderIcon providerId={model.providerId} name={model.providerName} size="small" />
         <span><strong>{model.name}</strong><small>via {model.providerName}{model.local ? ` · ${t("aiMarketplace.filters.local")}` : ""}</small></span>
         {routing?.defaultModelId === model.id && <Badge tone="red">{t("aiMarketplace.myModels.defaultBadge")}</Badge>}
-        <button disabled={routing?.defaultModelId === model.id} onClick={() => setDefault(model.id)}>{t("aiMarketplace.myModels.setDefault")}</button>
+        <button disabled={!chatRoutableModel(model) || routing?.defaultModelId === model.id} onClick={() => setDefault(model.id)}>{t("aiMarketplace.myModels.setDefault")}</button>
         <button className="text-danger" onClick={() => remove(model.id)}>{t("aiMarketplace.myModels.remove")}</button>
       </div>)}</div>}
   </section>;
@@ -661,7 +667,7 @@ export function AIProviderMarketplace() {
       <div><strong>{overview ? overview.connectedProviders : (data ? data.overview.connectedProviders : "—")}</strong><span>{t("aiMarketplace.stats.providersConnected")}</span></div>
       <div><strong>{overview ? overview.addedModels : (data ? data.overview.addedModels : "—")}</strong><span>{t("aiMarketplace.stats.modelsAdded")}</span></div>
     </section>
-    <RoutingPanel routing={routing} models={models} onChange={setRouting} />
+    <RoutingPanel routing={routing} models={models.filter(chatRoutableModel)} onChange={setRouting} />
     {(overview?.connectedProviders || data?.overview.connectedProviders || models.length > 0) ? <MyModels models={models} routing={routing} onChanged={changed} /> : null}
     <section className="explore-section">
       <div className="section-heading"><div><p className="section-kicker">{t("aiMarketplace.explore.kicker")}</p><h2>{t("aiMarketplace.explore.heading")}</h2></div></div>
