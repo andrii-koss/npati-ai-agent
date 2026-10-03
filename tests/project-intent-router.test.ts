@@ -547,6 +547,30 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(home.content).toContain("id=\"pricing\"");
     expect(home.content).not.toContain("next dev");
   });
+  it("creates an HTML blog for the exact chat request", async () => {
+    let company = await store.createCompany(authUserA, { name: "Blog Co" }, "blog-company");
+    const coordinator = await store.createCompanyAgent(authUserA, company.id, {
+      name: "Coordinator", role: "manager", tools: [], isActive: true,
+    }, "blog-coordinator");
+    company = await store.setCompanyMainAgent(authUserA, company.id, coordinator.id, company.revision);
+    mockPreviewStartError = "Sandbox runner is not configured";
+
+    const prompt = "Створи мені сайт, блог";
+    const result = await orchestrator.executeWebsiteTask(authUserA, {
+      companyId: company.id,
+      prompt,
+      intentDecision: classifyProjectIntent({ message: prompt }),
+      idempotencyKey: "blog-website",
+    });
+
+    expect(result.project.framework).toBe("HTML/CSS");
+    expect(result.projectCard.buildStatus).toBe("success");
+    expect(result.projectCard.projectId).toBe(result.project.id);
+    expect(previewAttempts).toBe(0);
+    const home = await projectWorkspace.readFile(authUserA, company.id, result.project.id, "index.html");
+    expect(home.content).toContain("<html lang=\"uk\">");
+    expect(home.content).toContain("<body");
+  });
   it("reports missing preview infrastructure without claiming the website is ready", async () => {
     let company = await store.createCompany(authUserA, { name: "Hosting Sandbox Co" }, "hosting-sandbox-company");
     const coordinator = await store.createCompanyAgent(authUserA, company.id, {

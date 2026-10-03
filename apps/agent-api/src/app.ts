@@ -55,6 +55,7 @@ import { registerProjectQaRoutes } from "./project-qa-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
 import { ProjectOrchestrator, ProjectOrchestrationError } from "./project-orchestrator";
+import { saveChatProjectCard } from "./project-chat-cards";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -2939,7 +2940,8 @@ ${localized.next}`;
 
         if (conversation) {
           await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", prompt || "Website Task");
-          await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", projectExecResult.responseMessage);
+          const assistantMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", projectExecResult.responseMessage);
+          await saveChatProjectCard(workspaceStore, auth, conversation.id, assistantMessage.id, projectExecResult.projectCard);
         }
 
         return {
@@ -3292,7 +3294,8 @@ ${localized.next}`;
                 : undefined;
               if (conversation) {
                 await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
-                await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", executed.responseMessage);
+                const assistantMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", executed.responseMessage);
+                await saveChatProjectCard(workspaceStore, auth, conversation.id, assistantMessage.id, executed.projectCard);
               }
               projectResponse = {
                 message: executed.responseMessage,

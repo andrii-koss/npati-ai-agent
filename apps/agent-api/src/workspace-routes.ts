@@ -1,3 +1,4 @@
+import { getChatMessagesWithProjectCards } from "./project-chat-cards";
 import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -233,7 +234,15 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     try { return reply.code(201).send(await store.createNeutralConversation(await auth.authenticate(request), request.body?.title ?? "New conversation")); } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { conversationId: string } }>("/conversations/:conversationId", async (request, reply) => {
-    try { reply.header("cache-control", "private, no-store"); return await store.getNeutralConversation(await auth.authenticate(request), request.params.conversationId); } catch (error) { return errorReply(reply, error); }
+    try {
+      reply.header("cache-control", "private, no-store");
+      const context = await auth.authenticate(request);
+      const conversation = await store.getNeutralConversation(context, request.params.conversationId);
+      return {
+        ...conversation,
+        messages: await getChatMessagesWithProjectCards(store, context, request.params.conversationId, conversation.messages),
+      };
+    } catch (error) { return errorReply(reply, error); }
   });
   app.patch<{ Params: { conversationId: string }; Body: { title?: string } }>("/conversations/:conversationId", async (request, reply) => {
     try { return await store.updateNeutralConversation(await auth.authenticate(request), request.params.conversationId, request.body.title ?? "New conversation"); } catch (error) { return errorReply(reply, error); }
