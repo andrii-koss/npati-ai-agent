@@ -1,16 +1,20 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
-import { useWorkspace } from "./BusinessWorkspace";
 import {
   createDefaultWebsiteDocument,
   getWebsiteAdapter,
   type WebsiteDocument,
 } from "@npati/shared";
+import {
+  chooseAvailableCompanyId,
+  readCachedCompanies,
+  writeActiveCompanyId,
+} from "./active-company";
 
-export type WebsiteProject = {
+export interface WebsiteProject {
   id: string;
   companyId: string;
   name: string;
@@ -29,82 +33,193 @@ export type WebsiteProject = {
   revision: number;
   createdAt?: string;
   updatedAt: string;
-};
+}
+
+interface TemplateOption {
+  id: "hosting" | "saas" | "ecommerce" | "portfolio" | "landing" | "blank";
+  icon: string;
+  title: string;
+  titleUk: string;
+  desc: string;
+  descUk: string;
+  badge: string;
+  pagesCount: number;
+  blocks: string[];
+  defaultName: string;
+  defaultDesc: string;
+}
+
+const TEMPLATES: TemplateOption[] = [
+  {
+    id: "hosting",
+    icon: "⚡",
+    title: "Cloud & Web Hosting",
+    titleUk: "Хмарний хостинг та домени",
+    desc: "Complete 5-page setup with domain search, NVMe specs, server tiers, and FAQ.",
+    descUk: "Готовий сайт на 5 сторінок з пошуком доменів, характеристиками NVMe, тарифами та FAQ.",
+    badge: "Recommended",
+    pagesCount: 5,
+    blocks: ["Navbar", "Hero", "Features", "Pricing", "FAQ", "CTA", "Contact", "Footer"],
+    defaultName: "CloudScale Hosting",
+    defaultDesc: "Modern cloud hosting company with domain registration, VPS tiers, and 24/7 support.",
+  },
+  {
+    id: "saas",
+    icon: "🚀",
+    title: "SaaS & AI Platform",
+    titleUk: "SaaS та AI Платформа",
+    desc: "High-impact tech startup landing with live metrics, feature grid, and pricing cards.",
+    descUk: "Ефективний лендінг для технологічного стартапу з метриками, блоками фіч та тарифами.",
+    badge: "Popular",
+    pagesCount: 3,
+    blocks: ["Navbar", "Hero", "Features", "Stats", "Pricing", "Testimonials", "CTA", "Footer"],
+    defaultName: "Cognitive AI Studio",
+    defaultDesc: "Autonomous AI agents and intelligent workflows for modern engineering teams.",
+  },
+  {
+    id: "ecommerce",
+    icon: "🛍️",
+    title: "E-Commerce & Store",
+    titleUk: "Інтернет-магазин",
+    desc: "Showcase physical or digital products with featured grid, reviews, and promo banners.",
+    descUk: "Вітрина товарів чи цифрових послуг із сіткою товарів, відгуками та промо-блоками.",
+    badge: "Store",
+    pagesCount: 3,
+    blocks: ["Navbar", "Hero", "Gallery", "Features", "Testimonials", "CTA", "Footer"],
+    defaultName: "Nordic Minimal Goods",
+    defaultDesc: "Curated collection of premium everyday essentials and sustainable accessories.",
+  },
+  {
+    id: "portfolio",
+    icon: "💼",
+    title: "Agency & Portfolio",
+    titleUk: "Агенція та портфоліо",
+    desc: "Modern creative showcase with case studies gallery, team members, and contact form.",
+    descUk: "Сучасна презентація робіт із галереєю кейсів, командою та формою зв'язку.",
+    badge: "Creative",
+    pagesCount: 4,
+    blocks: ["Navbar", "Hero", "Gallery", "Team", "Testimonials", "Contact", "Footer"],
+    defaultName: "Apex Design Agency",
+    defaultDesc: "Award-winning digital experience design and full-stack software development.",
+  },
+  {
+    id: "landing",
+    icon: "📄",
+    title: "High-Converting Landing",
+    titleUk: "Конверсійний лендінг",
+    desc: "Focused single-page site optimized for lead generation, waiting lists, or event launch.",
+    descUk: "Фокусована сторінка, оптимізована під збір лідів, список очікування або презентацію продукту.",
+    badge: "Single Page",
+    pagesCount: 1,
+    blocks: ["Navbar", "Hero", "Features", "Pricing", "CTA", "Footer"],
+    defaultName: "Product Launch Pro",
+    defaultDesc: "Transform your daily productivity with our next-generation browser extension.",
+  },
+  {
+    id: "blank",
+    icon: "✏️",
+    title: "Clean Blank Canvas",
+    titleUk: "Чистий аркуш",
+    desc: "Minimal starter with Navbar, Hero and Footer. Build your layout block by block.",
+    descUk: "Мінімальний старт з меню, hero та футером. Додавайте власні блоки один за одним.",
+    badge: "Custom",
+    pagesCount: 1,
+    blocks: ["Navbar", "Hero", "Footer"],
+    defaultName: "My Custom Website",
+    defaultDesc: "Custom website built from scratch with NPATI Visual Block Builder.",
+  },
+];
 
 const copy = {
   en: {
+    eyebrow: "Website Studio",
     title: "Website Builder",
-    subtitle: "Create, customize, and manage responsive websites with Next.js and AI.",
+    subtitle: "Build, customize and launch high-performing Next.js websites using AI and visual block editing.",
     newWebsite: "Create Website",
-    searchPlaceholder: "Search websites...",
+    searchPlaceholder: "Search websites by name or purpose...",
     filterAll: "All Frameworks",
     filterStatusAll: "All Statuses",
-    statusActive: "Active",
-    statusArchived: "Archived",
-    emptyTitle: "No websites yet",
-    emptySubtitle: "Build your first modern website with Next.js using our Visual Builder or describe it to the AI Agent.",
-    createNow: "Create First Website",
-    openBuilder: "Open in Builder →",
-    preview: "Preview ↗",
-    deploy: "Deploy",
-    rename: "Rename",
+    statusActive: "Active Only",
+    statusArchived: "Archived Only",
+    emptyTitle: "No websites created yet",
+    emptySubtitle: "Create your first website with our pre-built Next.js block templates or ask the AI agent in Chat.",
+    createNow: "Create Your First Website",
+    openBuilder: "Open in Builder",
+    preview: "Live Preview",
     duplicate: "Duplicate",
+    rename: "Rename",
     archive: "Archive",
     delete: "Delete",
+    restore: "Restore",
+    loadError: "Failed to load website projects",
+    renamePrompt: "Enter new website name:",
+    archivePrompt: "Archive this website? It will remain accessible under archived filter.",
+    deletePrompt: "Permanently delete this website project and all its files? This action cannot be undone.",
+    drawerKicker: "VISUAL BLOCK BUILDER",
+    drawerTitle: "Create New Website",
+    drawerSubtitle: "Select a starter block template and customize your project details.",
+    sectionTemplate: "1. Choose Starter Blocks & Template",
+    sectionDetails: "2. Website Details",
     nameLabel: "Website Name",
     descLabel: "Purpose & Description",
     frameworkLabel: "Framework",
     typeLabel: "Project Type",
     typeWebsite: "Multi-page Website",
-    typeLanding: "Landing Page",
+    typeLanding: "Single-page Landing",
     typeWebApp: "Web Application",
     cancel: "Cancel",
-    createBtn: "Create Website",
-    creating: "Creating...",
-    duplicating: "Duplicating...",
-    renamePrompt: "Enter new website name:",
-    archivePrompt: "Are you sure you want to archive this website?",
-    deletePrompt: "Are you sure you want to permanently delete this website? This action cannot be undone.",
-    loadError: "Could not load websites",
-    liveBadge: "Live Preview Active",
-    readyBadge: "Ready",
+    createBtn: "Create Website & Open Builder →",
+    creating: "Creating Project & Files...",
+    pages: "pages",
+    updated: "Updated",
+    liveStatus: "Live Preview",
+    readyStatus: "Ready",
+    buildingStatus: "Building...",
   },
   uk: {
+    eyebrow: "Студія сайтів",
     title: "Website Builder",
-    subtitle: "Створюйте, редагуйте та публікуйте адаптивні сайти на Next.js та за допомогою AI.",
+    subtitle: "Створюйте, редагуйте та публікуйте сайти на Next.js за допомогою штучного інтелекту та візуальних блоків.",
     newWebsite: "Створити сайт",
-    searchPlaceholder: "Пошук сайтів за назвою...",
-    filterAll: "Всі фреймворки",
-    filterStatusAll: "Всі статуси",
-    statusActive: "Активні",
-    statusArchived: "Архівні",
-    emptyTitle: "Сайтів ще немає",
-    emptySubtitle: "Створіть свій перший сучасний сайт на Next.js у Візуальному Конструкторі або попросіть AI Агента в чаті.",
+    searchPlaceholder: "Пошук сайтів за назвою чи описом...",
+    filterAll: "Усі фреймворки",
+    filterStatusAll: "Усі статуси",
+    statusActive: "Тільки активні",
+    statusArchived: "Тільки архівні",
+    emptyTitle: "Сайтів ще не створено",
+    emptySubtitle: "Створіть свій перший сайт із готових блоків Next.js або попросіть AI агента у Chat командою «Створи сайт».",
     createNow: "Створити перший сайт",
-    openBuilder: "Відкрити в Конструкторі →",
-    preview: "Прев’ю ↗",
-    deploy: "Деплой",
-    rename: "Перейменувати",
+    openBuilder: "Відкрити конструктор",
+    preview: "Live Preview",
     duplicate: "Дублювати",
+    rename: "Перейменувати",
     archive: "Архівувати",
     delete: "Видалити",
+    restore: "Відновити",
+    loadError: "Не вдалося завантажити проєкти сайтів",
+    renamePrompt: "Введіть нову назву сайту:",
+    archivePrompt: "Архівувати цей сайт? Його можна буде переглянути через фільтр архівних.",
+    deletePrompt: "Назавжди видалити цей сайт і всі його файли? Цю дію неможливо скасувати.",
+    drawerKicker: "КОНСТРУКТОР БЛОКІВ",
+    drawerTitle: "Створити новий сайт",
+    drawerSubtitle: "Оберіть структуру блоків та вкажіть назву сайту.",
+    sectionTemplate: "1. Оберіть структуру блоків та шаблон",
+    sectionDetails: "2. Налаштування проєкту",
     nameLabel: "Назва сайту",
-    descLabel: "Опис та призначення",
+    descLabel: "Призначення та опис",
     frameworkLabel: "Фреймворк",
-    typeLabel: "Тип сайту",
+    typeLabel: "Тип проєкту",
     typeWebsite: "Багатосторінковий сайт",
-    typeLanding: "Лендінг",
+    typeLanding: "Односторінковий лендінг",
     typeWebApp: "Вебзастосунок",
     cancel: "Скасувати",
-    createBtn: "Створити сайт",
-    creating: "Створення...",
-    duplicating: "Дублювання...",
-    renamePrompt: "Введіть нову назву сайту:",
-    archivePrompt: "Ви впевнені, що бажаєте архівувати цей сайт?",
-    deletePrompt: "Ви впевнені, що бажаєте назавжди видалити цей сайт? Цю дію неможливо скасувати.",
-    loadError: "Не вдалося завантажити сайти",
-    liveBadge: "Live Preview активний",
-    readyBadge: "Готовий",
+    createBtn: "Створити сайт і відкрити конструктор →",
+    creating: "Створення проєкту та файлів...",
+    pages: "стор.",
+    updated: "Оновлено",
+    liveStatus: "Live Preview",
+    readyStatus: "Готовий",
+    buildingStatus: "Збірка...",
   },
 };
 
@@ -112,39 +227,76 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = getStoredAuthToken();
   if (token) headers.set("Authorization", "Bearer " + token);
-  if (init?.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  const response = await fetch("/api" + path, { ...init, headers });
-  if (response.status === 204) return undefined as T;
-  const body = (await response.json().catch(() => null)) as T & { error?: { message?: string } };
-  if (!response.ok) throw new Error(body?.error?.message || "Request failed");
-  return body;
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const res = await fetch("/api" + path, { ...init, headers });
+  if (res.status === 204) return undefined as T;
+  const json = (await res.json().catch(() => null)) as any;
+  if (!res.ok) {
+    throw new Error(json?.error?.message || json?.message || `Request failed with status ${res.status}`);
+  }
+  return json as T;
 }
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { overview } = useWorkspace();
   const { language } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
 
-  const companyId = searchParams.get("companyId") || overview?.currentBusiness?.id || overview?.businesses[0]?.id || "";
-
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [companyId, setCompanyId] = useState<string>("");
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [frameworkFilter, setFrameworkFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("active");
 
+  // Filters & Search
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("active");
+  const [frameworkFilter, setFrameworkFilter] = useState<string>("all");
+
+  // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateOption["id"]>("hosting");
+  const [name, setName] = useState(TEMPLATES[0]?.defaultName ?? "CloudScale Hosting");
+  const [description, setDescription] = useState(TEMPLATES[0]?.defaultDesc ?? "Modern cloud hosting company");
   const [framework, setFramework] = useState("Next.js");
-  const [type, setType] = useState<WebsiteProject["type"]>("website");
+  const [type, setType] = useState<"website" | "landing_page" | "web_app">("website");
   const [busy, setBusy] = useState(false);
 
+  // Load Companies
+  useEffect(() => {
+    let active = true;
+    async function loadCompanies() {
+      try {
+        const cached = readCachedCompanies();
+        if (cached.length > 0 && active) {
+          setCompanies(cached);
+          const initialId = chooseAvailableCompanyId(cached);
+          setCompanyId(initialId);
+        }
+
+        const res = await apiFetch<{ companies: Array<{ id: string; name: string }> }>("/companies");
+        if (!active) return;
+        const list = res.companies || [];
+        setCompanies(list);
+        const resolved = chooseAvailableCompanyId(list);
+        setCompanyId(resolved);
+        writeActiveCompanyId(resolved);
+      } catch (err: any) {
+        if (active) setError(err.message || t.loadError);
+      }
+    }
+    void loadCompanies();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load Websites for Company
   const loadWebsites = async () => {
     if (!companyId) {
+      setWebsites([]);
       setLoading(false);
       return;
     }
@@ -166,19 +318,25 @@ export function WebsiteBuilderDashboard() {
     void loadWebsites();
   }, [companyId]);
 
+  // When template selection changes in drawer, update suggested values
+  const handleSelectTemplate = (tpl: TemplateOption) => {
+    setSelectedTemplate(tpl.id);
+    setName(tpl.defaultName);
+    setDescription(language === "uk" ? tpl.descUk : tpl.desc);
+    setType(tpl.pagesCount > 1 ? "website" : "landing_page");
+  };
+
   const filteredWebsites = useMemo(() => {
     return websites.filter((site) => {
-      // Search
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = site.name.toLowerCase().includes(q);
         const matchesDesc = (site.description || "").toLowerCase().includes(q);
         if (!matchesName && !matchesDesc) return false;
       }
-      // Status
       if (statusFilter === "active" && site.status === "archived") return false;
       if (statusFilter === "archived" && site.status !== "archived") return false;
-      // Framework
+
       if (frameworkFilter !== "all") {
         const fw = (site.framework || "").toLowerCase();
         if (frameworkFilter === "nextjs" && !fw.includes("next")) return false;
@@ -206,16 +364,21 @@ export function WebsiteBuilderDashboard() {
         }
       );
 
-      // Initialize website document & scaffold Next.js / Vite files
+      // Initialize website document using the selected template
+      const isVite = framework.toLowerCase().includes("vite");
       const doc: WebsiteDocument = createDefaultWebsiteDocument(
         name.trim(),
-        framework.toLowerCase().includes("vite") ? "vite" : "nextjs",
-        { purpose: description.trim() }
+        isVite ? "vite" : "nextjs",
+        {
+          purpose: description.trim(),
+          template: selectedTemplate,
+        }
       );
+
       const adapter = getWebsiteAdapter(doc.framework);
       const files = adapter.scaffoldProject(doc);
 
-      // Write initial files into the new project workspace
+      // Write initial scaffold files into the workspace
       for (const [filePath, content] of Object.entries(files)) {
         try {
           await apiFetch(
@@ -226,13 +389,11 @@ export function WebsiteBuilderDashboard() {
             }
           );
         } catch {
-          // ignore individual file write error
+          // ignore individual write fail
         }
       }
 
       setModalOpen(false);
-      setName("");
-      setDescription("");
       navigate(`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(created.id)}`);
     } catch (err: any) {
       setError(err.message || "Failed to create website");
@@ -260,16 +421,23 @@ export function WebsiteBuilderDashboard() {
 
   const handleDuplicate = async (site: WebsiteProject) => {
     try {
-      await apiFetch(
+      setLoading(true);
+      const res = await apiFetch<{ project: WebsiteProject }>(
         `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/duplicate`,
         {
           method: "POST",
+          headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify({ name: `${site.name} (Copy)` }),
         }
       );
       await loadWebsites();
+      if (res?.project?.id) {
+        navigate(`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(res.project.id)}`);
+      }
     } catch (err: any) {
       alert(err.message || "Failed to duplicate website");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -303,75 +471,144 @@ export function WebsiteBuilderDashboard() {
   };
 
   return (
-    <div className="website-builder-dashboard company-page" style={{ padding: "1.5rem", maxWidth: "1400px", margin: "0 auto" }}>
-      {/* Top Header */}
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "2rem", flexWrap: "wrap", gap: "1rem" }}>
-        <div>
-          <h1 style={{ fontSize: "1.75rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span>🌐</span> {t.title}
-          </h1>
-          <p style={{ color: "var(--muted-color, #8b949e)", margin: "0.35rem 0 0 0", fontSize: "0.95rem" }}>
-            {t.subtitle}
-          </p>
+    <main className="company-refined company-page" style={{ maxWidth: "1400px", margin: "0 auto", padding: "20px 24px" }}>
+      {/* NPATI Header Standard (Matching Settings & Automations) */}
+      <header className="inspector-header automations-header" style={{ marginBottom: "24px" }}>
+        <div className="automations-header-top">
+          <div>
+            <p className="eyebrow">{t.eyebrow}</p>
+            <h1>
+              <Link to="/settings" className="marketplace-back-button" aria-label="Settings" title="Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+              </Link>
+              <span>{t.title}</span>
+            </h1>
+            <p className="hero-copy">{t.subtitle}</p>
+          </div>
+
+          <div className="automations-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            {companies.length > 1 && (
+              <select
+                value={companyId}
+                onChange={(e) => {
+                  setCompanyId(e.target.value);
+                  writeActiveCompanyId(e.target.value);
+                }}
+                className="company-select"
+                style={{
+                  padding: "9px 14px",
+                  borderRadius: "10px",
+                  border: "1px solid var(--npati-gray-200, #e2e8f0)",
+                  background: "#ffffff",
+                  color: "#111111",
+                  fontSize: "13.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
+
+            <button
+              type="button"
+              className="button-primary"
+              onClick={() => {
+                setError("");
+                setModalOpen(true);
+              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+            >
+              <span style={{ fontSize: "16px", lineHeight: 1 }}>+</span>
+              <span>{t.newWebsite}</span>
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="button-primary"
-          onClick={() => {
-            setError("");
-            setModalOpen(true);
-          }}
-          style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
-        >
-          <span>+</span> {t.newWebsite}
-        </button>
       </header>
 
-      {/* Filters and Search Bar */}
-      <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem", flexWrap: "wrap", alignItems: "center" }}>
-        <input
-          type="search"
-          placeholder={t.searchPlaceholder}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            flex: "1 1 280px",
-            padding: "0.6rem 1rem",
-            background: "var(--surface-color, rgba(255,255,255,0.04))",
-            border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-            borderRadius: "8px",
-            color: "inherit",
-            fontSize: "0.9rem",
-          }}
-        />
+      {/* Filter and Search Bar (Clean NPATI Controls) */}
+      <div
+        style={{
+          display: "flex",
+          gap: "12px",
+          marginBottom: "24px",
+          flexWrap: "wrap",
+          alignItems: "center",
+          background: "#ffffff",
+          padding: "14px 18px",
+          borderRadius: "14px",
+          border: "1px solid #e4e4e7",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+        }}
+      >
+        <div style={{ flex: "1 1 260px", position: "relative" }}>
+          <input
+            type="search"
+            placeholder={t.searchPlaceholder}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "9px 12px 9px 36px",
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "10px",
+              color: "#111111",
+              fontSize: "14px",
+              boxSizing: "border-box",
+            }}
+          />
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#94a3b8"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </div>
 
         <select
           value={frameworkFilter}
           onChange={(e) => setFrameworkFilter(e.target.value)}
           style={{
-            padding: "0.6rem 1rem",
-            background: "var(--surface-color, rgba(255,255,255,0.04))",
-            border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-            borderRadius: "8px",
-            color: "inherit",
-            fontSize: "0.9rem",
+            padding: "9px 14px",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: "10px",
+            color: "#111111",
+            fontSize: "13.5px",
+            fontWeight: 500,
+            cursor: "pointer",
           }}
         >
           <option value="all">{t.filterAll}</option>
-          <option value="nextjs">Next.js</option>
+          <option value="nextjs">Next.js 14</option>
           <option value="vite">Vite + React</option>
         </select>
 
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => setStatusFilter(e.target.value as any)}
           style={{
-            padding: "0.6rem 1rem",
-            background: "var(--surface-color, rgba(255,255,255,0.04))",
-            border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-            borderRadius: "8px",
-            color: "inherit",
-            fontSize: "0.9rem",
+            padding: "9px 14px",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: "10px",
+            color: "#111111",
+            fontSize: "13.5px",
+            fontWeight: 500,
+            cursor: "pointer",
           }}
         >
           <option value="active">{t.statusActive}</option>
@@ -388,20 +625,25 @@ export function WebsiteBuilderDashboard() {
 
       {/* Grid of Website Projects */}
       {loading ? (
-        <p style={{ color: "var(--muted-color, #8b949e)" }}>Loading websites...</p>
+        <div style={{ textAlign: "center", padding: "4rem", color: "#64748b" }}>
+          <p>Loading website projects...</p>
+        </div>
       ) : filteredWebsites.length === 0 ? (
         <div
           className="company-run-card"
           style={{
             textAlign: "center",
             padding: "4rem 2rem",
-            borderRadius: "12px",
-            border: "1px dashed var(--border-color, rgba(255,255,255,0.15))",
+            background: "#ffffff",
+            borderRadius: "16px",
+            border: "1px dashed #cbd5e1",
           }}
         >
           <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🌐</div>
-          <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.5rem" }}>{t.emptyTitle}</h3>
-          <p style={{ color: "var(--muted-color, #8b949e)", maxWidth: "480px", margin: "0 auto 1.5rem auto", fontSize: "0.95rem" }}>
+          <h3 style={{ fontSize: "1.3rem", fontWeight: 700, margin: "0 0 0.5rem 0", color: "#111111" }}>
+            {t.emptyTitle}
+          </h3>
+          <p style={{ color: "#64748b", maxWidth: "500px", margin: "0 auto 1.75rem auto", fontSize: "14px", lineHeight: 1.6 }}>
             {t.emptySubtitle}
           </p>
           <button
@@ -409,141 +651,211 @@ export function WebsiteBuilderDashboard() {
             className="button-primary"
             onClick={() => setModalOpen(true)}
           >
-            {t.createNow}
+            + {t.createNow}
           </button>
         </div>
       ) : (
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-            gap: "1.5rem",
+            gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))",
+            gap: "20px",
           }}
         >
           {filteredWebsites.map((site) => {
             const editorUrl = `/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`;
             const isNext = (site.framework || "").toLowerCase().includes("next");
+            const isPreviewing = site.status === "previewing" || Boolean(site.previewUrl);
 
             return (
               <article
                 key={site.id}
-                className="project-card company-run-card"
+                className="company-run-card"
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   justifyContent: "space-between",
-                  borderRadius: "12px",
-                  padding: "1.25rem",
-                  border: "1px solid var(--border-color, rgba(255,255,255,0.1))",
-                  position: "relative",
-                  transition: "transform 0.2s ease, border-color 0.2s ease",
+                  background: "#ffffff",
+                  borderRadius: "16px",
+                  padding: "20px 22px",
+                  border: "1px solid #e4e4e7",
+                  boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+                  transition: "all 0.18s ease",
+                  margin: 0,
                 }}
               >
                 <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                      <span style={{ fontSize: "1.5rem" }}>🌐</span>
+                  {/* Top Bar with Icon & Status Badges */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div
+                        style={{
+                          width: "42px",
+                          height: "42px",
+                          borderRadius: "12px",
+                          background: "#eff6ff",
+                          border: "1px solid #dbeafe",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "20px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        🌐
+                      </div>
                       <div>
-                        <h3 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0 }}>
-                          <Link to={editorUrl} style={{ color: "inherit" }}>
+                        <h3 style={{ fontSize: "17px", fontWeight: 700, margin: 0, color: "#111111", lineHeight: 1.3 }}>
+                          <Link to={editorUrl} style={{ color: "inherit", textDecoration: "none" }}>
                             {site.name}
                           </Link>
                         </h3>
-                        <span style={{ fontSize: "0.8rem", color: "var(--muted-color, #8b949e)" }}>
-                          {site.type === "landing_page" ? t.typeLanding : site.type === "web_app" ? t.typeWebApp : t.typeWebsite}
-                        </span>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              background: isNext ? "#f3e8ff" : "#e0f2fe",
+                              color: isNext ? "#7e22ce" : "#0369a1",
+                              border: `1px solid ${isNext ? "#e9d5ff" : "#bae6fd"}`,
+                            }}
+                          >
+                            {isNext ? "Next.js" : "Vite"}
+                          </span>
+
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              background: isPreviewing ? "#ecfdf5" : "#f1f5f9",
+                              color: isPreviewing ? "#047857" : "#475569",
+                              border: `1px solid ${isPreviewing ? "#a7f3d0" : "#e2e8f0"}`,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "6px",
+                                height: "6px",
+                                borderRadius: "50%",
+                                background: isPreviewing ? "#10b981" : "#94a3b8",
+                              }}
+                            />
+                            {isPreviewing ? t.liveStatus : t.readyStatus}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <span className={`status-pill status-${site.status}`}>{site.status}</span>
                   </div>
 
-                  {site.description && (
-                    <p style={{ fontSize: "0.85rem", color: "var(--muted-color, #8b949e)", margin: "0.5rem 0 1rem 0", lineClamp: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                      {site.description}
-                    </p>
-                  )}
+                  {/* Description */}
+                  <p
+                    style={{
+                      fontSize: "13.5px",
+                      color: "#52525b",
+                      margin: "0 0 16px 0",
+                      lineHeight: 1.5,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {site.description || "Responsive Next.js website with visual block layout."}
+                  </p>
 
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", fontSize: "0.78rem", marginBottom: "1.25rem" }}>
-                    <span style={{ background: isNext ? "rgba(0,0,0,0.4)" : "rgba(100,108,255,0.15)", border: "1px solid rgba(255,255,255,0.1)", padding: "0.15rem 0.5rem", borderRadius: "4px" }}>
-                      ⚡ {site.framework || "Next.js"}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "12px", color: "#71717a", borderTop: "1px solid #f4f4f5", paddingTop: "12px", marginBottom: "16px" }}>
+                    <span>{t.updated}: {new Date(site.updatedAt).toLocaleDateString(language)}</span>
+                    <span style={{ fontWeight: 600, color: "#3f3f46" }}>
+                      {site.type === "landing_page" ? t.typeLanding : t.typeWebsite}
                     </span>
-                    {site.previewUrl && (
-                      <span style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", padding: "0.15rem 0.5rem", borderRadius: "4px" }}>
-                        ● {t.liveBadge}
-                      </span>
-                    )}
-                    {site.deploymentUrl && (
-                      <span style={{ background: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", border: "1px solid rgba(59, 130, 246, 0.3)", padding: "0.15rem 0.5rem", borderRadius: "4px" }}>
-                        🚀 Live
-                      </span>
-                    )}
                   </div>
                 </div>
 
-                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: "1rem" }}>
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-                    <Link
-                      to={editorUrl}
-                      className="button-primary"
-                      style={{ fontSize: "0.85rem", padding: "0.45rem 0.85rem", textDecoration: "none" }}
+                {/* Actions Toolbar */}
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <Link
+                    to={editorUrl}
+                    className="button-primary"
+                    style={{
+                      flex: "1 1 auto",
+                      textAlign: "center",
+                      textDecoration: "none",
+                      padding: "8px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {t.openBuilder} →
+                  </Link>
+
+                  {site.previewUrl && (
+                    <a
+                      href={site.previewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="button-secondary"
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "13px",
+                        textDecoration: "none",
+                        color: "#047857",
+                      }}
+                      title="Open Live Preview in new tab"
                     >
-                      {t.openBuilder}
-                    </Link>
+                      {t.preview} ↗
+                    </a>
+                  )}
 
-                    {site.previewUrl && (
-                      <a
-                        href={site.previewUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="button-secondary"
-                        style={{ fontSize: "0.85rem", padding: "0.45rem 0.75rem", textDecoration: "none" }}
-                      >
-                        {t.preview}
-                      </a>
-                    )}
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    style={{ padding: "8px 10px", fontSize: "13px" }}
+                    onClick={() => void handleDuplicate(site)}
+                    title={t.duplicate}
+                  >
+                    📋
+                  </button>
 
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    style={{ padding: "8px 10px", fontSize: "13px" }}
+                    onClick={() => void handleRename(site)}
+                    title={t.rename}
+                  >
+                    ✏️
+                  </button>
+
+                  {site.status !== "archived" && (
                     <button
                       type="button"
                       className="button-secondary"
-                      style={{ fontSize: "0.85rem", padding: "0.45rem 0.65rem" }}
-                      onClick={() => void handleDuplicate(site)}
-                      title={t.duplicate}
+                      style={{ padding: "8px 10px", fontSize: "13px" }}
+                      onClick={() => void handleArchive(site)}
+                      title={t.archive}
                     >
-                      📋
+                      📦
                     </button>
+                  )}
 
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      style={{ fontSize: "0.85rem", padding: "0.45rem 0.65rem" }}
-                      onClick={() => void handleRename(site)}
-                      title={t.rename}
-                    >
-                      ✏️
-                    </button>
-
-                    {site.status !== "archived" && (
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        style={{ fontSize: "0.85rem", padding: "0.45rem 0.65rem" }}
-                        onClick={() => void handleArchive(site)}
-                        title={t.archive}
-                      >
-                        📦
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      className="danger-button"
-                      style={{ fontSize: "0.85rem", padding: "0.45rem 0.65rem" }}
-                      onClick={() => void handleDelete(site)}
-                      title={t.delete}
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    style={{ padding: "8px 10px", fontSize: "13px" }}
+                    onClick={() => void handleDelete(site)}
+                    title={t.delete}
+                  >
+                    🗑️
+                  </button>
                 </div>
               </article>
             );
@@ -551,101 +863,174 @@ export function WebsiteBuilderDashboard() {
         </div>
       )}
 
-      {/* Create Website Modal / Drawer */}
+      {/* ========================================================
+          CREATE WEBSITE DRAWER (100% NATIVE NPATI DESIGN SYSTEM)
+          ======================================================== */}
       {modalOpen && (
         <div
           className="company-drawer-backdrop"
           onMouseDown={() => setModalOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", justifyContent: "center", alignItems: "center" }}
         >
-          <div
+          <aside
             className="company-drawer"
             onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              background: "var(--background-color, #0f141c)",
-              border: "1px solid var(--border-color, rgba(255,255,255,0.15))",
-              borderRadius: "16px",
-              padding: "2rem",
-              width: "100%",
-              maxWidth: "540px",
-              boxShadow: "0 25px 50px rgba(0,0,0,0.8)",
-            }}
+            style={{ width: "min(680px, 100vw)" }}
           >
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-              <h2 style={{ fontSize: "1.35rem", fontWeight: 700, margin: 0 }}>🌐 {t.newWebsite}</h2>
+            <header>
+              <div>
+                <span>{t.drawerKicker}</span>
+                <h2>{t.drawerTitle}</h2>
+              </div>
               <button
                 type="button"
                 className="company-drawer-close"
                 onClick={() => setModalOpen(false)}
                 aria-label={t.cancel}
-                style={{ background: "transparent", border: "none", fontSize: "1.5rem", color: "inherit", cursor: "pointer" }}
               >
-                ×
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </header>
 
             <form onSubmit={(e) => void handleCreate(e)}>
-              {error && <p role="alert" className="project-error" style={{ marginBottom: "1rem" }}>{error}</p>}
+              {error && (
+                <p role="alert" className="project-error" style={{ margin: "16px 26px 0 26px" }}>
+                  {error}
+                </p>
+              )}
 
-              <div style={{ marginBottom: "1.25rem" }}>
-                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-                  {t.nameLabel} *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. CloudScale Hosting"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  style={{ width: "100%", padding: "0.65rem 0.85rem", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                />
-              </div>
+              {/* Section 1: Template & Block Starter Selection */}
+              <section>
+                <h3>{t.sectionTemplate}</h3>
+                <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "#64748b" }}>
+                  {t.drawerSubtitle}
+                </p>
 
-              <div style={{ marginBottom: "1.25rem" }}>
-                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-                  {t.descLabel}
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Describe your site (e.g. Modern cloud hosting company with domain registration, pricing tiers, and contact form)"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  style={{ width: "100%", padding: "0.65rem 0.85rem", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                />
-              </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "12px",
+                  }}
+                >
+                  {TEMPLATES.map((tpl) => {
+                    const isSelected = selectedTemplate === tpl.id;
+                    return (
+                      <div
+                        key={tpl.id}
+                        onClick={() => handleSelectTemplate(tpl)}
+                        style={{
+                          border: isSelected
+                            ? "2px solid var(--npati-red, #e11d2e)"
+                            : "1.5px solid #e2e8f0",
+                          background: isSelected ? "#fff5f5" : "#ffffff",
+                          borderRadius: "14px",
+                          padding: "14px 16px",
+                          cursor: "pointer",
+                          transition: "all 0.16s ease",
+                          position: "relative",
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                            <span style={{ fontSize: "24px" }}>{tpl.icon}</span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                padding: "2px 7px",
+                                borderRadius: "6px",
+                                background: isSelected ? "var(--npati-red, #e11d2e)" : "#f1f5f9",
+                                color: isSelected ? "#ffffff" : "#475569",
+                              }}
+                            >
+                              {tpl.badge}
+                            </span>
+                          </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-                    {t.frameworkLabel}
-                  </label>
-                  <select
-                    value={framework}
-                    onChange={(e) => setFramework(e.target.value)}
-                    style={{ width: "100%", padding: "0.65rem 0.85rem", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                  >
-                    <option value="Next.js">Next.js (App Router)</option>
-                    <option value="Vite">Vite + React</option>
-                  </select>
+                          <h4 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: 700, color: "#111111" }}>
+                            {language === "uk" ? tpl.titleUk : tpl.title}
+                          </h4>
+
+                          <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#64748b", lineHeight: 1.4 }}>
+                            {language === "uk" ? tpl.descUk : tpl.desc}
+                          </p>
+                        </div>
+
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "auto" }}>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              color: isSelected ? "var(--npati-red, #e11d2e)" : "#0284c7",
+                            }}
+                          >
+                            ✓ {tpl.pagesCount} {t.pages} · {tpl.blocks.slice(0, 3).join(", ")}...
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+              </section>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-                    {t.typeLabel}
+              {/* Section 2: Project Details */}
+              <section>
+                <h3>{t.sectionDetails}</h3>
+
+                <label>
+                  <span>{t.nameLabel} *</span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CloudScale Hosting"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </label>
+
+                <label>
+                  <span>{t.descLabel}</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Describe your website purpose, products, and target audience..."
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </label>
+
+                <div className="company-form-grid">
+                  <label>
+                    <span>{t.frameworkLabel}</span>
+                    <select
+                      value={framework}
+                      onChange={(e) => setFramework(e.target.value)}
+                    >
+                      <option value="Next.js">Next.js 14 App Router (Recommended)</option>
+                      <option value="Vite">Vite + React</option>
+                    </select>
                   </label>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value as any)}
-                    style={{ width: "100%", padding: "0.65rem 0.85rem", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#fff" }}
-                  >
-                    <option value="website">{t.typeWebsite}</option>
-                    <option value="landing_page">{t.typeLanding}</option>
-                    <option value="web_app">{t.typeWebApp}</option>
-                  </select>
-                </div>
-              </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+                  <label>
+                    <span>{t.typeLabel}</span>
+                    <select
+                      value={type}
+                      onChange={(e) => setType(e.target.value as any)}
+                    >
+                      <option value="website">{t.typeWebsite}</option>
+                      <option value="landing_page">{t.typeLanding}</option>
+                      <option value="web_app">{t.typeWebApp}</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <footer>
                 <button
                   type="button"
                   className="button-secondary"
@@ -660,11 +1045,11 @@ export function WebsiteBuilderDashboard() {
                 >
                   {busy ? t.creating : t.createBtn}
                 </button>
-              </div>
+              </footer>
             </form>
-          </div>
+          </aside>
         </div>
       )}
-    </div>
+    </main>
   );
 }
