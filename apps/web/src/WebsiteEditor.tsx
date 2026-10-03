@@ -277,6 +277,107 @@ function IconSettings() {
   );
 }
 
+function IconClose() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function IconArrowUp() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+function IconArrowDown() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <polyline points="19 12 12 19 5 12" />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+
+function IconTag() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
+      <path d="M7 7h.01" />
+    </svg>
+  );
+}
+
+function IconPhone() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+
+function IconBriefcase() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="14" x="2" y="7" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </svg>
+  );
+}
+
+function IconUser() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+function IconGlobe() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" x2="22" y1="12" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function IconMail() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="16" x="2" y="4" rx="2" />
+      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+    </svg>
+  );
+}
+
+function RenderPageIcon({ icon, isHome }: { icon?: string; isHome?: boolean }) {
+  if (isHome || icon === "home") return <IconHome />;
+  if (icon === "tag" || icon === "pricing") return <IconTag />;
+  if (icon === "phone" || icon === "contact") return <IconPhone />;
+  if (icon === "bag" || icon === "services") return <IconBriefcase />;
+  if (icon === "user" || icon === "about") return <IconUser />;
+  if (icon === "globe") return <IconGlobe />;
+  if (icon === "mail") return <IconMail />;
+  if (icon === "sparkles") return <IconSparkles />;
+  return <IconFile />;
+}
+
 function IconSectionSymbol({ type }: { type: string }) {
   switch (type) {
     case "navbar":
@@ -579,13 +680,14 @@ function buildMockupDocument(name: string, framework: "nextjs" | "vite" = "nextj
 
   // Add remaining pages matching the mockup
   if (homePage) {
+    homePage.icon = "home";
     doc.pages = [
       homePage,
-      { id: "page-about", title: "About", slug: "/about", blocks: [] },
-      { id: "page-services", title: "Services", slug: "/services", blocks: [] },
-      { id: "page-pricing", title: "Pricing", slug: "/pricing", blocks: [] },
-      { id: "page-blog", title: "Blog", slug: "/blog", blocks: [] },
-      { id: "page-contact", title: "Contact", slug: "/contact", blocks: [] },
+      { id: "page-about", title: "About", slug: "/about", icon: "user", blocks: [] },
+      { id: "page-services", title: "Services", slug: "/services", icon: "bag", blocks: [] },
+      { id: "page-pricing", title: "Pricing", slug: "/pricing", icon: "tag", blocks: [] },
+      { id: "page-blog", title: "Blog", slug: "/blog", icon: "file", blocks: [] },
+      { id: "page-contact", title: "Contact", slug: "/contact", icon: "phone", blocks: [] },
     ];
   }
 
@@ -621,6 +723,25 @@ export function WebsiteEditor() {
   // More menu & Drawers
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
+
+  // Popover menus & page modal
+  const [openPageMenuId, setOpenPageMenuId] = useState<string | null>(null);
+  const [openBlockMenuId, setOpenBlockMenuId] = useState<string | null>(null);
+  const [addSectionMenuOpen, setAddSectionMenuOpen] = useState(false);
+  const [pageModal, setPageModal] = useState<{
+    isOpen: boolean;
+    mode: "add" | "edit";
+    pageId?: string;
+    title: string;
+    slug: string;
+    icon: string;
+  }>({
+    isOpen: false,
+    mode: "add",
+    title: "",
+    slug: "",
+    icon: "file",
+  });
 
   // Preview Mode: visual DOM preview vs running Next.js sandbox iframe
   const [previewMode, setPreviewMode] = useState<"visual" | "sandbox">("visual");
@@ -759,6 +880,25 @@ export function WebsiteEditor() {
   useEffect(() => {
     void loadProject();
   }, [companyId, projectId]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(".npati-builder-action-popover") ||
+        target?.closest(".npati-builder-more-btn") ||
+        target?.closest(".npati-builder-page-settings-btn") ||
+        target?.closest(".npati-builder-add-section-btn")
+      ) {
+        return;
+      }
+      setOpenPageMenuId(null);
+      setOpenBlockMenuId(null);
+      setAddSectionMenuOpen(false);
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
 
   // Save document to backend
   const saveDocumentToProject = async (documentToSave?: WebsiteDocument) => {
@@ -958,52 +1098,137 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
-  // Add Page
-  const handleAddPage = async () => {
-    if (!doc) return;
-    const title = await promptModal({
-      title: language === "uk" ? "Нова сторінка" : "New Page",
-      message: language === "uk" ? "Введіть назву нової сторінки:" : "Enter new page title:",
+  // Page Handlers
+  const handleOpenAddPageModal = () => {
+    setPageModal({
+      isOpen: true,
+      mode: "add",
+      title: "",
+      slug: "",
+      icon: "file",
     });
-    if (!title || !title.trim()) return;
-    const slug = "/" + title.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    const newPage: WebsitePage = {
-      id: `page-${Math.random().toString(36).slice(2, 7)}`,
-      title: title.trim(),
-      slug,
-      blocks: [
-        {
-          id: `block-navbar-${Math.random().toString(36).slice(2, 7)}`,
-          type: "navbar",
-          name: "Header",
-          props: { ...COMPONENT_REGISTRY.navbar.defaultProps, brandName: doc.name },
-          styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles, backgroundColor: "#ffffff", textColor: "#0f172a" },
-        },
-        {
-          id: `block-hero-${Math.random().toString(36).slice(2, 7)}`,
-          type: "hero",
-          name: "Hero Section",
-          props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: title.trim(), badge: "New Page" },
-          styles: { ...COMPONENT_REGISTRY.hero.defaultStyles, backgroundColor: "#F8FAFF", textColor: "#0f172a" },
-        },
-        {
-          id: `block-footer-${Math.random().toString(36).slice(2, 7)}`,
-          type: "footer",
-          name: "Footer",
-          props: { ...COMPONENT_REGISTRY.footer.defaultProps, brandName: doc.name },
-          styles: { ...COMPONENT_REGISTRY.footer.defaultStyles, backgroundColor: "#ffffff" },
-        },
-      ],
-    };
+  };
 
+  const handleOpenEditPageModal = (page: WebsitePage) => {
+    setPageModal({
+      isOpen: true,
+      mode: "edit",
+      pageId: page.id,
+      title: page.title,
+      slug: page.slug,
+      icon: page.icon || (page.slug === "/" ? "home" : "file"),
+    });
+  };
+
+  const handleSavePageModal = () => {
+    if (!doc || !pageModal.title.trim()) return;
+    const cleanTitle = pageModal.title.trim();
+    const cleanSlug = pageModal.slug.trim()
+      ? (pageModal.slug.startsWith("/") ? pageModal.slug : "/" + pageModal.slug)
+      : "/" + cleanTitle.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+
+    if (pageModal.mode === "add") {
+      const newPage: WebsitePage = {
+        id: `page-${Math.random().toString(36).slice(2, 7)}`,
+        title: cleanTitle,
+        slug: cleanSlug,
+        icon: pageModal.icon,
+        blocks: [
+          {
+            id: `block-navbar-${Math.random().toString(36).slice(2, 7)}`,
+            type: "navbar",
+            name: "Header",
+            props: { ...COMPONENT_REGISTRY.navbar.defaultProps, brandName: doc.name },
+            styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles, backgroundColor: "#ffffff", textColor: "#0f172a" },
+          },
+          {
+            id: `block-hero-${Math.random().toString(36).slice(2, 7)}`,
+            type: "hero",
+            name: "Hero Section",
+            props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: cleanTitle, badge: "New Page" },
+            styles: { ...COMPONENT_REGISTRY.hero.defaultStyles, backgroundColor: "#F8FAFF", textColor: "#0f172a" },
+          },
+          {
+            id: `block-footer-${Math.random().toString(36).slice(2, 7)}`,
+            type: "footer",
+            name: "Footer",
+            props: { ...COMPONENT_REGISTRY.footer.defaultProps, brandName: doc.name },
+            styles: { ...COMPONENT_REGISTRY.footer.defaultStyles, backgroundColor: "#ffffff" },
+          },
+        ],
+      };
+      const newDoc: WebsiteDocument = {
+        ...doc,
+        pages: [...doc.pages, newPage],
+        updatedAt: new Date().toISOString(),
+      };
+      pushDocumentChange(newDoc);
+      setActivePageId(newPage.id);
+      setSelectedBlockId(newPage.blocks[1]?.id || newPage.blocks[0]?.id || null);
+    } else if (pageModal.mode === "edit" && pageModal.pageId) {
+      const updatedPages = doc.pages.map((p) =>
+        p.id === pageModal.pageId
+          ? { ...p, title: cleanTitle, slug: cleanSlug, icon: pageModal.icon }
+          : p
+      );
+      const newDoc: WebsiteDocument = {
+        ...doc,
+        pages: updatedPages,
+        updatedAt: new Date().toISOString(),
+      };
+      pushDocumentChange(newDoc);
+    }
+
+    setPageModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleDuplicatePage = (pageId: string) => {
+    if (!doc) return;
+    const page = doc.pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const clone: WebsitePage = {
+      ...JSON.parse(JSON.stringify(page)),
+      id: `page-${Math.random().toString(36).slice(2, 7)}`,
+      title: `${page.title} (Copy)`,
+      slug: `${page.slug}-copy`,
+      blocks: page.blocks.map((b: any) => ({
+        ...b,
+        id: `block-${b.type}-${Math.random().toString(36).slice(2, 7)}`,
+      })),
+    };
     const newDoc: WebsiteDocument = {
       ...doc,
-      pages: [...doc.pages, newPage],
+      pages: [...doc.pages, clone],
       updatedAt: new Date().toISOString(),
     };
     pushDocumentChange(newDoc);
-    setActivePageId(newPage.id);
-    setSelectedBlockId(newPage.blocks[1]?.id || newPage.blocks[0]?.id || null);
+    setActivePageId(clone.id);
+  };
+
+  const handleMovePage = (pageId: string, direction: "up" | "down") => {
+    if (!doc) return;
+    const pages = [...doc.pages];
+    const index = pages.findIndex((p) => p.id === pageId);
+    if (index === -1) return;
+    if (direction === "up" && index > 0) {
+      const item = pages[index];
+      if (item) {
+        pages.splice(index, 1);
+        pages.splice(index - 1, 0, item);
+      }
+    } else if (direction === "down" && index < pages.length - 1) {
+      const item = pages[index];
+      if (item) {
+        pages.splice(index, 1);
+        pages.splice(index + 1, 0, item);
+      }
+    }
+    const newDoc: WebsiteDocument = {
+      ...doc,
+      pages,
+      updatedAt: new Date().toISOString(),
+    };
+    pushDocumentChange(newDoc);
   };
 
   // Delete page
@@ -1378,10 +1603,10 @@ export function WebsiteEditor() {
           <Link
             to="/settings/websites"
             className="npati-builder-close-btn"
-            title={language === "uk" ? "Закрити конструктор" : "Close Builder"}
+            title={language === "uk" ? "Закрити" : "Close"}
             aria-label="Close"
           >
-            <span aria-hidden="true">✕</span>
+            <IconClose />
           </Link>
         </div>
       </header>
@@ -1426,7 +1651,7 @@ export function WebsiteEditor() {
             <div className="npati-builder-tab-content">
               {/* Pages List */}
               <div className="npati-builder-page-list">
-                {(doc?.pages || []).map((page) => {
+                {(doc?.pages || []).map((page, pIdx) => {
                   const isActive = page.id === activePageId;
                   const isHome = page.slug === "/" || page.id === "page-home";
                   return (
@@ -1438,24 +1663,91 @@ export function WebsiteEditor() {
                         if (page.blocks[0]) setSelectedBlockId(page.blocks[0].id);
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {isHome ? <IconHome /> : <IconFile />}
-                        <span style={{ fontWeight: isActive ? 600 : 500 }}>{page.title}</span>
-                      </div>
-                      {isActive ? (
-                        <span style={{ color: "#e11d2e", display: "flex", alignItems: "center" }}>
-                          <IconSettings />
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                        <RenderPageIcon icon={page.icon} isHome={isHome} />
+                        <span style={{ fontWeight: isActive ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {page.title}
                         </span>
-                      ) : !isHome ? (
+                      </div>
+
+                      {/* Page Settings Action Popover */}
+                      <div style={{ position: "relative" }}>
                         <button
                           type="button"
-                          className="npati-builder-row-action-btn danger"
-                          onClick={(e) => { e.stopPropagation(); void handleDeletePage(page.id); }}
-                          title="Delete Page"
+                          className="npati-builder-page-settings-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenPageMenuId(openPageMenuId === page.id ? null : page.id);
+                          }}
+                          title="Page Settings"
                         >
-                          <IconTrash />
+                          <IconSettings />
                         </button>
-                      ) : null}
+
+                        {openPageMenuId === page.id && (
+                          <div className="npati-builder-action-popover" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="npati-builder-popover-item"
+                              onClick={() => {
+                                setOpenPageMenuId(null);
+                                handleOpenEditPageModal(page);
+                              }}
+                            >
+                              <IconEdit />
+                              <span>{language === "uk" ? "Редагувати сторінку" : "Edit Page"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="npati-builder-popover-item"
+                              onClick={() => {
+                                setOpenPageMenuId(null);
+                                handleDuplicatePage(page.id);
+                              }}
+                            >
+                              <IconCopy />
+                              <span>{language === "uk" ? "Скопіювати" : "Duplicate"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="npati-builder-popover-item"
+                              onClick={() => {
+                                setOpenPageMenuId(null);
+                                handleMovePage(page.id, "up");
+                              }}
+                              disabled={pIdx === 0}
+                            >
+                              <IconArrowUp />
+                              <span>{language === "uk" ? "Перемістити вище" : "Move Up"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="npati-builder-popover-item"
+                              onClick={() => {
+                                setOpenPageMenuId(null);
+                                handleMovePage(page.id, "down");
+                              }}
+                              disabled={pIdx === (doc?.pages.length || 0) - 1}
+                            >
+                              <IconArrowDown />
+                              <span>{language === "uk" ? "Перемістити нижче" : "Move Down"}</span>
+                            </button>
+                            {!isHome && (
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item danger"
+                                onClick={() => {
+                                  setOpenPageMenuId(null);
+                                  void handleDeletePage(page.id);
+                                }}
+                              >
+                                <IconTrash />
+                                <span>{language === "uk" ? "Видалити" : "Delete"}</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -1463,7 +1755,7 @@ export function WebsiteEditor() {
                 <button
                   type="button"
                   className="npati-builder-add-page-btn"
-                  onClick={() => void handleAddPage()}
+                  onClick={handleOpenAddPageModal}
                 >
                   <IconPlus />
                   <span>Add Page</span>
@@ -1471,39 +1763,48 @@ export function WebsiteEditor() {
               </div>
 
               {/* Sections Structure Hierarchy of current page */}
-              <div style={{ marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+              <div className="npati-builder-sections-wrap">
                 <div className="npati-builder-sections-header">
                   <span className="npati-builder-sections-title">
                     {activePage?.title || "Home"} Sections
                   </span>
 
-                  {/* Add section plus button */}
-                  <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        handleAddBlock(e.target.value as WebsiteBlockType);
-                        e.target.value = "";
-                      }
-                    }}
-                    style={{
-                      fontSize: "12px",
-                      padding: "2px 6px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      background: "#ffffff",
-                      cursor: "pointer",
-                      color: "#0f172a",
-                      fontWeight: 600,
-                    }}
-                  >
-                    <option value="" disabled>+</option>
-                    {Object.entries(COMPONENT_REGISTRY).map(([type, def]) => (
-                      <option key={type} value={type}>
-                        {def.title}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Add section plus button in same row */}
+                  <div style={{ position: "relative" }}>
+                    <button
+                      type="button"
+                      className="npati-builder-add-section-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAddSectionMenuOpen((prev) => !prev);
+                      }}
+                      title={language === "uk" ? "Додати секцію" : "Add Section"}
+                    >
+                      <IconPlus />
+                    </button>
+
+                    {addSectionMenuOpen && (
+                      <div className="npati-builder-action-popover section-templates-popover" onClick={(e) => e.stopPropagation()}>
+                        <div className="npati-builder-popover-title">
+                          {language === "uk" ? "Виберіть секцію" : "Add Section"}
+                        </div>
+                        {Object.entries(COMPONENT_REGISTRY).map(([type, def]) => (
+                          <button
+                            key={type}
+                            type="button"
+                            className="npati-builder-popover-item"
+                            onClick={() => {
+                              setAddSectionMenuOpen(false);
+                              handleAddBlock(type as WebsiteBlockType);
+                            }}
+                          >
+                            <IconSectionSymbol type={type} />
+                            <span>{def.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="npati-builder-sections-list">
@@ -1521,60 +1822,92 @@ export function WebsiteEditor() {
                         style={{ opacity: b.isHidden ? 0.45 : 1 }}
                       >
                         <div className="npati-builder-section-info">
-                          <span style={{ color: "#94a3b8", cursor: "grab" }}>
+                          <span className="npati-builder-drag-handle">
                             <IconGrip />
                           </span>
-                          <span style={{ color: isSelected ? "#e11d2e" : "#0f172a" }}>
+                          <span className="npati-builder-section-icon">
                             <IconSectionSymbol type={b.type} />
                           </span>
-                          <span className="npati-builder-section-name" style={{ color: isSelected ? "#e11d2e" : "#0f172a" }}>
+                          <span className="npati-builder-section-name">
                             {b.name || def.title}
                           </span>
                         </div>
 
-                        <div className="npati-builder-section-actions">
+                        {/* 3 Dots button on each block with popover */}
+                        <div style={{ position: "relative" }}>
                           <button
                             type="button"
-                            className="npati-builder-row-action-btn"
-                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "up"); }}
-                            disabled={idx === 0}
-                            title="Move Up"
+                            className="npati-builder-more-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenBlockMenuId(openBlockMenuId === b.id ? null : b.id);
+                            }}
+                            title="Actions"
                           >
-                            ▲
+                            <IconMore />
                           </button>
-                          <button
-                            type="button"
-                            className="npati-builder-row-action-btn"
-                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(b.id, "down"); }}
-                            disabled={idx === (activePage?.blocks.length || 0) - 1}
-                            title="Move Down"
-                          >
-                            ▼
-                          </button>
-                          <button
-                            type="button"
-                            className="npati-builder-row-action-btn"
-                            onClick={(e) => { e.stopPropagation(); handleToggleHideBlock(b.id); }}
-                            title={b.isHidden ? "Show Section" : "Hide Section"}
-                          >
-                            {b.isHidden ? <IconEyeOff /> : <IconEye />}
-                          </button>
-                          <button
-                            type="button"
-                            className="npati-builder-row-action-btn"
-                            onClick={(e) => { e.stopPropagation(); handleDuplicateBlock(b.id); }}
-                            title="Duplicate"
-                          >
-                            <IconCopy />
-                          </button>
-                          <button
-                            type="button"
-                            className="npati-builder-row-action-btn danger"
-                            onClick={(e) => { e.stopPropagation(); void handleDeleteBlock(b.id); }}
-                            title="Delete"
-                          >
-                            <IconTrash />
-                          </button>
+
+                          {openBlockMenuId === b.id && (
+                            <div className="npati-builder-action-popover" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item"
+                                onClick={() => {
+                                  setOpenBlockMenuId(null);
+                                  handleMoveBlock(b.id, "up");
+                                }}
+                                disabled={idx === 0}
+                              >
+                                <IconArrowUp />
+                                <span>{language === "uk" ? "Підняти вгору" : "Move Up"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item"
+                                onClick={() => {
+                                  setOpenBlockMenuId(null);
+                                  handleMoveBlock(b.id, "down");
+                                }}
+                                disabled={idx === (activePage?.blocks.length || 0) - 1}
+                              >
+                                <IconArrowDown />
+                                <span>{language === "uk" ? "Опустити вниз" : "Move Down"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item"
+                                onClick={() => {
+                                  setOpenBlockMenuId(null);
+                                  handleDuplicateBlock(b.id);
+                                }}
+                              >
+                                <IconCopy />
+                                <span>{language === "uk" ? "Скопіювати" : "Duplicate"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item"
+                                onClick={() => {
+                                  setOpenBlockMenuId(null);
+                                  handleToggleHideBlock(b.id);
+                                }}
+                              >
+                                {b.isHidden ? <IconEye /> : <IconEyeOff />}
+                                <span>{b.isHidden ? (language === "uk" ? "Показати" : "Show") : (language === "uk" ? "Сховати" : "Hide")}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="npati-builder-popover-item danger"
+                                onClick={() => {
+                                  setOpenBlockMenuId(null);
+                                  void handleDeleteBlock(b.id);
+                                }}
+                              >
+                                <IconTrash />
+                                <span>{language === "uk" ? "Видалити" : "Delete"}</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -2174,253 +2507,490 @@ export function WebsiteEditor() {
                 </button>
               </div>
 
-              {/* Inspector Content matching the photo exactly */}
+              {/* Inspector Content */}
               <div className="npati-builder-inspector-content">
-                {/* 1. Title */}
-                <div className="npati-builder-form-group">
-                  <label className="npati-builder-form-label">Title</label>
-                  <input
-                    type="text"
-                    className="npati-builder-input"
-                    value={selectedBlock.props.title || selectedBlock.props.brandName || ""}
-                    onChange={(e) => {
-                      if (selectedBlock.type === "navbar") {
-                        handleUpdateBlockProp("brandName", e.target.value);
-                      } else {
-                        handleUpdateBlockProp("title", e.target.value);
-                      }
-                    }}
-                  />
-                </div>
-
-                {/* 2. Subtitle */}
-                {selectedBlock.type !== "navbar" && (
-                  <div className="npati-builder-form-group">
-                    <label className="npati-builder-form-label">Subtitle</label>
-                    <textarea
-                      rows={3}
-                      className="npati-builder-textarea"
-                      value={selectedBlock.props.subtitle || selectedBlock.props.description || ""}
-                      onChange={(e) => handleUpdateBlockProp("subtitle", e.target.value)}
-                    />
-                  </div>
-                )}
-
-                {/* 3. Primary Button & Link (2-column layout matching photo) */}
-                <div className="npati-builder-btn-link-row">
-                  <div className="npati-builder-form-group npati-builder-btn-col">
-                    <label className="npati-builder-form-label">Primary Button</label>
-                    <input
-                      type="text"
-                      className="npati-builder-input"
-                      value={selectedBlock.props.primaryCtaText || selectedBlock.props.ctaText || "Get Started Free"}
-                      onChange={(e) => {
-                        if (selectedBlock.type === "navbar") {
-                          handleUpdateBlockProp("ctaText", e.target.value);
-                        } else {
-                          handleUpdateBlockProp("primaryCtaText", e.target.value);
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="npati-builder-form-group npati-builder-link-col">
-                    <label className="npati-builder-form-label">Link</label>
-                    <div className="npati-builder-link-input-wrap">
+                {/* SUBTAB: CONTENT */}
+                {inspectorSubTab === "content" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    {/* 1. Title */}
+                    <div className="npati-builder-form-group">
+                      <label className="npati-builder-form-label">Title</label>
                       <input
                         type="text"
                         className="npati-builder-input"
-                        value={selectedBlock.props.primaryCtaUrl || selectedBlock.props.ctaUrl || "#"}
+                        value={selectedBlock.props.title || selectedBlock.props.brandName || ""}
                         onChange={(e) => {
                           if (selectedBlock.type === "navbar") {
-                            handleUpdateBlockProp("ctaUrl", e.target.value);
+                            handleUpdateBlockProp("brandName", e.target.value);
                           } else {
-                            handleUpdateBlockProp("primaryCtaUrl", e.target.value);
+                            handleUpdateBlockProp("title", e.target.value);
                           }
                         }}
                       />
-                      <span className="link-icon">
-                        <IconLink />
-                      </span>
                     </div>
-                  </div>
-                </div>
 
-                {/* 4. Secondary Button & Link (2-column layout matching photo) */}
-                {selectedBlock.type === "hero" && (
-                  <div className="npati-builder-btn-link-row">
-                    <div className="npati-builder-form-group npati-builder-btn-col">
-                      <label className="npati-builder-form-label">Secondary Button</label>
-                      <input
-                        type="text"
-                        className="npati-builder-input"
-                        value={selectedBlock.props.secondaryCtaText || "Watch Demo"}
-                        onChange={(e) => handleUpdateBlockProp("secondaryCtaText", e.target.value)}
-                      />
-                    </div>
-                    <div className="npati-builder-form-group npati-builder-link-col">
-                      <label className="npati-builder-form-label">Link</label>
-                      <div className="npati-builder-link-input-wrap">
+                    {/* 2. Subtitle */}
+                    {selectedBlock.type !== "navbar" && (
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Subtitle</label>
+                        <textarea
+                          rows={3}
+                          className="npati-builder-textarea"
+                          value={selectedBlock.props.subtitle || selectedBlock.props.description || ""}
+                          onChange={(e) => handleUpdateBlockProp("subtitle", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* 3. Primary Button & Link (2-column layout matching photo) */}
+                    <div className="npati-builder-btn-link-row">
+                      <div className="npati-builder-form-group npati-builder-btn-col">
+                        <label className="npati-builder-form-label">Primary Button</label>
                         <input
                           type="text"
                           className="npati-builder-input"
-                          value={selectedBlock.props.secondaryCtaUrl || "#"}
-                          onChange={(e) => handleUpdateBlockProp("secondaryCtaUrl", e.target.value)}
+                          value={selectedBlock.props.primaryCtaText || selectedBlock.props.ctaText || "Get Started Free"}
+                          onChange={(e) => {
+                            if (selectedBlock.type === "navbar") {
+                              handleUpdateBlockProp("ctaText", e.target.value);
+                            } else {
+                              handleUpdateBlockProp("primaryCtaText", e.target.value);
+                            }
+                          }}
                         />
-                        <span className="link-icon">
-                          <IconLink />
-                        </span>
+                      </div>
+                      <div className="npati-builder-form-group npati-builder-link-col">
+                        <label className="npati-builder-form-label">Link</label>
+                        <div className="npati-builder-link-input-wrap">
+                          <input
+                            type="text"
+                            className="npati-builder-input"
+                            value={selectedBlock.props.primaryCtaUrl || selectedBlock.props.ctaUrl || "#"}
+                            onChange={(e) => {
+                              if (selectedBlock.type === "navbar") {
+                                handleUpdateBlockProp("ctaUrl", e.target.value);
+                              } else {
+                                handleUpdateBlockProp("primaryCtaUrl", e.target.value);
+                              }
+                            }}
+                          />
+                          <span className="link-icon">
+                            <IconLink />
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4. Secondary Button & Link (2-column layout matching photo) */}
+                    {selectedBlock.type === "hero" && (
+                      <div className="npati-builder-btn-link-row">
+                        <div className="npati-builder-form-group npati-builder-btn-col">
+                          <label className="npati-builder-form-label">Secondary Button</label>
+                          <input
+                            type="text"
+                            className="npati-builder-input"
+                            value={selectedBlock.props.secondaryCtaText || "Watch Demo"}
+                            onChange={(e) => handleUpdateBlockProp("secondaryCtaText", e.target.value)}
+                          />
+                        </div>
+                        <div className="npati-builder-form-group npati-builder-link-col">
+                          <label className="npati-builder-form-label">Link</label>
+                          <div className="npati-builder-link-input-wrap">
+                            <input
+                              type="text"
+                              className="npati-builder-input"
+                              value={selectedBlock.props.secondaryCtaUrl || "#"}
+                              onChange={(e) => handleUpdateBlockProp("secondaryCtaUrl", e.target.value)}
+                            />
+                            <span className="link-icon">
+                              <IconLink />
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. Layout Section matching photo */}
+                    <div>
+                      <span className="npati-builder-group-title">Layout</span>
+
+                      {/* Alignment */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Alignment</label>
+                        <div className="npati-builder-align-group">
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "left")}
+                            title="Align Left"
+                          >
+                            <IconAlignLeft />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "center")}
+                            title="Align Center"
+                          >
+                            <IconAlignCenter />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "right")}
+                            title="Align Right"
+                          >
+                            <IconAlignRight />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Padding */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Padding</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.paddingY || "large"}
+                          onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
+                        >
+                          <option value="none">None (0px)</option>
+                          <option value="small">Small (20px)</option>
+                          <option value="medium">Medium (40px)</option>
+                          <option value="large">Large (64px)</option>
+                          <option value="xlarge">X-Large (80px)</option>
+                        </select>
+                      </div>
+
+                      {/* Max Width */}
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Max Width</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.maxWidth || "large"}
+                          onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
+                        >
+                          <option value="large">1200px</option>
+                          <option value="medium">960px</option>
+                          <option value="small">640px</option>
+                          <option value="full">100% Full Width</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 6. Colors Section matching photo */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                      <span className="npati-builder-group-title">Colors</span>
+
+                      {/* Background Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Background</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.backgroundColor?.startsWith("#") ? selectedBlock.styles.backgroundColor : "#F8FAFF"}
+                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.backgroundColor || "#F8FAFF"}
+                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Title Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Title</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.textColor?.startsWith("#") ? selectedBlock.styles.textColor : "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.textColor || "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Subtitle Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Subtitle</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value="#64748B"
+                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value="#64748B"
+                            readOnly
+                          />
+                        </div>
+                      </div>
+
+                      {/* Primary Button Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Primary Button</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value="#0F172A"
+                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value="#0F172A"
+                            readOnly
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* 5. Layout Section matching photo */}
-                <div>
-                  <span className="npati-builder-group-title">Layout</span>
+                {/* SUBTAB: STYLE */}
+                {inspectorSubTab === "style" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {/* 1. Layout & Alignment */}
+                    <div>
+                      <span className="npati-builder-group-title">Layout & Spacing</span>
 
-                  {/* Alignment */}
-                  <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
-                    <label className="npati-builder-form-label">Alignment</label>
-                    <div className="npati-builder-align-group">
-                      <button
-                        type="button"
-                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
-                        onClick={() => handleUpdateBlockStyle("textAlign", "left")}
-                        title="Align Left"
-                      >
-                        <IconAlignLeft />
-                      </button>
-                      <button
-                        type="button"
-                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
-                        onClick={() => handleUpdateBlockStyle("textAlign", "center")}
-                        title="Align Center"
-                      >
-                        <IconAlignCenter />
-                      </button>
-                      <button
-                        type="button"
-                        className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
-                        onClick={() => handleUpdateBlockStyle("textAlign", "right")}
-                        title="Align Right"
-                      >
-                        <IconAlignRight />
-                      </button>
+                      {/* Alignment */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Alignment</label>
+                        <div className="npati-builder-align-group">
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "left" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "left")}
+                            title="Align Left"
+                          >
+                            <IconAlignLeft />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "center" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "center")}
+                            title="Align Center"
+                          >
+                            <IconAlignCenter />
+                          </button>
+                          <button
+                            type="button"
+                            className={`npati-builder-align-btn ${selectedBlock.styles?.textAlign === "right" ? "active" : ""}`}
+                            onClick={() => handleUpdateBlockStyle("textAlign", "right")}
+                            title="Align Right"
+                          >
+                            <IconAlignRight />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Vertical Spacing / Padding */}
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Vertical Padding</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.paddingY || "large"}
+                          onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
+                        >
+                          <option value="none">None (0px)</option>
+                          <option value="small">Small (24px)</option>
+                          <option value="medium">Medium (48px)</option>
+                          <option value="large">Large (72px)</option>
+                          <option value="xlarge">Extra Large (96px)</option>
+                        </select>
+                      </div>
+
+                      {/* Container Max Width */}
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Max Width</label>
+                        <select
+                          className="npati-builder-select"
+                          value={selectedBlock.styles?.maxWidth || "large"}
+                          onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
+                        >
+                          <option value="large">1200px (Default)</option>
+                          <option value="medium">960px (Contained)</option>
+                          <option value="small">640px (Narrow)</option>
+                          <option value="full">100% (Full Width)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 2. Color Palette */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                      <span className="npati-builder-group-title">Color Palette</span>
+
+                      {/* Background Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Background</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.backgroundColor?.startsWith("#") ? selectedBlock.styles.backgroundColor : "#F8FAFF"}
+                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.backgroundColor || "#F8FAFF"}
+                            onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Quick palette preset chips */}
+                      <div className="npati-builder-palette-chips">
+                        {["#ffffff", "#F8FAFF", "#F1F5F9", "#0F172A", "#e11d2e"].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            className="npati-builder-palette-chip"
+                            style={{ background: c }}
+                            onClick={() => handleUpdateBlockStyle("backgroundColor", c)}
+                            title={c}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Title Color */}
+                      <div className="npati-builder-color-row" style={{ marginTop: "10px" }}>
+                        <span className="npati-builder-color-label">Title Color</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.textColor?.startsWith("#") ? selectedBlock.styles.textColor : "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.textColor || "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Subtitle / Body Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Body Text</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.accentColor?.startsWith("#") ? selectedBlock.styles.accentColor : "#475569"}
+                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.accentColor || "#475569"}
+                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Primary Button Color */}
+                      <div className="npati-builder-color-row">
+                        <span className="npati-builder-color-label">Button Color</span>
+                        <div className="npati-builder-color-picker-wrap">
+                          <input
+                            type="color"
+                            className="npati-builder-color-swatch"
+                            value={selectedBlock.styles?.borderColor?.startsWith("#") ? selectedBlock.styles.borderColor : "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="npati-builder-color-code-input"
+                            value={selectedBlock.styles?.borderColor || "#0F172A"}
+                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Typography */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                      <span className="npati-builder-group-title">Typography</span>
+                      <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
+                        <label className="npati-builder-form-label">Font Family</label>
+                        <select
+                          className="npati-builder-select"
+                          value={doc?.theme?.fontFamily || "inter"}
+                          onChange={(e) => {
+                            if (doc) {
+                              pushDocumentChange({
+                                ...doc,
+                                theme: { ...doc.theme, fontFamily: e.target.value as any },
+                              });
+                            }
+                          }}
+                        >
+                          <option value="inter">Inter (Clean Modern)</option>
+                          <option value="roboto">Roboto (Geometric)</option>
+                          <option value="playfair">Playfair Display (Serif)</option>
+                          <option value="geist">Geist (Minimalist)</option>
+                          <option value="system">System Default</option>
+                        </select>
+                      </div>
+
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Title Weight</label>
+                        <select
+                          className="npati-builder-select"
+                          defaultValue="800"
+                          onChange={(e) => handleUpdateBlockProp("_headingWeight", e.target.value)}
+                        >
+                          <option value="600">Semi-Bold (600)</option>
+                          <option value="700">Bold (700)</option>
+                          <option value="800">Extra Bold (800)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 4. Borders & Corners */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                      <span className="npati-builder-group-title">Borders & Corners</span>
+                      <div className="npati-builder-form-group">
+                        <label className="npati-builder-form-label">Corner Radius</label>
+                        <select
+                          className="npati-builder-select"
+                          defaultValue="md"
+                          onChange={(e) => {
+                            if (doc) {
+                              pushDocumentChange({
+                                ...doc,
+                                theme: { ...doc.theme, borderRadius: e.target.value as any },
+                              });
+                            }
+                          }}
+                        >
+                          <option value="none">Sharp (0px)</option>
+                          <option value="sm">Small (6px)</option>
+                          <option value="md">Rounded (12px)</option>
+                          <option value="lg">Large (18px)</option>
+                          <option value="full">Pill / Full</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Padding */}
-                  <div className="npati-builder-form-group" style={{ marginBottom: "12px" }}>
-                    <label className="npati-builder-form-label">Padding</label>
-                    <select
-                      className="npati-builder-select"
-                      value={selectedBlock.styles?.paddingY || "large"}
-                      onChange={(e) => handleUpdateBlockStyle("paddingY", e.target.value)}
-                    >
-                      <option value="none">None (0px)</option>
-                      <option value="small">Small (20px)</option>
-                      <option value="medium">Medium (40px)</option>
-                      <option value="large">Large (64px)</option>
-                      <option value="xlarge">X-Large (80px)</option>
-                    </select>
-                  </div>
-
-                  {/* Max Width */}
-                  <div className="npati-builder-form-group">
-                    <label className="npati-builder-form-label">Max Width</label>
-                    <select
-                      className="npati-builder-select"
-                      value={selectedBlock.styles?.maxWidth || "large"}
-                      onChange={(e) => handleUpdateBlockStyle("maxWidth", e.target.value)}
-                    >
-                      <option value="large">1200px</option>
-                      <option value="medium">960px</option>
-                      <option value="small">640px</option>
-                      <option value="full">100% Full Width</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* 6. Colors Section matching photo */}
-                <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
-                  <span className="npati-builder-group-title">Colors</span>
-
-                  {/* Background Color */}
-                  <div className="npati-builder-color-row">
-                    <span className="npati-builder-color-label">Background</span>
-                    <div className="npati-builder-color-picker-wrap">
-                      <input
-                        type="color"
-                        className="npati-builder-color-swatch"
-                        value={selectedBlock.styles?.backgroundColor?.startsWith("#") ? selectedBlock.styles.backgroundColor : "#F8FAFF"}
-                        onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
-                      />
-                      <input
-                        type="text"
-                        className="npati-builder-color-code-input"
-                        value={selectedBlock.styles?.backgroundColor || "#F8FAFF"}
-                        onChange={(e) => handleUpdateBlockStyle("backgroundColor", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Title Color */}
-                  <div className="npati-builder-color-row">
-                    <span className="npati-builder-color-label">Title</span>
-                    <div className="npati-builder-color-picker-wrap">
-                      <input
-                        type="color"
-                        className="npati-builder-color-swatch"
-                        value={selectedBlock.styles?.textColor?.startsWith("#") ? selectedBlock.styles.textColor : "#0F172A"}
-                        onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
-                      />
-                      <input
-                        type="text"
-                        className="npati-builder-color-code-input"
-                        value={selectedBlock.styles?.textColor || "#0F172A"}
-                        onChange={(e) => handleUpdateBlockStyle("textColor", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Subtitle Color */}
-                  <div className="npati-builder-color-row">
-                    <span className="npati-builder-color-label">Subtitle</span>
-                    <div className="npati-builder-color-picker-wrap">
-                      <input
-                        type="color"
-                        className="npati-builder-color-swatch"
-                        value="#64748B"
-                        onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
-                      />
-                      <input
-                        type="text"
-                        className="npati-builder-color-code-input"
-                        value="#64748B"
-                        readOnly
-                      />
-                    </div>
-                  </div>
-
-                  {/* Primary Button Color */}
-                  <div className="npati-builder-color-row">
-                    <span className="npati-builder-color-label">Primary Button</span>
-                    <div className="npati-builder-color-picker-wrap">
-                      <input
-                        type="color"
-                        className="npati-builder-color-swatch"
-                        value="#0F172A"
-                        onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
-                      />
-                      <input
-                        type="text"
-                        className="npati-builder-color-code-input"
-                        value="#0F172A"
-                        readOnly
-                      />
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -2748,6 +3318,113 @@ export function WebsiteEditor() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Page Modal: Add / Edit page with icon picker */}
+      {pageModal.isOpen && (
+        <div className="npati-builder-modal-backdrop" onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}>
+          <div className="npati-builder-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="npati-builder-modal-header">
+              <span className="npati-builder-modal-title">
+                {pageModal.mode === "add"
+                  ? (language === "uk" ? "Додати нову сторінку" : "Add New Page")
+                  : (language === "uk" ? "Налаштування сторінки" : "Page Settings")}
+              </span>
+              <button
+                type="button"
+                className="npati-builder-close-btn"
+                onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}
+                title={language === "uk" ? "Закрити" : "Close"}
+              >
+                <IconClose />
+              </button>
+            </div>
+            <div className="npati-builder-modal-body">
+              <div className="npati-builder-form-group">
+                <label className="npati-builder-form-label">
+                  {language === "uk" ? "Назва сторінки" : "Page Title"}
+                </label>
+                <input
+                  type="text"
+                  className="npati-builder-input"
+                  placeholder="e.g. Services"
+                  value={pageModal.title}
+                  onChange={(e) => {
+                    const title = e.target.value;
+                    const autoSlug = "/" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+                    setPageModal((p) => ({
+                      ...p,
+                      title,
+                      slug: p.mode === "add" ? autoSlug : p.slug,
+                    }));
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="npati-builder-form-group">
+                <label className="npati-builder-form-label">
+                  {language === "uk" ? "URL адреса (Slug)" : "URL Slug"}
+                </label>
+                <input
+                  type="text"
+                  className="npati-builder-input"
+                  placeholder="/services"
+                  value={pageModal.slug}
+                  onChange={(e) => setPageModal((p) => ({ ...p, slug: e.target.value }))}
+                />
+              </div>
+
+              <div className="npati-builder-form-group">
+                <label className="npati-builder-form-label">
+                  {language === "uk" ? "Виберіть іконку" : "Select Icon"}
+                </label>
+                <div className="npati-builder-icon-grid">
+                  {[
+                    { id: "home", label: "Home" },
+                    { id: "file", label: "Doc" },
+                    { id: "user", label: "About" },
+                    { id: "bag", label: "Services" },
+                    { id: "tag", label: "Pricing" },
+                    { id: "phone", label: "Contact" },
+                    { id: "globe", label: "Web" },
+                    { id: "mail", label: "Mail" },
+                    { id: "sparkles", label: "Features" },
+                  ].map((ic) => (
+                    <button
+                      key={ic.id}
+                      type="button"
+                      className={`npati-builder-icon-option ${pageModal.icon === ic.id ? "active" : ""}`}
+                      onClick={() => setPageModal((p) => ({ ...p, icon: ic.id }))}
+                    >
+                      <RenderPageIcon icon={ic.id} />
+                      <span>{ic.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="npati-builder-modal-footer">
+              <button
+                type="button"
+                className="button-ghost"
+                onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}
+              >
+                {language === "uk" ? "Скасувати" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                disabled={!pageModal.title.trim()}
+                onClick={handleSavePageModal}
+              >
+                {pageModal.mode === "add"
+                  ? (language === "uk" ? "Створити сторінку" : "Create Page")
+                  : (language === "uk" ? "Зберегти" : "Save Changes")}
+              </button>
             </div>
           </div>
         </div>
