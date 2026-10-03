@@ -190,7 +190,8 @@ export class ProjectOrchestrator {
   }
 
   private async scaffoldNextProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, prompt?: string) {
-    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { purpose: prompt });
+    const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
+    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { template });
     const adapter = new NextJsAdapter();
     const files = adapter.scaffoldProject(doc);
     for (const [filePath, content] of Object.entries(files)) {
@@ -208,6 +209,19 @@ export class ProjectOrchestrator {
     } catch {
       return undefined;
     }
+  }
+
+  private async recordScaffoldFallback(
+    ctx: AuthContext, companyId: string, project: Project, idempotencyKey: string,
+  ): Promise<CompanyAgentRunDetails> {
+    const result = `Створено стартовий сайт "${project.name}" на базі Next.js. AI-персоналізацію не завершено; базовий сайт доступний для перегляду й редагування.`;
+    const { run } = await this.workspaceStore.createCompanyAgentRun(ctx, companyId, {
+      task: `Create starter website: ${project.name}`, requestedMode: "single", projectId: project.id,
+    }, `${idempotencyKey}:scaffold-fallback`);
+    await this.workspaceStore.updateCompanyAgentRun(ctx, companyId, run.id, {
+      status: "completed", executionMode: "single", selectedAgentIds: [], result,
+    });
+    return this.workspaceStore.getCompanyAgentRun(ctx, companyId, run.id);
   }
 
   /**
@@ -479,20 +493,31 @@ export class ProjectOrchestrator {
         idempotencyKey
       );
     } catch (runErr) {
-      const msg = runErr instanceof Error ? runErr.message : String(runErr);
-      const isModelFail = isModelError(runErr);
-      await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
-        status: "failed",
-        lastBuildStatus: isModelFail ? null : "failed",
-      });
-      if (isModelFail) {
-        throw new ProjectOrchestrationError(
-          /404|not found/i.test(msg) ? "MODEL_UNAVAILABLE" : "MODEL_ROUTING_FAILED",
-          msg,
-          502
-        );
+      if (isCreate && project.framework === "Next.js" &&
+        (runErr as { code?: string }).code === "INVALID_DELEGATION_PLAN") {
+        runDetails = await this.recordScaffoldFallback(ctx, params.companyId, project, idempotencyKey);
+      } else {
+        const msg = runErr instanceof Error ? runErr.message : String(runErr);
+        const isModelFail = isModelError(runErr);
+        await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
+          status: "failed",
+          lastBuildStatus: isModelFail ? null : "failed",
+        });
+        if (isModelFail) {
+          throw new ProjectOrchestrationError(
+            /404|not found/i.test(msg) ? "MODEL_UNAVAILABLE" : "MODEL_ROUTING_FAILED",
+            msg,
+            502
+          );
+        }
+        throw runErr;
       }
-      throw runErr;
+    }
+
+    if (isCreate && project.framework === "Next.js" &&
+      runDetails.run.status === "failed" && runDetails.run.errorCode === "INVALID_DELEGATION_PLAN") {
+      runDetails = await this.recordScaffoldFallback(ctx, params.companyId, project, idempotencyKey);
+      usedMultiAgent = false;
     }
 
     if (project.framework === "Next.js" && runDetails.run.status === "completed") {

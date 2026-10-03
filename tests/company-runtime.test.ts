@@ -41,6 +41,48 @@ async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key
   return response.json() as { id: string };
 }
 
+describe("Project delegation JSON recovery", () => {
+  it("repairs malformed planning output once for a bound project agent", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const ctx = { workspaceId: "project-json-ws", userId: "project-json-user", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    let company = await store.createCompany(ctx, { name: "Project JSON Co" }, "project-json-company");
+    const main = await store.createCompanyAgent(ctx, company.id, { name: "Coordinator", role: "manager", tools: [] }, "project-json-main");
+    const builder = await store.createCompanyAgent(ctx, company.id, { name: "Builder", role: "developer", tools: ["project.files.list"] }, "project-json-builder");
+    company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+    let calls = 0;
+    const ai = engine({ a2aSend: async () => ({
+      taskId: `plan-${++calls}`,
+      content: calls === 1 ? '{"mode":"single","agentIds":[' :
+        JSON.stringify({ mode: "single", agentIds: [builder.id], toolRequests: [] }),
+      metadata: {},
+    }) });
+    const runtime = new CompanyDelegationRuntime(store, ai);
+    const result = await runtime.execute(ctx, company.id, {
+      task: "Create a hosting site", mode: "single", preferredAgentId: builder.id, projectId: "project-1",
+    }, "project-json-run");
+    expect(result.run.status).toBe("completed");
+    expect(result.run.selectedAgentIds).toContain(builder.id);
+    expect(calls).toBe(2);
+  });
+
+  it("reads the delegation object when the model includes another JSON object first", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const ctx = { workspaceId: "wrapped-json-ws", userId: "wrapped-json-user", permissions: ["workspace:read", "business:manage"] };
+    let company = await store.createCompany(ctx, { name: "Wrapped JSON Co" }, "wrapped-json-company");
+    const main = await store.createCompanyAgent(ctx, company.id, { name: "Coordinator", role: "manager", tools: [] }, "wrapped-json-main");
+    company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+    const ai = engine({ a2aSend: async () => ({
+      taskId: "wrapped-plan",
+      content: '{"note":"example"}\n' + JSON.stringify({ mode: "single", agentIds: [], toolRequests: [] }),
+      metadata: {},
+    }) });
+    const runtime = new CompanyDelegationRuntime(store, ai);
+    const result = await runtime.execute(ctx, company.id, { task: "Answer", mode: "single" }, "wrapped-json-run");
+    expect(result.run.status).toBe("completed");
+  });
+});
 describe("Company delegation runtime", () => {
   it("accepts legacy browser capability display names in an existing agent allowlist", async () => {
     const store = new InMemoryWorkspaceStore();
