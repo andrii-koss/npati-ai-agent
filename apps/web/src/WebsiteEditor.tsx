@@ -52,9 +52,19 @@ interface CheckpointItem {
 // ---------------------------------------------------------------------------
 function IconBack() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m12 19-7-7 7-7" />
       <path d="M19 12H5" />
+    </svg>
+  );
+}
+
+function IconSave() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
     </svg>
   );
 }
@@ -1185,14 +1195,14 @@ export function WebsiteEditor() {
           </div>
         </div>
 
-        {/* Right: Actions (Undo, Redo, Preview, Save, Publish, More Menu) */}
+        {/* Right: Actions (Undo, Redo, Save, Preview, Publish, More Menu, Close) */}
         <div className="npati-builder-topbar-right">
           <button
             type="button"
             className="npati-builder-icon-btn"
             onClick={undo}
             disabled={historyIndex <= 0}
-            title="Undo"
+            title={language === "uk" ? "Скасувати (Ctrl+Z)" : "Undo"}
           >
             <IconUndo />
           </button>
@@ -1201,14 +1211,27 @@ export function WebsiteEditor() {
             className="npati-builder-icon-btn"
             onClick={redo}
             disabled={historyIndex >= history.length - 1}
-            title="Redo"
+            title={language === "uk" ? "Повторити (Ctrl+Y)" : "Redo"}
           >
             <IconRedo />
           </button>
 
+          {/* SAVE BUTTON */}
           <button
             type="button"
-            className={`npati-builder-back-btn ${previewMode === "sandbox" ? "active" : ""}`}
+            className="npati-builder-save-btn"
+            onClick={() => void saveDocumentToProject()}
+            disabled={saveStatus === "saving"}
+            title={language === "uk" ? "Зберегти зміни" : "Save changes"}
+          >
+            <IconSave />
+            <span>{saveStatus === "saving" ? (language === "uk" ? "Збереження..." : "Saving...") : (language === "uk" ? "Зберегти" : "Save")}</span>
+          </button>
+
+          {/* PREVIEW BUTTON */}
+          <button
+            type="button"
+            className={`npati-builder-preview-btn ${previewMode === "sandbox" ? "active" : ""}`}
             onClick={() => {
               if (previewStatus?.isRunning) {
                 setPreviewMode((m) => (m === "visual" ? "sandbox" : "visual"));
@@ -1219,9 +1242,10 @@ export function WebsiteEditor() {
             title="Toggle Live Preview"
           >
             <IconEye />
-            <span>{previewMode === "sandbox" ? "Visual View" : "Preview"}</span>
+            <span>{previewMode === "sandbox" ? (language === "uk" ? "Конструктор" : "Visual View") : (language === "uk" ? "Перегляд" : "Preview")}</span>
           </button>
 
+          {/* PUBLISH BUTTON */}
           <button
             type="button"
             className="npati-builder-publish-btn"
@@ -1229,7 +1253,7 @@ export function WebsiteEditor() {
             disabled={isDeploying}
           >
             <IconPublish />
-            <span>{isDeploying ? "Publishing..." : "Publish"}</span>
+            <span>{isDeploying ? (language === "uk" ? "Публікація..." : "Publishing...") : (language === "uk" ? "Опублікувати" : "Publish")}</span>
           </button>
 
           {/* More options menu */}
@@ -1349,6 +1373,16 @@ export function WebsiteEditor() {
               </div>
             )}
           </div>
+
+          {/* Close button matching project style */}
+          <Link
+            to="/settings/websites"
+            className="npati-builder-close-btn"
+            title={language === "uk" ? "Закрити конструктор" : "Close Builder"}
+            aria-label="Close"
+          >
+            <span aria-hidden="true">✕</span>
+          </Link>
         </div>
       </header>
 
@@ -1360,29 +1394,31 @@ export function WebsiteEditor() {
         {/* LEFT PANEL: Pages / Layers / Assets                                     */}
         {/* ----------------------------------------------------------------------- */}
         <aside className="npati-builder-left-panel">
-          {/* Top Tabs */}
-          <div className="npati-builder-nav-tabs">
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${leftTab === "pages" ? "active" : ""}`}
-              onClick={() => setLeftTab("pages")}
-            >
-              Pages
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${leftTab === "layers" ? "active" : ""}`}
-              onClick={() => setLeftTab("layers")}
-            >
-              Layers
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${leftTab === "assets" ? "active" : ""}`}
-              onClick={() => setLeftTab("assets")}
-            >
-              Assets
-            </button>
+          {/* Top Segmented Tabs: Pages | Layers | Assets */}
+          <div className="npati-builder-nav-tabs-wrapper">
+            <div className="npati-builder-nav-tabs">
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${leftTab === "pages" ? "active" : ""}`}
+                onClick={() => setLeftTab("pages")}
+              >
+                Pages
+              </button>
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${leftTab === "layers" ? "active" : ""}`}
+                onClick={() => setLeftTab("layers")}
+              >
+                Layers
+              </button>
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${leftTab === "assets" ? "active" : ""}`}
+                onClick={() => setLeftTab("assets")}
+              >
+                Assets
+              </button>
+            </div>
           </div>
 
           {/* TAB: PAGES */}
@@ -2058,29 +2094,31 @@ export function WebsiteEditor() {
         {/* RIGHT PANEL: Properties / Design / Advanced                             */}
         {/* ----------------------------------------------------------------------- */}
         <aside className="npati-builder-right-panel">
-          {/* Top Inspector Tabs: Properties | Design | Advanced */}
-          <div className="npati-builder-nav-tabs">
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${inspectorTab === "properties" ? "active" : ""}`}
-              onClick={() => setInspectorTab("properties")}
-            >
-              Properties
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${inspectorTab === "design" ? "active" : ""}`}
-              onClick={() => setInspectorTab("design")}
-            >
-              Design
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-nav-tab ${inspectorTab === "advanced" ? "active" : ""}`}
-              onClick={() => setInspectorTab("advanced")}
-            >
-              Advanced
-            </button>
+          {/* Top Segmented Tabs: Properties | Design | Advanced */}
+          <div className="npati-builder-nav-tabs-wrapper">
+            <div className="npati-builder-nav-tabs">
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${inspectorTab === "properties" ? "active" : ""}`}
+                onClick={() => setInspectorTab("properties")}
+              >
+                Properties
+              </button>
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${inspectorTab === "design" ? "active" : ""}`}
+                onClick={() => setInspectorTab("design")}
+              >
+                Design
+              </button>
+              <button
+                type="button"
+                className={`npati-builder-nav-tab ${inspectorTab === "advanced" ? "active" : ""}`}
+                onClick={() => setInspectorTab("advanced")}
+              >
+                Advanced
+              </button>
+            </div>
           </div>
 
           {/* TAB: PROPERTIES */}
