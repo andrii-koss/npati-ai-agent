@@ -766,7 +766,7 @@ export function ActivityPage() {
                           </span>
                         )}
                         {activeRunDetails.run.projectId && (
-                          <Link to={`/projects/${activeRunDetails.run.projectId}`} className="button-secondary open-project-from-activity-btn">
+                          <Link to={`/settings/websites/${activeRunDetails.run.companyId}/${activeRunDetails.run.projectId}`} className="button-secondary open-project-from-activity-btn">
                             🌐 {language === "uk" ? "Відкрити проєкт" : "Open Project"}
                           </Link>
                         )}

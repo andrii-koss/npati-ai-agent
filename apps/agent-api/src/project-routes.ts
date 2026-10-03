@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError, type ProjectInput } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectService } from "./project-service";
@@ -28,7 +28,9 @@ function key(request: FastifyRequest) {
   return value;
 }
 
-export function registerProjectRoutes(app: FastifyInstance, service: ProjectService, auth: AuthProvider) {
+import type { ProjectWorkspace } from "./project-workspace";
+
+export function registerProjectRoutes(app: FastifyInstance, service: ProjectService, auth: AuthProvider, workspace?: ProjectWorkspace) {
   app.get<{ Params: { companyId: string }; Querystring: { includeArchived?: string } }>("/companies/:companyId/projects", async (request, reply) => {
     try {
       if (request.query.includeArchived && !["true", "false"].includes(request.query.includeArchived)) throw new Error("Invalid includeArchived");
@@ -75,6 +77,37 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
     try {
       await service.delete(await authorize(auth, request, "business:manage"), request.params.companyId, request.params.projectId);
       return reply.code(204).send();
+    } catch (error) { return fail(reply, error); }
+  });
+
+  app.post<{ Params: { companyId: string; projectId: string }; Body: { name?: string } }>("/companies/:companyId/projects/:projectId/duplicate", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "business:manage");
+      const { companyId, projectId } = request.params;
+      const source = await service.get(context, companyId, projectId);
+      const newName = (request.body?.name || `${source.name} (Copy)`).trim();
+      const idempotency = `dup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const result = await service.create(context, companyId, {
+        name: newName,
+        type: source.type,
+        description: source.description,
+      }, idempotency);
+
+      if (workspace) {
+        try {
+          const files = await workspace.getFileTree(context, companyId, projectId);
+          for (const file of files) {
+            if (file.type === "file") {
+              try {
+                const item = await workspace.readFile(context, companyId, projectId, file.path);
+                await workspace.createFile(context, companyId, result.project.id, file.path, item.content);
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+
+      return reply.code(201).send(result.project);
     } catch (error) { return fail(reply, error); }
   });
 }

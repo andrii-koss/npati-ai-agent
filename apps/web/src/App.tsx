@@ -18,6 +18,8 @@ import { ProjectPage } from "./ProjectPage";
 import { ConfirmDialogContainer, confirmModal, alertModal, promptModal } from "./ConfirmDialog";
 import { I18nProvider, useTranslation } from "./i18n";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
+import { WebsiteEditor } from "./WebsiteEditor";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -47,7 +49,7 @@ function resolveNpatiAvatarUrl(value?: string | null): string | null {
 }
 
 
-const navigation = ["Settings"];
+const navigation = ["Websites", "Settings"];
 type SidebarConversation = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
 const legacyChatStorageResetMarker = "npati_legacy_chat_storage_removed_2026_09_06_v1";
 function clearLegacyLocalChatsOnce() {
@@ -935,7 +937,19 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
             </div>
           )}
         </div>
-        {navigation.map((item) => { const href = `/${item.toLowerCase()}`; return <Link key={item} className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`} to={href} onClick={onClose}>{item === "Settings" ? t("common.settings") : item}</Link>; })}
+        {navigation.map((item) => {
+          const href = item === "Websites" ? "/settings/websites" : `/${item.toLowerCase()}`;
+          return (
+            <Link
+              key={item}
+              className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`}
+              to={href}
+              onClick={onClose}
+            >
+              {item === "Settings" ? t("common.settings") : item === "Websites" ? "Website Builder" : item}
+            </Link>
+          );
+        })}
       </nav>
 
       {menuTarget &&
@@ -1064,6 +1078,7 @@ function Workspace({ children }: { children: ReactNode }) {
   const isMemory = location.pathname === "/memory" || location.pathname.startsWith("/memory");
   const isSkills = location.pathname === "/skills" || location.pathname.startsWith("/skills");
   const isInbox = location.pathname.startsWith("/inbox") || location.pathname.startsWith("/settings/email/inbox");
+  const isProjects = location.pathname.startsWith("/projects");
   return (
     <div className={`workspace ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
       <header className="workspace-mobile-header">
@@ -1091,9 +1106,9 @@ function Workspace({ children }: { children: ReactNode }) {
         />
       )}
       <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills || isInbox ? "settings-workspace-content" : ""}`}>
+      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isProjects || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills || isInbox ? "settings-workspace-content" : ""}`}>
         {isChat && <ChatUserMenu />}
-        {!isChat && !isSettings && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && !isInbox && <div className="workspace-topbar"><BusinessSwitcher /></div>}
+        {!isChat && !isSettings && !isProjects && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && !isInbox && <div className="workspace-topbar"><BusinessSwitcher /></div>}
         {children}
       </section>
     </div>
@@ -1223,13 +1238,25 @@ import { EmailInboxPage } from "./EmailInboxPage";
 import { IntegrationsPage } from "./IntegrationsPage";
 
 function SettingsPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const cards: Array<{
     to: string;
     icon: React.ReactNode;
     title: string;
     description: string;
   }> = [
+    {
+      to: "/settings/websites",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      ),
+      title: "Website Builder",
+      description: language === "uk" ? "Створюйте та редагуйте сайти на Next.js та за допомогою AI." : "Create, customize, and manage responsive websites with Next.js and AI.",
+    },
     {
       to: "/settings/ai",
       icon: (
@@ -1408,6 +1435,14 @@ function HealthBadge() {
   return <div className="health-card"><span className={`status-dot ${health?.status === "ok" ? "healthy" : ""}`} /><div><strong>{health?.status === "ok" ? "Agent API connected" : "Waiting for local services"}</strong><small>Database: {health?.services.database ?? "unknown"} · AI routing: {health?.services.omniroute ?? "unknown"} · Crawler: {health?.services.crawler ?? "unknown"} · Hub: {health?.services.hub ?? "unknown"}</small></div></div>;
 }
 
+function LegacyProjectRedirect() {
+  const { projectId = "" } = useParams();
+  const { overview } = useWorkspace();
+  const companyId = overview?.currentBusiness?.id || overview?.businesses[0]?.id || "";
+  if (!companyId) return <Navigate to="/settings/websites" replace />;
+  return <Navigate to={`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(projectId)}`} replace />;
+}
+
 export function App() {
   return (
     <I18nProvider>
@@ -1424,7 +1459,10 @@ export function App() {
             <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
             <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
             <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
-            <Route path="/projects/:companyId/:projectId" element={<Workspace><ProjectPage /></Workspace>} />
+            <Route path="/settings/websites" element={<Workspace><WebsiteBuilderDashboard /></Workspace>} />
+            <Route path="/settings/websites/:companyId/:projectId" element={<Workspace><WebsiteEditor /></Workspace>} />
+            <Route path="/projects/:companyId/:projectId" element={<Workspace><WebsiteEditor /></Workspace>} />
+            <Route path="/projects/:projectId" element={<LegacyProjectRedirect />} />
             <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/activity" element={<Workspace><ActivityPage /></Workspace>} />

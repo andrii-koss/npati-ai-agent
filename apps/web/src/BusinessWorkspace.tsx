@@ -1080,6 +1080,10 @@ function AssistantMessageToolbar({
 
 function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const navigate = useNavigate();
+  const builderUrl = card.companyId
+    ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.id)}`
+    : `/projects/${encodeURIComponent(card.id)}`;
+
   return (
     <div className="project-chat-card-container">
       <div className="project-chat-card">
@@ -1103,15 +1107,25 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           <button
             type="button"
             className="button-primary"
-            onClick={() => navigate(`/projects/${card.id}`)}
+            onClick={() => navigate(builderUrl)}
           >
-            Open Project →
+            Open in Website Builder →
           </button>
-          {card.previewUrl && (
+          {card.previewUrl ? (
+            <a
+              href={card.previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="button-secondary"
+              style={{ display: "inline-flex", alignItems: "center" }}
+            >
+              Preview ↗
+            </a>
+          ) : (
             <button
               type="button"
               className="button-secondary"
-              onClick={() => navigate(`/projects/${card.id}`)}
+              onClick={() => navigate(`${builderUrl}?tab=preview`)}
             >
               Preview
             </button>
@@ -1119,7 +1133,7 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           <button
             type="button"
             className="button-secondary"
-            onClick={() => navigate(`/projects/${card.id}?tab=changes`)}
+            onClick={() => navigate(`${builderUrl}?tab=changes`)}
           >
             Changes
           </button>

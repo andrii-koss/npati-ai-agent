@@ -8,7 +8,7 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { CompanyDelegationRuntime } from "./company-runtime";
-import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework } from "@npati/shared";
+import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework, createDefaultWebsiteDocument, NextJsAdapter } from "@npati/shared";
 
 export class ProjectOrchestrationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
@@ -116,6 +116,7 @@ export class ProjectOrchestrator {
       "- Language: TypeScript / JavaScript",
       "",
       "## Engineering Mandate & Guidelines",
+      "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
       "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
       "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",
       "- **Preserve Stability**: Ensure configuration, routing, and functional components remain intact across iterations.",
@@ -134,14 +135,10 @@ export class ProjectOrchestrator {
     return content;
   }
 
-  private async scaffoldNextProject(ctx: AuthContext, companyId: string, projectId: string) {
-    const files: Record<string, string> = {
-      "package.json": JSON.stringify({ name: "npati-next-website", private: true, scripts: { dev: "next dev --hostname 0.0.0.0", build: "next build", start: "next start --hostname 0.0.0.0" }, dependencies: { next: "latest", react: "latest", "react-dom": "latest" }, devDependencies: { typescript: "latest", "@types/react": "latest", "@types/node": "latest" } }, null, 2) + "\n",
-      "app/layout.tsx": 'import "./globals.css";\nexport default function RootLayout({ children }: { children: React.ReactNode }) { return <html lang="uk"><body>{children}</body></html>; }\n',
-      "app/page.tsx": 'export default function Home() { return <main><h1>Hosting</h1><p>Modern hosting for your next project.</p></main>; }\n',
-      "app/globals.css": 'body { margin: 0; font-family: system-ui, sans-serif; } main { padding: 3rem; }\n',
-      "tsconfig.json": JSON.stringify({ compilerOptions: { target: "ES2017", lib: ["dom", "dom.iterable", "esnext"], allowJs: true, skipLibCheck: true, strict: true, noEmit: true, esModuleInterop: true, module: "esnext", moduleResolution: "bundler", resolveJsonModule: true, isolatedModules: true, jsx: "preserve", incremental: true, plugins: [{ name: "next" }] }, include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"], exclude: ["node_modules"] }, null, 2) + "\n",
-    };
+  private async scaffoldNextProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, prompt?: string) {
+    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { purpose: prompt });
+    const adapter = new NextJsAdapter();
+    const files = adapter.scaffoldProject(doc);
     for (const [filePath, content] of Object.entries(files)) {
       try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
       catch { await this.projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
@@ -213,7 +210,7 @@ export class ProjectOrchestrator {
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
       project = await this.projectService.updatePreview(ctx, params.companyId, created.id, { framework });
 
-      if (framework === "Next.js") await this.scaffoldNextProject(ctx, params.companyId, project.id);
+      if (framework === "Next.js") await this.scaffoldNextProject(ctx, params.companyId, project.id, project.name, params.prompt);
 
       // Initialize PROJECT.md
       await this.initSharedProjectContext(ctx, params.companyId, project.id, {
