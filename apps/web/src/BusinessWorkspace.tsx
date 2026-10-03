@@ -1412,7 +1412,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             if (allMatch) {
               return current.map((cur, i) => {
                 const lod = loaded[i]!;
-                return cur.id === lod.id && cur.content === lod.content ? cur : { ...cur, id: lod.id, content: lod.content };
+                if (cur.id === lod.id && cur.content === lod.content && cur.projectCard === lod.projectCard) return cur;
+                return { ...cur, id: lod.id, content: lod.content, projectCard: lod.projectCard ?? cur.projectCard };
               });
             }
           }
