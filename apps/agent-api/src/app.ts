@@ -880,7 +880,7 @@ export function buildApp(config: AppConfig = {}) {
         }
       }
       return models;
-    }, baseAiEngine instanceof OmniRouteEngine);
+    }, false);
   const projectOrchestrator = new ProjectOrchestrator(
     workspaceStore,
     projectService,
@@ -3188,8 +3188,16 @@ ${localized.next}`;
       const streamId=request.body.streamId?.trim();
       if(streamId&&!/^[A-Za-z0-9._:-]{8,100}$/.test(streamId))return reply.code(400).send({error:{code:"INVALID_STREAM_ID",message:"Invalid chat stream identifier."}});
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
-      const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
-      if (connected.overview.connectedProviders === 0) {
+      let hasConnectedProviders = true;
+      try {
+        const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
+        hasConnectedProviders = connected.overview.connectedProviders > 0;
+      } catch (err) {
+        request.log.warn({ err }, "Marketplace check failed, checking AI preferences fallback");
+        const prefs = await aiPreferences.get(auth).catch(() => null);
+        hasConnectedProviders = Boolean(prefs?.addedModels?.length);
+      }
+      if (!hasConnectedProviders) {
         return reply.code(409).send({ error: { code: "AI_PROVIDER_REQUIRED", message: "Connect an AI provider to start using NPATI Agent." } });
       }
       const message = request.body.message?.trim() ?? "";
@@ -3221,8 +3229,11 @@ ${localized.next}`;
       let distributedChatLease:ActiveSessionLease|undefined;
       if(streamId){
         if(activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active."}});
-        distributedChatLease=await activeSessionRegistry.acquire(auth.workspaceId,auth.userId,`chat:${streamId}`,45);
-        if(!distributedChatLease)return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active on another API replica."}});
+        distributedChatLease = await activeSessionRegistry.acquire(auth.workspaceId, auth.userId, `chat:${streamId}`, 45).catch((err) => {
+          request.log.warn({ err }, "Distributed chat lease acquisition failed; proceeding with local lock");
+          return undefined;
+        });
+        if(!distributedChatLease && activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active on another API replica."}});
         activeChatStreams.set(streamId,{controller:streamController,workspaceId:auth.workspaceId,userId:auth.userId});
       }
       reply.hijack();
@@ -3405,7 +3416,8 @@ ${localized.next}`;
       }
       if (!reply.sent) {
         request.log.error(error);
-        return reply.code(500).send({ error: { code: "STREAM_UNAVAILABLE", message: "Could not start the chat stream." } });
+        const errorMessage = error instanceof Error ? error.message : "Could not start the chat stream.";
+        return reply.code(500).send({ error: { code: "STREAM_UNAVAILABLE", message: errorMessage } });
       }
     }
   });
