@@ -38,13 +38,14 @@ describe("Website Builder through ordinary streamed Chat", () => {
     const aiEngine = {
       chat: async () => ({ content: "Website task completed.", model: "test-model", usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 } }),
       async *stream() { yield "Website task completed."; },
-      listModels: async () => [], getModel: async () => undefined,
+      listModels: async () => [{ id: "test/chat", name: "Test Chat", capabilities: ["chat", "coding"] }], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
       ensureA2AEnabled: async () => undefined,
       ensureCombo: async (input: { name: string }) => ({ name: input.name }),
       a2aSend: async () => ({ taskId: "builder-plan", content: JSON.stringify({ mode: "single", agentIds: [agent.id], toolRequests: [] }), metadata: {} }),
     } as AIEngine;
+    await store.setUserSetting(auth, "ai.preferences", { addedModels: [{ id: "test/chat", upstreamId: "chat", providerId: "test", providerName: "Test", name: "Chat", capabilities: ["text", "chat", "coding"], added: true, local: false, freeStatus: "free" }], routing: { mode: "manual", defaultModelId: "test/chat" } }, 0);
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as OmniRouteMarketplace;
     const authProvider: AuthProvider = { authenticate: async () => auth };
     const app = buildApp({ workspaceStore: store, authProvider, aiEngine, marketplace, projectWorkspaceRoot: root });

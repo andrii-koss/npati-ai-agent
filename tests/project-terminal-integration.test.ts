@@ -88,20 +88,31 @@ describe("Project terminal integration", () => {
     const tools = new CompanyToolRuntime(ai, undefined, undefined, undefined, undefined, undefined, undefined, undefined, workspace, store, sandbox);
     const approvals: DurableApprovalGateway = { requestApproval: vi.fn(async () => ({ id: "terminal-approval" })), consumeApproved: vi.fn(async () => undefined) };
     const runtime = new CompanyDelegationRuntime(store, ai, 10_000, tools, undefined, undefined, undefined, undefined, approvals);
-    const controlled = await runtime.execute(owner, company.id, { task: "Install dependencies", mode: "single" }, "terminal-install-run");
+    const controlled = await runtime.execute(owner, company.id, { task: "Install dependencies", mode: "single", projectId: project.id }, "terminal-install-run");
     expect(controlled.run.status, JSON.stringify(controlled.run)).toBe("completed");
     expect(provider.calls).toContain("npm install");
+    expect(approvals.requestApproval).not.toHaveBeenCalled();
+    command = "npm run dev -- --hostname 0.0.0.0 --port 3000";
+    const dev = await runtime.execute(owner, company.id, { task: "Start dev server", mode: "single", projectId: project.id }, "terminal-dev-run");
+    expect(dev.run.status).toBe("completed");
+    expect(provider.calls).toContain(command);
+    expect(approvals.requestApproval).not.toHaveBeenCalled();
     command = "echo built && rm -rf ./";
-    const pending = await runtime.execute(owner, company.id, { task: "Clean build", mode: "single" }, "terminal-approval-run");
+    const pending = await runtime.execute(owner, company.id, { task: "Clean build", mode: "single", projectId: project.id }, "terminal-approval-run");
+    expect(pending.run.status).toBe("awaiting_approval");
     expect(pending.run.errorCode).toBe("APPROVAL_REQUIRED");
     expect(provider.calls).not.toContain(command);
     expect(JSON.stringify((approvals.requestApproval as any).mock.calls)).not.toContain(command);
+    const approvedCommand = command;
+    const planningCalls = vi.mocked(ai.a2aSend!).mock.calls.length;
+    command = "pwd";
     const resumed = await runtime.process(owner, company.id, pending.run.id, { approvalId: "terminal-approval" });
+    expect(vi.mocked(ai.a2aSend!).mock.calls.length).toBe(planningCalls);
     expect(resumed.run.status).toBe("completed");
-    expect(provider.calls).toContain(command);
-    expect(JSON.stringify(await events.list(owner, company.id, project.id))).not.toContain(command);
+    expect(provider.calls).toContain(approvedCommand);
+    expect(JSON.stringify(await events.list(owner, company.id, project.id))).not.toContain(approvedCommand);
     command = "echo denied";
-    const deniedPending = await runtime.execute(owner, company.id, { task: "Denied command", mode: "single" }, "terminal-denied-run");
+    const deniedPending = await runtime.execute(owner, company.id, { task: "Denied command", mode: "single", projectId: project.id }, "terminal-denied-run");
     expect(deniedPending.run.errorCode).toBe("APPROVAL_REQUIRED");
     vi.mocked(approvals.consumeApproved).mockRejectedValueOnce(new Error("Approval denied"));
     const denied = await runtime.process(owner, company.id, deniedPending.run.id, { approvalId: "terminal-approval" });
@@ -109,14 +120,19 @@ describe("Project terminal integration", () => {
     expect(provider.calls).not.toContain(command);
     command = "pwd";
     environmentReferences = { API_TOKEN: { id: "44444444-4444-4444-8444-444444444444", field: "token" } };
-    const credentialPending = await runtime.execute(owner, company.id, { task: "Use credential", mode: "single" }, "terminal-credential-run");
+    const credentialPending = await runtime.execute(owner, company.id, { task: "Use credential", mode: "single", projectId: project.id }, "terminal-credential-run");
     expect(credentialPending.run.errorCode).toBe("APPROVAL_REQUIRED");
     expect(JSON.stringify((approvals.requestApproval as any).mock.calls)).not.toContain("44444444-4444-4444-8444-444444444444");
     expect(provider.calls.filter((call) => call === "pwd")).toHaveLength(0);
     environmentReferences = undefined;
     command = "npm run build";
-    const built = await runtime.execute(owner, company.id, { task: "Build the project", mode: "single" }, "terminal-build-run");
+    const built = await runtime.execute(owner, company.id, { task: "Build the project", mode: "single", projectId: project.id }, "terminal-build-run");
     expect(built.run.status).toBe("completed");
+    expect(approvals.requestApproval).toHaveBeenCalledTimes(3);
+    const unbound = await runtime.execute(owner, company.id, { task: "Unbound terminal request", mode: "single" }, "terminal-unbound-run");
+    expect(unbound.run.status).toBe("awaiting_approval");
+    expect(approvals.requestApproval).toHaveBeenCalledTimes(4);
+    expect(provider.calls.filter((call) => call === "npm run build")).toHaveLength(1);
     expect((await workspace.readFile(owner, company.id, project.id, "generated.html")).content).toContain("built");
     expect((await events.list(owner, company.id, project.id)).length).toBeGreaterThan(0);
   });
@@ -126,18 +142,18 @@ describe("Project terminal integration", () => {
     const agent = await store.createCompanyAgent(owner, company.id, { name: "Builder", role: "Developer", tools: ["project.terminal.process"] }, "terminal-process-agent");
     company = await store.setCompanyMainAgent(owner, company.id, agent.id, company.revision);
     const processId = "22222222-2222-4222-8222-222222222222";
-    let input: Record<string, unknown> = { projectId: project.id, action: "start", command: "npm run build" };
+    let input: Record<string, unknown> = { projectId: project.id, action: "start", command: "npm run dev" };
     const ai = { executeTool: vi.fn(), ensureA2AEnabled: vi.fn(), ensureCombo: vi.fn(async (value: { name: string }) => ({ name: value.name })),
       a2aSend: vi.fn(async () => ({ taskId: "plan", content: JSON.stringify({ mode: "single", agentIds: [agent.id], toolRequests: [{ agentId: agent.id, tool: "project.terminal.process", input }] }), metadata: {} })),
       chat: vi.fn(async () => ({ content: "done", model: "auto" })) } as unknown as AIEngine;
     const approvals: DurableApprovalGateway = { requestApproval: vi.fn(async () => ({ id: "unexpected" })), consumeApproved: vi.fn(async () => undefined) };
     const runtime = new CompanyDelegationRuntime(store, ai, 10_000, new CompanyToolRuntime(ai, undefined, undefined, undefined, undefined, undefined, undefined, undefined, workspace, store, sandbox), undefined, undefined, undefined, undefined, approvals);
-    expect((await runtime.execute(owner, company.id, { task: "Start build", mode: "single" }, "process-start-run")).run.status).toBe("completed");
+    expect((await runtime.execute(owner, company.id, { task: "Start build", mode: "single", projectId: project.id }, "process-start-run")).run.status).toBe("completed");
     for (const action of ["status", "logs", "stop"] as const) {
       input = { projectId: project.id, action, processId };
-      expect((await runtime.execute(owner, company.id, { task: action + " build", mode: "single" }, "process-" + action + "-run")).run.status).toBe("completed");
+      expect((await runtime.execute(owner, company.id, { task: action + " build", mode: "single", projectId: project.id }, "process-" + action + "-run")).run.status).toBe("completed");
     }
-    expect(provider.calls).toContain("process:npm run build");
+    expect(provider.calls).toContain("process:npm run dev");
     expect(approvals.requestApproval).not.toHaveBeenCalled();
   });
   it("reports timeout, install failure, missing command, runner failure, and redacts secret output", async () => {

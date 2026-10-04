@@ -10,6 +10,22 @@ const result = (level: TerminalRiskLevel, reason: string, timeoutClass: Terminal
 });
 const relative = (value: string) => /^[A-Za-z0-9._/@+-]+$/.test(value) && !value.startsWith("/") && !value.split("/").includes("..") && !/(?:^|\/)(?:\.env(?:\..*)?|\.ssh|\.aws|\.git)(?:\/|$)/i.test(value);
 const packageName = (value: string) => /^[A-Za-z0-9@._/+~-]+$/.test(value) && !value.includes("..") && !value.startsWith("/") && !/^(?:https?:|git\+|file:)/i.test(value);
+const packageManager = (value: string) => ["npm", "pnpm", "yarn"].includes(value);
+const installFlag = (value: string) => ["--no-audit", "--frozen-lockfile", "--offline", "--prefer-offline", "--ignore-scripts", "--no-fund", "--legacy-peer-deps"].includes(value);
+const installArgs = (values: string[]) => values.every((value) => installFlag(value) || (!value.startsWith("-") && packageName(value)));
+const serverArgs = (values: string[]) => {
+  const args = values[0] === "--" ? values.slice(1) : values;
+  for (let index = 0; index < args.length; index++) {
+    const value = args[index]!;
+    if (["--turbo", "--turbopack", "--strictPort"].includes(value)) continue;
+    const [flag, inline] = value.split("=", 2);
+    if (!["--host", "--hostname", "--port", "-p", "-H"].includes(flag!)) return false;
+    const argument = inline ?? args[++index];
+    if (!argument || (["--port", "-p"].includes(flag!) ? !/^[1-9][0-9]{0,4}$/.test(argument) || Number(argument) > 65535 : !["0.0.0.0", "127.0.0.1", "localhost"].includes(argument))) return false;
+  }
+  return true;
+};
+const frameworkCli = (value: string) => ["next", "vite", "astro", "nuxt", "remix", "react-scripts", "svelte-kit"].includes(value);
 export function classifyTerminalCommand(command: string): TerminalCommandDecision {
   if (typeof command !== "string" || !command.trim() || command.length > 4096 || command.includes("\0")) throw new Error("Invalid terminal command");
   const clean = command.trim();
@@ -21,8 +37,18 @@ export function classifyTerminalCommand(command: string): TerminalCommandDecisio
   if (program === "cat" && words.length === 2 && relative(action!)) return result("safe", "Read sandbox file");
   if (program === "git" && action === "status" && args.every((word) => ["--short", "--porcelain", "-sb"].includes(word))) return result("safe", "Read Git status");
   if (program === "git" && action === "diff" && args.every((word) => ["--stat", "--name-only", "--cached"].includes(word))) return result("safe", "Read Git diff");
-  if (["npm", "pnpm", "yarn"].includes(program!) && (action === "test" || (action === "run" && ["build", "test"].includes(args[0] ?? "") && args.length === 1)) && words.length <= 3) return result("safe", "Run sandbox build or tests", "install_build");
-  if (["npm", "pnpm", "yarn"].includes(program!) && ["install", "ci"].includes(action!) && args.every((word) => ["--no-audit", "--frozen-lockfile", "--offline", "--prefer-offline"].includes(word) || packageName(word))) return result("controlled", "Install dependencies inside sandbox", "install_build");
+  if (packageManager(program!)) {
+    if (["install", "ci"].includes(action!) && installArgs(args) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
+    if (action === "test" && args.length === 0) return result("safe", "Run sandbox tests", "install_build");
+    if (action === "run" && ["build", "test"].includes(args[0] ?? "") && args.length === 1) return result("safe", "Run sandbox build or tests", "install_build");
+    if ((action === "run" && ["dev", "start", "preview"].includes(args[0] ?? "") && serverArgs(args.slice(1))) || (["dev", "start", "preview"].includes(action!) && serverArgs(args))) return result("controlled", "Start sandbox development server");
+  }
+  const cli = program === "npx" && action === "--yes" ? args[0] : program === "npx" ? action : program === "npm" && action === "exec" && args[0] === "--" ? args[1] : ["pnpm", "yarn"].includes(program!) && action === "exec" ? args[0] : undefined;
+  const cliArgs = program === "npx" && action === "--yes" ? args.slice(1) : program === "npx" ? args : program === "npm" && action === "exec" && args[0] === "--" ? args.slice(2) : ["pnpm", "yarn"].includes(program!) && action === "exec" ? args.slice(1) : [];
+  const scaffold = cli?.replace(/@latest$/, "");
+  if (scaffold && ["create-next-app", "create-vite", "create-astro", "create-remix", "create-react-app"].includes(scaffold) && relative(cliArgs[0] ?? "") && cliArgs.slice(1).every((arg, index, rest) => ["--typescript", "--javascript", "--eslint", "--app", "--src-dir", "--no-src-dir", "--tailwind", "--no-tailwind", "--use-npm", "--use-pnpm", "--use-yarn", "--yes", "-y"].includes(arg) || arg === "--template" && ["react", "react-ts", "vanilla", "vanilla-ts", "vue", "vue-ts", "svelte", "svelte-ts"].includes(rest[index + 1] ?? "") || index > 0 && rest[index - 1] === "--template")) return result("controlled", "Scaffold web project inside sandbox", "install_build");
+  if (cli && frameworkCli(cli) && ["build", "dev", "start", "preview", "sync"].includes(cliArgs[0] ?? "") && (cliArgs[0] !== "sync" || cli === "svelte-kit") && serverArgs(cliArgs.slice(1))) return result("controlled", "Run framework CLI inside sandbox", cliArgs[0] === "build" ? "install_build" : "default");
+  if (program === "node" && action && relative(action) && /\.(?:js|mjs|cjs)$/.test(action) && serverArgs(args)) return result("controlled", "Run Node project server inside sandbox");
   if (["pip", "pip3"].includes(program!) && action === "install" && (args.every(packageName) || (args.length === 2 && args[0] === "-r" && relative(args[1]!)))) return result("controlled", "Install Python dependencies inside sandbox", "install_build");
   if (program === "composer" && action === "install" && args.every((word) => ["--no-interaction", "--prefer-dist", "--no-progress"].includes(word))) return result("controlled", "Install Composer dependencies inside sandbox", "install_build");
   return result("approval", "Unknown or destructive command requires approval");

@@ -661,7 +661,7 @@ export class ProjectOrchestrator {
     }
 
     if (usedMultiAgent && needsBuild && runDetails.run.status === "completed") lastBuildStatus = previewUrl ? "success" : "failed";
-    const finalStatus = runDetails.run.status === "failed" || lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
+    const finalStatus = runDetails.run.status === "awaiting_approval" ? "working" : runDetails.run.status === "failed" || lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";
     project = await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, {
       status: finalStatus,
       lastBuildStatus,
@@ -692,7 +692,9 @@ export class ProjectOrchestrator {
       runId: runDetails.run.id,
     };
 
-    let responseMessage = runDetails.run.status === "failed"
+    let responseMessage = runDetails.run.status === "awaiting_approval"
+      ? `Project "${project.name}" is waiting for command approval. [Open approval](/company?company=${encodeURIComponent(params.companyId)}&runId=${encodeURIComponent(runDetails.run.id)})`
+      : runDetails.run.status === "failed"
       ? isCreate && lastBuildStatus === "failed"
         ? `Файли сайту "${project.name}" збережено, але перегляд не запущено.`
         : `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`

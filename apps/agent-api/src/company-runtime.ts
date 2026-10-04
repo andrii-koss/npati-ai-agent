@@ -267,6 +267,9 @@ export class CompanyDelegationRuntime {
 
   async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
+    if (options.approvalId && existing.run.status !== "awaiting_approval") throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409);
+    const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string } | null : null;
+    if (options.approvalId && (!pendingState || !pendingState.plan || !Number.isInteger(pendingState.nextToolIndex))) throw new CompanyRuntimeError("APPROVAL_INVALID", "Pending run plan is unavailable", 409);
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
     const controller = new AbortController(), timeout = AbortSignal.timeout(this.timeoutMs);
@@ -453,6 +456,7 @@ export class CompanyDelegationRuntime {
       }
       let plannedModel = planningRequest.model;
       const planned = await (async () => {
+        if (pendingState) return { taskId: existing.run.omnirouteTaskId ?? "resumed-plan", content: JSON.stringify(pendingState.plan), metadata: {} };
         let lastError: unknown;
         for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
           try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
@@ -529,7 +533,7 @@ export class CompanyDelegationRuntime {
         }
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
-      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0);
       const evidence = rawEvidence ? protect(rawEvidence) : rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
@@ -574,6 +578,7 @@ export class CompanyDelegationRuntime {
         totalCost += measured.costUsd;
         totalTokens += measured.totalTokens;
       }
+      await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, null);
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
         status: "completed",
         result: result.content,
@@ -586,14 +591,16 @@ export class CompanyDelegationRuntime {
     } catch (error) {
       const current = await this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
       const cancelled = current.run.cancelRequested || controller.signal.aborted || Boolean(options.signal?.aborted), timedOut = !cancelled && timeout.aborted;
+      const awaitingApproval = !cancelled && !timedOut && error instanceof CompanyRuntimeError && error.code === "APPROVAL_REQUIRED";
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
-        status: cancelled ? "cancelled" : "failed",
+        status: cancelled ? "cancelled" : awaitingApproval ? "awaiting_approval" : "failed",
         errorCode: cancelled ? "RUN_CANCELLED" : timedOut ? "RUN_TIMEOUT" : error instanceof CompanyRuntimeError ? error.code : error instanceof SecurityPolicyViolation ? error.code : "RUN_FAILED",
         errorMessage: cancelled ? "Company run was cancelled" : timedOut ? "Company run exceeded its timeout" : (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI"),
         totalCost,
         totalTokens,
         totalDurationMs: Math.max(0, Date.now() - runStartedAt),
       });
+      if (!awaitingApproval) await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, null);
     } finally { this.controllers.delete(created.run.id); }
     return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
   }
@@ -613,7 +620,8 @@ export class CompanyDelegationRuntime {
   async cancel(ctx: AuthContext, companyId: string, runId: string) {
     const current = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (["completed", "failed", "cancelled"].includes(current.run.status)) return current;
-    if (current.run.status === "queued") {
+    if (current.run.status === "queued" || current.run.status === "awaiting_approval") {
+      await this.store.setCompanyRunPendingPlan(ctx, companyId, runId, null);
       await this.store.updateCompanyAgentRun(ctx, companyId, runId, { status: "cancelled", cancelRequested: true, errorCode: "RUN_CANCELLED", errorMessage: "Company run was cancelled" });
       const cancelled = await this.store.getCompanyAgentRun(ctx, companyId, runId);
       await this.recordBackgroundEvent(ctx, companyId, runId, {
@@ -707,10 +715,12 @@ export class CompanyDelegationRuntime {
     return { costUsd, totalTokens: usage.totalTokens };
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string) {
-    const evidence: string[] = [];
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0) {
+    const evidence: string[] = previousEvidence ? [previousEvidence] : [];
     let sequenceNumber = 1;
-    for (const plan of plans.slice(0, 10)) {
+    for (const [offset, plan] of plans.slice(startIndex, 10).entries()) {
+      const planIndex = startIndex + offset;
+      const approvedForCurrent = Boolean(approvalId && planIndex === startIndex);
       if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
       const agent = agents.get(plan.agentId);
       if (!agent) throw new CompanyRuntimeError("INVALID_TOOL_AGENT", "Tool request references an unavailable agent", 502);
@@ -774,11 +784,12 @@ export class CompanyDelegationRuntime {
       const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
       const terminalDecision = tool.startsWith("project.terminal.") && (tool === "project.terminal.exec" || plan.input.action === "start") ? classifyTerminalCommand(String(plan.input.command ?? "")) : undefined;
       const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || (tool.startsWith("project.terminal.") && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length));
-      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? terminalNeedsApproval ? "high" : "low" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : undefined;
+      const sandboxAutoApproval = Boolean(runProjectId && !terminalNeedsApproval && (tool === "project.terminal.exec" || tool === "project.terminal.process") && this.toolRuntime.canAutoApproveSandboxTerminal && await this.toolRuntime.canAutoApproveSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input));
+      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : undefined;
       const approvalPayload = tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(String(plan.input.command ?? "")).digest("hex"), action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
       if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if (this.durableApprovals) {
-          if (!approvalId) {
+          if (!approvedForCurrent) {
             const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
             const req = await this.durableApprovals.requestApproval(ctx, company.id, {
               runId, agentId: agent.id, toolName: toolToAssess,
@@ -789,10 +800,11 @@ export class CompanyDelegationRuntime {
               agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
               inputSummary: summary(cleanPayload), errorMessage: `Human approval required. Approval request ID: ${req.id}`, reasonCode: "approval_required", sequenceNumber: sequenceNumber++
             });
+            await onApprovalPending?.(planIndex, evidence.join("\n"));
             throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval. Approval request ID: ${req.id}`, 403);
           }
           const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
-          try { await this.durableApprovals.consumeApproved(ctx, company.id, approvalId, { runId, agentId: agent.id, toolName: toolToAssess, inputPayload: cleanPayload }); }
+          try { await this.durableApprovals.consumeApproved(ctx, company.id, approvalId!, { runId, agentId: agent.id, toolName: toolToAssess, inputPayload: cleanPayload }); }
           catch (error) {
             const code = (error as any)?.code ?? "APPROVAL_INVALID";
             await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
@@ -815,6 +827,7 @@ export class CompanyDelegationRuntime {
               reasonCode: "approval_required",
               sequenceNumber: sequenceNumber++,
             });
+            await onApprovalPending?.(planIndex, evidence.join("\n"));
             throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval before execution. Approval request ID: ${req.id}`, 403);
           }
 
@@ -869,7 +882,7 @@ export class CompanyDelegationRuntime {
               : company.name || "company information";
         }
         if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
-        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" ? Boolean(approvalId || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvalId || plan.input._approvalToken)); }
+        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);

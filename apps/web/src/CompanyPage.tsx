@@ -236,6 +236,7 @@ export function CompanyPage() {
   const { t, language } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
+  const requestedRunId = searchParams.get("runId") ?? "";
   const { overview } = useWorkspace();
   const cachedCompaniesRef = useRef(getCachedCompanies());
   const [companies, setCompanies] = useState<Company[]>(cachedCompaniesRef.current);
@@ -274,6 +275,14 @@ export function CompanyPage() {
   const companyCreateKey = useRef(crypto.randomUUID());
   const agentCreateKey = useRef(crypto.randomUUID());
   const selected = companies.find((company) => company.id === selectedId);
+
+  useEffect(() => {
+    if (!selectedId || !/^[0-9a-f-]{36}$/i.test(requestedRunId)) return;
+    void api<RunDetails>(`/companies/${selectedId}/runs/${requestedRunId}`).then((details) => {
+      setRunDetails(details);
+      setRunning(!["completed", "failed", "cancelled", "awaiting_approval"].includes(details.run.status));
+    }).catch(() => undefined);
+  }, [selectedId, requestedRunId]);
 
   const [availableTools, setAvailableTools] = useState<CapabilityItem[]>(defaultToolOptions);
 
@@ -445,7 +454,7 @@ export function CompanyPage() {
 
   useEffect(() => { setRunDetails(undefined); setRunning(false); }, [selectedId]);
   useEffect(() => {
-    if (!runDetails || !selectedId || ["completed", "failed", "cancelled"].includes(runDetails.run.status)) return;
+    if (!runDetails || !selectedId || ["completed", "failed", "cancelled", "awaiting_approval"].includes(runDetails.run.status)) return;
     let active = true;
     const timer = window.setTimeout(() => {
       void api<RunDetails>(`/companies/${selectedId}/runs/${runDetails.run.id}`).then((details) => {
@@ -613,7 +622,7 @@ export function CompanyPage() {
       setRunDetails(result);
       if (result.run.status === "completed") setNotice(t("companySettings.notices.runCompleted"));
       else setNotice(result.run.errorMessage ?? t("companySettings.notices.runEnded", { status: translatedStatus(t, result.run.status) }));
-      const remainsActive = !["completed", "failed", "cancelled"].includes(result.run.status);
+      const remainsActive = !["completed", "failed", "cancelled", "awaiting_approval"].includes(result.run.status);
       setRunning(remainsActive);
       if (!remainsActive) setWorkingAgentIds(new Set());
     } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : t("companySettings.notices.runFailed")); }
@@ -631,7 +640,9 @@ export function CompanyPage() {
         method: "POST", body: JSON.stringify({ decision }),
       });
       if (decision === "rejected") {
-        setRunDetails((current) => current ? { ...current, run: { ...current.run, errorCode: "APPROVAL_REJECTED", errorMessage: t("companySettings.errors.executionRejectedByUser") } } : current);
+        const cancelled = await api<RunDetails>(`/companies/${selected.id}/runs/${runDetails.run.id}/cancel`, { method: "POST" });
+        setRunDetails(cancelled);
+        setRunning(false);
         setNotice(t("companySettings.notices.executionRejected"));
         return;
       }
@@ -640,7 +651,7 @@ export function CompanyPage() {
         method: "POST", body: JSON.stringify({ approvalId: pendingApprovalId }),
       });
       setRunDetails(resumed);
-      const remainsActive = !["completed", "failed", "cancelled"].includes(resumed.run.status);
+      const remainsActive = !["completed", "failed", "cancelled", "awaiting_approval"].includes(resumed.run.status);
       setRunning(remainsActive);
       setNotice(resumed.run.status === "completed" ? t("companySettings.notices.approvedCompleted") : resumed.run.errorMessage ?? t("companySettings.notices.runEnded", { status: translatedStatus(t, resumed.run.status) }));
     } catch (error) {

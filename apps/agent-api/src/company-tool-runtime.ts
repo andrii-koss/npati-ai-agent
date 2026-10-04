@@ -20,6 +20,7 @@ import type { DeployTargetConfig } from "./deploy-provider";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 
 export interface CompanyToolExecutor {
+  canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 }
 
@@ -56,6 +57,17 @@ function record(value: unknown) {
 }
 
 export class CompanyToolRuntime implements CompanyToolExecutor {
+  async canAutoApproveSandboxTerminal(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean> {
+    if (!this.projectSandbox) return false;
+    return this.projectSandbox.canAutoApproveTerminal(context, company.id, runProjectId, {
+      projectId: typeof input.projectId === "string" ? input.projectId : "",
+      sandboxId: typeof input.sandboxId === "string" ? input.sandboxId : undefined,
+      command: typeof input.command === "string" ? input.command : undefined,
+      action: input.action as "start" | "status" | "logs" | "stop" | undefined,
+      environmentReferences: input.environmentReferences as Record<string, TerminalSecretReference> | undefined,
+      agentId,
+    }, tool);
+  }
   private readonly projectReadVersions = new Map<string, string>();
   constructor(
     private readonly ai: AIEngine,
