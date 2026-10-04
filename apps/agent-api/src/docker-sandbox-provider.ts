@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
+import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
 
@@ -48,8 +49,11 @@ export class DockerSandboxProvider implements SandboxProvider {
   constructor(limits: Partial<RunnerLimits> = {}) { this.limits = { ...defaults, ...limits }; if (!this.limits.allowedHosts.split(",").every((host) => /^[a-z0-9.-]+$/.test(host) && !host.startsWith(".") && !host.endsWith("."))) throw new Error("Invalid sandbox allowlist");
     if (!/^(?:0\.[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)$/.test(this.limits.cpu) || !/^[1-9][0-9]*(?:[kmg])?$/i.test(this.limits.memory) || !Number.isSafeInteger(this.limits.diskBytes) || this.limits.diskBytes < 16_000_000 || !Number.isSafeInteger(this.limits.pids) || this.limits.pids < 16) throw new Error("Invalid sandbox resource limits"); }
   private async docker(argsList: string[], timeoutMs = 30_000, stdin?: string | Buffer, outputLimit?: number) {
-    const result = await args("docker", argsList, timeoutMs, stdin, outputLimit);
-    if (result.code !== 0 || result.timedOut) throw new SandboxProviderError(result.timedOut ? "docker_timeout" : "docker_failed", "Sandbox runner operation failed", result.timedOut ? 504 : 503, "docker", "project.terminal.exec", result.timedOut);
+    const action = [argsList[0], argsList[0] === "network" ? argsList[1] : undefined].filter(Boolean).join(".");
+    let result: Awaited<ReturnType<typeof args>>;
+    try { result = await args("docker", argsList, timeoutMs, stdin, outputLimit); }
+    catch (error) { throw dockerFailure(action, error instanceof Error ? error.message : "Docker CLI failed to start", false, (error as NodeJS.ErrnoException)?.code); }
+    if (result.code !== 0 || result.timedOut) throw dockerFailure(action, text(result.stderr), result.timedOut);
     return result;
   }
   private names(id: string) {
@@ -59,7 +63,10 @@ export class DockerSandboxProvider implements SandboxProvider {
   private async inspect(scope: SandboxScope, id: string) {
     const names = this.names(id);
     const found = await args("docker", ["inspect", "--format", "{{json .Config.Labels}}", names.sandbox]);
-    if (found.code !== 0) throw new SandboxProviderError("sandbox_not_found", "Sandbox not found", 404);
+    if (found.code !== 0) {
+      if (/(?:no such object|no such container)/i.test(text(found.stderr))) throw new SandboxProviderError("sandbox_not_found", "Sandbox not found", 404);
+      throw dockerFailure("inspect", text(found.stderr), found.timedOut);
+    }
     let labels: Record<string, string>;
     try { labels = JSON.parse(text(found.stdout)); } catch { throw new SandboxProviderError("sandbox_corrupt", "Sandbox metadata is invalid", 503); }
     if (labels["npati.scope"] !== label(scope) || labels["npati.sandbox"] !== id) throw new SandboxProviderError("sandbox_scope_denied", "Sandbox scope denied", 403);
@@ -75,11 +82,16 @@ export class DockerSandboxProvider implements SandboxProvider {
   async createSandbox(scope: SandboxScope): Promise<SandboxStatus> {
     if (!scope.workspaceId || !scope.userId || !scope.companyId || !scope.projectId) throw new SandboxProviderError("invalid_scope", "Sandbox scope is incomplete", 400);
     const id = randomUUID(), names = this.names(id);
+    let phase = "network.create";
     try {
       await this.docker(["network", "create", "--driver", "bridge", "--internal", "--opt", "com.docker.network.bridge.gateway_mode_ipv4=isolated", names.network]);
+      phase = "proxy.create";
       await this.docker(["create", "--name", names.proxy, "--network", names.network, "--network-alias", "egress", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "64", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--env", `ALLOWED_HOSTS=${this.limits.allowedHosts}`, this.limits.proxyImage]);
+      phase = "proxy.network.connect";
       await this.docker(["network", "connect", "bridge", names.proxy]);
+      phase = "proxy.start";
       await this.docker(["start", names.proxy]);
+      phase = "sandbox.create";
       await this.docker([
         "create", "--name", names.sandbox, "--label", `npati.scope=${label(scope)}`, "--label", `npati.sandbox=${id}`,
         "--network", names.network, "--network-alias", "project-preview", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -93,6 +105,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       this.touch(id);
       return this.state(scope, id);
     } catch (error) {
+      if (error instanceof SandboxProviderError) error.diagnostics = { ...error.diagnostics, dockerAction: phase, sandboxId: id, image: phase.startsWith("proxy") ? this.limits.proxyImage : phase.startsWith("sandbox") ? this.limits.image : undefined, container: phase.startsWith("proxy") ? names.proxy : phase.startsWith("sandbox") ? names.sandbox : undefined, network: names.network };
       await args("docker", ["rm", "-f", names.sandbox]).catch(() => undefined);
       await args("docker", ["rm", "-f", names.proxy]).catch(() => undefined);
       await args("docker", ["network", "rm", names.network]).catch(() => undefined);
@@ -112,7 +125,10 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (env.some(([key]) => !/^[A-Z_][A-Z0-9_]{0,63}$/.test(key))) throw new SandboxProviderError("invalid_environment", "Invalid environment key", 400);
     const script = env.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n") + "\n" + command + "\n";
     const started = Date.now();
-    const result = await args("docker", ["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "timeout", "-s", "TERM", "-k", "2", String(Math.max(1, Math.ceil(options.timeoutMs / 1000))), "sh", "-s"], Math.min(options.timeoutMs, 600_000) + 5_000, script, Math.min(options.outputLimitBytes, 128_000));
+    let result: Awaited<ReturnType<typeof args>>;
+    try { result = await args("docker", ["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "timeout", "-s", "TERM", "-k", "2", String(Math.max(1, Math.ceil(options.timeoutMs / 1000))), "sh", "-s"], Math.min(options.timeoutMs, 600_000) + 5_000, script, Math.min(options.outputLimitBytes, 128_000)); }
+    catch (error) { throw dockerFailure("exec", error instanceof Error ? error.message : "Docker CLI failed to start", false, (error as NodeJS.ErrnoException)?.code); }
+    if (result.code !== 0 && /^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
     if (result.timedOut) await this.stopSandbox(scope, id).catch(() => undefined);
     return {
       status: result.timedOut || result.code === 124 || result.code === 137 ? "timed_out" : result.code === 0 ? "completed" : "failed", exitCode: result.timedOut ? null : result.code,
@@ -196,7 +212,12 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const script = `let input="";process.stdin.on("data",c=>input+=c);process.stdin.on("end",async()=>{try{const q=JSON.parse(input);const url=new URL(q.path,"http://127.0.0.1:"+q.port);if(url.hostname!=="127.0.0.1")throw Error("Invalid preview path");const r=await fetch(url,{method:q.method,headers:q.headers,body:q.body?Buffer.from(q.body,"base64"):undefined,signal:AbortSignal.timeout(20000),redirect:"manual"});const data=Buffer.from(await r.arrayBuffer());if(data.length>8000000)throw Error("Preview response too large");process.stdout.write(JSON.stringify({status:r.status,headers:Object.fromEntries(r.headers),body:data.toString("base64")}));}catch(e){process.stderr.write(String(e));process.exitCode=1}})`;
     const result = await args("docker", ["exec", "-i", names.sandbox, "node", "-e", script], 25_000, JSON.stringify(options), 16_000_000);
-    if (result.code !== 0 || result.timedOut) throw new SandboxProviderError("preview_upstream_failed", "Sandbox preview is unavailable", 502);
+    if (result.code !== 0 || result.timedOut) {
+      if (/^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
+      const error = new SandboxProviderError("preview_upstream_failed", "Preview server is unavailable", 502);
+      error.diagnostics = { dockerAction: "preview.fetch", dockerStderr: safeDockerStderr(text(result.stderr)), sandboxId: id, container: names.sandbox, network: names.network };
+      throw error;
+    }
     this.touch(id);
     return JSON.parse(result.stdout.toString("utf8")) as PreviewProxyResponse;
   }
@@ -206,6 +227,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       throw new SandboxProviderError("invalid_port", "Invalid port number", 400);
     }
     const inspect = await args("docker", ["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", names.sandbox]);
+    if (inspect.code !== 0 || inspect.timedOut) throw dockerFailure("inspect.network", text(inspect.stderr), inspect.timedOut);
     const internalIp = text(inspect.stdout).trim();
     const internalHost = internalIp || names.sandbox;
     return { port, internalHost };
@@ -231,6 +253,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     const names = await this.inspect(scope, id);
     if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400);
     const result = await args("docker", ["exec", names.sandbox, "cat", "--", `/tmp/npati-process-${processId}.exit`]);
+    if (result.code !== 0 && /^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
     const done = result.code === 0, exitCode = done ? Number(text(result.stdout).trim()) : null;
     return { status: done ? exitCode === 0 ? "completed" : exitCode === 124 ? "timed_out" : "failed" : "running", exitCode, stdout: "", stderr: "", durationMs: 0, step: done ? "finished" : "running", tool: "project.terminal.process", retryable: false, processId };
   }

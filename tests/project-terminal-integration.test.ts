@@ -175,6 +175,7 @@ describe("Project terminal integration", () => {
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: agent.id })).rejects.toMatchObject({ code: "command_timeout", status: 504, step: "install_build", tool: "project.terminal.exec", retryable: true });
     provider.commandResult = result("failed", 1);
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm install", agentId: agent.id })).rejects.toMatchObject({ code: "install_failed" });
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: agent.id })).rejects.toMatchObject({ code: "build_failed", message: "Build command failed" });
     provider.commandResult = result("failed", 127);
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "unknowncmd", agentId: agent.id, approved: true })).rejects.toMatchObject({ code: "command_not_found" });
     provider.commandResult = result("completed", 0, "password=top-secret-value");

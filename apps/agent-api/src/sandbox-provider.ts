@@ -46,6 +46,7 @@ export interface SandboxProvider {
 export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
 export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
 export class SandboxProviderError extends Error {
+  diagnostics?: { dockerAction?: string; dockerStderr?: string; image?: string; container?: string; network?: string; sandboxId?: string };
   constructor(public readonly code: string, message: string, public readonly status = 503, public readonly step = "sandbox", public readonly tool = "project.terminal.exec", public readonly retryable = false, public readonly currentRevision?: string) { super(message); }
 }
 export class RemoteSandboxProvider implements SandboxProvider {
@@ -62,6 +63,9 @@ export class RemoteSandboxProvider implements SandboxProvider {
   }
   private async request<T>(operation: string, payload: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
     const body = JSON.stringify({ operation, payload });
+    const runnerEndpoint = new URL("/v1/sandbox", this.endpoint).origin + "/v1/sandbox";
+    const requestScope = payload.scope as SandboxScope | undefined;
+    const identifiers = { operation, endpoint: runnerEndpoint, projectId: requestScope?.projectId ?? null, sandboxId: typeof payload.sandboxId === "string" ? payload.sandboxId : null };
     const timestamp = String(Date.now()), nonce = randomUUID();
     const signature = createHmac("sha256", this.secret).update(`${timestamp}.${nonce}.${body}`).digest("hex");
     let response: Response;
@@ -71,10 +75,15 @@ export class RemoteSandboxProvider implements SandboxProvider {
         body, signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
-      throw new SandboxProviderError("runner_unavailable", "Sandbox runner is unavailable", 503, operation, "project.terminal.exec", true);
+      const causeCode = error && typeof error === "object" && "code" in error ? String(error.code) : "network_error";
+      console.error("[sandbox-runner-client] " + JSON.stringify({ ...identifiers, httpStatus: null, errorCode: "runner_unavailable", causeCode }));
+      throw new SandboxProviderError("runner_unavailable", `Sandbox runner is unavailable during ${operation}`, 503, operation, "project.terminal.exec", true);
     }
     const data = await response.json().catch(() => ({})) as { result?: T; error?: { code?: string; message?: string; status?: number; retryable?: boolean } };
-    if (!response.ok) throw new SandboxProviderError(data.error?.code ?? "runner_error", data.error?.message ?? "Sandbox runner failed", response.status, operation, "project.terminal.exec", data.error?.retryable ?? false);
+    if (!response.ok) {
+      console.error("[sandbox-runner-client] " + JSON.stringify({ ...identifiers, httpStatus: response.status, errorCode: data.error?.code ?? "runner_error" }));
+      throw new SandboxProviderError(data.error?.code ?? "runner_error", data.error?.message ?? `Sandbox runner ${operation} failed (HTTP ${response.status})`, response.status, operation, "project.terminal.exec", data.error?.retryable ?? false);
+    }
     return data.result as T;
   }
   createSandbox(scope: SandboxScope, options: { runtime?: string } = {}) { return this.request<SandboxStatus>("createSandbox", { scope, options }); }
