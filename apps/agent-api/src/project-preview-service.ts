@@ -185,8 +185,7 @@ export class ProjectPreviewService {
     if (!paths.has("package.json")) return;
     const manifest = JSON.parse((await this.workspace.readFile(ctx, companyId, projectId, "package.json")).content) as { scripts?: Record<string, string> };
     if (!manifest.scripts?.build) return;
-    const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci --no-audit --no-fund"
-      : stack.packageManager === "npm" ? "npm install --no-audit --no-fund"
+    const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci"
       : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
       : `${stack.packageManager} install`;
     try {
