@@ -5,7 +5,7 @@ import { DataStudioError } from "./identifier";
 import type { DataBackend, DataBackendEnvironment, DataEnvironmentName, DataProviderKind } from "./types";
 
 const backendColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy", name, provider, status, created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
-const environmentColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", environment, provider_config AS "providerConfig", migrator_secret_ref AS "migratorSecretRef", runtime_secret_ref AS "runtimeSecretRef", signing_key_ref AS "signingKeyRef", status, schema_fingerprint AS "schemaFingerprint", sync_status AS "syncStatus", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
+const environmentColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", environment, provider_config AS "providerConfig", migrator_secret_ref AS "migratorSecretRef", runtime_secret_ref AS "runtimeSecretRef", signing_key_ref AS "signingKeyRef", status, schema_fingerprint AS "schemaFingerprint", expected_schema AS "expectedSchema", sync_status AS "syncStatus", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
 
 export class DataBackendRepository {
   readonly pool: Pool;
@@ -107,6 +107,12 @@ export class DataBackendRepository {
     );
   }
 
+  async setExpectedSchema(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, schema: unknown, fingerprint: string): Promise<void> {
+    await this.get(ctx, companyId, id);
+    await this.pool.query("UPDATE data_backend_environments SET expected_schema=$1::jsonb,schema_fingerprint=$2,sync_status='synced',updated_at=now() WHERE backend_id=$3 AND environment=$4 AND workspace_id=$5 AND company_id=$6",
+      [JSON.stringify(schema), fingerprint, id, environment, ctx.workspaceId, companyId]);
+  }
+
   async putSecret(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, role: "migrator" | "runtime" | "signing", value: string): Promise<string> {
     await this.get(ctx, companyId, id);
     const ref = randomUUID();
@@ -193,7 +199,7 @@ export class DataBackendRepository {
   async acquireLock(id: string, environment: DataEnvironmentName, token: string, ttlMs: number): Promise<boolean> {
     const result = await this.pool.query(
       "INSERT INTO data_backend_migration_locks(backend_id,environment,owner_token,expires_at) VALUES($1,$2,$3,now()+$4::integer * interval '1 millisecond') " +
-      "ON CONFLICT(backend_id,environment) DO UPDATE SET owner_token=EXCLUDED.owner_token,expires_at=EXCLUDED.expires_at " +
+      "ON CONFLICT(backend_id,environment) DO UPDATE SET owner_token=EXCLUDED.owner_token,expires_at=EXCLUDED.expires_at,acquired_at=now() " +
       "WHERE data_backend_migration_locks.expires_at<now() RETURNING owner_token",
       [id, environment, token, ttlMs],
     );

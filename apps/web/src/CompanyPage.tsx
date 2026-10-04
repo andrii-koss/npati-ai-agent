@@ -7,6 +7,7 @@ import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import { ProjectSection } from "./ProjectSection";
+import { DataBackendSection } from "./DataBackendSection";
 
 type Company = {
   id: string; businessId?: string; name: string; website?: string; industry?: string; description?: string;
@@ -1223,6 +1224,7 @@ export function CompanyPage() {
         </div>
       </section>
     <ProjectSection companyId={selected.id} />
+    <DataBackendSection companyId={selected.id} />
     </>}
 
     {companyEditor && <div className="company-drawer-backdrop" onMouseDown={() => setCompanyEditor(false)}>

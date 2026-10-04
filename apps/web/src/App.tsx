@@ -20,6 +20,7 @@ import { I18nProvider, useTranslation } from "./i18n";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
 import { WebsiteEditor } from "./WebsiteEditor";
+import { DataStudioPage } from "./DataStudioPage";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -1475,6 +1476,8 @@ export function App() {
             <Route path="/settings/websites" element={<Workspace><WebsiteBuilderDashboard /></Workspace>} />
             <Route path="/settings/websites/:companyId/:projectId" element={<FullscreenRoute><WebsiteEditor /></FullscreenRoute>} />
             <Route path="/projects/:companyId/:projectId" element={<FullscreenRoute><WebsiteEditor /></FullscreenRoute>} />
+            <Route path="/companies/:companyId/projects/:projectId/data" element={<Workspace><DataStudioPage /></Workspace>} />
+            <Route path="/projects/:companyId/:projectId/data" element={<Workspace><DataStudioPage /></Workspace>} />
             <Route path="/projects/:projectId" element={<LegacyProjectRedirect />} />
             <Route path="/dashboard" element={<Navigate to="/settings/connections" replace />} />
             <Route path="/settings/dashboard" element={<Navigate to="/settings/connections" replace />} />

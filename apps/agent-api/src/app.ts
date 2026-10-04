@@ -43,6 +43,9 @@ import { SharedPostgresProvisioner } from "./data-studio/provisioner";
 import { DataBackendService } from "./data-studio/service";
 import { PostgresDataProvider } from "./data-studio/data-provider";
 import { registerDataBackendRoutes } from "./data-studio/routes";
+import { ProjectMigrationEngine } from "./data-studio/migration-engine";
+import { DataStudioUiService } from "./data-studio/studio-service";
+import { registerDataStudioRoutes } from "./data-studio/studio-routes";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
 import { RemoteSandboxProvider } from "./sandbox-provider";
@@ -848,6 +851,9 @@ export function buildApp(config: AppConfig = {}) {
     maxDatabaseBytes: Number(process.env.NPATI_DATA_MAX_DATABASE_BYTES) || 1_000_000_000,
   }, sharedPostgresProvisioner) : undefined;
   const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, dataProvider) : undefined;
+  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider
+    ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider,
+      new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)) : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
@@ -2479,6 +2485,7 @@ ${localized.next}`;
   });
   registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
   registerDataBackendRoutes(app, authProvider, dataBackendService);
+  registerDataStudioRoutes(app, authProvider, dataStudioService);
   app.addHook("onClose", async () => {
     await dataProvider?.close();
     await sharedPostgresProvisioner?.close();

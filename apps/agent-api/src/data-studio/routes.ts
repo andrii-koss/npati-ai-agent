@@ -4,7 +4,7 @@ import { AuthenticationError, type AuthProvider } from "../auth";
 import { DataStudioError } from "./identifier";
 import type { DataBackendService } from "./service";
 
-function fail(reply: FastifyReply, error: unknown) {
+export function fail(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof DataStudioError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, step: error.step, retryable: error.retryable } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });

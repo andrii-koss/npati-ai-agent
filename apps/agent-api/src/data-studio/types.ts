@@ -26,6 +26,7 @@ export interface DataBackendEnvironment {
   signingKeyRef?: string | null;
   status: "provisioning" | "ready" | "unavailable" | "archived";
   schemaFingerprint?: string | null;
+  expectedSchema?: unknown | null;
   syncStatus: "synced" | "drift_detected" | "reconciliation_required";
   createdAt: string;
   updatedAt: string;
