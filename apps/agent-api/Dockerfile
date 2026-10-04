@@ -9,7 +9,9 @@ RUN npm run build --workspace @npati/agent-api
 RUN npm prune --omit=dev
 
 FROM node:24-alpine AS runtime-base
-ENV NODE_ENV=production
+ARG NPATI_BUILD_COMMIT=unknown
+ARG NPATI_BUILD_TIME=unknown
+ENV NODE_ENV=production NPATI_BUILD_COMMIT=${NPATI_BUILD_COMMIT} NPATI_BUILD_TIME=${NPATI_BUILD_TIME}
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 # npm may keep native workspace dependencies (notably better-sqlite3) under

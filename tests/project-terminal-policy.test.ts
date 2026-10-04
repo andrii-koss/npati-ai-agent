@@ -1,8 +1,33 @@
-﻿import { describe, expect, it } from "vitest";
-import { classifyTerminalCommand } from "../apps/agent-api/src/terminal-command-policy";
+﻿import { describe, expect, it, vi } from "vitest";
+import { classifyTerminalCommand, normalizeTerminalCommand } from "../apps/agent-api/src/terminal-command-policy";
 import { defaultRiskApprovalService } from "@npati/shared";
+import { logTerminalPolicy } from "../apps/agent-api/src/terminal-policy-log";
 
 describe("Project terminal command policy", () => {
+  it("redacts secrets in terminal policy diagnostics", () => {
+    const previous = process.env.NPATI_TERMINAL_POLICY_LOG;
+    process.env.NPATI_TERMINAL_POLICY_LOG = "true";
+    const spy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      logTerminalPolicy({ rawCommand: "npm install --token=private-value", normalizedCommand: "npm install --token=private-value", rawArgs: ["--token=private-value"], projectId: "project-a", sandboxId: "sandbox-a", decision: "approval", reason: "test", policyRule: "test", toolName: "project.terminal.exec", executionContext: "project_agent", runId: "run-a", agentId: "agent-a", runType: "single" });
+      const output = JSON.stringify(spy.mock.calls);
+      expect(output).toContain("[terminal-policy]");
+      expect(output).toContain("project-a");
+      expect(output).not.toContain("private-value");
+    } finally { spy.mockRestore(); if (previous === undefined) delete process.env.NPATI_TERMINAL_POLICY_LOG; else process.env.NPATI_TERMINAL_POLICY_LOG = previous; }
+  });
+  it("matches structured executable, args and sandbox cwd", () => {
+    const normalized = normalizeTerminalCommand({ command: "npm", args: ["run", "dev", "--", "-H", "0.0.0.0"], cwd: "/workspace/site" });
+    expect(normalized).toMatchObject({ command: "npm run dev -- -H 0.0.0.0", executable: "npm", cwd: "site" });
+    expect(classifyTerminalCommand(normalized.command).requiresApproval).toBe(false);
+    expect(classifyTerminalCommand({ command: "npm install", args: ["--no-audit"] }).requiresApproval).toBe(false);
+    expect(classifyTerminalCommand("corepack pnpm install").requiresApproval).toBe(false);
+    expect(classifyTerminalCommand("corepack yarn install").requiresApproval).toBe(false);
+    expect(classifyTerminalCommand("corepack enable").requiresApproval).toBe(true);
+    expect(classifyTerminalCommand("sh -c npm install").requiresApproval).toBe(true);
+    expect(() => normalizeTerminalCommand({ command: "npm", args: ["run", "build;rm"] })).toThrow();
+    expect(() => normalizeTerminalCommand({ command: "npm run build", cwd: "../host" })).toThrow();
+  });
   it("keeps global host and system exec approval enabled", () => {
     expect(defaultRiskApprovalService.requiresApproval("exec")).toBe(true);
     expect(defaultRiskApprovalService.requiresApproval("system.eval")).toBe(true);

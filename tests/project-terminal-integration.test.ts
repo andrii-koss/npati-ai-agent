@@ -27,6 +27,7 @@ class FakeSandbox implements SandboxProvider {
   commandResult = result();
   creationFailure = false;
   calls: string[] = [];
+  workingDirectories: string[] = [];
   private status(): SandboxStatus { return { id: this.id, state: this.state, createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }; }
   private check(scope: SandboxScope, id: string) { if (id !== this.id || !scope.projectId || !scope.companyId) throw new SandboxProviderError("sandbox_scope_denied", "Sandbox scope denied", 403); }
   async createSandbox(_scope: SandboxScope) { if (this.creationFailure) throw new SandboxProviderError("sandbox_creation_failed", "Sandbox creation failed"); this.calls.push("create"); return this.status(); }
@@ -36,7 +37,7 @@ class FakeSandbox implements SandboxProvider {
   async getStatus(scope: SandboxScope, id: string) { this.check(scope, id); return this.status(); }
   async uploadFiles(scope: SandboxScope, id: string, files: SandboxFile[]) { this.check(scope, id); this.files = files; this.calls.push("upload"); }
   async downloadFiles(scope: SandboxScope, id: string) { this.check(scope, id); this.calls.push("download"); return this.files; }
-  async executeCommand(scope: SandboxScope, id: string, command: string) { this.check(scope, id); this.calls.push(command); if (command === "npm run build") this.files = [{ path: "generated.html", content: "<h1>built</h1>" }]; return this.commandResult; }
+  async executeCommand(scope: SandboxScope, id: string, command: string, options?: { cwd?: string }) { this.check(scope, id); this.calls.push(command); this.workingDirectories.push(options?.cwd ?? "."); if (command === "npm run build") this.files = [{ path: "generated.html", content: "<h1>built</h1>" }]; return this.commandResult; }
   async exposePort(): Promise<{ port: number; internalHost: string }> { throw new Error("unavailable"); }
   async getLogs(scope: SandboxScope, id: string) { this.check(scope, id); return "runner logs"; }
   async startProcess(scope: SandboxScope, id: string, command: string) { this.check(scope, id); this.calls.push("process:" + command); return { ...result(), processId: "22222222-2222-4222-8222-222222222222" }; }
@@ -81,9 +82,11 @@ describe("Project terminal integration", () => {
     const agent = await store.createCompanyAgent(owner, company.id, { name: "Builder", role: "Developer", tools: ["project.terminal.exec"] }, "terminal-exec-agent");
     company = await store.setCompanyMainAgent(owner, company.id, agent.id, company.revision);
     let command = "npm install";
+    let args: string[] | undefined;
+    let cwd: string | undefined;
     let environmentReferences: Record<string, { id: string; field: string }> | undefined;
     const ai = { executeTool: vi.fn(), ensureA2AEnabled: vi.fn(), ensureCombo: vi.fn(async (input: { name: string }) => ({ name: input.name })),
-      a2aSend: vi.fn(async () => ({ taskId: "plan", content: JSON.stringify({ mode: "single", agentIds: [agent.id], toolRequests: [{ agentId: agent.id, tool: "project.terminal.exec", input: { projectId: project.id, command, environmentReferences } }] }), metadata: {} })),
+      a2aSend: vi.fn(async () => ({ taskId: "plan", content: JSON.stringify({ mode: "single", agentIds: [agent.id], toolRequests: [{ agentId: agent.id, tool: "project.terminal.exec", input: { projectId: project.id, command, args, cwd, environmentReferences } }] }), metadata: {} })),
       chat: vi.fn(async () => ({ content: "done", model: "auto" })) } as unknown as AIEngine;
     const tools = new CompanyToolRuntime(ai, undefined, undefined, undefined, undefined, undefined, undefined, undefined, workspace, store, sandbox);
     const approvals: DurableApprovalGateway = { requestApproval: vi.fn(async () => ({ id: "terminal-approval" })), consumeApproved: vi.fn(async () => undefined) };
@@ -92,7 +95,13 @@ describe("Project terminal integration", () => {
     expect(controlled.run.status, JSON.stringify(controlled.run)).toBe("completed");
     expect(provider.calls).toContain("npm install");
     expect(approvals.requestApproval).not.toHaveBeenCalled();
-    command = "npm run dev -- --hostname 0.0.0.0 --port 3000";
+    command = "npm"; args = ["run", "dev", "--", "-H", "0.0.0.0"]; cwd = "/workspace/site";
+    const structured = await runtime.execute(owner, company.id, { task: "Start structured dev command", mode: "single", projectId: project.id }, "terminal-structured-run");
+    expect(structured.run.status).toBe("completed");
+    expect(provider.calls).toContain("npm run dev -- -H 0.0.0.0");
+    expect(provider.workingDirectories).toContain("site");
+    expect(approvals.requestApproval).not.toHaveBeenCalled();
+    args = undefined; cwd = undefined; command = "npm run dev -- --hostname 0.0.0.0 --port 3000";
     const dev = await runtime.execute(owner, company.id, { task: "Start dev server", mode: "single", projectId: project.id }, "terminal-dev-run");
     expect(dev.run.status).toBe("completed");
     expect(provider.calls).toContain(command);

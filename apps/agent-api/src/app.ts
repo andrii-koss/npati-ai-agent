@@ -1,3 +1,4 @@
+import { buildInfo } from "./build-info";
 import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { createHubClient } from "@npati/hub-connector";
@@ -2585,6 +2586,7 @@ ${localized.next}`;
   app.get("/health/live", async () => ({
     status: "ok" as const,
     timestamp: new Date().toISOString(),
+    build: buildInfo,
   }));
 
   app.get("/health", async (): Promise<HealthResponse> => {

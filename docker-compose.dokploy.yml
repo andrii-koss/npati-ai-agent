@@ -22,6 +22,9 @@ services:
       context: .
       dockerfile: apps/agent-api/Dockerfile
       target: runtime
+      args:
+        NPATI_BUILD_COMMIT: ${NPATI_BUILD_COMMIT:-unknown}
+        NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
     command: ["node", "dist/server.js"]
     restart: unless-stopped
     environment: &agent-api-env
@@ -38,6 +41,7 @@ services:
       NPATI_WEB_ORIGIN: ${NPATI_WEB_ORIGIN:?NPATI_WEB_ORIGIN is required}
       NPATI_AGENT_PUBLIC_DOMAIN: ${NPATI_AGENT_PUBLIC_DOMAIN:?NPATI_AGENT_PUBLIC_DOMAIN is required}
       NPATI_AGENT_VERSION: ${NPATI_AGENT_VERSION:-0.1.0}
+      NPATI_TERMINAL_POLICY_LOG: ${NPATI_TERMINAL_POLICY_LOG:-true}
       NPATI_DEPLOYMENT_TYPE: ${NPATI_DEPLOYMENT_TYPE:-self_hosted}
       NPATI_HOSTED_REGISTRATION_TOKEN: ${NPATI_HOSTED_REGISTRATION_TOKEN:-}
       NPATI_ENCRYPTION_KEY: ${NPATI_ENCRYPTION_KEY:?NPATI_ENCRYPTION_KEY is required}
@@ -119,6 +123,9 @@ services:
       context: .
       dockerfile: apps/agent-api/Dockerfile
       target: runtime
+      args:
+        NPATI_BUILD_COMMIT: ${NPATI_BUILD_COMMIT:-unknown}
+        NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
     environment: *agent-api-env
