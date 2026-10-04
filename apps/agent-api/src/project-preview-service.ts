@@ -4,6 +4,7 @@ import type { AuthContext, Project, ProjectStatus, WorkspaceStore } from "@npati
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
+import { SandboxProviderError } from "./sandbox-provider";
 
 export interface DetectedStack {
   packageManager: "npm" | "pnpm" | "yarn" | "bun";
@@ -37,6 +38,7 @@ export interface ActivePreviewSession {
   userId: string;
 }
 
+const sandboxInfrastructureErrors = new Set(["sandbox_image_not_found", "docker_cli_missing", "docker_daemon_unavailable", "docker_socket_permission_denied", "sandbox_network_not_found", "sandbox_container_start_failed", "sandbox_workspace_permission_denied", "sandbox_storage_full", "runner_unavailable"]);
 export class PreviewError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
     super(message);
@@ -190,6 +192,9 @@ export class ProjectPreviewService {
       await this.sandbox.execute(ctx, companyId, { projectId, command: install, agentId: "system", approved: true });
       await this.sandbox.execute(ctx, companyId, { projectId, command: `${stack.packageManager} run build`, agentId: "system", approved: true });
     } catch (error) {
+      if (error instanceof SandboxProviderError && sandboxInfrastructureErrors.has(error.code)) {
+        throw new PreviewError("sandbox_unavailable", error.message, error.status);
+      }
       throw new PreviewError("build_failed", error instanceof Error ? error.message : String(error), 409);
     }
   }

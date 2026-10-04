@@ -146,6 +146,34 @@ services:
       start_period: 30s
     networks: [npati-agent, npati-sandbox-control]
 
+  project-sandbox-image:
+    profiles: [local-sandbox]
+    image: npati/project-sandbox:local
+    build:
+      context: ./apps/agent-api
+      dockerfile: Dockerfile.project-sandbox
+    pull_policy: build
+    command: ["true"]
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  sandbox-egress-image:
+    profiles: [local-sandbox]
+    image: npati/sandbox-egress:local
+    build:
+      context: ./apps/agent-api
+      dockerfile: Dockerfile.sandbox-egress
+    pull_policy: build
+    command: ["true"]
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
   sandbox-runner:
     profiles: [local-sandbox]
     build:
@@ -153,6 +181,11 @@ services:
       dockerfile: apps/agent-api/Dockerfile
       target: sandbox-runner
     restart: unless-stopped
+    depends_on:
+      project-sandbox-image:
+        condition: service_completed_successfully
+      sandbox-egress-image:
+        condition: service_completed_successfully
     environment:
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
@@ -179,7 +212,7 @@ services:
     mem_limit: 512m
     pids_limit: 128
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD-SHELL", "docker info >/dev/null 2>&1 && docker image inspect npati/project-sandbox:local npati/sandbox-egress:local >/dev/null 2>&1 && node -e \"fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
