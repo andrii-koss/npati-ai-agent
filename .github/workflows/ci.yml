@@ -40,6 +40,8 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose config --quiet
       - run: docker build --file apps/agent-api/Dockerfile --tag npati-agent-api:ci .
+      - run: docker build --file apps/agent-api/Dockerfile.project-sandbox --tag npati/project-sandbox:ci apps/agent-api
+      - run: docker build --file apps/agent-api/Dockerfile.sandbox-egress --tag npati/sandbox-egress:ci apps/agent-api
       - run: docker build --file apps/web/Dockerfile --tag npati-agent-web:ci .
 
   release-gate:
