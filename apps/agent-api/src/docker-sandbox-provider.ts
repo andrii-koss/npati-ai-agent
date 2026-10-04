@@ -87,9 +87,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     try {
       await this.docker(["network", "create", "--driver", "bridge", "--internal", "--opt", "com.docker.network.bridge.gateway_mode_ipv4=isolated", names.network]);
       phase = "proxy.create";
-      await this.docker(["create", "--name", names.proxy, "--network", names.network, "--network-alias", "egress", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "64", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--env", `ALLOWED_HOSTS=${this.limits.allowedHosts}`, this.limits.proxyImage]);
+      await this.docker(["create", "--name", names.proxy, "--network", "bridge", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "64", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--env", `ALLOWED_HOSTS=${this.limits.allowedHosts}`, this.limits.proxyImage]);
       phase = "proxy.network.connect";
-      await this.docker(["network", "connect", "bridge", names.proxy]);
+      await this.docker(["network", "connect", "--alias", "egress", names.network, names.proxy]);
       phase = "proxy.start";
       await this.docker(["start", names.proxy]);
       phase = "sandbox.create";
@@ -99,9 +99,22 @@ export class DockerSandboxProvider implements SandboxProvider {
         "--cpus", this.limits.cpu, "--memory", this.limits.memory, "--pids-limit", String(this.limits.pids),
         "--tmpfs", `/workspace:rw,nosuid,nodev,uid=10001,gid=10001,size=${this.limits.diskBytes}`,
         "--tmpfs", "/tmp:rw,nosuid,nodev,uid=10001,gid=10001,size=64m",
-        "--workdir", "/workspace", "--env", "HOME=/workspace/.npati-runtime", "--env", "NPM_CONFIG_CACHE=/workspace/.npati-runtime/npm", "--env", "PIP_CACHE_DIR=/workspace/.npati-runtime/pip", "--env", "PIP_TARGET=/workspace/.npati-runtime/python", "--env", "PYTHONPATH=/workspace/.npati-runtime/python", "--env", "HTTP_PROXY=http://egress:8080",
-        "--env", "HTTPS_PROXY=http://egress:8080", "--env", "http_proxy=http://egress:8080", "--env", "https_proxy=http://egress:8080",
-        "--env", "NO_PROXY=localhost,127.0.0.1", this.limits.image, "sleep", "infinity",
+        "--workdir", "/workspace", "--env", "HOME=/workspace/.npati-runtime",
+        "--env", "NPM_CONFIG_CACHE=/workspace/.npati-runtime/npm",
+        "--env", "npm_config_proxy=http://egress:8080",
+        "--env", "npm_config_https_proxy=http://egress:8080",
+        "--env", "npm_config_audit=false",
+        "--env", "npm_config_fund=false",
+        "--env", "PIP_CACHE_DIR=/workspace/.npati-runtime/pip",
+        "--env", "PIP_TARGET=/workspace/.npati-runtime/python",
+        "--env", "PYTHONPATH=/workspace/.npati-runtime/python",
+        "--env", "NEXT_TELEMETRY_DISABLED=1",
+        "--env", "HTTP_PROXY=http://egress:8080",
+        "--env", "HTTPS_PROXY=http://egress:8080",
+        "--env", "http_proxy=http://egress:8080",
+        "--env", "https_proxy=http://egress:8080",
+        "--env", "NO_PROXY=localhost,127.0.0.1",
+        this.limits.image, "sleep", "infinity",
       ]);
       this.touch(id);
       return this.state(scope, id);
@@ -113,7 +126,16 @@ export class DockerSandboxProvider implements SandboxProvider {
       throw error;
     }
   }
-  async startSandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); const status = await this.state(scope, id); if (status.state !== "running") await this.docker(["start", names.sandbox]); this.touch(id); return this.state(scope, id); }
+  async startSandbox(scope: SandboxScope, id: string) {
+    const names = await this.inspect(scope, id);
+    const status = await this.state(scope, id);
+    if (status.state !== "running") {
+      await this.docker(["start", names.sandbox]);
+      await this.docker(["exec", names.sandbox, "mkdir", "-p", "/workspace/.npati-runtime/npm", "/workspace/.npati-runtime/pip", "/workspace/.npati-runtime/python"]).catch(() => undefined);
+    }
+    this.touch(id);
+    return this.state(scope, id);
+  }
   async stopSandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); if ((await this.state(scope, id)).state === "running") await this.docker(["stop", "--time", "5", names.sandbox], 15_000); return this.state(scope, id); }
   async destroySandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); await this.docker(["rm", "-f", names.sandbox]); await this.docker(["rm", "-f", names.proxy]); await this.docker(["network", "rm", names.network]); this.activity.delete(id); }
   async getStatus(scope: SandboxScope, id: string) { return this.state(scope, id); }
@@ -131,6 +153,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     catch (error) { throw dockerFailure("exec", error instanceof Error ? error.message : "Docker CLI failed to start", false, (error as NodeJS.ErrnoException)?.code); }
     if (result.code !== 0 && /^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
     if (result.timedOut) await this.stopSandbox(scope, id).catch(() => undefined);
+    if (result.code !== 0 && !result.timedOut) {
+      console.warn(`[sandbox-runner] command failed (exit ${result.code}):\nSTDOUT: ${text(result.stdout).slice(0, 1000)}\nSTDERR: ${text(result.stderr).slice(0, 1000)}`);
+    }
     return {
       status: result.timedOut || result.code === 124 || result.code === 137 ? "timed_out" : result.code === 0 ? "completed" : "failed", exitCode: result.timedOut ? null : result.code,
       stdout: text(result.stdout), stderr: text(result.stderr), durationMs: Date.now() - started, step: "command", tool: "project.terminal.exec", retryable: result.timedOut,
