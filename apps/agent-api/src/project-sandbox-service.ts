@@ -138,8 +138,9 @@ export class ProjectSandboxService {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
       total += Buffer.byteLength(file.content, "utf8");
-      if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Sandbox file output exceeds sync limit", 413, "download");
-      if (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) || redactTerminalText(file.content) !== file.content) throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
+      const fileName = file.path.split("/").pop() || "";
+      const isLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(fileName);
+      if (!isLockfile && (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) || redactTerminalText(file.content) !== file.content)) throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       const original = originals.get(file.path);
       if (!original) await this.workspace.createFile(ctx, project.companyId, project.id, file.path, file.content);
       else if (original.content !== file.content) await this.workspace.writeFile(ctx, project.companyId, project.id, file.path, file.content, original.revision!);

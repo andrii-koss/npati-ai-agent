@@ -210,7 +210,7 @@ fi
   async downloadFiles(scope: SandboxScope, id: string): Promise<SandboxFile[]> {
     const names = await this.inspect(scope, id);
     this.touch(id);
-    const listed = await this.docker(["exec", names.sandbox, "find", "/workspace", "-type", "f", "-not", "-path", "*/node_modules/*", "-not", "-path", "*/.git/*", "-not", "-path", "*/vendor/*", "-not", "-path", "*/.npati-runtime/*", "-not", "-path", "*/dist/*", "-not", "-path", "*/build/*", "-not", "-path", "*/.venv/*", "-not", "-path", "*/__pycache__/*", "-print0"], 30_000, undefined, 256_000);
+    const listed = await this.docker(["exec", names.sandbox, "find", "/workspace", "-type", "f", "-not", "-path", "*/node_modules/*", "-not", "-path", "*/.git/*", "-not", "-path", "*/vendor/*", "-not", "-path", "*/.npati-runtime/*", "-not", "-path", "*/dist/*", "-not", "-path", "*/build/*", "-not", "-path", "*/.next/*", "-not", "-path", "*/.cache/*", "-not", "-path", "*/.venv/*", "-not", "-path", "*/__pycache__/*", "-print0"], 30_000, undefined, 256_000);
     const paths = listed.stdout.toString("utf8").split("\0").filter(Boolean);
     if (paths.length > this.limits.maxFiles) throw new SandboxProviderError("download_limit", "Too many sandbox files", 413);
     const files: SandboxFile[] = [];
