@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
-import { chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
@@ -34,13 +34,14 @@ function args(cmd: string, values: string[], timeoutMs = 30_000, stdin?: string 
   });
 }
 const text = (bytes: Buffer) => bytes.toString("utf8").slice(0, 128_000);
-async function assignSandboxOwner(directory: string): Promise<void> {
+export async function assignSandboxOwner(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const child = path.join(directory, entry.name);
     if (entry.isDirectory()) await assignSandboxOwner(child);
-    else await chown(child, 10001, 10001);
+    else { await chmod(child, 0o666).catch(() => undefined); await chown(child, 10001, 10001).catch(() => undefined); }
   }
-  await chown(directory, 10001, 10001);
+  await chmod(directory, 0o777).catch(() => undefined);
+  await chown(directory, 10001, 10001).catch(() => undefined);
 }
 export class DockerSandboxProvider implements SandboxProvider {
   private readonly limits: RunnerLimits;
