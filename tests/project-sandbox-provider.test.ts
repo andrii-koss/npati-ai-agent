@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { DockerSandboxProvider } from "../apps/agent-api/src/docker-sandbox-provider";
+import { DockerSandboxProvider, assignSandboxOwner } from "../apps/agent-api/src/docker-sandbox-provider";
 import { RemoteSandboxProvider } from "../apps/agent-api/src/sandbox-provider";
 
 const scope = { workspaceId: "workspace-a", userId: "user-a", companyId: "company-a", projectId: "project-a" };
@@ -45,5 +48,20 @@ describe("Remote sandbox provider", () => {
     expect(() => new DockerSandboxProvider({ memory: "0" })).toThrow("resource limits");
     expect(() => new DockerSandboxProvider({ pids: 0 })).toThrow("resource limits");
     expect(() => new DockerSandboxProvider({ diskBytes: 0 })).toThrow("resource limits");
+  });
+  it("assigns permissions and does not fail upload if chown throws EPERM", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "npati-test-upload-"));
+    try {
+      const sub = path.join(dir, "nested");
+      await mkdir(sub, { recursive: true });
+      const testFile = path.join(sub, "test.txt");
+      await writeFile(testFile, "hello");
+
+      await expect(assignSandboxOwner(dir)).resolves.not.toThrow();
+      const s = await stat(testFile);
+      expect(s.size).toBe(5);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

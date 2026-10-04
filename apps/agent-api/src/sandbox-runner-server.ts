@@ -84,6 +84,9 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     console.info("[sandbox-runner] " + JSON.stringify({ operation, projectId: scope?.projectId ?? null, sandboxId: sandboxId || null, image: operation === "createSandbox" ? process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local" : null, container: resources.container, network: resources.network, status: "ok", httpStatus: 200, errorCode: null, errorMessage: null, dockerStderr: null }));
     return { result: result ?? null };
   } catch (error) {
+    if (!(error instanceof SandboxProviderError) && error instanceof Error) {
+      console.error(`[sandbox-runner] underlying error during ${operation}:`, error.stack || error.message);
+    }
     const systemCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
     const known = error instanceof SandboxProviderError ? error : systemCode === "EACCES" || systemCode === "EPERM" ? new SandboxProviderError("sandbox_workspace_permission_denied", "Sandbox workspace is not writable", 503) : systemCode === "ENOSPC" ? new SandboxProviderError("sandbox_storage_full", "Sandbox storage is full", 503) : new SandboxProviderError("runner_failure", `Sandbox runner ${operation} failed`, 503);
     const d = known.diagnostics;
