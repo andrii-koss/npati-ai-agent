@@ -28,6 +28,10 @@ services:
       NODE_ENV: production
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
+      NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-remote}
+      NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
+      NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:-}
       NPATI_AUTH_STRICT: "true"
       NPATI_ALLOW_LEGACY_PASSWORD_AUTH: "false"
       NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:?NPATI_BACKEND_URL is required}
@@ -108,7 +112,7 @@ services:
       timeout: 8s
       retries: 10
       start_period: 300s
-    networks: [npati-agent]
+    networks: [npati-agent, npati-sandbox-control]
 
   company-worker:
     build:
@@ -133,7 +137,47 @@ services:
       timeout: 8s
       retries: 8
       start_period: 30s
-    networks: [npati-agent]
+    networks: [npati-agent, npati-sandbox-control]
+
+  sandbox-runner:
+    profiles: [local-sandbox]
+    build:
+      context: .
+      dockerfile: apps/agent-api/Dockerfile
+      target: sandbox-runner
+    restart: unless-stopped
+    environment:
+      NPATI_SANDBOX_RUNNER_MODE: local
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
+      NPATI_SANDBOX_IMAGE: npati/project-sandbox:local
+      NPATI_SANDBOX_EGRESS_IMAGE: npati/sandbox-egress:local
+      NPATI_BROWSER_QA_IMAGE: npati/browser-qa:local
+      NPATI_SANDBOX_CPU: ${NPATI_SANDBOX_CPU:-1}
+      NPATI_SANDBOX_MEMORY: ${NPATI_SANDBOX_MEMORY:-1024m}
+      NPATI_SANDBOX_PIDS: ${NPATI_SANDBOX_PIDS:-128}
+      NPATI_SANDBOX_DISK_BYTES: ${NPATI_SANDBOX_DISK_BYTES:-536870912}
+      NPATI_SANDBOX_SYNC_MAX_FILES: ${NPATI_SANDBOX_SYNC_MAX_FILES:-500}
+      NPATI_SANDBOX_SYNC_MAX_BYTES: ${NPATI_SANDBOX_SYNC_MAX_BYTES:-20000000}
+      NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "7865"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m
+    cpus: "1.0"
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [npati-sandbox-control]
 
   crawler:
     build:
@@ -300,6 +344,8 @@ services:
 
 networks:
   npati-agent:
+  npati-sandbox-control:
+    internal: true
 
 volumes:
   agent-data:

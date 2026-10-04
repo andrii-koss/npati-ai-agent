@@ -24,6 +24,22 @@ describe("Remote sandbox provider", () => {
     expect(() => new RemoteSandboxProvider("http://runner.example", "a".repeat(40))).toThrow("HTTPS");
     expect(() => new RemoteSandboxProvider("https://runner.example", "short")).toThrow("32 characters");
   });
+  it("permits HTTP only for the trusted local Docker service", () => {
+    const secret = "a".repeat(40);
+    expect(() => new RemoteSandboxProvider("http://sandbox-runner:7865", secret, fetch, "local")).not.toThrow();
+    expect(() => new RemoteSandboxProvider("http://other-runner:7865", secret, fetch, "local")).toThrow();
+    expect(() => new RemoteSandboxProvider("http://sandbox-runner:7865", secret, fetch, "remote")).toThrow("HTTPS");
+    expect(() => new RemoteSandboxProvider("https://runner.example", secret, fetch, "remote")).not.toThrow();
+  });
+  it("signs runner-mediated preview requests", async () => {
+    const transport = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const parsed = JSON.parse(String(init?.body));
+      expect(parsed).toMatchObject({ operation: "proxyPreview", payload: { scope, sandboxId: "sandbox-a", options: { port: 3000, path: "/", method: "GET" } } });
+      return new Response(JSON.stringify({ result: { status: 200, headers: { "content-type": "text/html" }, body: "b2s=" } }), { status: 200 });
+    });
+    const provider = new RemoteSandboxProvider("http://sandbox-runner:7865", "a".repeat(40), transport as typeof fetch, "local");
+    expect((await provider.proxyPreview(scope, "sandbox-a", { port: 3000, path: "/", method: "GET", headers: {} })).body).toBe("b2s=");
+  });
   it("rejects resource limits that would disable containment", () => {
     expect(() => new DockerSandboxProvider({ cpu: "0" })).toThrow("resource limits");
     expect(() => new DockerSandboxProvider({ memory: "0" })).toThrow("resource limits");
