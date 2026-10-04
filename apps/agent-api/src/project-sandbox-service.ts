@@ -3,13 +3,13 @@ import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
 import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
 import type { SandboxBrowserQaOptions, SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
-import { classifyTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
+import { classifyTerminalCommand, normalizeTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import type { ProjectService } from "./project-service";
 
 export interface TerminalSecretReference { id: string; field: string; }
 export interface TerminalRequest {
-  projectId: string; sandboxId?: string; command?: string; processId?: string;
+  projectId: string; sandboxId?: string; command?: string; executable?: string; args?: string[]; cwd?: string; processId?: string;
   action?: "start" | "status" | "logs" | "stop";
   environmentReferences?: Record<string, TerminalSecretReference>;
   approved?: boolean; runId?: string; agentId: string;
@@ -148,7 +148,8 @@ export class ProjectSandboxService {
     await this.agent(ctx, companyId, request.agentId, tool);
     const project = await this.project(ctx, companyId, request.projectId);
     if (request.sandboxId && request.sandboxId !== project.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
-    const command = request.command ?? "";
+    const normalized = normalizeTerminalCommand(request);
+    const command = normalized.command;
     const decision = classifyTerminalCommand(command);
     if ((decision.requiresApproval || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) throw new SandboxProviderError("approval_required", "Terminal command requires approval", 403, "approval", tool);
     const environment = await this.environment(ctx, companyId, request.environmentReferences);
@@ -161,8 +162,8 @@ export class ProjectSandboxService {
       if (request.sandboxId && request.sandboxId !== sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
       const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId);
       const raw = startProcess
-        ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment })
-        : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment });
+        ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd })
+        : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd });
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
       if (!startProcess) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
       await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId, processId: raw.processId, commandSummary: decision.requiresApproval ? "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")" : redactTerminalText(command, secrets), riskLevel: decision.level, status: startProcess ? "running" : raw.status, exitCode: raw.exitCode, output, durationMs: raw.durationMs, errorCode: raw.status === "completed" ? undefined : raw.status === "timed_out" ? "command_timeout" : raw.exitCode === 127 ? "command_not_found" : decision.timeoutClass === "install_build" ? "install_failed" : "command_failed" });
@@ -229,13 +230,20 @@ export class ProjectSandboxService {
     return files;
   }
 
-  async canAutoApproveTerminal(ctx: AuthContext, companyId: string, runProjectId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process") {
-    if (!runProjectId || request.projectId !== runProjectId || !request.agentId || Object.keys(request.environmentReferences ?? {}).length) return false;
-    if (tool === "project.terminal.process" && request.action !== "start" && !["status", "logs", "stop"].includes(request.action ?? "")) return false;
-    if ((tool === "project.terminal.exec" || request.action === "start") && classifyTerminalCommand(request.command ?? "").requiresApproval) return false;
+  async evaluateAutoApprovalTerminal(ctx: AuthContext, companyId: string, runProjectId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process"): Promise<{ allowed: boolean; reason: string; sandboxId?: string }> {
+    if (!runProjectId) return { allowed: false, reason: "run_has_no_project" };
+    if (request.projectId !== runProjectId) return { allowed: false, reason: "project_mismatch" };
+    if (!request.agentId || request.agentId === "system") return { allowed: false, reason: "not_project_agent" };
+    if (Object.keys(request.environmentReferences ?? {}).length) return { allowed: false, reason: "secret_references" };
+    if (tool === "project.terminal.process" && request.action !== "start" && !["status", "logs", "stop"].includes(request.action ?? "")) return { allowed: false, reason: "invalid_process_action" };
+    if ((tool === "project.terminal.exec" || request.action === "start") && classifyTerminalCommand(request).requiresApproval) return { allowed: false, reason: "command_policy_requires_approval" };
     const project = await this.project(ctx, companyId, request.projectId);
     await this.agent(ctx, companyId, request.agentId, tool);
-    return !request.sandboxId || request.sandboxId === project.sandboxId;
+    if (request.sandboxId && request.sandboxId !== project.sandboxId) return { allowed: false, reason: "sandbox_mismatch", sandboxId: project.sandboxId };
+    return { allowed: true, reason: "project_sandbox_verified", sandboxId: project.sandboxId };
+  }
+  async canAutoApproveTerminal(ctx: AuthContext, companyId: string, runProjectId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process") {
+    return (await this.evaluateAutoApprovalTerminal(ctx, companyId, runProjectId, request, tool)).allowed;
   }
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {

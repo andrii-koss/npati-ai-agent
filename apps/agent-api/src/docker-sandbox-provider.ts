@@ -3,10 +3,10 @@ import { randomUUID, createHash } from "node:crypto";
 import { chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
+import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
 import { safeProjectPath } from "./project-workspace";
-import { classifyTerminalCommand } from "./terminal-command-policy";
+import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
 
 interface RunnerLimits {
   cpu: string; memory: string; diskBytes: number; pids: number; image: string; proxyImage: string; maxFiles: number; maxBytes: number; allowedHosts: string;
@@ -103,15 +103,16 @@ export class DockerSandboxProvider implements SandboxProvider {
   async stopSandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); if ((await this.state(scope, id)).state === "running") await this.docker(["stop", "--time", "5", names.sandbox], 15_000); return this.state(scope, id); }
   async destroySandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); await this.docker(["rm", "-f", names.sandbox]); await this.docker(["rm", "-f", names.proxy]); await this.docker(["network", "rm", names.network]); this.activity.delete(id); }
   async getStatus(scope: SandboxScope, id: string) { return this.state(scope, id); }
-  async executeCommand(scope: SandboxScope, id: string, command: string, options: { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string> }): Promise<SandboxCommandResult> {
+  async executeCommand(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);
-    classifyTerminalCommand(command);
+    const normalized = normalizeTerminalCommand({ command, cwd: options.cwd });
+    classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
     this.touch(id);
     const env = Object.entries(options.environment ?? {});
     if (env.some(([key]) => !/^[A-Z_][A-Z0-9_]{0,63}$/.test(key))) throw new SandboxProviderError("invalid_environment", "Invalid environment key", 400);
     const script = env.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n") + "\n" + command + "\n";
     const started = Date.now();
-    const result = await args("docker", ["exec", "-i", "--workdir", "/workspace", names.sandbox, "timeout", "-s", "TERM", "-k", "2", String(Math.max(1, Math.ceil(options.timeoutMs / 1000))), "sh", "-s"], Math.min(options.timeoutMs, 600_000) + 5_000, script, Math.min(options.outputLimitBytes, 128_000));
+    const result = await args("docker", ["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "timeout", "-s", "TERM", "-k", "2", String(Math.max(1, Math.ceil(options.timeoutMs / 1000))), "sh", "-s"], Math.min(options.timeoutMs, 600_000) + 5_000, script, Math.min(options.outputLimitBytes, 128_000));
     if (result.timedOut) await this.stopSandbox(scope, id).catch(() => undefined);
     return {
       status: result.timedOut || result.code === 124 || result.code === 137 ? "timed_out" : result.code === 0 ? "completed" : "failed", exitCode: result.timedOut ? null : result.code,
@@ -214,15 +215,16 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (processId) { if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400); const result = await this.docker(["exec", names.sandbox, "cat", "--", `/tmp/npati-process-${processId}.log`]); return text(result.stdout); }
     const result = await this.docker(["logs", "--tail", "100", names.sandbox]); return text(result.stdout) + text(result.stderr);
   }
-  async startProcess(scope: SandboxScope, id: string, command: string, options: { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string> }): Promise<SandboxCommandResult> {
+  async startProcess(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);
-    classifyTerminalCommand(command);
+    const normalized = normalizeTerminalCommand({ command, cwd: options.cwd });
+    classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
     this.touch(id);
     if (Object.keys(options.environment ?? {}).length) throw new SandboxProviderError("process_secrets_unsupported", "Background process secret references are unavailable", 400);
     const processId = randomUUID(), marker = `/tmp/npati-process-${processId}`;
     const command64 = Buffer.from(command).toString("base64");
     const script = `setsid sh -c 'printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s > ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
-    await this.docker(["exec", "-i", names.sandbox, "sh", "-s"], 10_000, script);
+    await this.docker(["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "sh", "-s"], 10_000, script);
     return { status: "running", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "process", tool: "project.terminal.process", retryable: false, processId };
   }
   async getProcessStatus(scope: SandboxScope, id: string, processId: string): Promise<SandboxCommandResult> {

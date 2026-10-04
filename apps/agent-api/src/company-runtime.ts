@@ -1,4 +1,5 @@
-import { classifyTerminalCommand } from "./terminal-command-policy";
+import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
+import { logTerminalPolicy } from "./terminal-policy-log";
 import { createHash } from "node:crypto";
 import { isChatCapableModel, type AIEngine, type AIModelSummary, type ChatResult } from "@npati/omniroute-adapter";
 import { chatInferenceCandidates, isUnavailableInferenceError } from "./chat-inference-candidates";
@@ -533,7 +534,7 @@ export class CompanyDelegationRuntime {
         }
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
-      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode);
       const evidence = rawEvidence ? protect(rawEvidence) : rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
@@ -715,7 +716,7 @@ export class CompanyDelegationRuntime {
     return { costUsd, totalTokens: usage.totalTokens };
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0) {
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0, runType = "company_run") {
     const evidence: string[] = previousEvidence ? [previousEvidence] : [];
     let sequenceNumber = 1;
     for (const [offset, plan] of plans.slice(startIndex, 10).entries()) {
@@ -782,11 +783,40 @@ export class CompanyDelegationRuntime {
       const operation = typeof plan.input.operation === "string" ? plan.input.operation.trim().toLowerCase() : "";
       const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
       const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
-      const terminalDecision = tool.startsWith("project.terminal.") && (tool === "project.terminal.exec" || plan.input.action === "start") ? classifyTerminalCommand(String(plan.input.command ?? "")) : undefined;
-      const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || (tool.startsWith("project.terminal.") && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length));
-      const sandboxAutoApproval = Boolean(runProjectId && !terminalNeedsApproval && (tool === "project.terminal.exec" || tool === "project.terminal.process") && this.toolRuntime.canAutoApproveSandboxTerminal && await this.toolRuntime.canAutoApproveSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input));
+      const isTerminal = tool === "project.terminal.exec" || tool === "project.terminal.process";
+      const terminalStarts = tool === "project.terminal.exec" || (tool === "project.terminal.process" && plan.input.action === "start");
+      let normalizedTerminal: ReturnType<typeof normalizeTerminalCommand> | undefined;
+      if (terminalStarts) {
+        try {
+          normalizedTerminal = normalizeTerminalCommand({
+            command: typeof plan.input.command === "string" ? plan.input.command : undefined,
+            executable: typeof plan.input.executable === "string" ? plan.input.executable : undefined,
+            args: plan.input.args as string[] | undefined,
+            cwd: plan.input.cwd as string | undefined,
+          });
+        } catch (error) {
+          logTerminalPolicy({ rawCommand: String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: "", sandboxId: typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined, projectId: String(plan.input.projectId ?? ""), decision: "deny", reason: error instanceof Error ? error.message : "Invalid command", policyRule: "invalid_command_structure", toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType });
+          throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Invalid terminal command structure", 400);
+        }
+      }
+      const terminalDecision = normalizedTerminal ? classifyTerminalCommand(normalizedTerminal.command) : undefined;
+      const hasSecretReferences = isTerminal && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length > 0;
+      const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || hasSecretReferences);
+      let sandboxEvaluation: { allowed: boolean; reason: string; sandboxId?: string } = { allowed: false, reason: runProjectId ? "sandbox_adapter_unavailable" : "run_has_no_project" };
+      if (isTerminal && !terminalNeedsApproval && runProjectId) {
+        try {
+          sandboxEvaluation = this.toolRuntime.evaluateSandboxTerminal
+            ? await this.toolRuntime.evaluateSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input)
+            : { allowed: Boolean(this.toolRuntime.canAutoApproveSandboxTerminal && await this.toolRuntime.canAutoApproveSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input)), reason: "legacy_sandbox_adapter" };
+        } catch (error) {
+          logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? "", normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined, projectId: String(plan.input.projectId ?? ""), decision: "deny", reason: "sandbox_scope_check_failed", policyRule: "sandbox_scope", toolName: tool, executionContext: "project_agent", runId, agentId: agent.id, runType });
+          throw error;
+        }
+      }
+      const sandboxAutoApproval = isTerminal && !terminalNeedsApproval && sandboxEvaluation.allowed;
+      if (isTerminal) logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: sandboxEvaluation.sandboxId ?? (typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined), projectId: String(plan.input.projectId ?? ""), decision: sandboxAutoApproval ? "allow" : "approval", reason: terminalDecision?.requiresApproval ? terminalDecision.reason : hasSecretReferences ? "Secret references require approval" : sandboxEvaluation.reason, policyRule: terminalDecision?.requiresApproval ? terminalDecision.policyRule : hasSecretReferences ? "secret_references" : sandboxEvaluation.reason, toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType });
       const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : undefined;
-      const approvalPayload = tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(String(plan.input.command ?? "")).digest("hex"), action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
+      const approvalPayload = isTerminal ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(normalizedTerminal?.command ?? String(plan.input.command ?? "")).digest("hex"), cwd: normalizedTerminal?.cwd === "." ? undefined : normalizedTerminal?.cwd, action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
       if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if (this.durableApprovals) {
           if (!approvedForCurrent) {
