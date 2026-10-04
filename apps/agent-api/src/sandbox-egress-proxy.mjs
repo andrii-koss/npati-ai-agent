@@ -63,9 +63,12 @@ const server = http.createServer(async (req, res) => {
     if (url.protocol !== "http:") throw new Error("invalid_scheme");
     const address = await destination(url.hostname, url.port || 80);
     const outgoing = http.request({ hostname: address, port: 80, method: req.method, path: url.pathname + url.search, headers: { ...req.headers, host: url.hostname } }, (response) => { res.writeHead(response.statusCode ?? 502, response.headers); response.pipe(res); });
-    outgoing.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    outgoing.on("error", (err) => { console.warn(`[egress-proxy] http outgoing error for ${url.hostname}:`, err.message); if (!res.headersSent) res.writeHead(502); res.end(); });
     req.pipe(outgoing);
-  } catch { res.writeHead(403); res.end(); }
+  } catch (err) {
+    console.warn(`[egress-proxy] http rejected: ${req.url} - ${err instanceof Error ? err.message : String(err)}`);
+    res.writeHead(403); res.end();
+  }
 });
 server.on("connect", async (req, client, head) => {
   client.pause();
@@ -78,15 +81,24 @@ server.on("connect", async (req, client, head) => {
     upstream.once("connect", () => {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       let buffered = Buffer.from(head);
-      const timer = setTimeout(() => { client.destroy(); upstream.destroy(); }, 5_000);
+      const timer = setTimeout(() => {
+        console.warn(`[egress-proxy] SNI timeout for host: ${host}`);
+        client.destroy(); upstream.destroy();
+      }, 5_000);
       const onData = (chunk) => {
         buffered = Buffer.concat([buffered, chunk]);
-        if (buffered.length > 16_384) { client.destroy(); upstream.destroy(); return; }
+        if (buffered.length > 16_384) {
+          console.warn(`[egress-proxy] ClientHello exceeded buffer limit for host: ${host}`);
+          client.destroy(); upstream.destroy(); return;
+        }
         const serverName = clientHelloServerName(buffered);
         if (serverName === undefined) return;
         clearTimeout(timer);
         client.off("data", onData);
-        if (serverName !== host) { client.destroy(); upstream.destroy(); return; }
+        if (serverName !== host) {
+          console.warn(`[egress-proxy] SNI mismatch: requested ${host} but got ${serverName}`);
+          client.destroy(); upstream.destroy(); return;
+        }
         upstream.write(buffered);
         client.pipe(upstream);
         upstream.pipe(client);
@@ -95,8 +107,14 @@ server.on("connect", async (req, client, head) => {
       client.resume();
       if (buffered.length) onData(Buffer.alloc(0));
     });
-    upstream.on("error", () => client.destroy());
+    upstream.on("error", (err) => {
+      console.warn(`[egress-proxy] upstream connection error to ${host} (${address}):`, err.message);
+      client.destroy();
+    });
     client.on("error", () => upstream.destroy());
-  } catch { client.end("HTTP/1.1 403 Forbidden\r\n\r\n"); }
+  } catch (err) {
+    console.warn(`[egress-proxy] CONNECT rejected for ${req.url}:`, err instanceof Error ? err.message : String(err));
+    client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+  }
 });
 if (process.env.NPATI_EGRESS_TEST !== "true") server.listen(8080, "0.0.0.0");
