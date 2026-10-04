@@ -169,17 +169,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     const names = await this.inspect(scope, id);
     this.touch(id);
     if (files.length > this.limits.maxFiles || files.reduce((sum, file) => sum + Buffer.byteLength(file.content), 0) > this.limits.maxBytes) throw new SandboxProviderError("upload_limit", "Upload exceeds sandbox limits", 413);
-    const directory = await mkdtemp(path.join(tmpdir(), "npati-sandbox-upload-"));
-    try {
-      for (const file of files) {
-        const relative = safeProjectPath(file.path);
-        const target = path.join(directory, relative);
-        await mkdir(path.dirname(target), { recursive: true });
-        await writeFile(target, file.content, { flag: "wx" });
-      }
-      await assignSandboxOwner(directory);
-      await this.docker(["cp", "-a", path.join(directory, "."), `${names.sandbox}:/workspace/`], 120_000);
-    } finally { await rm(directory, { recursive: true, force: true }); }
+    const sanitized = files.map((file) => ({ path: safeProjectPath(file.path), content: file.content }));
+    const script = `let chunks=[];process.stdin.on("data",c=>chunks.push(c));process.stdin.on("end",async()=>{try{const files=JSON.parse(Buffer.concat(chunks).toString("utf8"));const fs=require("node:fs/promises");const path=require("node:path");for(const file of files){const rel=path.normalize(file.path).replace(/^[/\\]+/,"");if(rel.startsWith("..")||path.isAbsolute(rel))throw Error("Unsafe path: "+file.path);const target=path.join("/workspace",rel);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,file.content,"utf8");}}catch(e){process.stderr.write(String(e));process.exitCode=1}})`;
+    await this.docker(["exec", "-i", names.sandbox, "node", "-e", script], 120_000, JSON.stringify(sanitized));
   }
   async downloadFiles(scope: SandboxScope, id: string): Promise<SandboxFile[]> {
     const names = await this.inspect(scope, id);
