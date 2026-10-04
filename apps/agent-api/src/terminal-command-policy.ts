@@ -4,9 +4,12 @@ export interface TerminalCommandDecision {
   requiresApproval: boolean;
   timeoutClass: "default" | "install_build";
   reason: string;
+  policyRule: string;
 }
+export interface TerminalCommandSpec { command?: string; executable?: string; args?: string[]; cwd?: string; }
+export interface NormalizedTerminalCommand { rawCommand: string; command: string; executable: string; args: string[]; cwd: string; }
 const result = (level: TerminalRiskLevel, reason: string, timeoutClass: TerminalCommandDecision["timeoutClass"] = "default"): TerminalCommandDecision => ({
-  level, requiresApproval: level === "approval", timeoutClass, reason,
+  level, requiresApproval: level === "approval", timeoutClass, reason, policyRule: reason.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
 });
 const relative = (value: string) => /^[A-Za-z0-9._/@+-]+$/.test(value) && !value.startsWith("/") && !value.split("/").includes("..") && !/(?:^|\/)(?:\.env(?:\..*)?|\.ssh|\.aws|\.git)(?:\/|$)/i.test(value);
 const packageName = (value: string) => /^[A-Za-z0-9@._/+~-]+$/.test(value) && !value.includes("..") && !value.startsWith("/") && !/^(?:https?:|git\+|file:)/i.test(value);
@@ -26,7 +29,25 @@ const serverArgs = (values: string[]) => {
   return true;
 };
 const frameworkCli = (value: string) => ["next", "vite", "astro", "nuxt", "remix", "react-scripts", "svelte-kit"].includes(value);
-export function classifyTerminalCommand(command: string): TerminalCommandDecision {
+export function normalizeTerminalCommand(input: string | TerminalCommandSpec): NormalizedTerminalCommand {
+  const spec = typeof input === "string" ? { command: input } : input;
+  if (!spec || typeof spec !== "object") throw new Error("Invalid terminal command");
+  const rawCommand = spec.command ?? spec.executable ?? "";
+  if (typeof rawCommand !== "string" || !rawCommand.trim() || rawCommand.length > 4096 || rawCommand.includes("\0")) throw new Error("Invalid terminal command");
+  if (spec.executable !== undefined && (typeof spec.executable !== "string" || spec.executable !== rawCommand.trim().split(/\s+/)[0])) throw new Error("Conflicting terminal executable");
+  if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.length > 64 || !spec.args.every((arg) => typeof arg === "string" && /^[A-Za-z0-9._/@+=:-]+$/.test(arg)))) throw new Error("Invalid terminal arguments");
+  const rawWords = rawCommand.trim().split(/\s+/);
+  const words = [...rawWords, ...(spec.args ?? [])];
+  const command = /[\r\n]/.test(rawCommand) ? rawCommand.trim() + (spec.args?.length ? " " + spec.args.join(" ") : "") : words.join(" ");
+  if (command.length > 4096) throw new Error("Invalid terminal command");
+  const cwdInput = spec.cwd ?? ".";
+  if (typeof cwdInput !== "string") throw new Error("Invalid terminal cwd");
+  const cwd = cwdInput === "/workspace" || cwdInput === "." || cwdInput === "" ? "." : cwdInput.startsWith("/workspace/") ? cwdInput.slice(11) : cwdInput;
+  if (cwd !== "." && (!/^[A-Za-z0-9._/-]+$/.test(cwd) || cwd.startsWith("/") || cwd.split("/").some((part) => !part || part === "." || part === ".." || /^(?:\.env(?:\..*)?|\.git|\.ssh|\.aws|\.npati-.*|\.worktrees)$/i.test(part)))) throw new Error("Invalid terminal cwd");
+  return { rawCommand, command, executable: words[0]!, args: words.slice(1), cwd };
+}
+export function classifyTerminalCommand(input: string | TerminalCommandSpec): TerminalCommandDecision {
+  const { command } = normalizeTerminalCommand(input);
   if (typeof command !== "string" || !command.trim() || command.length > 4096 || command.includes("\0")) throw new Error("Invalid terminal command");
   const clean = command.trim();
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
@@ -37,6 +58,10 @@ export function classifyTerminalCommand(command: string): TerminalCommandDecisio
   if (program === "cat" && words.length === 2 && relative(action!)) return result("safe", "Read sandbox file");
   if (program === "git" && action === "status" && args.every((word) => ["--short", "--porcelain", "-sb"].includes(word))) return result("safe", "Read Git status");
   if (program === "git" && action === "diff" && args.every((word) => ["--stat", "--name-only", "--cached"].includes(word))) return result("safe", "Read Git diff");
+  if (program === "corepack" && ["pnpm", "yarn"].includes(action ?? "")) {
+    const nested = classifyTerminalCommand([action, ...args].join(" "));
+    return nested.requiresApproval ? result("approval", "Corepack command requires approval") : { ...nested, policyRule: "corepack_" + nested.policyRule };
+  }
   if (packageManager(program!)) {
     if (["install", "ci"].includes(action!) && installArgs(args) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
     if (action === "test" && args.length === 0) return result("safe", "Run sandbox tests", "install_build");

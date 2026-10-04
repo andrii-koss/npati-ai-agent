@@ -21,6 +21,7 @@ import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 
 export interface CompanyToolExecutor {
   canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
+  evaluateSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<{ allowed: boolean; reason: string; sandboxId?: string }>;
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 }
 
@@ -58,11 +59,17 @@ function record(value: unknown) {
 
 export class CompanyToolRuntime implements CompanyToolExecutor {
   async canAutoApproveSandboxTerminal(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean> {
-    if (!this.projectSandbox) return false;
-    return this.projectSandbox.canAutoApproveTerminal(context, company.id, runProjectId, {
+    return (await this.evaluateSandboxTerminal(context, company, runProjectId, agentId, tool, input)).allowed;
+  }
+  async evaluateSandboxTerminal(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<{ allowed: boolean; reason: string; sandboxId?: string }> {
+    if (!this.projectSandbox) return { allowed: false, reason: "sandbox_runner_unavailable" };
+    return this.projectSandbox.evaluateAutoApprovalTerminal(context, company.id, runProjectId, {
       projectId: typeof input.projectId === "string" ? input.projectId : "",
       sandboxId: typeof input.sandboxId === "string" ? input.sandboxId : undefined,
       command: typeof input.command === "string" ? input.command : undefined,
+      executable: typeof input.executable === "string" ? input.executable : undefined,
+      args: Array.isArray(input.args) ? input.args as string[] : undefined,
+      cwd: typeof input.cwd === "string" ? input.cwd : undefined,
       action: input.action as "start" | "status" | "logs" | "stop" | undefined,
       environmentReferences: input.environmentReferences as Record<string, TerminalSecretReference> | undefined,
       agentId,
@@ -145,6 +152,9 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         projectId: typeof input.projectId === "string" ? input.projectId : "",
         sandboxId: typeof input.sandboxId === "string" ? input.sandboxId : undefined,
         command: typeof input.command === "string" ? input.command : undefined,
+      executable: typeof input.executable === "string" ? input.executable : undefined,
+      args: Array.isArray(input.args) ? input.args as string[] : undefined,
+      cwd: typeof input.cwd === "string" ? input.cwd : undefined,
         processId: typeof input.processId === "string" ? input.processId : undefined,
         action: input.action as "start" | "status" | "logs" | "stop" | undefined,
         environmentReferences: input.environmentReferences as Record<string, TerminalSecretReference> | undefined,
