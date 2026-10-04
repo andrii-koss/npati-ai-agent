@@ -28,7 +28,8 @@ export type RouterSignal =
   | "website_build"
   | "website_preview"
   | "website_test"
-  | "website_debug";
+  | "website_debug"
+  | "data_model_action";
 
 export interface RouterDecision {
   isNoTool: boolean;
@@ -105,6 +106,7 @@ export class HybridRouter {
     else if (projectIntentDecision.intent === "PREVIEW_PROJECT") matchedSignals.push("website_preview");
     else if (projectIntentDecision.intent === "TEST_PROJECT") matchedSignals.push("website_test");
     else if (projectIntentDecision.intent === "DEBUG_PROJECT") matchedSignals.push("website_debug");
+    else if (projectIntentDecision.intent === "ADD_DATA_MODEL" || projectIntentDecision.intent === "EDIT_DATA_MODEL") matchedSignals.push("data_model_action");
 
     // 2. NO_TOOL Path: Simple explanation / reasoning without action signals
     if (isPureExplanation && !hasUrl && !hasBrowser && !hasCrawl && !hasFile && !hasTime) {
@@ -123,7 +125,9 @@ export class HybridRouter {
 
     // 3. Domain & Candidate Classification
     let primaryDomain: CapabilityDomain | undefined;
-    if (hasBrowser) {
+    if (projectIntentDecision.intent === "ADD_DATA_MODEL" || projectIntentDecision.intent === "EDIT_DATA_MODEL") {
+      primaryDomain = "storage";
+    } else if (hasBrowser) {
       primaryDomain = "browser";
     } else if (hasUrl || hasTime || hasCrawl) {
       primaryDomain = "research";

@@ -4838,3 +4838,6 @@ CAPABILITY_MATRIX.push(...PROJECT_DEPLOY_MATRIX);
 
 import { PROJECT_QA_MATRIX } from "./project-qa-capabilities";
 CAPABILITY_MATRIX.push(...PROJECT_QA_MATRIX);
+
+import { PROJECT_DATA_MATRIX } from "./project-data-capabilities";
+CAPABILITY_MATRIX.push(...PROJECT_DATA_MATRIX);

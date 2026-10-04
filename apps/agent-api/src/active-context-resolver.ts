@@ -54,7 +54,20 @@ export class ActiveContextResolver {
       } catch {
         project = undefined;
       }
-      if (!project || project.companyId !== company.id || project.status === "archived") {
+      if (!project || project.companyId !== company.id) {
+        if (validated.contextType === "project") {
+          throw new WorkspaceAccessError(`Project not found or does not belong to company: ${validated.projectId}`);
+        }
+        return this.resolve(auth, {
+          contextType: "company",
+          companyId: company.id,
+          businessId: company.businessId ?? null,
+        });
+      }
+      if (project.status === "archived") {
+        if (validated.contextType === "project") {
+          throw new ContextValidationError(`Cannot set active context to an archived project: ${validated.projectId}`);
+        }
         return this.resolve(auth, {
           contextType: "company",
           companyId: company.id,

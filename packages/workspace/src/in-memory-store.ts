@@ -332,7 +332,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const timestamp = now();
     const project: Project = {
       id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
-      name: input.name, description: input.description, type: input.type, status: "ready",
+      name: input.name, description: input.description, type: input.type ?? "website", status: "ready",
+      dataBackendId: input.dataBackendId,
       revision: 1, createdAt: timestamp, updatedAt: timestamp,
     };
     this.projects.set(project.id, project);
