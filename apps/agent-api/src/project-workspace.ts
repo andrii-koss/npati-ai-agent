@@ -353,7 +353,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
     const { clean, absolute } = await this.target(base, filePath);
     const bytes = await this.bytes(absolute);
-    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|\b(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8"))) throw new ProjectFileError("secret_content", "Protected file content", 403);
+    const isManifestOrLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(path.basename(clean));
+    if (!isManifestOrLockfile && (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8")))) throw new ProjectFileError("secret_content", "Protected file content", 403);
     return this.content(clean, bytes);
   }
   private async save(absolute: string, content: string) {
