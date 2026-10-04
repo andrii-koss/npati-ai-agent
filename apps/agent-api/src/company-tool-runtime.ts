@@ -18,6 +18,8 @@ import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { DeployTargetConfig } from "./deploy-provider";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
+import { isDataCapabilityPermitted } from "@npati/shared";
+import type { AgentDataStudioService } from "./data-studio/agent-data-service";
 
 export interface CompanyToolExecutor {
   canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
@@ -93,6 +95,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectFileLeaseManager?: ProjectFileLeaseManager,
     private readonly projectDeploy?: ProjectDeployService,
     private readonly projectQa?: ProjectBrowserQaService,
+    private readonly projectData?: AgentDataStudioService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -168,6 +171,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
     if (tool.startsWith("project.deploy.")) return this.projectDeployTool(context, company, tool, input);
     if (tool.startsWith("project.qa.")) return this.projectQaTool(context, company, tool, input);
+    if (tool.startsWith("project.data.")) return this.projectDataTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -441,6 +445,79 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         });
       default:
         throw new Error(`Unsupported git tool: ${tool}`);
+    }
+  }
+
+  private async projectDataTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectData) throw new Error("Project Data Studio service is not configured");
+    const agentId = typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "";
+    if (agentId && this.projectAgentStore) {
+      const agent = await this.projectAgentStore.getCompanyAgent(context, company.id, agentId);
+      if (!agent.isActive || !isDataCapabilityPermitted(agent.tools, tool)) {
+        throw new Error(`Agent lacks required capability group for ${tool}`);
+      }
+    }
+    const projectId = text(input.projectId, "Project ID", 100);
+    const approved = input.__npatiApprovalGranted === true || input.confirmed === true;
+    const runId = typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined;
+
+    switch (tool) {
+      case "project.data.schema.inspect":
+        return this.projectData.inspectSchema(context, company.id, projectId);
+      case "project.data.schema.apply": {
+        const operation = input.operation as any;
+        const dryRun = input.dryRun === true;
+        const expectedFingerprint = typeof input.expectedFingerprint === "string" ? input.expectedFingerprint : undefined;
+        return this.projectData.applySchema(context, company.id, projectId, operation, {
+          dryRunOnly: dryRun,
+          expectedFingerprint,
+          runId,
+          agentId,
+          approved,
+        });
+      }
+      case "project.data.rows.list": {
+        const collection = text(input.collection, "Collection", 100);
+        return this.projectData.listRows(context, company.id, projectId, collection, input as any);
+      }
+      case "project.data.rows.read": {
+        const collection = text(input.collection, "Collection", 100);
+        const id = text(input.id, "Row ID", 100);
+        return this.projectData.readRow(context, company.id, projectId, collection, id);
+      }
+      case "project.data.rows.create": {
+        const collection = text(input.collection, "Collection", 100);
+        const row = record(input.row);
+        return this.projectData.createRow(context, company.id, projectId, collection, row);
+      }
+      case "project.data.rows.update": {
+        const collection = text(input.collection, "Collection", 100);
+        const id = text(input.id, "Row ID", 100);
+        const row = record(input.row);
+        return this.projectData.updateRow(context, company.id, projectId, collection, id, row);
+      }
+      case "project.data.rows.delete": {
+        const collection = text(input.collection, "Collection", 100);
+        const ids = Array.isArray(input.ids) ? input.ids.map(String) : [];
+        if (!ids.length) throw new Error("Row IDs are required for deletion");
+        return this.projectData.deleteRows(context, company.id, projectId, collection, ids, approved);
+      }
+      case "project.data.migrations.list":
+        return this.projectData.listMigrations(context, company.id, projectId);
+      case "project.data.templates.list":
+        return this.projectData.listTemplates();
+      case "project.data.templates.apply": {
+        const templateId = text(input.templateId, "Template ID", 100);
+        const dryRun = input.dryRun === true;
+        return this.projectData.applyTemplate(context, company.id, projectId, templateId, {
+          dryRunOnly: dryRun,
+          runId,
+          agentId,
+          approved,
+        });
+      }
+      default:
+        throw new Error(`Unknown project data tool: ${tool}`);
     }
   }
 

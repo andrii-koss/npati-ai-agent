@@ -197,6 +197,8 @@ export * from "./project-intent";
 export * from "./project-git-capabilities";
 export * from "./project-deploy-capabilities";
 export * from "./project-qa-capabilities";
+export * from "./project-data-capabilities";
+export * from "./project-data-templates";
 export * from "./website-schema";
 export * from "./website-renderer";
 export * from "./static-website-renderer";

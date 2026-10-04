@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current step: D2 completed. All unit, API, schema, and UI tests pass. Typecheck clean across all packages. Web production build passes. Live PostgreSQL acceptance remains unverified because the local Docker daemon is unavailable.
-- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API.
-- Next step: D3 (Agent capabilities for Data Studio).
+- Current step: D3 completed. All unit, API, schema, UI, agent capability, template, intent router, and capability inspector tests pass. Typecheck clean across all 13 workspace packages. Web production build passes. Live PostgreSQL acceptance remains unverified because the local Docker daemon is unavailable.
+- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates.
+- Next step: D4 (Project Auth: client auth, sessions, tokens, RLS compiler).
 - Source of truth: `docs/data-studio/PLAN.md`, `docs/data-studio/00-audit.md`, and repository code.
 
 ## Implemented in D1
@@ -53,42 +53,76 @@
   - Empty states: project without DataBackend prompts user to attach or create a backend.
   - Responsive layout: scrollable tables and slide-over panels for mobile/tablet screens.
 
-## Explicitly outside D2
+## Implemented in D3
 
-- No agent capabilities / capability groups for Data Studio (D3).
-- No Project Auth (client login, registration, sessions, email verification, passwords, RLS user mapping) (D4).
+- Canonical Agent Capabilities registered in `defaultCapabilityRegistry` and `CAPABILITY_MATRIX` (total capabilities increased from 334 to 344; agent-callable from 70 to 80):
+  1. `project.data.schema.inspect`: low risk, inspects tables, columns, relations, fingerprint, drift status.
+  2. `project.data.schema.apply`: high risk, applies structured schema operation (create/drop collection, add/drop field, create relation, etc.). Approval required if destructive.
+  3. `project.data.rows.list`: low risk, paginated row query with filters and sorting.
+  4. `project.data.rows.read`: low risk, reads single row by ID.
+  5. `project.data.rows.create`: medium risk, inserts single row (max 100 rows/run).
+  6. `project.data.rows.update`: medium risk, updates single row by ID.
+  7. `project.data.rows.delete`: high risk, bulk row deletion requiring human confirmation.
+  8. `project.data.migrations.list`: low risk, lists applied migration history.
+  9. `project.data.templates.list`: low risk, lists pre-built schema templates.
+  10. `project.data.templates.apply`: high risk, previews and applies a complete schema template atomically with single human confirmation.
+- Capability Groups & Authorization:
+  - Capabilities grouped under `DATA_CAPABILITY_GROUPS`: `data.read`, `data.write`, `data.schema`, `auth.admin`.
+  - Evaluated via `isDataCapabilityPermitted(agent.tools, tool)` in `CompanyToolRuntime`. Agents without matching group receive permission denied errors.
+- Schema Templates Catalog (`packages/shared/src/project-data-templates.ts`):
+  - Catalog of 4 templates: `ecommerce` (8 collections: categories, products, product_variants, carts, cart_items, orders, order_items, addresses), `blog` (4 collections: posts, categories, tags, comments), `crm` (4 collections: contacts, companies, deals, notes), `saas-basic` (3 collections: organizations, memberships, subscriptions).
+  - Validation engine `validateTemplate`: strictly enforces that private collections (`KNOWN_PRIVATE_COLLECTIONS`) must declare owner-based access policies with `ownerField`. Rejects templates without required policies (`TEMPLATE_POLICY_MISSING`).
+  - Declares GDPR strategies (`delete`, `anonymize`, `detach`, `retain`) for user-related collections.
+  - Atomic application: compiles all collections and relations into ordered migrations, provides combined dry-run diff preview, applies all operations within a transaction, and rolls back in reverse order on failure. Requires single human approval.
+- Agent Data Studio Service (`apps/agent-api/src/data-studio/agent-data-service.ts`):
+  - Integrated into `CompanyToolRuntime` and `app.ts`.
+  - Locked to `environment="dev"`. Addressing `prod` directly throws `PROD_ENVIRONMENT_FORBIDDEN`.
+  - Rejects arbitrary SQL; agents can only invoke structured `SchemaOperation` or templates.
+  - Validates identifiers against SQL injection, reserved keywords, and length limits.
+  - Updates `PROJECT.md` Shared Project Context with synced schema overview (`## Data Schema (Data Studio)`) omitting row data and secrets.
+- Intent Router Integration:
+  - Added `ADD_DATA_MODEL` and `EDIT_DATA_MODEL` to `ProjectIntent`.
+  - Natural language classifiers in `classifyProjectIntent` recognizing Ukrainian and English prompts ("додай у проєкт таблиці для інтернет-магазину", "створи інтернет-магазин", "додай таблицю для замовлень", "зміни структуру таблиці products", "видали колонку з таблиці").
+  - Hybrid router routes data model actions to primary domain `"storage"`.
+- Execution Limits:
+  - Max 50 schema operations per run (`MAX_SCHEMA_OPS_PER_RUN = 50`).
+  - Max 100 rows per agent insert or delete (`MAX_ROWS_PER_MUTATION = 100`).
+
+## Explicitly outside D3
+
+- No Project Auth (client login, registration, JWT sessions, RLS user mapping, password hashing, email verification) (D4).
 - No public Project API gateway or publishing of `PROJECT_PUBLISHABLE_KEY` / `PROJECT_SECRET_KEY` (D5).
-- No automated reconciliation on schema drift (drift is detect-and-inspect only in D2).
+- No Project Auth UI in Website Builder (D6).
 - No environment promote workflow (D7).
 
 ## Verification
 
 - Automated tests:
-  - `tests/data-studio-ui-api.test.ts` (10 passing tests): overview, tenant isolation, SQL injection prevention in identifiers, prod schema change blocking, drift blocking Apply, row CRUD, CSV export formula injection escaping, CSV import type validation, multi-project backend sharing, service availability.
-  - All Data Studio test suites pass (18 tests total across 5 files):
+  - `tests/data-studio-agent-capabilities.test.ts` (11 passing tests): canonical registry & matrix registration, capability group permissions (`data.read`/`data.write`/`data.schema`), template validation requiring owner policies, template catalog validation, identifier & field type validation, approval requirement for destructive changes and execution upon approval, atomic ecommerce template application and `PROJECT.md` context sync, tenant isolation & cross-company protection, missing backend error handling, `CompanyToolRuntime` agent authorization, intent classification for Ukrainian/English phrases.
+  - All Data Studio test suites pass (29 passing tests across 6 files):
+    - `data-studio-agent-capabilities.test.ts`
     - `data-studio-core-migration.test.ts`
     - `data-studio-identifiers.test.ts`
     - `data-studio-routes.test.ts`
     - `data-studio-schema.test.ts`
     - `data-studio-ui-api.test.ts`
+  - Regression test suites pass:
+    - `developer-capability-inspector.test.ts` (8 passing tests, updated to 344 total items / 80 agent-callable tools)
+    - `capability-registry.test.ts` (10 passing tests, verified metadata and API exposure)
+    - `risk-approval.test.ts` (10 passing tests)
+    - `project-intent-router.test.ts` (21 passing tests, tenant isolation and project context)
 - TypeScript Typecheck: `npm run typecheck` passes with 0 errors across all 13 workspace packages.
-- Web Production Build: `npm --workspace=@npati/web run build` compiles Vite bundle and CSS assets successfully.
+- Web Production Build: `npm --workspace=@npati/web run build` passes with code 0.
 
 ## Known issues and risks
 
-- Live PostgreSQL acceptance remains unverified in this test environment due to Docker daemon absence. D1/D2 integration tests with real Postgres should run in a CI or Docker-enabled environment.
+- Live PostgreSQL acceptance remains unverified in this test environment due to Docker daemon absence. Integration tests with real Postgres should run in a CI or Docker-enabled environment.
 - In-memory workspace store used in mock unit tests; full Postgres store integration test requires a live Postgres instance.
-- Schema drift auto-reconciliation is intentionally omitted in D2; operators must resolve drift manually or in future reconciliation tooling.
 
-## D3 handoff
+## D4 handoff
 
-D3 can build upon:
-1. `validateOperation` and `DataStudioUiService` schema operation pipelines.
-2. `ProjectMigrationEngine` dry-run, apply, and row query/mutation operations (`listOwnerRows`, `createOwnerRow`, `updateOwnerRow`, `deleteOwnerRows`).
-3. Registered UI routes and migration history attribution (storing `runId` and agent author in `data_backend_migrations`).
-4. Implement agent capabilities in `apps/agent-api` and `@npati/agent`:
-   - `data_studio_inspect` (inspect schema, drift, collections, relations)
-   - `data_studio_migrate` (propose schema operations with diff dry-run and apply)
-   - `data_studio_query` (filtered row queries)
-   - `data_studio_mutate` (create, update, delete rows)
-   - Capability group assignment with risk tiers and approval gates.
+D4 (Project Auth) can build upon:
+1. `validateTemplate` access policies: templates declare `accessPolicies` (`rule: "owner"`, `ownerField: "owner_id"`) and `gdprStrategies`. D4 will compile these into PostgreSQL RLS policies (`CREATE POLICY ... USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id)`).
+2. `AgentDataStudioService` and `ProjectMigrationEngine` for managing auth tables (`_npati_auth_users`, `_npati_auth_sessions`, `_npati_auth_identities`) in project databases.
+3. Pre-existing `auth.admin` capability group in `DATA_CAPABILITY_GROUPS`.
+4. Tenant isolation and DataBackend dev/prod environment model.

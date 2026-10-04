@@ -43,7 +43,7 @@ export interface Project {
   dataBackendId?: string;
   revision: number; createdAt: string; updatedAt: string;
 }
-export interface ProjectInput { name: string; description?: string; type: ProjectType; }
+export interface ProjectInput { name: string; description?: string; type: ProjectType; dataBackendId?: string; }
 
 export type CheckpointTrigger = "manual" | "pre_run" | "post_run" | "pre_restore";
 

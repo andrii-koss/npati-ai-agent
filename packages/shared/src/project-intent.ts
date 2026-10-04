@@ -13,7 +13,9 @@ export type ProjectIntent =
   | "PREVIEW_PROJECT"
   | "CONNECT_REPOSITORY"
   | "COMMIT_PROJECT"
-  | "DEPLOY_PROJECT";
+  | "DEPLOY_PROJECT"
+  | "ADD_DATA_MODEL"
+  | "EDIT_DATA_MODEL";
 
 export interface ProjectIntentInput {
   message?: string;
@@ -73,6 +75,9 @@ const COMMIT_REGEX = /(?:зроби коміт|закоміть|git commit|commi
 
 const DEPLOY_REGEX = /(?:задеплой(?:ти)?|опублікуй(?: сайт)?|виклади на хостинг|deploy (?:(?:the |this |a )?(?:site|website|project|app)|to )|publish (?:the |this |a )?(?:site|website|project)|deploy)/i;
 
+const EDIT_DATA_MODEL_REGEX = /(?:зміни|онови|видали|поправ|відредагуй|edit|update|modify|alter|drop|delete)(?:\s+[\p{L}\d_-]+){0,3}\s+(?:таблиц|колекці|модел|поля?|поле|зв['ʼ]?язок|стовпець|колонк[ауи]|table|collection|model|field|relation|column)/iu;
+const ADD_DATA_MODEL_REGEX = /(?:додай|створи|налаштуй|зроби|add|create|setup|generate)(?:\s+[\p{L}\d_-]+){0,4}\s+(?:таблиц|колекці|модел|баз[уі]|схем|інтернет-магазин|магазин|блог|crm|saas|ecommerce|blog|store|table|collection|model|database|schema)/iu;
+
 function extractEntityName(message: string): string | undefined {
   const match = message.match(/(?:for|для|назва|called|named|під назвою)\s+["'«]?([^"'»\n.,!?]+)["'»]?/i)
     || message.match(/(?:створи(?: мені)?|зроби(?: мені)?|create(?: me)?|build)\s+(?:новий\s+)?(?:адаптивний\s+)?(?:сучасний\s+)?(?:сайт|веб-?сайт|website|landing)\s*[,:]\s*["'«]?([^"'»\n.!?]+)["'»]?/i);
@@ -95,7 +100,8 @@ export function extractFramework(message: string): string | undefined {
   return undefined;
 }
 
-export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentDecision {
+export function classifyProjectIntent(rawInput: ProjectIntentInput | string): ProjectIntentDecision {
+  const input: ProjectIntentInput = typeof rawInput === "string" ? { message: rawInput } : rawInput;
   const raw = input.message ?? input.prompt ?? "";
   const text = raw.trim();
   const lower = text.toLowerCase();
@@ -240,6 +246,32 @@ export function classifyProjectIntent(input: ProjectIntentInput): ProjectIntentD
       needsClarification: !input.activeProjectId,
       clarificationPrompt: !input.activeProjectId ? "Будь ласка, оберіть активний проєкт для виправлення помилки." : undefined,
       suggestedAction: "project.files.edit",
+    });
+  }
+
+  // 10.1. Data Model Intents (D3)
+  if (EDIT_DATA_MODEL_REGEX.test(text)) {
+    return buildDecision({
+      intent: "EDIT_DATA_MODEL",
+      confidence: 0.92,
+      isExecutableInStep5: true,
+      needsClarification: !input.activeProjectId,
+      clarificationPrompt: !input.activeProjectId ? "Оберіть активний проєкт для зміни моделі даних." : undefined,
+      suggestedAction: "project.data.schema.apply",
+    });
+  }
+
+  if (ADD_DATA_MODEL_REGEX.test(text) && (/таблиц|колекці|модел|баз|схем|table|collection|model|database|schema/i.test(text) || Boolean(input.activeProjectId))) {
+    return buildDecision({
+      intent: "ADD_DATA_MODEL",
+      confidence: 0.92,
+      isExecutableInStep5: true,
+      needsClarification: !input.activeProjectId,
+      clarificationPrompt: !input.activeProjectId ? "Оберіть активний проєкт для додавання моделі даних." : undefined,
+      suggestedAction: "project.data.templates.apply",
+      targetDetails: {
+        topic: text,
+      },
     });
   }
 

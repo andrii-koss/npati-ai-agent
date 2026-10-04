@@ -46,6 +46,7 @@ import { registerDataBackendRoutes } from "./data-studio/routes";
 import { ProjectMigrationEngine } from "./data-studio/migration-engine";
 import { DataStudioUiService } from "./data-studio/studio-service";
 import { registerDataStudioRoutes } from "./data-studio/studio-routes";
+import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
 import { RemoteSandboxProvider } from "./sandbox-provider";
@@ -851,11 +852,16 @@ export function buildApp(config: AppConfig = {}) {
     maxDatabaseBytes: Number(process.env.NPATI_DATA_MAX_DATABASE_BYTES) || 1_000_000_000,
   }, sharedPostgresProvisioner) : undefined;
   const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, dataProvider) : undefined;
-  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider
-    ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider,
-      new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)) : undefined;
+  const projectMigrationEngine = dataBackendRepository && sharedPostgresProvisioner && dataProvider
+    ? new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)
+    : undefined;
+  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
+    ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine) : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+  const agentDataStudioService = dataBackendRepository && dataProvider && projectMigrationEngine
+    ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace)
+    : undefined;
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
   const sandboxRunnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
@@ -887,7 +893,7 @@ export function buildApp(config: AppConfig = {}) {
     projectPreviewService,
     projectSandbox,
   );
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService, projectBrowserQaService);
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService, projectBrowserQaService, agentDataStudioService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
