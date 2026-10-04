@@ -304,6 +304,7 @@ export class ProjectOrchestrator {
       "2. Make surgical, minimal modifications to fulfill the user request precisely.",
       "3. Keep all working pages, styles, assets, and configurations functional.",
       project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
+      project.framework === "Next.js" ? "4. The Next.js project structure, package.json, and layout are ALREADY scaffolded in the workspace. Do not run create-next-app or re-scaffold; inspect and edit the existing files directly." : "",
       sharedContext ? `\n[Shared Project Context (PROJECT.md)]:\n${sharedContext.slice(0, 2000)}` : "",
       `\nUser Task: ${params.prompt}`,
     ].filter(Boolean).join("\n");
