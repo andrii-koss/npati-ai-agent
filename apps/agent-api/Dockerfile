@@ -22,8 +22,11 @@ COPY --from=build /app/apps/agent-api/dist ./dist
 FROM runtime-base AS sandbox-runner
 USER root
 RUN apk add --no-cache docker-cli
+COPY apps/agent-api/Dockerfile.project-sandbox apps/agent-api/Dockerfile.sandbox-egress /opt/npati-sandbox-images/
+COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-sandbox-images/src/
+COPY apps/agent-api/sandbox-runner-entrypoint.sh /opt/npati-sandbox-images/entrypoint.sh
 EXPOSE 7865
-CMD ["node", "dist/sandbox-runner-server.js"]
+CMD ["sh", "/opt/npati-sandbox-images/entrypoint.sh"]
 
 FROM runtime-base AS runtime
 RUN mkdir -p /app/data && chown node:node /app/data
