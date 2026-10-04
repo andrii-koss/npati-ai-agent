@@ -33,7 +33,7 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
   last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",
-  last_deployed_at AS "lastDeployedAt", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -729,6 +729,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration059 } = await import("./migration-059");
         await runMigration059(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('059_company_approval_pause')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    const dataStudioMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='060_data_backends'");
+    if (!dataStudioMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration060 } = await import("./migration-060");
+        await runMigration060(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('060_data_backends')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }

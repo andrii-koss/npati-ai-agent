@@ -1,0 +1,84 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
+import { AuthenticationError, type AuthProvider } from "../auth";
+import { DataStudioError } from "./identifier";
+import type { DataBackendService } from "./service";
+
+function fail(reply: FastifyReply, error: unknown) {
+  if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
+  if (error instanceof DataStudioError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, step: error.step, retryable: error.retryable } });
+  if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
+  if (error instanceof WorkspaceNotFoundError) return reply.code(404).send({ error: { code: error.code, message: error.message } });
+  return reply.code(503).send({ error: { code: "DATA_STUDIO_UNAVAILABLE", message: "Data Studio is unavailable", step: "request", retryable: true } });
+}
+
+export function registerDataBackendRoutes(app: FastifyInstance, auth: AuthProvider, service?: DataBackendService) {
+  const authorize = async (request: FastifyRequest, permission: "workspace:read" | "business:manage") => {
+    const ctx = await auth.authenticate(request);
+    if (!ctx.permissions.includes(permission)) throw new WorkspaceAccessError("Missing permission: " + permission);
+    if (!service) throw new DataStudioError(503, "request", "Data Studio is unavailable", true, "DATA_STUDIO_UNAVAILABLE");
+    return { ctx, service };
+  };
+
+  app.get<{ Params: { companyId: string } }>("/companies/:companyId/data-backends", async (request, reply) => {
+    try { const { ctx, service } = await authorize(request, "workspace:read"); return { backends: await service.list(ctx, request.params.companyId) }; }
+    catch (error) { return fail(reply, error); }
+  });
+
+  app.post<{ Params: { companyId: string }; Body: { name: string; provider?: "shared_postgres" | "external_postgres" } }>(
+    "/companies/:companyId/data-backends",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["name"], properties: {
+      name: { type: "string", minLength: 1, maxLength: 200 }, provider: { type: "string", enum: ["shared_postgres", "external_postgres"] },
+    } } } },
+    async (request, reply) => {
+      try { const { ctx, service } = await authorize(request, "business:manage"); return reply.code(201).send(await service.create(ctx, request.params.companyId, request.body)); }
+      catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.get<{ Params: { companyId: string; backendId: string } }>("/companies/:companyId/data-backends/:backendId", async (request, reply) => {
+    try { const { ctx, service } = await authorize(request, "workspace:read"); return await service.get(ctx, request.params.companyId, request.params.backendId); }
+    catch (error) { return fail(reply, error); }
+  });
+
+  app.patch<{ Params: { companyId: string; backendId: string }; Body: { name: string } }>(
+    "/companies/:companyId/data-backends/:backendId",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 200 } } } } },
+    async (request, reply) => {
+      try { const { ctx, service } = await authorize(request, "business:manage"); return await service.rename(ctx, request.params.companyId, request.params.backendId, request.body.name); }
+      catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.post<{ Params: { companyId: string; backendId: string } }>("/companies/:companyId/data-backends/:backendId/activate", async (request, reply) => {
+    try { const { ctx, service } = await authorize(request, "business:manage"); return await service.activate(ctx, request.params.companyId, request.params.backendId); }
+    catch (error) { return fail(reply, error); }
+  });
+  app.post<{ Params: { companyId: string; backendId: string } }>("/companies/:companyId/data-backends/:backendId/archive", async (request, reply) => {
+    try { const { ctx, service } = await authorize(request, "business:manage"); return await service.archive(ctx, request.params.companyId, request.params.backendId); }
+    catch (error) { return fail(reply, error); }
+  });
+
+  app.delete<{ Params: { companyId: string; backendId: string }; Body: { confirmName: string } }>(
+    "/companies/:companyId/data-backends/:backendId",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["confirmName"], properties: { confirmName: { type: "string" } } } } },
+    async (request, reply) => {
+      try { const { ctx, service } = await authorize(request, "business:manage"); return await service.remove(ctx, request.params.companyId, request.params.backendId, request.body.confirmName); }
+      catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.put<{ Params: { companyId: string; projectId: string }; Body: { dataBackendId: string } }>(
+    "/companies/:companyId/projects/:projectId/data-backend",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["dataBackendId"], properties: { dataBackendId: { type: "string", format: "uuid" } } } } },
+    async (request, reply) => {
+      try { const { ctx, service } = await authorize(request, "business:manage"); return await service.attach(ctx, request.params.companyId, request.params.projectId, request.body.dataBackendId); }
+      catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.delete<{ Params: { companyId: string; projectId: string } }>("/companies/:companyId/projects/:projectId/data-backend", async (request, reply) => {
+    try { const { ctx, service } = await authorize(request, "business:manage"); return await service.attach(ctx, request.params.companyId, request.params.projectId, null); }
+    catch (error) { return fail(reply, error); }
+  });
+}

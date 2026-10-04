@@ -29,7 +29,8 @@ EXPOSE 7865
 CMD ["sh", "/opt/npati-sandbox-images/entrypoint.sh"]
 
 FROM runtime-base AS runtime
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN apk add --no-cache postgresql-client
+RUN mkdir -p /app/data /app/project-snapshots && chown node:node /app/data /app/project-snapshots
 EXPOSE 3001
 USER node
 CMD ["node", "dist/server.js"]

@@ -87,6 +87,18 @@ services:
       WEB_RESEARCH_MAX_CONTENT_CHARACTERS: ${WEB_RESEARCH_MAX_CONTENT_CHARACTERS:-80000}
       WEB_RESEARCH_PER_DOMAIN_DELAY_MS: ${WEB_RESEARCH_PER_DOMAIN_DELAY_MS:-750}
       DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:-npati}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
+      NPATI_PROJECTS_POSTGRES_HOST: postgres-projects
+      NPATI_PROJECTS_POSTGRES_PORT: 5432
+      NPATI_PROJECTS_POSTGRES_ADMIN_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      NPATI_PROJECTS_POSTGRES_ADMIN_DB: postgres
+      NPATI_PROJECTS_SNAPSHOT_DIR: /app/project-snapshots
+      NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS: ${NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS:-30}
+      NPATI_DATA_MAX_COLLECTIONS: ${NPATI_DATA_MAX_COLLECTIONS:-50}
+      NPATI_DATA_MAX_FIELDS: ${NPATI_DATA_MAX_FIELDS:-100}
+      NPATI_DATA_MAX_ROWS: ${NPATI_DATA_MAX_ROWS:-100}
+      NPATI_DATA_MAX_QUERIES_PER_MINUTE: ${NPATI_DATA_MAX_QUERIES_PER_MINUTE:-600}
+      NPATI_DATA_MAX_DATABASE_BYTES: ${NPATI_DATA_MAX_DATABASE_BYTES:-1000000000}
       QDRANT_URL: http://qdrant:6333
       QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
@@ -106,8 +118,9 @@ services:
       NPATI_STORAGE_RECONCILE_PAGE_SIZE: ${NPATI_STORAGE_RECONCILE_PAGE_SIZE:-250}
     ports:
       - "${NPATI_AGENT_API_PORT:-3001}:3001"
-    volumes: &agent-api-volumes
+    volumes:
       - npati-agent-data:/app/data
+      - postgres-projects-snapshots:/app/project-snapshots
     depends_on:
       omniroute:
         condition: service_healthy
@@ -123,7 +136,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks: [npati-agent-network]
+    networks: [npati-agent-network, npati-projects-db-network]
 
   company-worker:
     container_name: npati-agent-company-worker
@@ -133,8 +146,11 @@ services:
       target: runtime
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
-    environment: *agent-api-env
-    volumes: *agent-api-volumes
+    environment:
+      <<: *agent-api-env
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ""
+    volumes:
+      - npati-agent-data:/app/data
     depends_on:
       omniroute:
         condition: service_healthy
@@ -298,6 +314,28 @@ services:
       retries: 3
     networks: [npati-agent-network]
 
+  postgres-projects:
+    profiles: [data-studio]
+    container_name: npati-agent-postgres-projects
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
+      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-projects-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    cpus: "1.0"
+    mem_limit: 1g
+    pids_limit: 256
+    networks: [npati-projects-db-network]
   postgres:
     container_name: npati-agent-postgres
     image: pgvector/pgvector:pg17
@@ -318,6 +356,8 @@ services:
     networks: [npati-agent-network]
 
 networks:
+  npati-projects-db-network:
+    internal: true
   npati-agent-network:
     name: npati-agent-network
 
@@ -330,6 +370,10 @@ volumes:
     name: npati-agent-redis-data
   postgres-data:
     name: npati-agent-postgres-data
+  postgres-projects-data:
+    name: npati-agent-postgres-projects-data
+  postgres-projects-snapshots:
+    name: npati-agent-postgres-projects-snapshots
   crawler-state:
     name: npati-agent-crawler-state
   minio-data:

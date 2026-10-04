@@ -74,6 +74,18 @@ services:
       NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:?NPATI_BROWSER_INTERNAL_TOKEN is required}
       NPATI_BROWSER_UPLOAD_ROOT: /app/data/browser-uploads
       DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:?NPATI_POSTGRES_PASSWORD is required}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
+      NPATI_PROJECTS_POSTGRES_HOST: postgres-projects
+      NPATI_PROJECTS_POSTGRES_PORT: 5432
+      NPATI_PROJECTS_POSTGRES_ADMIN_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      NPATI_PROJECTS_POSTGRES_ADMIN_DB: postgres
+      NPATI_PROJECTS_SNAPSHOT_DIR: /app/project-snapshots
+      NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS: ${NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS:-30}
+      NPATI_DATA_MAX_COLLECTIONS: ${NPATI_DATA_MAX_COLLECTIONS:-50}
+      NPATI_DATA_MAX_FIELDS: ${NPATI_DATA_MAX_FIELDS:-100}
+      NPATI_DATA_MAX_ROWS: ${NPATI_DATA_MAX_ROWS:-100}
+      NPATI_DATA_MAX_QUERIES_PER_MINUTE: ${NPATI_DATA_MAX_QUERIES_PER_MINUTE:-600}
+      NPATI_DATA_MAX_DATABASE_BYTES: ${NPATI_DATA_MAX_DATABASE_BYTES:-1000000000}
       QDRANT_URL: http://qdrant:6333
       QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
@@ -95,6 +107,7 @@ services:
       - "3001"
     volumes:
       - agent-data:/app/data
+      - postgres-projects-snapshots:/app/project-snapshots
     depends_on:
       omniroute:
         condition: service_healthy
@@ -116,7 +129,7 @@ services:
       timeout: 8s
       retries: 10
       start_period: 300s
-    networks: [npati-agent, npati-sandbox-control]
+    networks: [npati-agent, npati-sandbox-control, npati-projects-db]
 
   company-worker:
     build:
@@ -128,7 +141,9 @@ services:
         NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
-    environment: *agent-api-env
+    environment:
+      <<: *agent-api-env
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ""
     volumes:
       - agent-data:/app/data
     depends_on:
@@ -329,6 +344,27 @@ services:
       retries: 5
     networks: [npati-agent]
 
+  postgres-projects:
+    profiles: [data-studio]
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
+      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-projects-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    cpus: "1.0"
+    mem_limit: 1g
+    pids_limit: 256
+    networks: [npati-projects-db]
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
@@ -348,6 +384,8 @@ services:
     networks: [npati-agent]
 
 networks:
+  npati-projects-db:
+    internal: true
   npati-agent:
   npati-sandbox-control:
     internal: true
@@ -357,6 +395,8 @@ volumes:
   omniroute-data:
   redis-data:
   postgres-data:
+  postgres-projects-data:
+  postgres-projects-snapshots:
   crawler-state:
   minio-data:
   qdrant-data:
