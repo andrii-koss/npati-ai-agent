@@ -13,7 +13,7 @@ interface RunnerLimits {
   cpu: string; memory: string; diskBytes: number; pids: number; image: string; proxyImage: string; maxFiles: number; maxBytes: number; allowedHosts: string;
 }
 const defaults: RunnerLimits = {
-  cpu: "1", memory: "1024m", diskBytes: 512 * 1024 * 1024, pids: 128,
+  cpu: "1", memory: "1536m", diskBytes: 1536 * 1024 * 1024, pids: 128,
   image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com",
 };
 const uuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
