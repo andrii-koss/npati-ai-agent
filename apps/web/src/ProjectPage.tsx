@@ -1430,7 +1430,7 @@ export function ProjectPage() {
                           <div className="run-card-header">
                             <span className={`status-pill status-${r.status}`}>{r.status}</span>
                             <span className="run-card-time">{new Date(r.createdAt).toLocaleString()}</span>
-                            <Link to={`/activity?runId=${r.id}`} className="button-secondary view-run-btn">
+                            <Link to={r.status === "awaiting_approval" ? `/company?company=${companyId}&runId=${r.id}` : `/activity?runId=${r.id}`} className="button-secondary view-run-btn">
                               {language === "uk" ? "Переглянути Run →" : "View Run →"}
                             </Link>
                           </div>

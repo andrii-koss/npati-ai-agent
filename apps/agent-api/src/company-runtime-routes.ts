@@ -23,7 +23,8 @@ function failure(reply: FastifyReply, error: unknown) {
 }
 function runtimeStatus(code?: string) {
   if (code === "SECURITY_GUARDRAIL_BLOCKED") return 400;
-  if (code === "TOOL_FORBIDDEN" || code === "APPROVAL_REQUIRED" || code === "INVALID_APPROVAL_TOKEN") return 403;
+  if (code === "APPROVAL_REQUIRED") return 202;
+  if (code === "TOOL_FORBIDDEN" || code === "INVALID_APPROVAL_TOKEN") return 403;
   if (code === "APPROVAL_ALREADY_USED" || code === "APPROVAL_INVALID" || code === "APPROVAL_EXPIRED") return 409;
   if (code === "CIRCULAR_DELEGATION" || code === "TOOL_LOOP_DETECTED") return 400;
   if (code === "RUN_TIMEOUT") return 504;

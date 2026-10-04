@@ -19,6 +19,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly projectQaReports = new Map<string, ProjectQaReport>();
   private readonly companyEdges = new Map<string, CompanyAgentEdge>();
   private readonly companyRuns = new Map<string, CompanyAgentRun>();
+  private readonly companyRunPendingPlans = new Map<string, unknown>();
   private readonly companyRunSteps = new Map<string, CompanyAgentRunStep>();
   private readonly companyToolAudit = new Map<string, CompanyAgentToolAudit>();
   private readonly companyRunEvents = new Map<string, CompanyAgentRunEvent>();
@@ -721,6 +722,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     };
   }
 
+  async getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null> {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    const plan = this.companyRunPendingPlans.get(runId);
+    return plan === undefined ? null : structuredClone(plan);
+  }
+  async setCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string, plan: unknown | null): Promise<void> {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    if (plan === null) this.companyRunPendingPlans.delete(runId);
+    else this.companyRunPendingPlans.set(runId, structuredClone(plan));
+  }
   async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
     const { run } = await this.getCompanyAgentRun(context, companyId, runId);
     const timestamp = now();
@@ -729,7 +740,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const updated: CompanyAgentRun = {
       ...run, ...patch,
       startedAt: started ? run.startedAt ?? timestamp : run.startedAt,
-      completedAt: terminal ? timestamp : run.completedAt,
+      completedAt: terminal ? timestamp : started || patch.status === "awaiting_approval" ? undefined : run.completedAt,
       updatedAt: timestamp,
     };
     this.companyRuns.set(runId, updated);

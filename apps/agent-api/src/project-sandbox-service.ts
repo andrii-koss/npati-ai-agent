@@ -229,6 +229,14 @@ export class ProjectSandboxService {
     return files;
   }
 
+  async canAutoApproveTerminal(ctx: AuthContext, companyId: string, runProjectId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process") {
+    if (!runProjectId || request.projectId !== runProjectId || !request.agentId || Object.keys(request.environmentReferences ?? {}).length) return false;
+    if (tool === "project.terminal.process" && request.action !== "start" && !["status", "logs", "stop"].includes(request.action ?? "")) return false;
+    if ((tool === "project.terminal.exec" || request.action === "start") && classifyTerminalCommand(request.command ?? "").requiresApproval) return false;
+    const project = await this.project(ctx, companyId, request.projectId);
+    await this.agent(ctx, companyId, request.agentId, tool);
+    return !request.sandboxId || request.sandboxId === project.sandboxId;
+  }
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {
     const tool = "project.terminal.process" as const;

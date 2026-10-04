@@ -721,6 +721,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const approvalPause = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='059_company_approval_pause'");
+    if (!approvalPause.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration059 } = await import("./migration-059");
+        await runMigration059(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('059_company_approval_pause')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1465,6 +1477,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         totalDurationMs: run.totalDurationMs ?? 0, completedAt: run.completedAt } : undefined };
   }
 
+  async getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null> {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    const result = await this.pool.query<{ pending_plan: unknown }>("SELECT pending_plan FROM company_agent_runs WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4", [runId, context.workspaceId, companyId, context.userId]);
+    return result.rows[0]?.pending_plan ?? null;
+  }
+  async setCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string, plan: unknown | null): Promise<void> {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    await this.pool.query("UPDATE company_agent_runs SET pending_plan=$5::jsonb,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4", [runId, context.workspaceId, companyId, context.userId, plan === null ? null : JSON.stringify(plan)]);
+  }
   async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
     await this.getCompanyAgentRun(context, companyId, runId);
     const value = JSON.stringify(patch);
@@ -1482,7 +1503,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       total_tokens=CASE WHEN $5::jsonb ? 'totalTokens' THEN ($5::jsonb->>'totalTokens')::bigint ELSE total_tokens END,
       total_duration_ms=CASE WHEN $5::jsonb ? 'totalDurationMs' THEN ($5::jsonb->>'totalDurationMs')::int ELSE total_duration_ms END,
       started_at=CASE WHEN ($5::jsonb->>'status') IN ('planning','running') THEN COALESCE(started_at,now()) ELSE started_at END,
-      completed_at=CASE WHEN ($5::jsonb->>'status') IN ('completed','failed','cancelled') THEN now() ELSE completed_at END,
+      completed_at=CASE WHEN ($5::jsonb->>'status') IN ('completed','failed','cancelled') THEN now() WHEN ($5::jsonb->>'status') IN ('planning','running','awaiting_approval') THEN NULL ELSE completed_at END,
       updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
       RETURNING ${companyRunColumns}`, [runId, context.workspaceId, companyId, context.userId, value]);

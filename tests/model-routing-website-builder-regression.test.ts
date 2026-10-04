@@ -42,6 +42,9 @@ class MockSandboxProvider implements SandboxProvider {
   public files: SandboxFile[] = [];
   public exposedPort = 3000;
   public commands: string[] = [];
+  public startedProcesses = 0;
+  public stoppedProcesses = 0;
+  public destroyedSandboxes = 0;
   async createSandbox(_scope: SandboxScope): Promise<SandboxStatus> {
     return { id: "test-sandbox-id", state: "created", createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() };
   }
@@ -51,7 +54,7 @@ class MockSandboxProvider implements SandboxProvider {
   async stopSandbox(_scope: SandboxScope, _id: string): Promise<SandboxStatus> {
     return { id: "test-sandbox-id", state: "stopped", createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() };
   }
-  async destroySandbox(_scope: SandboxScope, _id: string): Promise<void> {}
+  async destroySandbox(_scope: SandboxScope, _id: string): Promise<void> { this.destroyedSandboxes++; }
   async getStatus(_scope: SandboxScope, _id: string): Promise<SandboxStatus> {
     return { id: "test-sandbox-id", state: "running", createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() };
   }
@@ -66,9 +69,11 @@ class MockSandboxProvider implements SandboxProvider {
     return { status: "completed", exitCode: 0, stdout: "Build success", stderr: "", durationMs: 50, step: "build", tool: "project.terminal.exec", retryable: false };
   }
   async startProcess(_scope: SandboxScope, _id: string, _command: string): Promise<SandboxCommandResult> {
-    return { status: "running", exitCode: null, stdout: "Dev server started", stderr: "", durationMs: 10, step: "preview", tool: "project.terminal.exec", retryable: false, processId: "proc-123" };
+    this.startedProcesses++;
+    return { status: "running", exitCode: null, stdout: "Dev server started", stderr: "", durationMs: 10, step: "preview", tool: "project.terminal.exec", retryable: false, processId: "22222222-2222-4222-8222-222222222222" };
   }
   async stopProcess(_scope: SandboxScope, _id: string, _processId: string): Promise<SandboxCommandResult> {
+    this.stoppedProcesses++;
     return { status: "stopped", exitCode: 0, stdout: "", stderr: "", durationMs: 5, step: "preview", tool: "project.terminal.exec", retryable: false };
   }
   async getProcessStatus(_scope: SandboxScope, _id: string, _processId: string): Promise<SandboxCommandResult> {
@@ -239,6 +244,10 @@ describe("Model Routing & Website Builder Regression Tests", () => {
         isActive: true,
       }, "ai-developer-agent");
       await store.setCompanyMainAgent(auth, company.id, agent.id, company.revision);
+      await store.setUserSetting(auth, "ai.preferences", { addedModels: [
+        { id: "test/unsupported", upstreamId: "unsupported", providerId: "test", providerName: "Test", name: "Unsupported", capabilities: ["chat"], added: true, local: false, freeStatus: "free" },
+        { id: "oc/north-mini-code-free", upstreamId: "north-mini-code-free", providerId: "oc", providerName: "OpenCode", name: "North Mini", capabilities: ["chat", "coding"], added: true, local: false, freeStatus: "free" },
+      ], routing: { mode: "manual", defaultModelId: "oc/north-mini-code-free" } }, 0);
 
       const attemptedModels: string[] = [];
       const comboRoutes: string[][] = [];
@@ -329,7 +338,8 @@ describe("Model Routing & Website Builder Regression Tests", () => {
       const projectRuns = await store.listProjectRuns(auth, company.id, projectId);
       expect(projectRuns).toHaveLength(1);
       expect(projectRuns[0]?.selectedAgentIds).toContain(agent.id);
-      expect(attemptedModels.slice(0, 2)).toEqual(["test/unsupported", "oc/north-mini-code-free"]);
+      expect(attemptedModels).toContain("oc/north-mini-code-free");
+      expect(attemptedModels).not.toContain("test/unsupported");
       expect(comboRoutes.length).toBeGreaterThan(0);
       expect(comboRoutes.every((route) => !route.includes("openai/text-embedding-ada-002"))).toBe(true);
 
@@ -354,6 +364,16 @@ describe("Model Routing & Website Builder Regression Tests", () => {
       expect(result.projectCard?.previewUrl).toBeTruthy();
       expect(result.suggestedActions).toContain(`Preview: ${result.projectCard.name}`);
       expect(result.suggestedActions).toContain(`Open: ${result.projectCard.name}`);
+      expect(mockSandbox.startedProcesses).toBeGreaterThan(0);
+
+      const previewPath = `/companies/${company.id}/projects/${projectId}/preview`;
+      expect((await app.inject({ method: "POST", url: `${previewPath}/stop` })).statusCode).toBe(200);
+      expect(mockSandbox.stoppedProcesses).toBeGreaterThan(0);
+      expect((await app.inject({ method: "POST", url: `${previewPath}/start`, payload: {} })).statusCode).toBe(200);
+      expect(mockSandbox.startedProcesses).toBeGreaterThan(1);
+      const currentProject = await projectService.get(auth, company.id, projectId);
+      await projectSandbox.destroy(auth, currentProject);
+      expect(mockSandbox.destroyedSandboxes).toBe(1);
     });
   });
 });
