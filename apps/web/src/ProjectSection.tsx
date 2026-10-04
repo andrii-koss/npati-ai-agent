@@ -10,7 +10,7 @@ export type Project = {
   framework?: string; repositoryBranch?: string; sandboxId?: string;
   previewUrl?: string; previewPort?: number; lastBuildStatus?: string;
   deploymentStatus?: string; deploymentUrl?: string; lastDeployedAt?: string;
-  revision: number; updatedAt: string;
+  dataBackendId?: string | null; revision: number; updatedAt: string;
 };
 
 const copy = {
@@ -129,11 +129,20 @@ export function ProjectSection({ companyId }: { companyId: string }) {
     {error && <p role="alert" className="project-error">{error}</p>}
     {projects.length === 0 ? <p>{t.empty}</p> : <div className="project-card-grid">{projects.map((project) => <article className="project-card" key={project.id}>
       <h3>{project.name}</h3>
-      <div className="project-card-meta"><span>{project.type === "web_app" ? t.webApp : project.type === "landing_page" ? t.landingPage : t.website}</span><span>{project.status}</span></div>
+      <div className="project-card-meta">
+        <span>{project.type === "web_app" ? t.webApp : project.type === "landing_page" ? t.landingPage : t.website}</span>
+        <span>{project.status}</span>
+        {project.dataBackendId ? (
+          <span className="data-studio-badge" title="DataBackend attached">🗄️ Data</span>
+        ) : (
+          <span className="data-studio-badge muted" title="No DataBackend attached">No DB</span>
+        )}
+      </div>
       <small>{t.framework}: {project.framework || t.notSet}</small>
       <small>{t.updated}: {new Date(project.updatedAt).toLocaleDateString(language)}</small>
       <div className="project-card-actions">
         <Link className="button-secondary" to={"/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(project.id)}>{t.open}</Link>
+        <Link className="button-secondary" to={"/companies/" + encodeURIComponent(companyId) + "/projects/" + encodeURIComponent(project.id) + "/data"}>📊 Data</Link>
         {project.status !== "archived" && <><button type="button" className="button-secondary" disabled={busy} onClick={() => void rename(project)}>{t.rename}</button>
           <button type="button" className="button-secondary" disabled={busy} onClick={() => void archive(project)}>{t.archive}</button></>}
         <button type="button" className="danger-button" disabled={busy} onClick={() => void remove(project)}>{t.delete}</button>

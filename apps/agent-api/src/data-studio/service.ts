@@ -31,7 +31,7 @@ export class DataBackendService {
         await provisioner.provisionDatabase(backend, environment);
         if (this.dataProvider) {
           const schema = await this.dataProvider.introspectSchema(backend, environment);
-          await this.repository.setEnvironment(ctx, companyId, backend.id, environment, { schemaFingerprint: this.dataProvider.schemaFingerprint(schema) });
+          await this.repository.setExpectedSchema(ctx, companyId, backend.id, environment, schema, this.dataProvider.schemaFingerprint(schema));
         }
       }
       await this.repository.setStatus(ctx, companyId, backend.id, "ready");
@@ -54,7 +54,7 @@ export class DataBackendService {
       await provisioner.provisionDatabase(backend, environment);
       if (this.dataProvider) {
         const schema = await this.dataProvider.introspectSchema(backend, environment);
-        await this.repository.setEnvironment(ctx, companyId, id, environment, { schemaFingerprint: this.dataProvider.schemaFingerprint(schema) });
+        await this.repository.setExpectedSchema(ctx, companyId, id, environment, schema, this.dataProvider.schemaFingerprint(schema));
       }
     }
     await this.repository.setStatus(ctx, companyId, id, "ready");

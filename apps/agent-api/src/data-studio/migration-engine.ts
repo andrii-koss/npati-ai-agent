@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Pool } from "pg";
-import { DataStudioError } from "./identifier";
+import { Pool, type QueryResultRow } from "pg";
+import { DataStudioError, bindFilter, quoteIdentifier } from "./identifier";
 import type { DataBackendRepository } from "./repository";
 import type { DataProvider, SchemaChange, SchemaOperation, SchemaSnapshot } from "./data-provider";
 import type { DatabaseProvisioner } from "./provisioner";
@@ -56,15 +56,23 @@ export class ProjectMigrationEngine {
     ].join(" "));
   }
 
+  private compileManagedChange(operation: SchemaOperation): SchemaChange {
+    const change = this.provider.compileOperation(operation);
+    if (operation.kind !== "create_collection" && !(operation.kind === "create_relation" && operation.cardinality === "many-to-many")) return change;
+    const table = quoteIdentifier(operation.kind === "create_collection" ? operation.collection : operation.name);
+    return { ...change, upSql: change.upSql + " CREATE POLICY npati_management ON " + table +
+      " FOR ALL TO CURRENT_USER USING (true) WITH CHECK (true);" };
+  }
+
   async dryRun(request: MigrationRequest): Promise<MigrationPreview> {
     const current = await this.provider.introspectSchema(request.backend, request.environment);
-    const change = this.provider.compileOperation(request.operation);
+    const change = this.compileManagedChange(request.operation);
     return { ...change, current, diff: { operation: request.operation, beforeFingerprint: this.provider.schemaFingerprint(current), sql: change.upSql } };
   }
 
   async apply(ctx: AuthContext, request: MigrationRequest): Promise<MigrationResult> {
     const { backend, environment } = request;
-    const change = this.provider.compileOperation(request.operation);
+    const change = this.compileManagedChange(request.operation);
     if (backend.workspaceId !== ctx.workspaceId || backend.createdBy !== ctx.userId || backend.companyId !== (ctx.companyId ?? backend.companyId)) {
       throw new DataStudioError(403, "migration", "Backend is outside tenant", false, "TENANT_DENIED");
     }
@@ -127,7 +135,7 @@ export class ProjectMigrationEngine {
         [id, backend.id, environment, version, JSON.stringify(request.operation), change.reversible, change.destructive,
           change.requiresSnapshot, change.upSql, change.downSql ?? null, request.authorId, request.runId ?? null, checksum, snapshot?.id ?? null],
       );
-      await this.repository.setEnvironment(ctx, backend.companyId, backend.id, environment, { schemaFingerprint: fingerprint, syncStatus: "synced" });
+      await this.repository.setExpectedSchema(ctx, backend.companyId, backend.id, environment, updated, fingerprint);
       return { ...change, current, diff: { operation: request.operation, beforeFingerprint: actual, sql: change.upSql }, id, version, checksum, fingerprint, snapshot };
     } finally {
       await pool.end();
@@ -167,13 +175,70 @@ export class ProjectMigrationEngine {
       finally { client.release(); }
       await this.repository.pool.query("UPDATE data_backend_migrations SET status='rolled_back' WHERE id=$1", [id]);
       const schema = await this.provider.introspectSchema(backend, environment);
-      await this.repository.setEnvironment(ctx, backend.companyId, backend.id, environment, { schemaFingerprint: this.provider.schemaFingerprint(schema), syncStatus: "synced" });
+      await this.repository.setExpectedSchema(ctx, backend.companyId, backend.id, environment, schema, this.provider.schemaFingerprint(schema));
     } finally {
       await pool.end();
       await this.repository.releaseLock(backend.id, environment, token);
     }
   }
 
+  private async ownerQuery<T extends QueryResultRow = QueryResultRow>(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, sql: string, values: unknown[]): Promise<T[]> {
+    const stored = await this.repository.get(ctx, backend.companyId, backend.id);
+    const env = await this.repository.environment(ctx, stored.companyId, stored.id, environment);
+    if (stored.status !== "ready" || env.status !== "ready") throw new DataStudioError(409, "owner_data", "Backend is not ready", false, "BACKEND_NOT_READY");
+    if (env.syncStatus !== "synced") throw new DataStudioError(409, "owner_data", "Environment requires reconciliation", false, "DRIFT_BLOCKED");
+    const pool = await this.pool(stored, environment);
+    try { return (await pool.query<T>(sql, values)).rows; }
+    finally { await pool.end(); }
+  }
+
+  async listOwnerRows(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string,
+    input: { filters?: Array<{ field: string; operator: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; value: unknown }>;
+      sort?: { field: string; direction: "asc" | "desc" }; limit?: number; offset?: number; search?: string } = {}) {
+    const table = quoteIdentifier(collection);
+    const values: unknown[] = [];
+    if ((input.filters?.length ?? 0) > 10) throw new DataStudioError(400, "owner_data", "Too many filters", false, "QUERY_LIMIT");
+    const conditions = (input.filters ?? []).map((filter) => bindFilter(filter.field, filter.operator, filter.value, values));
+    if (input.search) {
+      if (input.search.length > 200) throw new DataStudioError(400, "owner_data", "Search is too long", false, "INVALID_SEARCH");
+      values.push("%" + input.search.replace(/[\\%_]/g, "\\$&") + "%");
+      conditions.push("EXISTS (SELECT 1 FROM jsonb_each_text(to_jsonb(" + table + ")) AS search_value WHERE search_value.value ILIKE $" + values.length + " ESCAPE '\\')");
+    }
+    const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 100);
+    const offset = Number(input.offset) || 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) throw new DataStudioError(400, "owner_data", "Invalid offset", false, "INVALID_OFFSET");
+    const sort = input.sort ? " ORDER BY " + quoteIdentifier(input.sort.field) + (input.sort.direction === "desc" ? " DESC" : input.sort.direction === "asc" ? " ASC" : (() => { throw new DataStudioError(400, "owner_data", "Invalid sort", false, "INVALID_SORT"); })()) : " ORDER BY id";
+    values.push(limit, offset);
+    return this.ownerQuery<Record<string, unknown>>(ctx, backend, environment,
+      "SELECT * FROM " + table + (conditions.length ? " WHERE " + conditions.join(" AND ") : "") + sort + " LIMIT $" + (values.length - 1) + " OFFSET $" + values.length, values);
+  }
+
+  async createOwnerRow(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, row: Record<string, unknown>) {
+    const fields = Object.keys(row).filter((f) => row[f] !== undefined);
+    if (fields.length > 100 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
+    const sql = fields.length === 0
+      ? "INSERT INTO " + quoteIdentifier(collection) + " DEFAULT VALUES RETURNING *"
+      : "INSERT INTO " + quoteIdentifier(collection) + " (" + fields.map(quoteIdentifier).join(",") + ") VALUES (" + fields.map((_, index) => "$" + (index + 1)).join(",") + ") RETURNING *";
+    const values = fields.map((f) => row[f] === undefined ? null : row[f]);
+    return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, values))[0];
+  }
+
+  async updateOwnerRow(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, id: string, row: Record<string, unknown>) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new DataStudioError(400, "owner_data", "Invalid row ID", false, "INVALID_ROW_ID");
+    const fields = Object.keys(row).filter((f) => row[f] !== undefined);
+    if (!fields.length || fields.length > 100 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
+    const values = fields.map((f) => row[f] === undefined ? null : row[f]);
+    const sql = "UPDATE " + quoteIdentifier(collection) + " SET " + fields.map((field, index) => quoteIdentifier(field) + "=$" + (index + 1)).join(",") +
+      " WHERE id=$" + (fields.length + 1) + " RETURNING *";
+    return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, [...values, id]))[0] ?? null;
+  }
+
+  async deleteOwnerRows(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, ids: string[]) {
+    if (!ids.length || ids.length > 100 || ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new DataStudioError(400, "owner_data", "Invalid row IDs", false, "INVALID_ROW_IDS");
+    const rows = await this.ownerQuery<{ id: string }>(ctx, backend, environment,
+      "DELETE FROM " + quoteIdentifier(collection) + " WHERE id = ANY($1::uuid[]) RETURNING id", [ids]);
+    return { deleted: rows.length };
+  }
   async detectDrift(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName) {
     const env = await this.repository.environment(ctx, backend.companyId, backend.id, environment);
     const schema = await this.provider.introspectSchema(backend, environment);
