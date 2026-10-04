@@ -76,6 +76,34 @@ The Agent's PostgreSQL schema migrations are idempotent and run automatically wh
 initializes its workspace store. No separate migration command is required for a new Agent
 deployment.
 
+### Website Builder sandbox runner on this VPS
+
+In the Dokploy Compose Environment editor set `COMPOSE_PROFILES=local-sandbox`,
+`NPATI_SANDBOX_RUNNER_MODE=local`, `NPATI_SANDBOX_RUNNER_URL=http://sandbox-runner:7865`,
+a unique `NPATI_SANDBOX_RUNNER_SECRET` of at least 32 characters, and a stable
+`NPATI_PREVIEW_SECRET`. The API, company worker, and runner receive the same
+runner secret from Compose. Do not attach a public domain to `sandbox-runner`.
+
+The `local-sandbox` profile builds `npati/project-sandbox:local` and
+`npati/sandbox-egress:local` automatically before starting the runner. The image
+jobs exit successfully; the runner healthcheck verifies access to the host
+Docker daemon and both images. After redeploy, the runner startup log must show
+`socketPresent:true` and `present:true` for both images.
+
+If the currently running deployment predates this Compose change, build the
+images once on the same VPS and Docker daemon used by Dokploy, from the checked
+out repository, then redeploy the Compose service:
+
+```bash
+docker build -f apps/agent-api/Dockerfile.project-sandbox -t npati/project-sandbox:local apps/agent-api
+docker build -f apps/agent-api/Dockerfile.sandbox-egress -t npati/sandbox-egress:local apps/agent-api
+docker image inspect npati/project-sandbox:local npati/sandbox-egress:local
+```
+
+To inspect the running deployment without printing the runner secret, run
+`scripts/ops/inspect-sandbox-runner.sh` with the runner, API, and worker container
+names (and optionally a sandbox ID). Use `docker ps --format '{{.Names}}'` to find
+those names.
 ### Redis host setting
 
 Redis requires `vm.overcommit_memory=1` on the **Linux host** for reliable background

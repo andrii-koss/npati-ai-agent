@@ -163,6 +163,12 @@ async function fixture() {
 }
 
 describe("Step 4 — Project Preview & Changes", () => {
+  it("classifies a missing sandbox image as an infrastructure failure", async () => {
+    const { preview, workspace, provider, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "package.json", JSON.stringify({ scripts: { build: "next build" }, dependencies: { next: "15.0.0" } }));
+    vi.spyOn(provider, "createSandbox").mockRejectedValueOnce(new SandboxProviderError("sandbox_image_not_found", "Sandbox image not found", 503));
+    await expect(preview.buildProject(owner, company.id, project.id)).rejects.toMatchObject({ code: "sandbox_unavailable", message: "Sandbox image not found", status: 503 });
+  });
   describe("1. Framework & dev command & port detection", () => {
     it("detects Next.js with npm", async () => {
       const files = [{ path: "package.json" }, { path: "package-lock.json" }, { path: "next.config.js" }];
