@@ -3,6 +3,8 @@ import { Pool } from "pg";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
 import { DataStudioError } from "./identifier";
 import type { DataBackend, DataBackendEnvironment, DataEnvironmentName, DataProviderKind } from "./types";
+import type { ProjectAccessPolicy } from "@npati/shared";
+import type { ProjectKeyBundle } from "./auth-crypto";
 
 const backendColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy", name, provider, status, created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
 const environmentColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", environment, provider_config AS "providerConfig", migrator_secret_ref AS "migratorSecretRef", runtime_secret_ref AS "runtimeSecretRef", signing_key_ref AS "signingKeyRef", status, schema_fingerprint AS "schemaFingerprint", expected_schema AS "expectedSchema", sync_status AS "syncStatus", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
@@ -133,6 +135,68 @@ export class DataBackendRepository {
     );
     if (!result.rowCount) throw new DataStudioError(404, "resolve_secret", "Database secret not found", false, "SECRET_NOT_FOUND");
     return this.vault.decrypt(result.rows[0]!.encryptedValue);
+  }
+
+  async getAccessPolicies(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName): Promise<ProjectAccessPolicy[]> {
+    await this.get(ctx, companyId, id);
+    const result = await this.pool.query<{ policyJson: ProjectAccessPolicy }>(
+      'SELECT policy_json AS "policyJson" FROM data_backend_access_policies WHERE backend_id=$1 AND environment=$2 ORDER BY collection_name',
+      [id, environment],
+    );
+    return result.rows.map((r) => r.policyJson);
+  }
+
+  async setCollectionAccessPolicies(
+    ctx: AuthContext,
+    companyId: string,
+    id: string,
+    environment: DataEnvironmentName,
+    collectionName: string,
+    policies: ProjectAccessPolicy[],
+  ): Promise<void> {
+    await this.get(ctx, companyId, id);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "DELETE FROM data_backend_access_policies WHERE backend_id=$1 AND environment=$2 AND collection_name=$3",
+        [id, environment, collectionName],
+      );
+      for (const policy of policies) {
+        await client.query(
+          "INSERT INTO data_backend_access_policies(id, backend_id, environment, collection_name, policy_json, updated_at) VALUES($1,$2,$3,$4,$5,now())",
+          [randomUUID(), id, environment, collectionName, JSON.stringify(policy)],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteAccessPolicies(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, collectionName: string): Promise<void> {
+    await this.get(ctx, companyId, id);
+    await this.pool.query(
+      "DELETE FROM data_backend_access_policies WHERE backend_id=$1 AND environment=$2 AND collection_name=$3",
+      [id, environment, collectionName],
+    );
+  }
+
+  async getSigningKeys(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName): Promise<ProjectKeyBundle | null> {
+    try {
+      const secret = await this.resolveSecret(ctx, companyId, id, environment, "signing");
+      return JSON.parse(secret) as ProjectKeyBundle;
+    } catch (error) {
+      if (error instanceof DataStudioError && error.code === "SECRET_NOT_FOUND") return null;
+      throw error;
+    }
+  }
+
+  async saveSigningKeys(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, bundle: ProjectKeyBundle): Promise<string> {
+    return this.putSecret(ctx, companyId, id, environment, "signing", JSON.stringify(bundle));
   }
 
   async attach(ctx: AuthContext, companyId: string, projectId: string, backendId: string | null): Promise<string | null> {

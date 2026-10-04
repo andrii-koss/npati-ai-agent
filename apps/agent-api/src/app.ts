@@ -46,6 +46,8 @@ import { registerDataBackendRoutes } from "./data-studio/routes";
 import { ProjectMigrationEngine } from "./data-studio/migration-engine";
 import { DataStudioUiService } from "./data-studio/studio-service";
 import { registerDataStudioRoutes } from "./data-studio/studio-routes";
+import { ProjectAuthService } from "./data-studio/auth-service";
+import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
@@ -857,10 +859,17 @@ export function buildApp(config: AppConfig = {}) {
     : undefined;
   const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
     ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine) : undefined;
+  const projectAuthService = dataBackendRepository && sharedPostgresProvisioner
+    ? new ProjectAuthService({
+        store: workspaceStore,
+        repository: dataBackendRepository,
+        provisioner: sharedPostgresProvisioner,
+      })
+    : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const agentDataStudioService = dataBackendRepository && dataProvider && projectMigrationEngine
-    ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace)
+    ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace, projectAuthService)
     : undefined;
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
@@ -2492,7 +2501,9 @@ ${localized.next}`;
   registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
   registerDataBackendRoutes(app, authProvider, dataBackendService);
   registerDataStudioRoutes(app, authProvider, dataStudioService);
+  registerProjectAuthRoutes(app, authProvider, projectAuthService);
   app.addHook("onClose", async () => {
+    await projectAuthService?.close();
     await dataProvider?.close();
     await sharedPostgresProvisioner?.close();
     await dataBackendRepository?.close();
