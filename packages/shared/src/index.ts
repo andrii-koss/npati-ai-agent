@@ -199,6 +199,7 @@ export * from "./project-deploy-capabilities";
 export * from "./project-qa-capabilities";
 export * from "./project-data-capabilities";
 export * from "./project-data-templates";
+export * from "./project-auth-types";
 export * from "./website-schema";
 export * from "./website-renderer";
 export * from "./static-website-renderer";

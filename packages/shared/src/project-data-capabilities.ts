@@ -303,6 +303,62 @@ export const PROJECT_DATA_CAPABILITIES: CapabilityDefinition[] = [
     },
     version: 1,
   },
+  {
+    id: "project.auth.inspect",
+    inventoryIds: [345],
+    type: "tool",
+    domain: "storage",
+    name: "Project Auth Inspect",
+    description: "Inspect Project Auth configuration, user registration settings, password policies, token TTLs, and collection access policies. Never exposes passwords, password hashes, or token secrets.",
+    useWhen: ["An authorized agent needs to check authentication settings, roles, or access policies for a project DataBackend."],
+    doNotUseWhen: ["Attempting to read user passwords, hashes, or tokens (which are strictly forbidden and never exposed)."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: ["workspace:read"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+      },
+    },
+    version: 1,
+  },
+  {
+    id: "project.auth.configure",
+    inventoryIds: [346],
+    type: "tool",
+    domain: "storage",
+    name: "Project Auth Configure",
+    description: "Configure Project Auth settings (allow registration, require email verification, password complexity, token TTLs) or declarative collection access policies. Sensitive changes (disabling email verification or altering admin roles) require human approval.",
+    useWhen: ["An authorized agent needs to update authentication settings or access policies based on user requests."],
+    doNotUseWhen: ["The agent is not granted auth.admin or data.write capability groups."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: ["workspace:write"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+        settings: {
+          type: "object",
+          description: "Partial ProjectAuthSettings (allowRegistration, requireEmailVerification, etc.)",
+        },
+        policies: {
+          type: "array",
+          description: "List of declarative collection access policies",
+        },
+      },
+    },
+    version: 1,
+  },
 ];
 
 export const PROJECT_DATA_MATRIX: CapabilityMatrixEntry[] = PROJECT_DATA_CAPABILITIES.map((capability) => ({

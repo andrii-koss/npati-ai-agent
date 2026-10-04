@@ -4,6 +4,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import type { Project } from "./ProjectSection";
+import { DataStudioAuthSection } from "./DataStudioAuthSection";
 
 // --- Types ---
 export type FieldType =
@@ -125,7 +126,7 @@ export function DataStudioPage() {
 
   // Tab & collection selection
   const [selectedCollection, setSelectedCollection] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations">("data");
+  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations" | "auth">("data");
 
   // Data view state (rows)
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -913,6 +914,13 @@ export function DataStudioPage() {
           <div className="sidebar-footer">
             <button
               type="button"
+              className={`sidebar-nav-item ${activeTab === "auth" ? "active" : ""}`}
+              onClick={() => setActiveTab("auth")}
+            >
+              🔐 {isUk ? "Автентифікація" : "Authentication"}
+            </button>
+            <button
+              type="button"
               className={`sidebar-nav-item ${activeTab === "migrations" ? "active" : ""}`}
               onClick={() => setActiveTab("migrations")}
             >
@@ -923,7 +931,16 @@ export function DataStudioPage() {
 
         {/* Right Content Area */}
         <main className="data-studio-main">
-          {activeTab === "migrations" ? (
+          {activeTab === "auth" ? (
+            <DataStudioAuthSection
+              companyId={companyId}
+              projectId={projectId}
+              environment={environment}
+              collections={userCollections.map((c) => c.name)}
+              isUk={isUk}
+              notify={notify}
+            />
+          ) : activeTab === "migrations" ? (
             /* --- Migrations History View --- */
             <div className="data-studio-pane migrations-pane">
               <div className="pane-header">

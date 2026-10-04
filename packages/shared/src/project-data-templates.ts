@@ -20,8 +20,7 @@ export interface TemplateAccessPolicy {
   role?: string;
   description?: string;
 }
-
-export type GdprStrategy = "delete" | "anonymize" | "detach" | "retain";
+import type { GdprStrategy } from "./project-auth-types";
 
 export interface DataSchemaTemplate {
   id: "ecommerce" | "blog" | "crm" | "saas-basic" | string;

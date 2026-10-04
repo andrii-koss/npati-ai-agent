@@ -78,6 +78,9 @@ export async function syncProjectMdSchema(
   }
 }
 
+import type { ProjectAuthService } from "./auth-service";
+import type { ProjectAccessPolicy, ProjectAuthSettings } from "@npati/shared";
+
 export class AgentDataStudioService {
   constructor(
     private readonly store: Pick<WorkspaceStore, "getProject">,
@@ -85,6 +88,7 @@ export class AgentDataStudioService {
     private readonly provider: DataProvider,
     private readonly migrations: ProjectMigrationEngine,
     private readonly workspace?: ProjectWorkspace,
+    private readonly authService?: ProjectAuthService,
   ) {}
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, requestedEnv?: string) {
@@ -384,6 +388,69 @@ export class AgentDataStudioService {
       templateId: template.id,
       collections: template.collections.map((c) => c.name),
       appliedMigrationsCount: appliedMigrations.length,
+    };
+  }
+
+  async inspectAuth(ctx: AuthContext, companyId: string, projectId: string) {
+    if (!this.authService) {
+      throw new DataStudioError(503, "auth", "Project Auth service not configured", true, "AUTH_UNAVAILABLE");
+    }
+    const settings = await this.authService.getAuthSettings(ctx, companyId, projectId, "dev");
+    const policies = await this.authService.getAccessPolicies(ctx, companyId, projectId, "dev");
+    return {
+      settings,
+      policiesCount: policies.length,
+      policies: policies.map((p) => ({
+        collection: p.collection,
+        rule: p.rule,
+        ownerField: p.ownerField,
+        role: p.role,
+        actions: p.actions,
+      })),
+      roles: ["admin", "member", "user"],
+    };
+  }
+
+  async configureAuth(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    input: { settings?: Partial<ProjectAuthSettings>; policies?: ProjectAccessPolicy[] },
+    options: { approved?: boolean } = {},
+  ) {
+    if (!this.authService) {
+      throw new DataStudioError(503, "auth", "Project Auth service not configured", true, "AUTH_UNAVAILABLE");
+    }
+
+    const isSensitive =
+      (input.settings?.requireEmailVerification === false) ||
+      (input.settings?.allowRegistration !== undefined) ||
+      Boolean(input.policies?.some((p) => p.rule === "public" && p.actions?.includes("delete")));
+
+    if (isSensitive && !options.approved) {
+      return {
+        approvalRequired: true,
+        risk: "high",
+        reason: "Modifying security-sensitive authentication settings requires human approval.",
+        proposedSettings: input.settings,
+        proposedPolicies: input.policies,
+      };
+    }
+
+    let updatedSettings;
+    if (input.settings) {
+      updatedSettings = await this.authService.updateAuthSettings(ctx, companyId, projectId, "dev", input.settings);
+    }
+    let compiledPolicies;
+    if (input.policies) {
+      compiledPolicies = await this.authService.applyAccessPolicies(ctx, companyId, projectId, "dev", input.policies);
+    }
+
+    return {
+      success: true,
+      configured: true,
+      settings: updatedSettings,
+      policies: compiledPolicies,
     };
   }
 }

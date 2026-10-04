@@ -171,7 +171,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
     if (tool.startsWith("project.deploy.")) return this.projectDeployTool(context, company, tool, input);
     if (tool.startsWith("project.qa.")) return this.projectQaTool(context, company, tool, input);
-    if (tool.startsWith("project.data.")) return this.projectDataTool(context, company, tool, input);
+    if (tool.startsWith("project.data.") || tool.startsWith("project.auth.")) return this.projectDataTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -515,6 +515,13 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
           agentId,
           approved,
         });
+      }
+      case "project.auth.inspect":
+        return this.projectData.inspectAuth(context, company.id, projectId);
+      case "project.auth.configure": {
+        const settings = typeof input.settings === "object" ? input.settings as any : undefined;
+        const policies = Array.isArray(input.policies) ? input.policies as any : undefined;
+        return this.projectData.configureAuth(context, company.id, projectId, { settings, policies }, { approved });
       }
       default:
         throw new Error(`Unknown project data tool: ${tool}`);
