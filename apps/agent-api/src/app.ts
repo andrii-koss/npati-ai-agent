@@ -38,6 +38,11 @@ import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connecto
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
+import { DataBackendRepository } from "./data-studio/repository";
+import { SharedPostgresProvisioner } from "./data-studio/provisioner";
+import { DataBackendService } from "./data-studio/service";
+import { PostgresDataProvider } from "./data-studio/data-provider";
+import { registerDataBackendRoutes } from "./data-studio/routes";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
 import { RemoteSandboxProvider } from "./sandbox-provider";
@@ -823,6 +828,26 @@ export function buildApp(config: AppConfig = {}) {
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
   let projectSandbox: ProjectSandboxService | undefined = config.projectSandbox;
+  const dataBackendRepository = config.databaseUrl ? new DataBackendRepository(config.databaseUrl) : undefined;
+  const projectsAdminPassword = process.env.NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD;
+  const sharedPostgresProvisioner = dataBackendRepository && projectsAdminPassword
+    ? new SharedPostgresProvisioner({
+        host: process.env.NPATI_PROJECTS_POSTGRES_HOST || "postgres-projects",
+        port: Number(process.env.NPATI_PROJECTS_POSTGRES_PORT) || 5432,
+        adminUser: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_USER || "npati_projects_admin",
+        adminPassword: projectsAdminPassword,
+        maintenanceDatabase: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_DB || "postgres",
+        snapshotDirectory: process.env.NPATI_PROJECTS_SNAPSHOT_DIR || path.join(config.dataDirectory ?? ".data", "data-backend-snapshots"),
+      }, dataBackendRepository)
+    : undefined;
+  const dataProvider = sharedPostgresProvisioner ? new PostgresDataProvider({
+    maxCollections: Number(process.env.NPATI_DATA_MAX_COLLECTIONS) || 50,
+    maxFields: Number(process.env.NPATI_DATA_MAX_FIELDS) || 100,
+    maxRows: Number(process.env.NPATI_DATA_MAX_ROWS) || 100,
+    maxQueriesPerMinute: Number(process.env.NPATI_DATA_MAX_QUERIES_PER_MINUTE) || 600,
+    maxDatabaseBytes: Number(process.env.NPATI_DATA_MAX_DATABASE_BYTES) || 1_000_000_000,
+  }, sharedPostgresProvisioner) : undefined;
+  const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, dataProvider) : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
@@ -2453,6 +2478,12 @@ ${localized.next}`;
     beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
   });
   registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
+  registerDataBackendRoutes(app, authProvider, dataBackendService);
+  app.addHook("onClose", async () => {
+    await dataProvider?.close();
+    await sharedPostgresProvisioner?.close();
+    await dataBackendRepository?.close();
+  });
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);

@@ -40,6 +40,7 @@ export interface Project {
   framework?: string; runtime?: string; repositoryProvider?: string; repositoryUrl?: string; repositoryBranch?: string;
   sandboxId?: string; previewUrl?: string; previewPort?: number; lastRunId?: string; lastBuildStatus?: string;
   deploymentUrl?: string; deploymentStatus?: string; lastDeployedAt?: string;
+  dataBackendId?: string;
   revision: number; createdAt: string; updatedAt: string;
 }
 export interface ProjectInput { name: string; description?: string; type: ProjectType; }

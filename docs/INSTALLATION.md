@@ -97,3 +97,34 @@ For `NPATI_ENV=production`, configure unique values of at least 32 characters fo
 are intentionally rejected. If the log mentions a missing native SQLite binding,
 rebuild the API image without cache so the workspace-native dependency layer is
 included: `docker compose build --no-cache agent-api`.
+
+## Data Studio database profile (D1)
+
+Data Studio uses a separate PostgreSQL 17 container. The existing pgvector-backed
+NPATI Core database does not store project rows. Data Studio is opt-in: without
+the profile, Company, Chat, and Website Builder continue to start normally.
+Set NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD in .env to a unique random value
+(for example, generate 32 bytes with openssl rand -hex 32), then run:
+
+~~~bash
+docker compose --profile data-studio up -d --build
+~~~
+
+The postgres-projects service has no published host port. Only agent-api joins
+its internal database network. The Company worker gets a blank project admin
+password, and sandboxes have neither credentials nor a route to that network.
+Project snapshots use the separate postgres-projects-snapshots volume mounted
+only in agent-api. Keep the password and snapshots out of logs, source control,
+prompts, generated files, and public build environments
+(docker-compose.yml; docker-compose.dokploy.yml; apps/agent-api/src/data-studio/provisioner.ts).
+
+DataBackend creation provisions separate dev and prod databases and their
+migrator/runtime roles. If the profile is disabled, Data Studio endpoints
+report 503 while the rest of NPATI remains available. A failed provision can
+be retried with POST /companies/:companyId/data-backends/:backendId/activate.
+A backend can be removed only after active Projects are detached, with its
+exact name supplied as confirmName. Removal snapshots each environment before
+dropping its database; snapshot retention defaults to 30 days, configured by
+NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS. The D7 backup scheduler and restore UI
+are not included in D1 (apps/agent-api/src/data-studio/service.ts;
+apps/agent-api/src/data-studio/routes.ts; docs/data-studio/PLAN.md).
