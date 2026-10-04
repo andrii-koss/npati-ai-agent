@@ -146,7 +146,16 @@ export class DockerSandboxProvider implements SandboxProvider {
     this.touch(id);
     const env = Object.entries(options.environment ?? {});
     if (env.some(([key]) => !/^[A-Z_][A-Z0-9_]{0,63}$/.test(key))) throw new SandboxProviderError("invalid_environment", "Invalid environment key", 400);
-    const script = env.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n") + "\n" + command + "\n";
+    const isExplicitInstall = /^(?:npm|pnpm|yarn|bun)\s+(?:install|ci|add)\b/.test(command.trim());
+    const ensureDepsScript = !isExplicitInstall ? `if [ -f package.json ] && [ ! -d node_modules ]; then
+  if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile;
+  elif [ -f yarn.lock ]; then yarn install;
+  elif [ -f package-lock.json ]; then npm ci;
+  else npm install;
+  fi
+fi
+` : "";
+    const script = env.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n") + "\n" + ensureDepsScript + command + "\n";
     const started = Date.now();
     let result: Awaited<ReturnType<typeof args>>;
     try { result = await args("docker", ["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "timeout", "-s", "TERM", "-k", "2", String(Math.max(1, Math.ceil(options.timeoutMs / 1000))), "sh", "-s"], Math.min(options.timeoutMs, 600_000) + 5_000, script, Math.min(options.outputLimitBytes, 128_000)); }
@@ -263,8 +272,17 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (Object.keys(options.environment ?? {}).length) throw new SandboxProviderError("process_secrets_unsupported", "Background process secret references are unavailable", 400);
     const processId = randomUUID(), marker = `/tmp/npati-process-${processId}`;
     const command64 = Buffer.from(command).toString("base64");
-    const script = `setsid sh -c 'printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s > ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
-    await this.docker(["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "sh", "-s"], 10_000, script);
+    const ensureDepsScript = `if [ -f package.json ] && [ ! -d node_modules ]; then
+  if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile;
+  elif [ -f yarn.lock ]; then yarn install;
+  elif [ -f package-lock.json ]; then npm ci;
+  else npm install;
+  fi
+fi
+`;
+    const ensureDeps64 = Buffer.from(ensureDepsScript).toString("base64");
+    const script = `setsid sh -c 'printf %s ${ensureDeps64} | base64 -d | sh -s > ${marker}.log 2>&1 && printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s >> ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
+    await this.docker(["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "sh", "-s"], 15_000, script);
     return { status: "running", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "process", tool: "project.terminal.process", retryable: false, processId };
   }
   async getProcessStatus(scope: SandboxScope, id: string, processId: string): Promise<SandboxCommandResult> {
