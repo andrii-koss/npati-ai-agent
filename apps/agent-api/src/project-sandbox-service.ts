@@ -247,6 +247,10 @@ export class ProjectSandboxService {
     if (request.action === "logs") return { processId: request.processId, output: redactTerminalText(await this.provider.getLogs(scope, project.sandboxId, request.processId)).slice(0, this.limits.outputLimitBytes) };
     throw new SandboxProviderError("invalid_process_action", "Invalid process action", 400, "process", tool);
   }
+  async proxyPreview(scope: SandboxScope, sandboxId: string, options: import("./sandbox-provider").PreviewProxyRequest) {
+    if (!this.provider.proxyPreview) throw new Error("Sandbox runner does not support preview proxy");
+    return this.provider.proxyPreview(scope, sandboxId, options);
+  }
   async exposePort(ctx: AuthContext, companyId: string, projectId: string, port: number) {
     const project = await this.project(ctx, companyId, projectId);
     const ready = await this.ensure(ctx, project);

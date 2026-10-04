@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from "node:crypto";
-import http from "node:http";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthContext, Project, ProjectStatus, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
@@ -34,7 +33,8 @@ export interface ActivePreviewSession {
   status: "starting" | "running" | "restarting" | "failed" | "stopped";
   lastError?: string;
   startedAt: string;
-  internalHost: string;
+  workspaceId: string;
+  userId: string;
 }
 
 export class PreviewError extends Error {
@@ -278,7 +278,7 @@ export class ProjectPreviewService {
     }
 
     // Expose port on sandbox runner
-    const portExposure = await this.sandbox.exposePort(ctx, companyId, projectId, devPort);
+    await this.sandbox.exposePort(ctx, companyId, projectId, devPort);
     const updatedProject = await this.projects.get(ctx, companyId, projectId);
     const sandboxId = updatedProject.sandboxId;
     if (!sandboxId) throw new PreviewError("sandbox_failed", "Failed to obtain sandbox ID", 500);
@@ -318,7 +318,8 @@ export class ProjectPreviewService {
       maxRestarts: 3,
       status: "running",
       startedAt: new Date().toISOString(),
-      internalHost: portExposure.internalHost,
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
     };
     this.sessions.set(projectId, session);
 
@@ -512,56 +513,38 @@ export class ProjectPreviewService {
       `);
     }
 
+    if (!this.sandbox) return reply.code(503).send({ error: "Sandbox runner unavailable" });
     const subpath = "/" + (request.params["*"] ?? "");
-    const targetHost = session.internalHost;
-    const targetPort = session.port;
-
-    return new Promise<void>((resolve, reject) => {
-      const headers = { ...request.headers };
-      delete headers["host"];
-      delete headers["connection"];
-
-      const req = http.request(
-        {
-          host: targetHost,
-          port: targetPort,
-          path: subpath + (request.url.includes("?") ? "?" + request.url.split("?")[1] : ""),
-          method: request.method,
-          headers: {
-            ...headers,
-            host: `${targetHost}:${targetPort}`,
-          },
-        },
-        (res) => {
-          reply.code(res.statusCode ?? 200);
-          for (const [key, value] of Object.entries(res.headers)) {
-            if (value !== undefined) {
-              reply.header(key, value);
-            }
-          }
-          res.pipe(reply.raw);
-          res.on("end", () => resolve());
-          res.on("error", (err) => reject(err));
-        },
-      );
-
-      req.on("error", (err) => {
-        reply.code(502).type("text/html").send(`
-          <!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview Error</title>
-          <style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:2rem;}
-          .card{background:#1e293b;border:1px solid #ef4444;border-radius:8px;padding:1.5rem;max-width:800px;margin:2rem auto;}
-          h1{color:#f87171;font-size:1.25rem;margin-top:0;}
-          pre{background:#0f172a;padding:1rem;border-radius:6px;overflow-x:auto;color:#fca5a5;font-size:0.875rem;}</style></head>
-          <body><div class="card"><h1>Preview Connection Failed</h1><p>Could not connect to preview server on port ${targetPort}:</p><pre><code>${escapeHtml(err.message)}</code></pre></div></body></html>
-        `);
-        resolve();
-      });
-
-      if (request.body && (request.method === "POST" || request.method === "PUT" || request.method === "PATCH")) {
-        const payload = typeof request.body === "string" ? request.body : JSON.stringify(request.body);
-        req.write(payload);
+    const query = new URL(request.url, "http://localhost").searchParams;
+    query.delete("token");
+    const path = subpath + (query.size ? "?" + query.toString() : "");
+    const headers: Record<string, string> = {};
+    for (const name of ["accept", "accept-language", "content-type", "user-agent"]) {
+      const value = request.headers[name];
+      if (typeof value === "string") headers[name] = value;
+    }
+    const payload = request.body === undefined ? undefined
+      : Buffer.from(typeof request.body === "string" ? request.body : JSON.stringify(request.body)).toString("base64");
+    try {
+      const result = await this.sandbox.proxyPreview({
+        workspaceId: session.workspaceId, userId: session.userId, companyId, projectId,
+      }, session.sandboxId, { port: session.port, path, method: request.method, headers, body: payload });
+      reply.code(result.status);
+      const prefix = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
+      const routed = (target: string) => `${prefix}${target}${target.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+      for (const [name, value] of Object.entries(result.headers)) {
+        if (["connection", "transfer-encoding", "content-length", "content-encoding", "set-cookie"].includes(name.toLowerCase())) continue;
+        reply.header(name, name.toLowerCase() === "location" && value.startsWith("/") && !value.startsWith("//") ? routed(value) : value);
       }
-      req.end();
-    });
+      let body = Buffer.from(result.body, "base64");
+      if (String(result.headers["content-type"] ?? "").includes("text/html")) {
+        const html = body.toString("utf8").replace(/(src|href|action|poster)=(["'])(\/[^"']*)\2/gi, (_match, attr: string, quote: string, target: string) =>
+          `${attr}=${quote}${routed(target)}${quote}`);
+        body = Buffer.from(html);
+      }
+      return reply.send(body);
+    } catch (error) {
+      return reply.code(502).type("text/html").send(`<!DOCTYPE html><html><body><h1>Preview Connection Failed</h1><pre>${escapeHtml(error instanceof Error ? error.message : "Unknown error")}</pre></body></html>`);
+    }
   }
 }

@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -455,6 +455,24 @@ describe("Step 4 — Project Preview & Changes", () => {
       expect(res3.statusCode).toBe(403);
     });
 
+    it("routes Next.js assets through the runner without a sandbox IP", async () => {
+      const { preview, workspace, sandbox, company, project } = await fixture();
+      const started = await preview.startPreview(owner, company.id, project.id);
+      const proxy = vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
+        status: 200, headers: { "content-type": "text/html" },
+        body: Buffer.from('<script src="/_next/static/app.js"></script>').toString("base64"),
+      });
+      const app = Fastify();
+      registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
+      const res = await app.inject({
+        method: "GET",
+        url: `/companies/${company.id}/projects/${project.id}/preview/proxy/?token=${started.token}`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain(`/api/companies/${company.id}/projects/${project.id}/preview/proxy/_next/static/app.js?token=`);
+      expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: owner.workspaceId, companyId: company.id }), expect.any(String), expect.objectContaining({ port: started.port, path: "/", method: "GET" }));
+    });
+
     it("displays error card instead of blank page when dev server failed", async () => {
       const { preview, workspace, company, project } = await fixture();
       const app = Fastify();
@@ -475,7 +493,8 @@ describe("Step 4 — Project Preview & Changes", () => {
         status: "failed",
         lastError: "SyntaxError: Unexpected token in app/page.tsx",
         startedAt: new Date().toISOString(),
-        internalHost: "127.0.0.1",
+        workspaceId: owner.workspaceId,
+        userId: owner.userId,
       });
 
       const { token } = preview.generateToken({

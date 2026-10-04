@@ -3,7 +3,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
+import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
 import { SandboxProviderError } from "./sandbox-provider";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand } from "./terminal-command-policy";
@@ -184,6 +184,20 @@ export class DockerSandboxProvider implements SandboxProvider {
       files.push({ path: relative, content });
     }
     return files;
+  }
+  async proxyPreview(scope: SandboxScope, id: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse> {
+    const names = await this.inspect(scope, id);
+    if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535 ||
+        !options.path.startsWith("/") || options.path.startsWith("//") || options.path.length > 4096 ||
+        !["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].includes(options.method) ||
+        (options.body && options.body.length > 8_000_000)) {
+      throw new SandboxProviderError("invalid_preview_request", "Invalid preview request", 400);
+    }
+    const script = `let input="";process.stdin.on("data",c=>input+=c);process.stdin.on("end",async()=>{try{const q=JSON.parse(input);const url=new URL(q.path,"http://127.0.0.1:"+q.port);if(url.hostname!=="127.0.0.1")throw Error("Invalid preview path");const r=await fetch(url,{method:q.method,headers:q.headers,body:q.body?Buffer.from(q.body,"base64"):undefined,signal:AbortSignal.timeout(20000),redirect:"manual"});const data=Buffer.from(await r.arrayBuffer());if(data.length>8000000)throw Error("Preview response too large");process.stdout.write(JSON.stringify({status:r.status,headers:Object.fromEntries(r.headers),body:data.toString("base64")}));}catch(e){process.stderr.write(String(e));process.exitCode=1}})`;
+    const result = await args("docker", ["exec", "-i", names.sandbox, "node", "-e", script], 25_000, JSON.stringify(options), 16_000_000);
+    if (result.code !== 0 || result.timedOut) throw new SandboxProviderError("preview_upstream_failed", "Sandbox preview is unavailable", 502);
+    this.touch(id);
+    return JSON.parse(result.stdout.toString("utf8")) as PreviewProxyResponse;
   }
   async exposePort(scope: SandboxScope, id: string, port: number): Promise<{ port: number; internalHost: string }> {
     const names = await this.inspect(scope, id);

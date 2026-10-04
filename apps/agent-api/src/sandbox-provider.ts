@@ -26,6 +26,7 @@ export interface SandboxCommandResult {
   processId?: string;
 }
 export interface SandboxProvider {
+  proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
   createSandbox(scope: SandboxScope, options?: { runtime?: string }): Promise<SandboxStatus>;
   startSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
@@ -41,15 +42,20 @@ export interface SandboxProvider {
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
 }
+export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
+export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
 export class SandboxProviderError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 503, public readonly step = "sandbox", public readonly tool = "project.terminal.exec", public readonly retryable = false, public readonly currentRevision?: string) { super(message); }
 }
 export class RemoteSandboxProvider implements SandboxProvider {
   private readonly endpoint: URL;
-  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch) {
+  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote")) {
+    if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");
     this.endpoint = new URL(url);
     const loopback = ["127.0.0.1", "localhost"].includes(this.endpoint.hostname);
-    if (this.endpoint.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && this.endpoint.protocol === "http:" && loopback)) throw new Error("Sandbox runner URL must use HTTPS");
+    const localDocker = mode === "local" && this.endpoint.protocol === "http:" && this.endpoint.hostname === "sandbox-runner" && !this.endpoint.username && !this.endpoint.password && !this.endpoint.search && !this.endpoint.hash && (this.endpoint.port === "7865" || !this.endpoint.port);
+    if (this.endpoint.protocol !== "https:" && !localDocker && !(process.env.NODE_ENV !== "production" && this.endpoint.protocol === "http:" && loopback)) throw new Error("Sandbox runner URL must use HTTPS");
+    if (mode === "local" && !localDocker) throw new Error("Local sandbox runner must use http://sandbox-runner:7865");
     if (process.env.NODE_ENV === "production" && loopback) throw new Error("Production sandbox runner must be on a separate host");
     if (!secret || secret.length < 32) throw new Error("Sandbox runner secret must be at least 32 characters");
   }
@@ -84,4 +90,5 @@ export class RemoteSandboxProvider implements SandboxProvider {
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("stopProcess", { scope, sandboxId, processId }); }
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("getProcessStatus", { scope, sandboxId, processId }); }
   inspectBrowser(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions) { return this.request<SandboxBrowserQaResult>("inspectBrowser", { scope, sandboxId, options }, Math.min(60_000, options.timeoutMs) + 15_000); }
+  proxyPreview(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest) { return this.request<PreviewProxyResponse>("proxyPreview", { scope, sandboxId, options }, 30_000); }
 }

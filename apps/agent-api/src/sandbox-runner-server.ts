@@ -4,7 +4,8 @@ import { DockerSandboxProvider } from "./docker-sandbox-provider";
 import { SandboxProviderError, type SandboxScope } from "./sandbox-provider";
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
-if (secret.length < 32 || process.env.NPATI_SANDBOX_RUNNER_ISOLATED_HOST !== "true") throw new Error("Sandbox runner requires a dedicated host and 32-character secret");
+if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
+if ((process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote") === "remote" && process.env.NPATI_SANDBOX_RUNNER_ISOLATED_HOST !== "true") throw new Error("Remote sandbox runner requires an isolated host");
 const provider = new DockerSandboxProvider({
   image: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
   proxyImage: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",
@@ -18,6 +19,7 @@ const provider = new DockerSandboxProvider({
 });
 const app = Fastify({ bodyLimit: 25_000_000, logger: false });
 const seen = new Map<string, number>();
+app.get("/health", async () => ({ status: "ok" }));
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
 app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
   const timestamp = String(request.headers["x-npati-timestamp"] ?? "");
@@ -50,6 +52,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "stopProcess": result = await provider.stopProcess(scope, id, String(p.processId ?? "")); break;
       case "getProcessStatus": result = await provider.getProcessStatus(scope, id, String(p.processId ?? "")); break;
       case "inspectBrowser": result = await provider.inspectBrowser(scope, id, p.options as any); break;
+      case "proxyPreview": result = await provider.proxyPreview(scope, id, p.options as any); break;
       default: throw new SandboxProviderError("invalid_operation", "Unknown sandbox operation", 400);
     }
     return { result: result ?? null };
