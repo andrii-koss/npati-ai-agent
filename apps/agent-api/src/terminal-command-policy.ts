@@ -47,11 +47,10 @@ export function normalizeTerminalCommand(input: string | TerminalCommandSpec): N
   return { rawCommand, command, executable: words[0]!, args: words.slice(1), cwd };
 }
 export function classifyTerminalCommand(input: string | TerminalCommandSpec): TerminalCommandDecision {
-  const { command } = normalizeTerminalCommand(input);
-  if (typeof command !== "string" || !command.trim() || command.length > 4096 || command.includes("\0")) throw new Error("Invalid terminal command");
-  const clean = command.trim();
+  const normalized = normalizeTerminalCommand(input);
+  const clean = normalized.command;
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
-  const words = clean.split(/\s+/);
+  const words = [normalized.executable, ...normalized.args];
   const [program, action, ...args] = words;
   if (program === "pwd" && words.length === 1) return result("safe", "Read current directory");
   if (program === "ls" && words.slice(1).every((word) => ["-l", "-a", "-la", "-al"].includes(word) || relative(word))) return result("safe", "List sandbox files");

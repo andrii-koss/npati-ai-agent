@@ -5,6 +5,7 @@ import type { SandboxBrowserQaOptions, SandboxProvider, SandboxScope, SandboxSta
 import { SandboxProviderError } from "./sandbox-provider";
 import { classifyTerminalCommand, normalizeTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
+import { logTerminalPolicy } from "./terminal-policy-log";
 import type { ProjectService } from "./project-service";
 
 export interface TerminalSecretReference { id: string; field: string; }
@@ -150,8 +151,11 @@ export class ProjectSandboxService {
     if (request.sandboxId && request.sandboxId !== project.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
     const normalized = normalizeTerminalCommand(request);
     const command = normalized.command;
-    const decision = classifyTerminalCommand(command);
-    if ((decision.requiresApproval || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) throw new SandboxProviderError("approval_required", "Terminal command requires approval", 403, "approval", tool);
+    const decision = classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
+    if ((decision.requiresApproval || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) {
+      logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId: project.sandboxId, projectId: project.id, decision: "approval", reason: decision.requiresApproval ? decision.reason : "Secret references require approval", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
+      throw new SandboxProviderError("approval_required", "Terminal command requires approval", 403, "approval", tool);
+    }
     const environment = await this.environment(ctx, companyId, request.environmentReferences);
     const secrets = Object.values(environment);
     const timeoutMs = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
@@ -160,6 +164,7 @@ export class ProjectSandboxService {
       const ready = await this.ensure(ctx, project);
       sandboxId = ready.sandboxId;
       if (request.sandboxId && request.sandboxId !== sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
+      logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId, projectId: project.id, decision: "allow", reason: request.approved && decision.requiresApproval ? "human_approved" : "sandbox_execution", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
       const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId);
       const raw = startProcess
         ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd })

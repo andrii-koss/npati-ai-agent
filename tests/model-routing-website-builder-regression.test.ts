@@ -308,6 +308,9 @@ describe("Model Routing & Website Builder Regression Tests", () => {
         projectSandbox,
       });
       apps.push(app);
+      const live = await app.inject({ method: "GET", url: "/health/live" });
+      expect(live.statusCode).toBe(200);
+      expect(live.json().build).toMatchObject({ version: expect.any(String), commit: expect.any(String), fingerprint: expect.any(String) });
 
       // Execute Chat request with the exact user prompt
       const response = await app.inject({

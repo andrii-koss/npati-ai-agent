@@ -1,3 +1,4 @@
+import { logBuildInfo } from "./build-info";
 import { buildApp } from "./app";
 import { MinioObjectStorage } from "./object-storage";
 
@@ -55,6 +56,7 @@ const app = buildApp({
   },
 });
 
+logBuildInfo("agent-api");
 try {
   await app.listen({ host: "0.0.0.0", port });
 } catch (error) {
