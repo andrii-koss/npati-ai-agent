@@ -153,9 +153,60 @@ export interface AuditChainVerification {
   headHash: string | null;
 }
 
-export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
-export type CodeSessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived";
-export const CODE_SESSION_STATUSES: readonly CodeSessionStatus[] = ["active", "paused", "awaiting_approval", "completed", "failed", "cancelled", "archived"] as const;
+/** C1a: feature flags with staged rollout. */
+export type FeatureFlagScope = "global" | "company" | "user";
+export const FEATURE_FLAG_SCOPES: readonly FeatureFlagScope[] = ["global", "company", "user"] as const;
+export type FeatureFlagStage = "off" | "internal" | "allowlist" | "percent" | "ga";
+export const FEATURE_FLAG_STAGES: readonly FeatureFlagStage[] = ["off", "internal", "allowlist", "percent", "ga"] as const;
+
+export interface FeatureFlag {
+  id: string;
+  workspaceId: string;
+  scope: FeatureFlagScope;
+  /** Empty string for the global scope; company id or user id otherwise. */
+  scopeId: string;
+  flagKey: string;
+  stage: FeatureFlagStage;
+  enabled: boolean;
+  rolloutPercent: number;
+  allowlist: string[];
+  revision: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+export interface FeatureFlagInput {
+  scope: FeatureFlagScope;
+  scopeId?: string;
+  flagKey: string;
+  stage?: FeatureFlagStage;
+  enabled?: boolean;
+  rolloutPercent?: number;
+  allowlist?: string[];
+  expectedRevision?: number;
+}
+export interface FeatureFlagHistoryEntry {
+  id: string;
+  workspaceId: string;
+  flagKey: string;
+  scope: FeatureFlagScope;
+  scopeId: string;
+  previousValue: Record<string, unknown> | null;
+  nextValue: Record<string, unknown> | null;
+  actor: string;
+  createdAt: string;
+}
+/** A published tool-schema manifest: the exact set of `name@version` a session was created with. */
+export interface CodeToolManifest {
+  version: number;
+  tools: Array<{ name: string; version: number; status: "active" | "deprecated"; deprecatedAt?: string | null }>;
+  checksum: string;
+  createdAt: string;
+}
+
+export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";
+export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
+export type CodeSessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived" | "suspended_by_flag";
+export const CODE_SESSION_STATUSES: readonly CodeSessionStatus[] = ["active", "paused", "awaiting_approval", "completed", "failed", "cancelled", "archived", "suspended_by_flag"] as const;
 
 /**
  * A code session is the unit the CodingAgentRunner will drive in C6. It deliberately links to the
@@ -488,8 +539,15 @@ export interface WorkspaceStore {
   updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
 
-  /** C1c: append-only audit journal. `appendAuditEntry` fails closed and is never idempotent-silent. */
-  appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry>;
+  /** C1a: feature flags (resolution is user -> company -> global) and their change history. */
+  listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]>;
+  setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag>;
+  listFeatureFlagHistory(context: AuthContext, flagKey?: string, limit?: number): Promise<FeatureFlagHistoryEntry[]>;
+  /** C1a: published tool-schema manifest, so an old session reads with the manifest it was created with. */
+  publishCodeToolManifest(context: AuthContext, manifest: { version: number; tools: CodeToolManifest["tools"]; checksum: string }): Promise<CodeToolManifest>;
+  latestCodeToolManifest(context: AuthContext): Promise<CodeToolManifest | null>;
+
+  /** C1c: append-only audit journal. `appendAuditEntry` fails closed and is never idempotent-silent. */  appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry>;
   listAuditEntries(context: AuthContext, companyId: string, filters?: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number }): Promise<AuditEntry[]>;
   verifyAuditChain(context: AuthContext, companyId: string, range?: { fromSequence?: number; toSequence?: number }): Promise<AuditChainVerification>;
   auditChainState(context: AuthContext, companyId: string): Promise<AuditChainState>;

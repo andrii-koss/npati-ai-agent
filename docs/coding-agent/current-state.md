@@ -3,8 +3,123 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C1c — tamper-evident audit log** (after C0 audit and C1 foundation)
-- Next: **C1a — feature flags, staged rollout and versioning** (then C1b images), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+- Last completed: **C1a — feature flags, staged rollout and versioning** (after C0 audit, C1 foundation, C1c audit log)
+- Next: **C1b — sandbox images pinned by digest** (then C2 tools), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+
+## Implemented (C1a, latest step)
+- **Feature-flag store** (migration **067**, additive): `feature_flags` with scope `global|company|user`,
+  `stage` (`off|internal|allowlist|percent|ga`), `enabled`, `rollout_percent`, `allowlist`, `revision`,
+  `updated_by`, unique on (workspace, scope, scope_id, flag_key); `feature_flag_history` records every
+  change (previous/next value, actor) so "who turned it on" is answerable without the journal — the
+  privileged action itself is additionally in the C1c AuditLog.
+- **`FeatureFlagService`** (`apps/agent-api/src/feature-flags.ts`): master `coding_agent.enabled` plus
+  sub-flags `code.read`, `code.write`, `code.shell`, `code.git`, `code.subagents`,
+  `code.background_runs`, `code.mounted_folder`, `code.hooks`, `code.mcp`, `code.full_auto_sandbox`
+  and the `code.model_profile.<id>` template; keys outside the `code.` namespace are rejected
+  (`invalid_flag_key`). Resolution is user → company → global; stages are `off` = deny,
+  `internal` = admin/owner only, `allowlist` = id list, `percent` = deterministic FNV bucket,
+  `ga` = allow. The in-process cache is capped at 30 s (`NPATI_CODE_FLAG_CACHE_TTL_MS`, default 15 s)
+  and `invalidate()` is called on every write, so a kill switch acts immediately.
+- **Master flag is a veto switch**: an explicit `off` at a broader scope stops the feature even where a
+  narrower scope enabled it (this is what makes an incident stop authoritative); sub-flags keep
+  most-specific-wins. This semantics change is called out below for confirmation.
+- **Dark launch by default**: nothing is enabled out of the box; mutations require master +
+  `code.write`, and the check exists in **both** the route and `CodeService`, so a direct service call
+  is refused too (403 `feature_disabled` with the offending `flagKey`). A missing flag service means
+  **deny**, never allow. Reads stay available — this is the History (read-only) mode: project/session
+  lists, details, limits, flags and `archive` keep working while the feature is off, so a user can
+  still see and remove their data. Website Builder and Data Studio are untouched.
+- **Kill switch** (`POST /companies/:companyId/code/flags/kill-switch`): audited (`flag.kill_switch`)
+  before the state change, disables master at the requested scope, invalidates the cache, moves
+  `active|paused|awaiting_approval` sessions of that company to the new `suspended_by_flag` status and
+  best-effort stops the sandbox of those projects (full cleanup and SecretLease revocation are C4/C6).
+- **Auto-disable on a security event** (`NPATI_CODE_AUTO_DISABLE_ON_AUDIT_BREAK`, default true):
+  `evaluateAutoDisable({ type: "audit_chain_broken" })` disables master globally and audits
+  `flag.auto_disable`; the owner sees the new state in the UI.
+- **Administration**: only `*`/`owner`/`admin:all` may change flags (403 `flag_admin_required`, checked
+  before any company lookup); `expectedRevision` gives 409 `flag_revision_conflict`; promoting a stage
+  above `internal` returns 409 `gate_not_passed` unless `NPATI_ALLOW_PRE_GATE_ROLLOUT=true`, because G1
+  and R1 have not been passed. Every change goes through `AuditLogService.record()` **before** it is
+  applied, so an audit outage refuses the change (fail closed).
+- **UI**: Settings → Code → «Feature flags (experimental)» — master switch, kill switch with
+  confirmation, the ten sub-flags, scope selector (company/global with a warning), dark-launch alert
+  and change history; the page switches to History read-only (mutating buttons disabled with an
+  explanation) when master is off.
+- **Versioning**: `code-tool-registry.ts` (schemas as `name@version`, canonical JSON checksum,
+  `CODE_TOOL_MANIFEST_VERSION`, `assertManifestConsistent`, `resolveManifestForSession`),
+  `persisted-schema-upcast.ts` (`PERSISTED_SCHEMA_VERSIONS` for session transcript, summary, checkpoint
+  metadata, model profile and tool result; `upcastPersisted` reads old records without migrating
+  history and refuses records newer than the code), `api-versioning.ts` (`API_VERSION = "v1"`, 90-day
+  deprecation window, `x-npati-api-version` request header, `unsupported_api_version` for an unknown
+  version) — code API responses now also carry the `x-npati-api-version` header.
+- **CI guard**: `scripts/verify-code-tool-schemas.mjs` (`npm run audit:code-tools`) compares the
+  published artifact `apps/agent-api/src/code-tool-schemas.published.json` with the frozen snapshot
+  `tests/fixtures/code-tool-schema-snapshot.json` and fails the build for a changed schema without a
+  version bump, a removed published version, a new version without a manifest bump, or a tampered
+  checksum; `tests/coding-agent-c1a-tool-schema-artifact.test.ts` keeps registry ↔ artifact ↔ snapshot
+  in sync (vite compiles TS, so the guard itself needs no TS loader).
+- **Session manifest pinning**: a new `CodeSession` records `toolManifestVersion` (manifest v1 today),
+  and `app.ts` publishes the manifest at startup after `assertManifestConsistent()`.
+
+## Files / migrations / capabilities changed (C1a)
+- Migration **`packages/workspace/src/migration-067.ts`** (`067_feature_flags_and_versioning`),
+  registered in `postgres-store.ts`.
+- Workspace package: `types.ts` (flag types, `CodeToolManifest`, `suspended_by_flag` status, five new
+  store methods), `postgres-store.ts`, `in-memory-store.ts` (mirrored).
+- agent-api: **new** `feature-flags.ts`, `code-tool-registry.ts`, `persisted-schema-upcast.ts`,
+  `api-versioning.ts`, `code-tool-schemas.published.json`; **new** `scripts/verify-code-tool-schemas.mjs`,
+  `tests/fixtures/code-tool-schema-snapshot.json`; changed `code-routes.ts` (mutation gates, three flag
+  routes, API-version check + header), `code-service.ts` (deny-by-default `assertWriteEnabled`,
+  manifest pinning), `app.ts` (flag service + manifest publication).
+- web: **new** `CodeFlagsPanel.tsx`; changed `CodeSettingsPage.tsx`, `styles.css`.
+- Config/docs: `.env.example` (`NPATI_CODE_FLAG_CACHE_TTL_MS`, `NPATI_ALLOW_PRE_GATE_ROLLOUT`,
+  `NPATI_CODE_AUTO_DISABLE_ON_AUDIT_BREAK`), `package.json` (`audit:code-tools`), this file.
+- Capabilities: none added (still **348 / 84**); rule 24 in action — the flag plumbing exists, the
+  `code.*` capabilities and the Inspector's per-capability flag badge arrive with C2.
+
+## Verification (C1a)
+- `npm run typecheck` → **0 errors** (13 workspaces); `npm run build` for agent-api and web → **exit 0**.
+- `npm run audit:code-tools` → **exit 0** (`0 tool(s), manifest v1, checksum e3b0c44…b855`); drift was
+  demonstrated to fail in all four cases (changed schema without bump, removed version, new version,
+  tampered checksum).
+- New/updated suites: `tests/coding-agent-c1a-flags.test.ts` **12/12** (dark launch denies mutations
+  through both the API and a direct service call; per-company and per-user isolation; master veto over
+  sub-flags; key validation; non-admin refusal; fail-closed audit; revision conflict; gate above
+  `internal`; kill switch suspends sessions, invalidates the cache immediately and is audited;
+  auto-disable on a broken chain; 503 when flags are not configured),
+  `tests/coding-agent-c1a-versioning.test.ts` **17/17**,
+  `tests/coding-agent-c1a-tool-schema-artifact.test.ts` **6/6**, plus the C1 suite **16/16** (updated
+  for deny-by-default and the pinned manifest) and the C1c suite **10/10** — the four security-gate
+  suites together are **61/61**.
+- Regression slice (23 files) in the same run: **216 passed, 3 skipped (DB-bound C1c), 1 failed** — the
+  failure was a stale `toolManifestVersion: null` expectation caused by the new manifest pinning, and
+  it is fixed. Pre-existing failures are unchanged and unrelated: `company-runtime.test.ts` (4),
+  `manual-product-e2e-web.test.ts` (1), `production-durable-approvals.test.ts` (1, reproduced on a
+  clean HEAD).
+
+## Real E2E status (C1a)
+- Verified in-process: flag resolution across scopes and stages, master veto, cache invalidation and
+  the immediate kill-switch effect, session suspension, audit-before-apply, API error contracts, the
+  versioning helpers, the artifact/snapshot guard, and both builds.
+- **Not verified here:** the flag tables and the `suspended_by_flag` CHECK against a live PostgreSQL
+  (migration 067 is additive and follows 065/066; the DB-backed job must apply it), the UI panel in a
+  browser, and the C1c DB-bound triggers (unchanged, 3 tests skipped without `DATABASE_URL`).
+
+## Known risks / open questions (C1a)
+1. **Master flag is now a veto switch** (a broader `off` overrides a narrower `on`). It is required for
+   an incident kill switch, but it is a semantics decision — confirm it, or switch to a separate
+   "incident stop" row that outranks every scope.
+2. `stage: "internal"` admits only admin/owner; ordinary users need `allowlist`/`percent`/`ga`. This is
+   the conservative reading of the plan and is easy to relax in one condition.
+3. A rejected flag change (revision conflict) already has a `flag.change` entry, because the audit is
+   written first (fail closed). If "audit only applied changes" is preferred, the order must change
+   together with a compensating entry.
+4. `tsx` is still not declared in `devDependencies`; the new guard no longer needs it, but the older
+   `gate:agent` script has the same latent dependency.
+5. Auto-disable currently reacts to the audit-chain-broken event; error-rate and budget thresholds
+   need the metrics that arrive with C6/R1.
+6. Kill-switch cleanup is best-effort for sandboxes and does not revoke SecretLeases (C4) or suspend
+   runs (C6 adds run-level `suspended_by_flag`; C1a suspends sessions).
 
 ## Implemented (C1c, latest step)
 - **Append-only journal** `audit_log`, deliberately separate from Activity and from
@@ -110,15 +225,18 @@ Update this file after every completed step.
    workspace-scoped for that reason.
 
 ## Next-session handoff
-- Read `docs/coding-agent/PLAN.md` (version 4, section C1a), `docs/coding-agent/00-audit.md`
-  sections 3, 9 and 13, and this file.
-- Execute **only C1a**: feature-flag store with global/company/user scope and history, the master kill
-  switch plus the sub-flags (dark by default), server-side checks with ≤30 s cache TTL, the
-  History/read-only mode when disabled, `code.*` tool-schema version registry, the session tool
-  manifest, upcasters for old events, API versioning and the CI snapshot guard. **Every flag change
-  must be written through `AuditLogService.record()` (C1c) — flag changes are privileged actions, and
-  if the journal write fails the change must be refused.**
-- Do not start C1b in that session; images come after C1a (order in `00-audit.md` section 13).
+- Read `docs/coding-agent/PLAN.md` (version 4, section C1b), `docs/coding-agent/00-audit.md`
+  sections 7 and 13, and this file.
+- Execute **only C1b**: sandbox images addressed by digest — the build/publish pipeline, `NPATI_SANDBOX_IMAGE`
+  as `repo@sha256:…`, verification that the running image matches the recorded digest, the allow/revoke
+  list, the age policy (`NPATI_CODE_MAX_IMAGE_AGE_DAYS`) and the toolchain variants C1 deliberately
+  deferred (Go/Rust/Java), with `security-gate` tests: an image referenced by tag or an unverified
+  digest is refused, a revoked or missing digest refuses to start, and the recorded digest must match
+  the running container.
+- Image allow/revoke decisions are privileged: they must be written through `AuditLogService.record()`
+  (C1c) and fail closed, like flag changes already are.
+- Do not start C2 (the `code.*` tools) in that session; tools come after C1b (order in
+  `00-audit.md` section 13).
 - **`code_project` project type** on the existing `Project` entity (no new entity): the enum and CHECK
   constraint were extended additively, so Website Builder projects keep working unchanged.
 - **Classification and retention** exist on projects and sessions: `data_classification`

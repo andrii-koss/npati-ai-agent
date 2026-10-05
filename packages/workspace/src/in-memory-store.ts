@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
@@ -17,6 +17,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeSessions = new Map<string, CodeSession>();
   private readonly auditLog = new Map<string, AuditEntry[]>();
   private readonly auditAnchors = new Map<string, AuditAnchor[]>();
+  private readonly featureFlags = new Map<string, FeatureFlag>();
+  private readonly featureFlagHistory: FeatureFlagHistoryEntry[] = [];
+  private readonly codeToolManifests = new Map<number, CodeToolManifest>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
@@ -538,6 +541,69 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const existing = this.auditAnchors.get(companyId) ?? [];
     this.auditAnchors.set(companyId, [...existing.filter((item) => item.day !== anchor.day), record]);
     return structuredClone(record);
+  }
+
+  // --- C1a: feature flags and tool manifests ------------------------------------------------
+
+  /**
+   * Sets or updates a flag row and always appends a history entry, mirroring the SQL store. The
+   * in-memory store is used by tests and local development, so it keeps identical semantics
+   * (revision conflict -> WorkspaceAccessError, one row per scope + scopeId + flagKey).
+   */
+  async setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag> {
+    const scopeId = input.scope === "global" ? "" : (input.scopeId ?? "");
+    if (input.scope !== "global" && !scopeId) throw new WorkspaceAccessError("scopeId is required for company and user scoped flags");
+    const mapKey = `${context.workspaceId}|${input.scope}:${scopeId}:${input.flagKey}`;
+    const previous = this.featureFlags.get(mapKey) ?? null;
+    if (input.expectedRevision !== undefined && previous && previous.revision !== input.expectedRevision) {
+      throw new WorkspaceAccessError("Feature flag changed by another request. Reload and try again.");
+    }
+    const next: FeatureFlag = {
+      id: previous?.id ?? randomUUID(),
+      workspaceId: context.workspaceId,
+      scope: input.scope,
+      scopeId,
+      flagKey: input.flagKey,
+      stage: input.stage ?? previous?.stage ?? "off",
+      enabled: input.enabled ?? previous?.enabled ?? false,
+      rolloutPercent: input.rolloutPercent ?? previous?.rolloutPercent ?? 0,
+      allowlist: input.allowlist ?? previous?.allowlist ?? [],
+      revision: previous ? previous.revision + 1 : 1,
+      updatedBy: context.userId,
+      updatedAt: now(),
+    };
+    this.featureFlags.set(mapKey, next);
+    this.featureFlagHistory.push({
+      id: randomUUID(), workspaceId: context.workspaceId, flagKey: input.flagKey, scope: input.scope, scopeId,
+      previousValue: previous ? { ...previous } : null, nextValue: { ...next }, actor: context.userId, createdAt: now(),
+    });
+    return structuredClone(next);
+  }
+
+  async listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]> {
+    return structuredClone([...this.featureFlags.entries()]
+      .filter(([mapKey]) => mapKey.startsWith(`${context.workspaceId}|`))
+      .map(([, flag]) => flag)
+      .sort((a, b) => a.flagKey.localeCompare(b.flagKey) || a.scope.localeCompare(b.scope) || a.scopeId.localeCompare(b.scopeId)));
+  }
+
+  async listFeatureFlagHistory(context: AuthContext, flagKey?: string, limit = 100): Promise<FeatureFlagHistoryEntry[]> {
+    return structuredClone(this.featureFlagHistory
+      .filter((entry) => entry.workspaceId === context.workspaceId && (!flagKey || entry.flagKey === flagKey))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, Math.max(1, Math.min(limit, 500))));
+  }
+
+  async publishCodeToolManifest(context: AuthContext, manifest: { version: number; tools: CodeToolManifest["tools"]; checksum: string }): Promise<CodeToolManifest> {
+    const record: CodeToolManifest = { version: manifest.version, tools: manifest.tools, checksum: manifest.checksum, createdAt: now() };
+    this.codeToolManifests.set(manifest.version, record);
+    return structuredClone(record);
+  }
+
+  async latestCodeToolManifest(): Promise<CodeToolManifest | null> {
+    const versions = [...this.codeToolManifests.keys()].sort((a, b) => b - a);
+    const latest = versions.length ? this.codeToolManifests.get(versions[0]!) : undefined;
+    return latest ? structuredClone(latest) : null;
   }
 
   async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);

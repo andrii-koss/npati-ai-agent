@@ -4,6 +4,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
+import { CodeFlagsPanel } from "./CodeFlagsPanel";
 
 // --- Types -------------------------------------------------------------------
 
@@ -118,6 +119,12 @@ function codeErrorMessage(error: unknown, isUk: boolean): string {
       return isUk ? "Зниження класу даних заборонено." : "Lowering the data classification is not allowed.";
     case "retention_downgrade_denied":
       return isUk ? "Скорочення класу зберігання заборонено." : "Shortening the retention class is not allowed.";
+    case "feature_disabled":
+      return isUk
+        ? "Coding Agent вимкнено (History read-only): створення й зміни недоступні, історія, Activity, Changes/diff, Export і Delete працюють."
+        : "The Coding Agent is disabled (History read-only): creation and mutations are unavailable while history, Activity, Changes/diff, Export and Delete still work.";
+    case "flag_admin_required":
+      return isUk ? "Керувати флагами може лише власник/адміністратор компанії." : "Only the company owner/admin can manage flags.";
     default:
       return fallback;
   }
@@ -297,6 +304,14 @@ export function CodeSettingsPage() {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionProjectId, setSessionProjectId] = useState<string>("");
   const [reloadToken, setReloadToken] = useState(0);
+  /**
+   * C1a: the master flag decides whether mutations are possible. `null` means "not known yet", in
+   * which case the page stays usable and the server remains the authority (it answers
+   * `feature_disabled` if the flag is off).
+   */
+  const [masterEnabled, setMasterEnabled] = useState<boolean | null>(null);
+  const readOnly = masterEnabled === false;
+  const readOnlyTitle = isUk ? "Coding Agent вимкнено (History read-only)" : "Coding Agent is disabled (History read-only)";
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
@@ -559,7 +574,8 @@ export function CodeSettingsPage() {
               type="button"
               className="button-primary automations-action-primary"
               onClick={() => setCreateOpen(true)}
-              disabled={!companyId}
+              disabled={!companyId || readOnly}
+              title={readOnly ? readOnlyTitle : undefined}
             >
               ＋ {isUk ? "Новий код-проєкт" : "New code project"}
             </button>
@@ -690,7 +706,8 @@ export function CodeSettingsPage() {
                         <button
                           type="button"
                           className="automation-action-btn"
-                          disabled={busyId === project.id}
+                          disabled={busyId === project.id || readOnly}
+                          title={readOnly ? readOnlyTitle : undefined}
                           onClick={() => void detectToolchain(project)}
                         >
                           {busyId === project.id ? "…" : isUk ? "Визначити toolchain" : "Detect toolchain"}
@@ -698,6 +715,8 @@ export function CodeSettingsPage() {
                         <button
                           type="button"
                           className="automation-action-btn"
+                          disabled={readOnly}
+                          title={readOnly ? readOnlyTitle : undefined}
                           onClick={() => { setSessionProjectId(project.id); setSessionOpen(true); }}
                         >
                           {isUk ? "Сесії" : "Sessions"}
@@ -706,7 +725,8 @@ export function CodeSettingsPage() {
                           <button
                             type="button"
                             className="automation-action-btn danger"
-                            disabled={busyId === project.id}
+                            disabled={busyId === project.id || readOnly}
+                            title={readOnly ? readOnlyTitle : undefined}
                             onClick={() => void archiveProject(project)}
                           >
                             {isUk ? "Архівувати" : "Archive"}
@@ -732,7 +752,8 @@ export function CodeSettingsPage() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              disabled={!companyId || projects.length === 0}
+              disabled={!companyId || projects.length === 0 || readOnly}
+              title={readOnly ? readOnlyTitle : undefined}
               onClick={() => {
                 setSessionProjectId((current) => current || detailId || visibleProjects[0]?.id || projects[0]?.id || "");
                 setSessionOpen(true);
@@ -774,7 +795,8 @@ export function CodeSettingsPage() {
                           <button
                             type="button"
                             className="automation-action-btn danger"
-                            disabled={busyId === session.id}
+                            disabled={busyId === session.id || readOnly}
+                            title={readOnly ? readOnlyTitle : undefined}
                             onClick={() => void archiveSession(session)}
                           >
                             {isUk ? "Архівувати" : "Archive"}
@@ -786,6 +808,16 @@ export function CodeSettingsPage() {
                 </tbody>
               </table>
             </div>
+          )}
+
+          {companyId && (
+            <CodeFlagsPanel
+              companyId={companyId}
+              isUk={isUk}
+              notify={(type, message) => setFeedback({ type, message })}
+              onMasterEnabledChange={setMasterEnabled}
+              onSessionsSuspended={() => reload()}
+            />
           )}
 
           <details className="code-limits">
@@ -805,7 +837,7 @@ export function CodeSettingsPage() {
         </>
       )}
 
-      {createOpen && companyId && (
+      {createOpen && companyId && !readOnly && (
         <CreateProjectDrawer
           isUk={isUk}
           companyName={companyName}
@@ -819,6 +851,8 @@ export function CodeSettingsPage() {
           isUk={isUk}
           project={detailProject}
           busy={busyId === detailProject.id}
+          readOnly={readOnly}
+          readOnlyTitle={readOnlyTitle}
           onClose={() => setDetailId(null)}
           onDetect={() => void detectToolchain(detailProject)}
           onArchive={() => void archiveProject(detailProject)}
@@ -826,7 +860,7 @@ export function CodeSettingsPage() {
         />
       )}
 
-      {sessionOpen && companyId && (
+      {sessionOpen && companyId && !readOnly && (
         <CreateSessionDrawer
           isUk={isUk}
           projects={projects.filter((project) => project.status !== "archived")}
@@ -998,10 +1032,13 @@ function CreateProjectDrawer({ isUk, companyName, onClose, onSubmit }: {
 
 // --- Drawer: project details -------------------------------------------------
 
-function ProjectDetailsDrawer({ isUk, project, busy, onClose, onDetect, onArchive, onSave }: {
+function ProjectDetailsDrawer({ isUk, project, busy, readOnly, readOnlyTitle, onClose, onDetect, onArchive, onSave }: {
   isUk: boolean;
   project: CodeProject;
   busy: boolean;
+  /** C1a: when the master flag is off, editing is disabled (History read-only) but details stay visible. */
+  readOnly?: boolean;
+  readOnlyTitle?: string;
   onClose: () => void;
   onDetect: () => void;
   onArchive: () => void;
@@ -1097,7 +1134,7 @@ function ProjectDetailsDrawer({ isUk, project, busy, onClose, onDetect, onArchiv
               )}
             </>
           ) : <p className="ds-muted">{isUk ? "Toolchain ще не визначено." : "Toolchain is not detected yet."}</p>}
-          <button type="button" className="button-secondary" disabled={busy} onClick={onDetect}>
+          <button type="button" className="button-secondary" disabled={busy || readOnly} title={readOnly ? readOnlyTitle : undefined} onClick={onDetect}>
             {busy ? "…" : isUk ? "Визначити повторно" : "Detect again"}
           </button>
         </section>
@@ -1152,15 +1189,28 @@ function ProjectDetailsDrawer({ isUk, project, busy, onClose, onDetect, onArchiv
 
         <div className="browser-form-footer">
           <div className="browser-form-footer-hint">
-            {isUk ? "Зміни зберігаються з перевіркою revision." : "Changes are saved with a revision check."}
+            {readOnly
+              ? (readOnlyTitle ?? (isUk ? "Coding Agent вимкнено (History read-only)" : "Coding Agent is disabled (History read-only)"))
+              : isUk ? "Зміни зберігаються з перевіркою revision." : "Changes are saved with a revision check."}
           </div>
           <div className="code-detail-actions">
             {project.status !== "archived" && (
-              <button type="button" className="automation-action-btn danger" disabled={busy} onClick={onArchive}>
+              <button
+                type="button"
+                className="automation-action-btn danger"
+                disabled={busy || readOnly}
+                title={readOnly ? readOnlyTitle : undefined}
+                onClick={onArchive}
+              >
                 {isUk ? "Архівувати" : "Archive"}
               </button>
             )}
-            <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={saving}>
+            <button
+              type="submit"
+              className="button-primary automations-action-primary browser-submit-btn"
+              disabled={saving || readOnly}
+              title={readOnly ? readOnlyTitle : undefined}
+            >
               {saving ? (isUk ? "Збереження…" : "Saving…") : isUk ? "Зберегти" : "Save"}
             </button>
           </div>
