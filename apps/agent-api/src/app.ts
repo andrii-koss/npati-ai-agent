@@ -893,6 +893,25 @@ export function buildApp(config: AppConfig = {}) {
     await projectSandbox?.destroy(context, project);
     // D7: deleting a Project only detaches it; the DataBackend keeps serving other Projects.
     await dataBackendService?.detachProjectArtifacts(context, project.companyId, project.id).catch(() => undefined);
+  }, async (context, companyId, projectId) => {
+    // Data Studio: wire a newly created Project to its database automatically so the owner never
+    // has to attach a DataBackend by hand. The company's newest ready backend is reused; the first
+    // Project of a company creates one on demand. Any failure leaves the Project detached.
+    if (!dataBackendService) return undefined;
+    try {
+      const backends = await dataBackendService.list(context, companyId);
+      let backendId = (backends.find((backend) => backend.status === "ready") ?? backends[0])?.id;
+      if (!backendId) {
+        const company = await workspaceStore.getCompany(context, companyId);
+        const created = await dataBackendService.create(context, companyId, { name: `${company.name} data`.slice(0, 200) });
+        backendId = created.id;
+      }
+      await dataBackendService.attach(context, companyId, projectId, backendId);
+      return backendId;
+    } catch (error) {
+      app.log.warn({ err: error, companyId, projectId }, "project_data_backend_auto_attach_failed");
+      return undefined;
+    }
   });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   // The gateway vendors the Project API client into the Project workspace, so it needs the workspace handle.

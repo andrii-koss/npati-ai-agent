@@ -4,7 +4,16 @@ import { defaultAppScheme, isValidAppScheme } from "@npati/shared";
 const projectTypes = new Set<string>(PROJECT_TYPES);
 
 export class ProjectService {
-  constructor(private readonly store: WorkspaceStore, private readonly beforeRemove?: (context: AuthContext, project: Awaited<ReturnType<WorkspaceStore["getProject"]>>) => Promise<void>) {}
+  constructor(
+    private readonly store: WorkspaceStore,
+    private readonly beforeRemove?: (context: AuthContext, project: Awaited<ReturnType<WorkspaceStore["getProject"]>>) => Promise<void>,
+    /**
+     * Called after a Project was created without an explicit DataBackend. It attaches the
+     * company's DataBackend (creating one when the company has none) so the owner never has to
+     * wire a Project to its database by hand. Returning `undefined` simply leaves it detached.
+     */
+    private readonly attachDataBackend?: (context: AuthContext, companyId: string, projectId: string) => Promise<string | undefined>,
+  ) {}
 
   private async company(context: AuthContext, companyId: string) {
     return this.store.getCompany(context, companyId);
@@ -26,10 +35,20 @@ export class ProjectService {
     } else if (input.appScheme !== undefined) {
       throw new Error("App scheme is only supported for mobile_app projects");
     }
-    return this.store.createProject(context, companyId, {
+    const created = await this.store.createProject(context, companyId, {
       name, type: input.type, description: input.description?.trim() || undefined,
       dataBackendId: input.dataBackendId, appScheme,
     }, idempotencyKey);
+    // Data Studio: a website created without an explicit database is attached to the company's
+    // DataBackend automatically (created on demand the first time). Failures never block creation.
+    if (!created.project.dataBackendId && this.attachDataBackend) {
+      const attached = await this.attachDataBackend(context, companyId, created.project.id).catch(() => undefined);
+      if (attached) {
+        const project = await this.store.getProject(context, companyId, created.project.id).catch(() => created.project);
+        return { ...created, project };
+      }
+    }
+    return created;
   }
 
   async list(context: AuthContext, companyId: string, includeArchived = false) {

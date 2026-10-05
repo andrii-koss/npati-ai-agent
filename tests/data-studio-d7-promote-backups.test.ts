@@ -4,6 +4,7 @@ import { PromoteService } from "../apps/agent-api/src/data-studio/promote-servic
 import { BackupService } from "../apps/agent-api/src/data-studio/backup-service";
 import { QuotaService } from "../apps/agent-api/src/data-studio/quota-service";
 import { DataBackendService } from "../apps/agent-api/src/data-studio/service";
+import { ProjectService } from "../apps/agent-api/src/project-service";
 import { ExternalPostgresProvisioner } from "../apps/agent-api/src/data-studio/external-provisioner";
 import type { DataBackendRepository } from "../apps/agent-api/src/data-studio/repository";
 import type { DatabaseProvisioner } from "../apps/agent-api/src/data-studio/provisioner";
@@ -483,8 +484,49 @@ describe("D7 — lifecycle", () => {
   });
 });
 
-describe("D7 — schema template routes (settings page)", () => {
-  it("lists templates, refuses prod and requires explicit approval before applying", async () => {
+describe("D7 — automatic DataBackend attachment", () => {
+  it("attaches a database to a new Project and returns it with the backend already linked", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const company = await store.createCompany(owner, { name: "Auto attach" }, "auto-attach");
+    const calls: string[] = [];
+    const service = new ProjectService(store, undefined, async (_ctx, companyId, projectId) => {
+      calls.push(projectId);
+      // The real callback goes through the repository; here we only verify the plumbing.
+      (store as unknown as { projects: Map<string, { dataBackendId?: string }> }).projects.get(projectId)!.dataBackendId = "backend-auto";
+      return "backend-auto";
+    });
+
+    const created = await service.create(owner, company.id, { name: "Shop", type: "website" }, "auto-attach-key");
+    expect(calls).toHaveLength(1);
+    expect(created.project.dataBackendId).toBe("backend-auto");
+  });
+
+  it("keeps an explicitly selected database and never calls the auto attach", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const company = await store.createCompany(owner, { name: "Explicit" }, "explicit-attach");
+    let called = 0;
+    const service = new ProjectService(store, undefined, async () => { called += 1; return "backend-other"; });
+
+    const created = await service.create(owner, company.id, { name: "App", type: "mobile_app", dataBackendId: "backend-chosen" }, "explicit-attach-key");
+    expect(called).toBe(0);
+    expect(created.project.dataBackendId).toBe("backend-chosen");
+  });
+
+  it("still creates the Project when the automatic attachment fails", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const company = await store.createCompany(owner, { name: "Broken attach" }, "broken-attach");
+    const service = new ProjectService(store, undefined, async () => { throw new Error("postgres-projects down"); });
+
+    const created = await service.create(owner, company.id, { name: "Site", type: "website" }, "broken-attach-key");
+    expect(created.project.id).toBeTruthy();
+    expect(created.project.dataBackendId ?? null).toBeNull();
+  });
+});
+
+describe("D7 — schema template routes (settings page)", () => {  it("lists templates, refuses prod and requires explicit approval before applying", async () => {
     const Fastify = (await import("fastify")).default;
     const { registerDataStudioRoutes } = await import("../apps/agent-api/src/data-studio/studio-routes");
     const app = Fastify();
