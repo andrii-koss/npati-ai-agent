@@ -1,7 +1,35 @@
 {
-  "manifestVersion": 2,
-  "checksum": "c1d027c28ade21131aa1b004192bf5350f9d4768c65d37a36f94bdb5f2e4066a",
+  "manifestVersion": 3,
+  "checksum": "677fb6f897cdf8b2684cd7f59ba574ea3a53897bb7eb9aff6aedec3280072125",
   "tools": [
+    {
+      "key": "code.fs.apply_patch@1",
+      "name": "code.fs.apply_patch",
+      "version": 1,
+      "status": "active",
+      "checksum": "18d8626636e1edb58e94e3d7bcf4d81a8ecb73381cd12efcc88248ef292a6956"
+    },
+    {
+      "key": "code.fs.delete@1",
+      "name": "code.fs.delete",
+      "version": 1,
+      "status": "active",
+      "checksum": "04e57e5a9b45de37809b4be2f10476bf05affde3ce4efb4db7458a9a2d1c7ebd"
+    },
+    {
+      "key": "code.fs.diff@1",
+      "name": "code.fs.diff",
+      "version": 1,
+      "status": "active",
+      "checksum": "a191b48c314830701a041f8b30e976da5b2925d77561439c4a74e54d55c4f953"
+    },
+    {
+      "key": "code.fs.edit@1",
+      "name": "code.fs.edit",
+      "version": 1,
+      "status": "active",
+      "checksum": "6f9587579d21ab307d2662eb477ae87d35fe71a89f6d7f5b8cd88f61acd044f1"
+    },
     {
       "key": "code.fs.grep@1",
       "name": "code.fs.grep",
@@ -17,6 +45,13 @@
       "checksum": "02e09004873fdc7c399a1f92f5df1f01365527a16283226c254dca06486fb7d9"
     },
     {
+      "key": "code.fs.move@1",
+      "name": "code.fs.move",
+      "version": 1,
+      "status": "active",
+      "checksum": "be94c5c366a001eaeac84076e773ee444ed497ab17f2d5175d1f155656a710e1"
+    },
+    {
       "key": "code.fs.read@1",
       "name": "code.fs.read",
       "version": 1,
@@ -29,6 +64,20 @@
       "version": 1,
       "status": "active",
       "checksum": "516fe45fd1d6e65277fe71d5c5aa4eaa2df79eafcbba1cd87e166f01b1d6a62f"
+    },
+    {
+      "key": "code.fs.undo_last_turn@1",
+      "name": "code.fs.undo_last_turn",
+      "version": 1,
+      "status": "active",
+      "checksum": "dc0e50a5eb014a99675286525d0225212625a0c3b20f2ccb21fb7bdeb1c5541c"
+    },
+    {
+      "key": "code.fs.write@1",
+      "name": "code.fs.write",
+      "version": 1,
+      "status": "active",
+      "checksum": "2aa3e6fe7110e3522f640e134e445edfddcd2eeda3010d6f9954529a70d7e61d"
     },
     {
       "key": "code.project.info@1",

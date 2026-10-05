@@ -4843,5 +4843,7 @@ import { PROJECT_DATA_MATRIX } from "./project-data-capabilities";
 CAPABILITY_MATRIX.push(...PROJECT_DATA_MATRIX);
 
 // C2: read-only Coding Agent tools (domain "code", inventory ids 349-354).
-import { CODE_READ_MATRIX } from "./code-capabilities";
+// C3: mutating Coding Agent tools (inventory ids 355-361).
+import { CODE_READ_MATRIX, CODE_WRITE_MATRIX } from "./code-capabilities";
 CAPABILITY_MATRIX.push(...CODE_READ_MATRIX);
+CAPABILITY_MATRIX.push(...CODE_WRITE_MATRIX);

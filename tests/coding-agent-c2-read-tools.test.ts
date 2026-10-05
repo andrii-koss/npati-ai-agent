@@ -11,8 +11,13 @@ import { projectInfo } from "../apps/agent-api/src/code-tools-project";
 import { resolveCodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
 import {
   CODE_TOOL_MANIFEST_VERSION, CODE_TOOL_SCHEMAS, KNOWN_TOOL_MANIFESTS, PUBLISHED_TOOL_SCHEMA_CHECKSUM,
-  assertManifestConsistent, resolveManifestForSession, toolKey, toolSchemaChecksum,
+  PUBLISHED_V2_TOOL_SCHEMA_CHECKSUM, assertManifestConsistent, resolveManifestForSession, toolKey, toolSchemaChecksum,
 } from "../apps/agent-api/src/code-tool-registry";
+
+/** The six read-only tools C2 published; later steps add to the registry without replacing these. */
+const C2_READ_TOOL_KEYS = [
+  "code.fs.grep@1", "code.fs.list@1", "code.fs.read@1", "code.fs.tree@1", "code.project.info@1", "code.symbols.outline@1",
+];
 
 /** In-memory `CodeReadPort`: no sandbox, no filesystem, fully deterministic. */
 function makePort(options: {
@@ -408,14 +413,17 @@ describe("security-gate: C2 untrusted-data envelope and output budget", () => {
 });
 
 describe("security-gate: C2 tool schema registry", () => {
-  it("publishes exactly the six read-only tools with versioned schemas", () => {
-    const keys = CODE_TOOL_SCHEMAS.map((tool) => toolKey(tool)).sort();
-    expect(keys).toEqual([
-      "code.fs.grep@1", "code.fs.list@1", "code.fs.read@1", "code.fs.tree@1", "code.project.info@1", "code.symbols.outline@1",
-    ]);
+  it("keeps every C2 read-only tool published with versioned schemas as a subset of the registry", () => {
+    const keys = CODE_TOOL_SCHEMAS.map((tool) => toolKey(tool));
+    // Subset, not equality: C3 published mutating tools into the same registry, and a future step will
+    // add more. What must never change is that the C2 read tools stay published and well-formed.
+    expect(C2_READ_TOOL_KEYS.every((key) => keys.includes(key))).toBe(true);
+    // No duplicate `name@version` and no version below 1: a published version is immutable.
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.every((key) => /@[1-9]\d*$/.test(key))).toBe(true);
     for (const tool of CODE_TOOL_SCHEMAS) {
       expect(tool.status).toBe("active");
-      expect(tool.version).toBe(1);
+      expect(tool.version).toBeGreaterThanOrEqual(1);
       expect(Object.keys(tool.inputSchema).length).toBeGreaterThan(0);
       expect(Object.keys(tool.outputSchema).length).toBeGreaterThan(0);
       expect(tool.inputSchema.additionalProperties).toBe(false);
@@ -423,17 +431,28 @@ describe("security-gate: C2 tool schema registry", () => {
     }
   });
 
-  it("keeps the manifest consistent with the published checksum and serves the pre-C2 manifest", () => {
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(2);
+  it("keeps the manifest consistent with the published checksum and serves the pre-C2 manifests", () => {
+    // Constants, never literals: the manifest version grows with the published set, and the checksum
+    // must equal the checksum of the currently published schemas.
+    expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(2);
     expect(toolSchemaChecksum()).toBe(PUBLISHED_TOOL_SCHEMA_CHECKSUM);
     expect(() => assertManifestConsistent()).not.toThrow();
 
     // A session created before C2 (manifest v1 = empty set) still resolves.
     const old = resolveManifestForSession(1);
     expect(old.tools).toEqual([]);
-    const current = resolveManifestForSession(2);
+    // A session created during C2 keeps resolving with exactly the six read tools it was pinned to, and
+    // its checksum is frozen: editing one of those schemas without publishing a new version breaks this.
+    const c2 = resolveManifestForSession(2);
+    expect(c2.version).toBe(2);
+    expect(c2.tools.map((tool) => tool.key).sort()).toEqual([...C2_READ_TOOL_KEYS].sort());
+    expect(c2.checksum).toBe(PUBLISHED_V2_TOOL_SCHEMA_CHECKSUM);
+    // The current manifest serves the whole published set.
+    const current = resolveManifestForSession(CODE_TOOL_MANIFEST_VERSION);
     expect(current.tools).toHaveLength(CODE_TOOL_SCHEMAS.length);
-    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version).sort()).toEqual([1, 2]);
+    expect(current.checksum).toBe(PUBLISHED_TOOL_SCHEMA_CHECKSUM);
+    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version).sort())
+      .toEqual([1, 2, CODE_TOOL_MANIFEST_VERSION].sort());
     expect(() => resolveManifestForSession(99)).toThrow(/Unknown tool manifest version/);
   });
 

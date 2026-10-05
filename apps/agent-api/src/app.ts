@@ -10,7 +10,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -73,8 +73,10 @@ import { assertManifestConsistent, currentToolManifest } from "./code-tool-regis
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
-import { CodeToolRuntime, createProjectWorkspaceReadPort } from "./code-tool-runtime";
-import { canonicalExecutors } from "./code-tool-executors";
+import { CodeToolRuntime, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
+import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
+import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
+import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
 import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
@@ -1009,31 +1011,62 @@ export function buildApp(config: AppConfig = {}) {
   // touching the host. Activity is logged here; the run-event stream and ExecutionSnapshot links arrive
   // with the runner in C6 (the run event enum is lifecycle-only by design).
   const codeReadTracker = new ReadTracker(resolveReadTrackerOptions());
+  // C3: the write runtime reuses the existing Website Builder checkpoint mechanism (`ProjectGitService`
+  // already commits the dirty worktree and tags `refs/npati/checkpoints/<id>`) and the existing approval
+  // system (`CompanyApprovalsRepository` verifies the payload hash on consumption). Nothing is stored in
+  // a new format, and the per-turn log stays in-process until C6a decides persistence.
+  const codeTurnTracker = new CodeTurnTracker(resolveTurnTrackingOptions());
+  const codeCheckpointPort = codeCheckpointPortFromGit({
+    createCheckpoint: (ctx, companyId, projectId, input) => projectGitService.createCheckpoint(ctx, companyId, projectId, input),
+    restoreCheckpoint: (ctx, companyId, projectId, checkpointId, restoreOptions) => projectGitService.restoreCheckpoint(ctx, companyId, projectId, checkpointId, restoreOptions),
+    diff: (ctx, companyId, projectId, diffOptions) => projectGitService.diff(ctx, companyId, projectId, diffOptions),
+    isLargeChange: (ctx, companyId, projectId) => projectGitService.isLargeChange(ctx, companyId, projectId),
+  });
+  const codeApprovalPort = approvalsRepo
+    ? approvalsBackedPort(approvalsRepo, { defaultTtlMs: resolveApprovalPolicy().ttlMs })
+    : undefined;
+  const codeProjectWorkspaceWritePort = createProjectWorkspaceWritePort({
+    writeFile: (ctx, companyId, projectId, filePath, content, expectedRevision) => projectWorkspace.writeFile(ctx, companyId, projectId, filePath, content, expectedRevision),
+    createFile: (ctx, companyId, projectId, filePath, content) => projectWorkspace.createFile(ctx, companyId, projectId, filePath, content),
+    editFile: (ctx, companyId, projectId, filePath, find, replacement, expectedRevision) => projectWorkspace.editFile(ctx, companyId, projectId, filePath, find, replacement, expectedRevision),
+    moveFile: (ctx, companyId, projectId, from, to, expectedRevision) => projectWorkspace.moveFile(ctx, companyId, projectId, from, to, expectedRevision),
+    deleteFile: (ctx, companyId, projectId, filePath) => projectWorkspace.deleteFile(ctx, companyId, projectId, filePath),
+  });
+  // Single sandbox execution adapter for the code toolset: text search and the post-write hooks both use
+  // it, so the terminal policy sees one consistent caller identity.
+  const codeSandboxExecPort = projectSandbox ? {
+    execute: async (ctx: AuthContext, companyId: string, request: { projectId: string; command: string; cwd?: string; timeoutMs?: number }) => {
+      const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "code-tool-runtime", ...(request.cwd ? { cwd: request.cwd } : {}) };
+      const result = await projectSandbox!.execute(ctx, companyId, terminalRequest);
+      const shaped = result as { stdout?: string; output?: string; exitCode?: number };
+      return { stdout: shaped?.stdout ?? shaped?.output ?? "", exitCode: shaped?.exitCode };
+    },
+  } : undefined;
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
     audit: auditLogService,
     tracker: codeReadTracker,
     limits: config.codeAgentLimits,
-    // C2: the canonical implementations are the only executor path; path safety, the sensitive-file
+    // C2/C3: the canonical implementations are the only executor path; path safety, the sensitive-file
     // policy and the untrusted-data envelope come from `code-tools-*.ts` (no second policy exists).
-    executors: canonicalExecutors({
+    executors: allCanonicalExecutors({
       projectLoader: async ({ ctx, companyId, projectId }) => {
         const project = await projectService.get(ctx, companyId, projectId);
         return (project as { type?: string } | null)?.type === "code_project" ? project as never : null;
       },
     }),
-    toPort: () => createProjectWorkspaceReadPort(projectWorkspace, projectSandbox
-      ? {
-        execute: async (ctx, companyId, request) => {
-          // `agentId` identifies the caller in terminal policy logs; the runtime is not an agent identity,
-          // so it is named explicitly until C6 passes the real session agent id through.
-          const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "code-tool-runtime", ...(request.cwd ? { cwd: request.cwd } : {}) };
-          const result = await projectSandbox!.execute(ctx, companyId, terminalRequest);
-          return { stdout: (result as { stdout?: string; output?: string })?.stdout ?? (result as { output?: string })?.output ?? "", exitCode: (result as { exitCode?: number })?.exitCode };
-        },
-      }
-      : undefined),
+    checkpoints: codeCheckpointPort,
+    approvals: codeApprovalPort,
+    turns: codeTurnTracker,
+    writePort: codeProjectWorkspaceWritePort,
+    // Formatter/syntax hooks run in the sandbox and only when the deployment configures them; their
+    // output is a warning on the tool result and never blocks (or silently rewrites) a change.
+    postWriteHooks: codeSandboxExecPort ? {
+      format: async ({ ctx, companyId, projectId, paths }) => runSandboxPostWriteHook(codeSandboxExecPort, ctx, companyId, projectId, process.env.NPATI_CODE_FORMAT_COMMAND, paths),
+      checkSyntax: async ({ ctx, companyId, projectId, paths }) => runSandboxPostWriteHook(codeSandboxExecPort, ctx, companyId, projectId, process.env.NPATI_CODE_SYNTAX_COMMAND, paths),
+    } : undefined,
+    toPort: () => createProjectWorkspaceReadPort(projectWorkspace, codeSandboxExecPort),
     activity: { record: async (event) => { app.log.info({ ...event, kind: "code.tool.activity" }, "code tool activity"); } },
   });
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
@@ -2894,13 +2927,18 @@ ${localized.next}`;
         agent: request.query.agentId ? { id: request.query.agentId, revision: 1, tools: ["*"] } : undefined,
       };
     }
-    // C2: expose the Coding Agent feature-flag state per capability. A missing flag service (or a
-    // failed lookup) degrades to "unknown" instead of pretending the feature is enabled.
+    // C2/C3: expose the Coding Agent feature-flag state per capability. Read-only tools are gated by
+    // `code.read`, mutating tools by `code.write`, so both are resolved here. A missing flag service (or
+    // a failed lookup) degrades to "unknown" instead of pretending the feature is enabled.
     let flagStates: Record<string, boolean> | undefined;
     let flagSourceAvailable = false;
     if (featureFlagService) {
       try {
-        flagStates = { [CODE_READ_FLAG]: await featureFlagService.isEnabled(auth, CODE_READ_FLAG, { companyId: request.query.companyId, userId: auth.userId }) };
+        const options = { companyId: request.query.companyId, userId: auth.userId };
+        flagStates = {
+          [CODE_READ_FLAG]: await featureFlagService.isEnabled(auth, CODE_READ_FLAG, options),
+          [CODE_WRITE_FLAG]: await featureFlagService.isEnabled(auth, CODE_WRITE_FLAG, options),
+        };
         flagSourceAvailable = true;
       } catch {
         flagStates = undefined;

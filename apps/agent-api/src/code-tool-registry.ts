@@ -50,15 +50,37 @@ export class CodeToolSchemaError extends Error {
  */
 export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as unknown as readonly CodeToolSchema[];
 
+/**
+ * The C2 published subset (read/search only). Kept as a named constant because manifest v2 must keep
+ * resolving for sessions created before C3, and because its checksum is frozen (see
+ * `PUBLISHED_V2_TOOL_SCHEMA_CHECKSUM`).
+ */
+const C2_TOOL_NAMES: readonly string[] = [
+  "code.fs.list",
+  "code.fs.read",
+  "code.fs.grep",
+  "code.fs.tree",
+  "code.symbols.outline",
+  "code.project.info",
+];
+export const C2_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C2_TOOL_NAMES.includes(tool.name));
+
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 2;
+export const CODE_TOOL_MANIFEST_VERSION = 3;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
- * Regenerate with: `node scripts/code-tool-schemas-generate.mjs`.
+ * Regenerate with: `node scripts/code-tool-schemas-generate.mjs --manifest-version N`.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "c1d027c28ade21131aa1b004192bf5350f9d4768c65d37a36f94bdb5f2e4066a";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "677fb6f897cdf8b2684cd7f59ba574ea3a53897bb7eb9aff6aedec3280072125";
+
+/**
+ * Checksum of the C2 published set (the six read/search tools). It is frozen here so that a session
+ * pinned to manifest v2 keeps resolving *and* so that mutating one of those six schemas without
+ * publishing a new version fails the tests instead of silently rewriting history.
+ */
+export const PUBLISHED_V2_TOOL_SCHEMA_CHECKSUM = "c1d027c28ade21131aa1b004192bf5350f9d4768c65d37a36f94bdb5f2e4066a";
 
 export function toolKey(tool: Pick<CodeToolSchema, "name" | "version">): string {
   return `${tool.name}@${tool.version}`;
@@ -158,11 +180,13 @@ export function resolveManifestForSession(manifestVersion: number, manifests: re
 }
 
 /**
- * Manifests this build can serve. Version 1 (the empty C1a set) stays available so a session created
- * before C2 still resolves, and C6/C10 extend the list when they keep older sessions.
+ * Manifests this build can serve. Version 1 (the empty C1a set) and version 2 (the C2 read/search
+ * tools) stay available so a session created before C3 still resolves; C6/C10 extend the list when they
+ * keep older sessions.
  */
 export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest([], 1),
+  toolManifest(C2_TOOL_SCHEMAS, 2),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

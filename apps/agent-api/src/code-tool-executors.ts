@@ -4,7 +4,14 @@ import {
   type CodeDirEntry, type CodeReadPort as FsReadPort, type CodeSearchRequest, type CodeSearchResponse,
 } from "./code-tools-fs";
 import { projectInfo, type ProjectInfoInput, type ProjectInfoResult } from "./code-tools-project";
-import { CodeToolError, type CodeReadPort, type CodeToolExecutionContext } from "./code-tool-runtime";
+import { CodeToolError, type CodeReadPort, type CodeToolExecutionContext, type CodeWritePort } from "./code-tool-runtime";
+import { simpleUnifiedDiff } from "./code-workspace-checkpoint";
+import {
+  applyEdit, deletePathSafe, movePathSafe, resolveWriteLimits, writeFileSafe,
+  type CodeWritePort as EngineWritePort, type WriteOptions as EngineWriteOptions,
+} from "./code-tools-write";
+import { applyPatch as applyCanonicalPatch } from "./code-tools-patch";
+import { buildUnifiedDiff, diffLineStats, sha256 } from "./code-tools-diff";
 
 /**
  * C2: binds the canonical tool logic (`code-tools-fs.ts`, `code-tools-project.ts`) to the runtime.
@@ -108,6 +115,402 @@ export function toCanonicalPort(input: CodeToolExecutionContext, options: Canoni
     canonical.runCtags = (path: string) => runner(input, path);
   }
   return canonical;
+}
+
+/**
+ * C3: the canonical write executors.
+ *
+ * They are the only place where a change is turned into a workspace call, and they always go through
+ * the write port with the revision the caller read, so the workspace refuses a lost update. Diffs are
+ * produced per file (an injected `diffProvider` wins; otherwise the bounded fallback in
+ * `code-workspace-checkpoint.ts` is used) and returned as statistics plus a unified diff — never as
+ * file content in the audit trail.
+ *
+ * Raw unified-diff patches are applied only when every hunk matches the current content exactly; a
+ * mismatch refuses the whole patch before any write. A canonical patch parser (`code-tools-patch.ts`)
+ * can replace the fallback by injecting `applyPatchProvider`.
+ */
+export interface CanonicalWriteExecutorOptions extends CanonicalExecutorOptions {
+  diffProvider?: (input: { path: string; before: string; after: string }) => { diff: string; linesAdded: number; linesRemoved: number } | null;
+  /** Replaces the built-in unified-diff application when the canonical patch module is wired. */
+  applyPatchProvider?: (input: { patch: string; files: Map<string, string> }) => Map<string, string>;
+  /** Explicit approval granted outside the runtime (tests, maintenance scripts). */
+  approved?: boolean;
+  /** Optional formatter/syntax hooks; they only ever return warnings. */
+  hooks?: EngineWriteOptions["hooks"];
+}
+
+interface WriteFileState { content: string; revision: string; sha256: string }
+
+function writePortOf(input: CodeToolExecutionContext): CodeWritePort {
+  if (!input.writePort) {
+    throw new CodeToolError("write_unavailable", "This deployment cannot apply changes: no write port is configured", 503, "configure", false, input.tool.name);
+  }
+  return input.writePort;
+}
+
+function stringArg(args: Record<string, unknown>, names: string[]): string | null {
+  for (const name of names) {
+    const value = args[name];
+    if (typeof value === "string" && value.length) return value;
+  }
+  return null;
+}
+
+/** Current content, or null when the file does not exist yet (a new file needs no prior revision). */
+async function readCurrent(input: CodeToolExecutionContext, path: string): Promise<WriteFileState | null> {
+  try {
+    const file = await input.port.readFile({
+      ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path,
+      maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes,
+    });
+    return { content: file.content ?? "", revision: file.revision, sha256: file.sha256 };
+  } catch (error) {
+    const shaped = error as { code?: string; status?: number };
+    if (shaped?.code === "not_a_file" || shaped?.code === "not_found" || shaped?.code === "ENOENT" || shaped?.status === 404) return null;
+    rethrowCanonical(error);
+  }
+}
+
+function expectedRevisionFor(input: CodeToolExecutionContext, path: string, current: WriteFileState | null): string {
+  const fromTracker = input.expectedRevisions?.[path];
+  if (fromTracker) return fromTracker;
+  const explicit = stringArg(input.args, ["expectedRevision", "revision"]);
+  if (explicit) return explicit;
+  return current?.revision ?? "";
+}
+
+/**
+ * The revision the caller read for a path, as the canonical engines expect it. Only the read tracker
+ * can supply it: the request itself is untrusted, so an `expectedRevision` argument never becomes the
+ * lost-update guard.
+ */
+function readRevisionFor(input: CodeToolExecutionContext, path: string): { revision?: string; sha?: string } | undefined {
+  const revision = input.expectedRevisions?.[path];
+  return revision ? { revision } : undefined;
+}
+
+function diffFor(options: CanonicalWriteExecutorOptions, path: string, before: string, after: string) {
+  const provided = options.diffProvider?.({ path, before, after });
+  if (provided) return provided;
+  return simpleUnifiedDiff(before, after, path);
+}
+
+/** Applies a unified diff to one file, refusing when any hunk does not match exactly. */
+export function applyUnifiedDiffToFile(path: string, before: string, patch: string): string {
+  const lines = before.split("\n");
+  const hunks: Array<{ start: number; removed: string[]; added: string[] }> = [];
+  let current: { start: number; removed: string[]; added: string[] } | null = null;
+  for (const line of patch.split("\n")) {
+    const header = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
+    if (header) {
+      current = { start: Math.max(0, Number.parseInt(header[1] ?? "1", 10) - 1), removed: [], added: [] };
+      hunks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("-")) current.removed.push(line.slice(1));
+    else if (line.startsWith("+")) current.added.push(line.slice(1));
+    else if (line.startsWith(" ")) { current.removed.push(line.slice(1)); current.added.push(line.slice(1)); }
+  }
+  if (!hunks.length) {
+    throw new CodeToolError("invalid_arguments", `Patch for ${path} contains no hunks`, 400, "validate_arguments", false, "code.fs.apply_patch");
+  }
+  let result = [...lines];
+  // Apply from the bottom so earlier line numbers stay valid.
+  for (const hunk of [...hunks].sort((a, b) => b.start - a.start)) {
+    const existing = result.slice(hunk.start, hunk.start + hunk.removed.length);
+    if (existing.length !== hunk.removed.length || existing.some((line, index) => line !== hunk.removed[index])) {
+      throw new CodeToolError("patch_conflict", `Patch for ${path} does not match the current content`, 409, "execute", false, "code.fs.apply_patch", { path });
+    }
+    result = [...result.slice(0, hunk.start), ...hunk.added, ...result.slice(hunk.start + hunk.removed.length)];
+  }
+  return result.join("\n");
+}
+
+function patchBlocks(patch: string): Map<string, string> {
+  const blocks = new Map<string, string>();
+  let path: string | null = null;
+  let buffer: string[] = [];
+  const flush = () => { if (path) blocks.set(path, buffer.join("\n")); };
+  for (const line of patch.split("\n")) {
+    const target = /^\+\+\+ b\/(.+)$/.exec(line) ?? /^\+\+\+ (.+)$/.exec(line);
+    if (target) { flush(); path = (target[1] ?? "").replace(/^b\//, "").trim(); buffer = []; continue; }
+    if (path) buffer.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+/**
+ * C3: adapts the runtime's write port (context-first) to the canonical write-engine port (path-first),
+ * so the canonical engines (`applyEdit`, `writeFileSafe`, `applyPatch`, `movePathSafe`, `deletePathSafe`)
+ * are the only implementations of editing, guarding and diffing.
+ */
+export function toEngineWritePort(input: CodeToolExecutionContext): EngineWritePort {
+  const base = { ctx: input.ctx, companyId: input.companyId, projectId: input.projectId };
+  const missing = (error: unknown): boolean => {
+    const shaped = error as { code?: string; status?: number };
+    return shaped?.code === "not_found" || shaped?.code === "not_a_file" || shaped?.code === "ENOENT" || shaped?.status === 404;
+  };
+  const stat = async (path: string) => {
+    try {
+      const file = await input.port.readFile({ ...base, path, maxLines: 1, maxBytes: 1 });
+      return { exists: true as const, type: "file" as const, revision: file.revision };
+    } catch (error) {
+      const slash = path.lastIndexOf("/");
+      const parent = slash > 0 ? path.slice(0, slash) : ".";
+      try {
+        const listing = await input.port.listDir({ ...base, path: parent, depth: 1, limit: 1000 });
+        const entry = listing.entries.find((candidate) => candidate.path === path || candidate.path === path.slice(slash + 1));
+        if (entry) return { exists: true as const, type: entry.type === "directory" ? ("dir" as const) : ("file" as const), revision: undefined };
+        return { exists: false as const };
+      } catch (listingError) {
+        if (missing(error) || missing(listingError)) return { exists: false as const };
+        throw error;
+      }
+    }
+  };
+  return {
+    async readFile(path) {
+      const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes });
+      return { content: file.content ?? "", revision: file.revision, encoding: file.encoding };
+    },
+    async writeFile(path, content, opts) {
+      const port = writePortOf(input);
+      const existing = await stat(path);
+      // The workspace is the authority on lost updates: an existing file is always written with the
+      // revision the caller read, a new one goes through the separate create path.
+      if (existing.exists) {
+        const result = await port.writeFile({ ...base, path, content, expectedRevision: opts?.expectedRevision ?? existing.revision ?? "" });
+        return { sha256: result.sha256, revision: result.revision };
+      }
+      const created = await port.createFile({ ...base, path, content });
+      return { sha256: created.sha256, revision: created.revision };
+    },
+    async deletePath(path) {
+      await writePortOf(input).deleteFile({ ...base, path });
+    },
+    async movePath(from, to) {
+      const source = await stat(from);
+      await writePortOf(input).moveFile({ ...base, from, to, expectedRevision: source.revision ?? "" });
+    },
+    stat,
+    async listDir(dir) {
+      const listing = await input.port.listDir({ ...base, path: dir, depth: 1, limit: 1000 });
+      return listing.entries.map((entry) => ({ name: entry.path.split("/").pop() ?? entry.path, type: entry.type }));
+    },
+  };
+}
+
+/** Canonical engine options for one execution, including the approval the runtime already granted. */
+function engineOptions(input: CodeToolExecutionContext, options: CanonicalWriteExecutorOptions): EngineWriteOptions {
+  return {
+    tool: input.tool.name,
+    limits: resolveWriteLimits(),
+    approved: input.approved === true || options.approved === true,
+    hooks: options.hooks,
+    // The runtime enforces read-before-write (tracker `sha256` freshness) before any write tool reaches
+    // an executor, so the engine does not need a revision from the read to allow the overwrite.
+    readVerified: true,
+  };
+}
+
+/** Accepts the canonical argument names first and keeps the legacy aliases for older callers. */
+function canonicalEditArgs(args: Record<string, unknown>): { path: string; old_string: string; new_string: string; replace_all: boolean } {
+  const path = stringArg(args, ["path", "file", "filePath"]);
+  const oldString = typeof args.old_string === "string" ? args.old_string : stringArg(args, ["find", "oldText", "search"]);
+  const newString = typeof args.new_string === "string" ? args.new_string : (stringArg(args, ["replacement", "newText", "replace"]) ?? "");
+  return {
+    path: path ?? "",
+    old_string: oldString ?? "",
+    new_string: newString,
+    // `replace_all` is the canonical name; `replaceAll` stays supported for older callers.
+    replace_all: args.replace_all === true || args.replaceAll === true,
+  };
+}
+
+/** The canonical patch format (`*** Begin Patch`) is routed to the canonical parser/applier. */
+export function isCanonicalPatchFormat(patch: string): boolean {
+  return /^\*\*\* Begin Patch\s*$/m.test(patch) || /^\*\*\* (Update|Add|Delete) File: /m.test(patch);
+}
+
+export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
+  /** Writes one file (creating it when it does not exist) and returns the change record. */
+  const commit = async (input: CodeToolExecutionContext, path: string, content: string, current: WriteFileState | null) => {
+    const port = writePortOf(input);
+    const result = current
+      ? await port.writeFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, content, expectedRevision: expectedRevisionFor(input, path, current) })
+      : await port.createFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, content });
+    const before = current?.content ?? "";
+    const stats = diffFor(options, path, before, content);
+    return { path: result.path, sha256: result.sha256, revision: result.revision, linesAdded: stats.linesAdded, linesRemoved: stats.linesRemoved, diff: stats.diff };
+  };
+
+  return {
+    "code.fs.write": async (input) => {
+      const path = stringArg(input.args, ["path", "file", "filePath"]);
+      if (!path) throw new CodeToolError("invalid_arguments", "code.fs.write requires a path", 400, "validate_arguments", false, input.tool.name);
+      return writeFileSafe(
+        {
+          path,
+          content: typeof input.args.content === "string" ? input.args.content : input.args.newContent,
+          createDirectories: input.args.createDirectories,
+          overwrite: input.args.overwrite,
+        },
+        toEngineWritePort(input),
+        engineOptions(input, options),
+        readRevisionFor(input, path),
+      );
+    },
+
+    "code.fs.edit": async (input) => {
+      const args = canonicalEditArgs(input.args);
+      if (!args.path) throw new CodeToolError("invalid_arguments", "code.fs.edit requires a path", 400, "validate_arguments", false, input.tool.name);
+      if (!args.old_string) throw new CodeToolError("invalid_arguments", "code.fs.edit requires old_string", 400, "validate_arguments", false, input.tool.name);
+      return applyEdit(args, toEngineWritePort(input), engineOptions(input, options), readRevisionFor(input, args.path));
+    },
+
+    "code.fs.move": async (input) => {
+      const from = stringArg(input.args, ["from", "path", "source"]);
+      const to = stringArg(input.args, ["to", "destination", "target"]);
+      if (!from || !to) throw new CodeToolError("invalid_arguments", "code.fs.move requires from and to", 400, "validate_arguments", false, input.tool.name);
+      return movePathSafe({ from, to, overwrite: input.args.overwrite }, toEngineWritePort(input), engineOptions(input, options));
+    },
+
+    "code.fs.delete": async (input) => {
+      const path = stringArg(input.args, ["path", "file", "filePath"]);
+      if (!path) throw new CodeToolError("invalid_arguments", "code.fs.delete requires a path", 400, "validate_arguments", false, input.tool.name);
+      return deletePathSafe(
+        { path, recursive: input.args.recursive, expectedRevision: input.args.expectedRevision },
+        toEngineWritePort(input),
+        engineOptions(input, options),
+      );
+    },
+
+    "code.fs.apply_patch": async (input) => {
+      const patch = stringArg(input.args, ["patch", "diff"]);
+      const dryRun = input.args.dryRun === true;
+      if (patch && isCanonicalPatchFormat(patch)) {
+        // Canonical format (`*** Begin Patch`): one parser, one applier, atomic across files. The result
+        // keeps the canonical `applied`/`stats` fields and, for callers that read the older shape, the
+        // same information as `files`/`path`/`linesAdded`/`linesRemoved`.
+        const result = await applyCanonicalPatch({ patch, dryRun }, toEngineWritePort(input), engineOptions(input, options));
+        const files = result.applied.map((item) => ({
+          path: item.path,
+          action: item.action,
+          sha256: item.sha256 ?? null,
+          linesAdded: item.linesAdded,
+          linesRemoved: item.linesRemoved,
+          diff: result.applied.length === 1 ? result.diff : "",
+        }));
+        return {
+          ...result,
+          files,
+          path: files[0]?.path ?? "",
+          linesAdded: result.stats.additions,
+          linesRemoved: result.stats.deletions,
+        };
+      }
+      const parsed = patch ? patchBlocks(patch) : null;
+      const edits = Array.isArray(input.args.edits) ? input.args.edits as Array<Record<string, unknown>>
+        : Array.isArray(input.args.changes) ? input.args.changes as Array<Record<string, unknown>> : [];
+      const files = Array.isArray(input.args.files) ? input.args.files as Array<Record<string, unknown>> : [];
+
+      // Every result is computed before the first write, so a patch that does not apply cleanly changes
+      // nothing at all — and `dryRun` returns that plan without touching the workspace.
+      const planned: Array<{ path: string; content: string; before: string; current: WriteFileState | null }> = [];
+      if (edits.length) {
+        for (const edit of edits) {
+          const path = stringArg(edit, ["path", "file", "filePath"]);
+          const find = stringArg(edit, ["find", "oldText", "search", "old_string"]);
+          const replacement = stringArg(edit, ["replacement", "newText", "replace", "new_string"]) ?? "";
+          if (!path || find === null) throw new CodeToolError("invalid_arguments", "Each edit needs path and find", 400, "validate_arguments", false, input.tool.name);
+          const current = await readCurrent(input, path);
+          if (!current) throw new CodeToolError("not_a_file", `${path} does not exist`, 404, "execute", false, input.tool.name, { path });
+          if (!current.content.includes(find)) throw new CodeToolError("patch_conflict", `Edit for ${path} does not match the current content`, 409, "execute", false, input.tool.name, { path });
+          planned.push({ path, content: current.content.replace(find, replacement), before: current.content, current });
+        }
+      } else if (files.length) {
+        for (const entry of files) {
+          const path = stringArg(entry, ["path", "file", "filePath"]);
+          const content = typeof entry.content === "string" ? entry.content : (typeof entry.newContent === "string" ? entry.newContent : null);
+          if (!path || content === null) throw new CodeToolError("invalid_arguments", "Each file entry needs path and content", 400, "validate_arguments", false, input.tool.name);
+          const current = await readCurrent(input, path);
+          planned.push({ path, content, before: current?.content ?? "", current });
+        }
+      } else if (patch) {
+        const blocks = patchBlocks(patch);
+        if (!blocks.size) throw new CodeToolError("invalid_arguments", "The patch contains no file blocks", 400, "validate_arguments", false, input.tool.name);
+        for (const [path, filePatch] of blocks) {
+          const current = await readCurrent(input, path);
+          const before = current?.content ?? "";
+          const applied = options.applyPatchProvider
+            ? options.applyPatchProvider({ patch: filePatch, files: new Map([[path, before]]) }).get(path) ?? before
+            : applyUnifiedDiffToFile(path, before, filePatch);
+          planned.push({ path, content: applied, before, current });
+        }
+      } else {
+        throw new CodeToolError("invalid_arguments", "code.fs.apply_patch accepts a patch, edits[] or files[]", 400, "validate_arguments", false, input.tool.name);
+      }
+
+      const diff = planned.map((item) => buildUnifiedDiff(item.before, item.content, item.path)).filter(Boolean).join("");
+      const applied = planned.map((item) => {
+        const stats = diffLineStats(buildUnifiedDiff(item.before, item.content, item.path));
+        return { path: item.path, action: item.current ? "update" as const : "add" as const, linesAdded: stats.additions, linesRemoved: stats.deletions, sha256: sha256(item.content) };
+      });
+      const stats = applied.reduce((accumulator, item) => ({
+        files: accumulator.files + 1,
+        additions: accumulator.additions + item.linesAdded,
+        deletions: accumulator.deletions + item.linesRemoved,
+      }), { files: 0, additions: 0, deletions: 0 });
+      if (dryRun) {
+        return { applied, dryRun: true, diff, stats, files: applied, linesAdded: stats.additions, linesRemoved: stats.deletions };
+      }
+      const results = [];
+      for (const item of planned) results.push(await commit(input, item.path, item.content, item.current));
+      return {
+        path: results[0]?.path ?? "",
+        applied,
+        dryRun: false,
+        files: results,
+        stats,
+        linesAdded: stats.additions,
+        linesRemoved: stats.deletions,
+        diff: results.map((item) => item.diff).filter(Boolean).join("\n"),
+      };
+    },
+  };
+}
+
+/** Read-only and write executors merged, which is what the application wires into the runtime. */
+export function allCanonicalExecutors(options: CanonicalWriteExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
+  return { ...canonicalExecutors(options), ...canonicalWriteExecutors(options) };
+}
+
+/**
+ * C3 post-write hook: runs a deployment-configured command (formatter, syntax check) in the sandbox over
+ * the files a change touched. It returns warnings only — the hook never blocks a write, never rewrites a
+ * file behind the caller's back and never runs when no command is configured.
+ */
+export async function runSandboxPostWriteHook(
+  sandbox: { execute(ctx: CodeToolExecutionContext["ctx"], companyId: string, request: { projectId: string; command: string; timeoutMs?: number }): Promise<{ stdout?: string; output?: string; exitCode?: number }> },
+  ctx: CodeToolExecutionContext["ctx"],
+  companyId: string,
+  projectId: string,
+  command: string | undefined,
+  paths: string[],
+): Promise<string[] | undefined> {
+  if (!command || !paths.length) return undefined;
+  const quoted = paths.map((path) => `'${path.replace(/'/g, "'\\''")}'`).join(" ");
+  const result = await sandbox.execute(ctx, companyId, { projectId, command: `${command} ${quoted}`, timeoutMs: 120_000 });
+  const output = (result.stdout ?? result.output ?? "").trim();
+  const lines = output ? output.split("\n").slice(0, 20) : [];
+  if (typeof result.exitCode === "number" && result.exitCode !== 0) {
+    return lines.length ? lines : [`command exited with code ${result.exitCode}`];
+  }
+  return lines.length ? lines : undefined;
 }
 
 /**

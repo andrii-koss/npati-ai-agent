@@ -22,7 +22,24 @@ export type CodeToolErrorCode =
   | "too_large"
   | "read_failed"
   | "search_failed"
-  | "invalid_argument";
+  | "invalid_argument"
+  // C3 write-side codes. Kept in this union (rather than a second error type) so every tool reports the
+  // same structured shape and the runtime only needs one mapping table.
+  | "edit_no_match"
+  | "edit_not_unique"
+  | "edit_too_large"
+  | "patch_invalid"
+  | "patch_conflict"
+  | "patch_too_large"
+  | "approval_required"
+  | "git_dir_protected"
+  | "already_exists"
+  | "not_read"
+  | "unchanged"
+  | "write_failed"
+  | "move_failed"
+  | "delete_failed"
+  | "checkpoint_failed";
 
 /** Structured tool error: the shape the model receives instead of a stack trace. */
 export class CodeToolError extends Error {
