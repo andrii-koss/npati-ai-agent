@@ -526,6 +526,91 @@ describe("D7 — automatic DataBackend attachment", () => {
   });
 });
 
+describe("D7 — transferring a DataBackend to another company", () => {
+  async function harness() {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const company = await store.createCompany(owner, { name: "Old Company" }, "transfer-old");
+    const target = await store.createCompany(owner, { name: "New Company" }, "transfer-new");
+    const state = fakeState();
+    state.backend = { ...state.backend, companyId: company.id, name: "Store DB" };
+    state.environments.dev.companyId = company.id;
+    state.environments.prod.companyId = company.id;
+    const transfers: Array<Record<string, string>> = [];
+    const repository = fakeRepository(state) as unknown as Record<string, unknown>;
+    repository.transferToCompany = async (workspaceId: string, from: string, to: string, backendId: string, createdBy: string) => {
+      transfers.push({ workspaceId, from, to, backendId, createdBy });
+      return { moved: 1, environments: 2, detachedProjects: 1, promotions: 0 };
+    };
+    const { provisioner } = fakeProvisioner(state);
+    const service = new DataBackendService(store, repository as never, provisioner);
+    return { store, service, state, company, target, transfers };
+  }
+
+  it("hands the database over to another company and reports the detached projects", async () => {
+    const { service, state, company, target, transfers } = await harness();
+    const result = await service.transfer(owner, company.id, state.backend.id, { targetCompanyId: target.id, confirmName: "Store DB" });
+    expect(result).toMatchObject({
+      transferred: true,
+      targetCompanyId: target.id,
+      targetCompanyName: "New Company",
+      detachedProjects: 1,
+      environments: 2,
+    });
+    expect(transfers).toEqual([{ workspaceId: owner.workspaceId, from: company.id, to: target.id, backendId: state.backend.id, createdBy: owner.userId }]);
+  });
+
+  it("requires the exact DataBackend name before moving it", async () => {
+    const { service, state, company, target, transfers } = await harness();
+    await expect(service.transfer(owner, company.id, state.backend.id, { targetCompanyId: target.id, confirmName: "store db" }))
+      .rejects.toMatchObject({ code: "CONFIRMATION_REQUIRED" });
+    expect(transfers).toHaveLength(0);
+  });
+
+  it("refuses the current company and companies of other users as a target", async () => {
+    const { store, service, state, company, target, transfers } = await harness();
+    await expect(service.transfer(owner, company.id, state.backend.id, { targetCompanyId: company.id, confirmName: "Store DB" }))
+      .rejects.toMatchObject({ code: "INVALID_TARGET_COMPANY" });
+    await expect(service.transfer(owner, company.id, state.backend.id, { confirmName: "Store DB" }))
+      .rejects.toMatchObject({ code: "INVALID_TARGET_COMPANY" });
+
+    const stranger: AuthContext = { workspaceId: owner.workspaceId, userId: "user-stranger", permissions: ["workspace:read", "business:manage"] };
+    const foreign = await store.createCompany(stranger, { name: "Foreign" }, "transfer-foreign");
+    // The company lookup already refuses another owner's company; the ownership check in the
+    // service stays as defence in depth.
+    await expect(service.transfer(owner, company.id, state.backend.id, { targetCompanyId: foreign.id, confirmName: "Store DB" }))
+      .rejects.toMatchObject({ code: "BUSINESS_ACCESS_DENIED" });
+    expect(transfers).toHaveLength(0);
+  });
+
+  it("exposes the transfer over HTTP and rejects it without confirmation", async () => {
+    const Fastify = (await import("fastify")).default;
+    const { registerDataBackendRoutes } = await import("../apps/agent-api/src/data-studio/routes");
+    const app = Fastify();
+    const calls: unknown[] = [];
+    const service = {
+      async transfer(_ctx: AuthContext, companyId: string, id: string, input: unknown) {
+        calls.push({ companyId, id, input });
+        return { transferred: true, backendId: id, targetCompanyId: "company-new", detachedProjects: 0 };
+      },
+    };
+    registerDataBackendRoutes(app, { authenticate: async () => owner } as never, service as never);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/companies/company-old/data-backends/backend-1/transfer",
+      payload: { targetCompanyId: "company-new", confirmName: "Store DB" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ transferred: true, targetCompanyId: "company-new" });
+    expect(calls).toHaveLength(1);
+
+    const missing = await app.inject({ method: "POST", url: "/companies/company-old/data-backends/backend-1/transfer", payload: { targetCompanyId: "company-new" } });
+    expect(missing.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
 describe("D7 — schema template routes (settings page)", () => {  it("lists templates, refuses prod and requires explicit approval before applying", async () => {
     const Fastify = (await import("fastify")).default;
     const { registerDataStudioRoutes } = await import("../apps/agent-api/src/data-studio/studio-routes");

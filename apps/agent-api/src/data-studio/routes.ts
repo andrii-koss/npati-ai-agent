@@ -88,8 +88,19 @@ export function registerDataBackendRoutes(
     },
   );
 
-  app.put<{ Params: { companyId: string; projectId: string }; Body: { dataBackendId: string } }>(
-    "/companies/:companyId/projects/:projectId/data-backend",
+  app.post<{ Params: { companyId: string; backendId: string }; Body: { targetCompanyId: string; confirmName: string } }>(
+    "/companies/:companyId/data-backends/:backendId/transfer",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["targetCompanyId", "confirmName"], properties: {
+      targetCompanyId: { type: "string", minLength: 1, maxLength: 100 },
+      confirmName: { type: "string", minLength: 1, maxLength: 200 },
+    } } } },
+    async (request, reply) => {
+      try { const { ctx, service } = await authorize(request, "business:manage"); return await service.transfer(ctx, request.params.companyId, request.params.backendId, request.body); }
+      catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.put<{ Params: { companyId: string; projectId: string }; Body: { dataBackendId: string } }>(    "/companies/:companyId/projects/:projectId/data-backend",
     { schema: { body: { type: "object", additionalProperties: false, required: ["dataBackendId"], properties: { dataBackendId: { type: "string", format: "uuid" } } } } },
     async (request, reply) => {
       try { const { ctx, service } = await authorize(request, "business:manage"); return await service.attach(ctx, request.params.companyId, request.params.projectId, request.body.dataBackendId); }

@@ -1266,6 +1266,15 @@ export function buildApp(config: AppConfig = {}) {
     return {status:"completed" as const,persistedCount};
   }
   async function beforeDeleteCompany(context: AuthContext, companyId: string) {
+    // Data Studio keeps DataBackends with ON DELETE RESTRICT, so a company that still owns project
+    // databases cannot be deleted. Refuse with an actionable message instead of a raw foreign-key
+    // error: the owner transfers or deletes those DataBackends first (Data Studio → Databases).
+    if (dataBackendService) {
+      const backends = await dataBackendService.list(context, companyId).catch(() => []);
+      if (backends.length) {
+        throw new Error(`Company cannot be deleted while it owns ${backends.length} DataBackend(s) — transfer or delete them in Data Studio first.`);
+      }
+    }
     await scopedMemory.purgeCompany(companyId, context.workspaceId);
     await guardrailPolicies.purge(context, companyId);
     if (!objectStorage || !knowledgeRepo) return;

@@ -79,6 +79,37 @@ export class DataBackendService {
     await this.repository.setStatus(ctx, companyId, id, "ready");
     return this.repository.get(ctx, companyId, id);
   }
+  /**
+   * Hands an existing DataBackend over to another company of the same workspace. The databases and
+   * their rows stay where they are (only Core metadata changes ownership), so the owner can delete
+   * the old company and attach the transferred database to the new company's projects. Projects of
+   * the previous company are detached, because a Project cannot move between companies.
+   */
+  async transfer(ctx: AuthContext, companyId: string, id: string, input: { targetCompanyId?: string; confirmName?: string }) {
+    const backend = await this.repository.get(ctx, companyId, id);
+    const targetCompanyId = typeof input?.targetCompanyId === "string" ? input.targetCompanyId.trim() : "";
+    if (!targetCompanyId) throw new DataStudioError(400, "transfer", "A target company is required", false, "INVALID_TARGET_COMPANY");
+    if (targetCompanyId === companyId) throw new DataStudioError(400, "transfer", "The target company must be different from the current one", false, "INVALID_TARGET_COMPANY");
+    if (input?.confirmName !== backend.name) {
+      throw new DataStudioError(409, "transfer", "Type the DataBackend name to confirm the transfer", false, "CONFIRMATION_REQUIRED");
+    }
+    const target = await this.store.getCompany(ctx, targetCompanyId);
+    if (target.userId !== ctx.userId) {
+      throw new DataStudioError(403, "transfer", "The target company belongs to another user", false, "TARGET_COMPANY_NOT_OWNED");
+    }
+    const result = await this.repository.transferToCompany(ctx.workspaceId, companyId, targetCompanyId, id, ctx.userId);
+    if (!result.moved) throw new DataStudioError(404, "transfer", "DataBackend not found", false, "DATA_BACKEND_NOT_FOUND");
+    return {
+      transferred: true,
+      backendId: id,
+      backendName: backend.name,
+      targetCompanyId,
+      targetCompanyName: target.name,
+      detachedProjects: result.detachedProjects,
+      environments: result.environments,
+    };
+  }
+
   async list(ctx: AuthContext, companyId: string) {
     await this.store.getCompany(ctx, companyId);
     return this.repository.list(ctx, companyId);
