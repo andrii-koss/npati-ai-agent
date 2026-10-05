@@ -24,6 +24,14 @@ const WRITE_TOOLS = [
   "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn",
 ] as const;
 
+/** C4: the sandbox execution tools this guard now covers as well (schema → executor parity). */
+const SHELL_TOOLS = [
+  "code.shell.exec", "code.shell.process.start", "code.shell.process.list",
+  "code.shell.process.logs", "code.shell.process.stop", "code.verify.run",
+] as const;
+
+const ALL_C4_TOOLS = [...WRITE_TOOLS, ...SHELL_TOOLS] as const;
+
 function toolSchema(name: string): CodeToolSchema {
   const found = CODE_TOOL_SCHEMAS.find((schema) => schema.name === name);
   if (!found) throw new Error(`Schema missing for ${name}`);
@@ -78,6 +86,16 @@ function sampleArgs(tool: string, schema: CodeToolSchema): Record<string, unknow
       return { ...args, turnOnly: true };
     case "code.fs.undo_last_turn":
       return { ...args, confirm: true };
+    case "code.shell.exec":
+      return { ...args, command: "npm test" };
+    case "code.shell.process.start":
+      return { ...args, command: "npm run dev" };
+    case "code.shell.process.logs":
+      return { ...args, processId: "proc-1" };
+    case "code.shell.process.stop":
+      return { ...args, processId: "proc-1" };
+    case "code.verify.run":
+      return { ...args, tools: ["test"] };
     default:
       return args;
   }
@@ -161,6 +179,25 @@ function harness(): Harness {
     async consume() { return undefined; },
   };
 
+  // C4: sandbox execution ports. They are fakes so the parity guard can prove that schema-shaped
+  // arguments reach the shell executors instead of being rejected as invalid_arguments; the real ports
+  // live in `app.ts` and drive the admitted sandbox.
+  const shellRuntime = {
+    async exec() { return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 1, truncated: false, risk: "low" as const }; },
+    async startProcess() { return { processId: "proc-1", startedAt: new Date(0).toISOString() }; },
+    async listProcesses() { return { processes: [{ processId: "proc-1", command: "npm run dev", status: "running" as const, startedAt: null, exitCode: null }] }; },
+    async processLogs() { return { lines: ["ready"], nextOffset: 1, eof: true }; },
+    async stopProcess({ processId }: { processId: string }) { return { processId, stopped: true }; },
+  };
+  const verifyRunner = {
+    async run({ tools }: { tools: Array<"lint" | "typecheck" | "test" | "build"> }) {
+      return {
+        results: tools.map((tool) => ({ tool, ok: true, summary: `${tool} passed`, findings: [] })),
+        stats: { tools: tools.length, passed: tools.length, failed: 0, durationMs: 1 },
+      };
+    },
+  };
+
   const runtime = new CodeToolRuntime({
     schemas: CODE_TOOL_SCHEMAS,
     flags: { async assertEnabled() { return true; } } as never,
@@ -168,7 +205,7 @@ function harness(): Harness {
     audit: { async record() { return undefined; } } as never,
     activity: { async record() { return undefined; } },
     turns: new CodeTurnTracker(),
-    executors: allCanonicalExecutors(),
+    executors: allCanonicalExecutors({ shellRuntime, verifyRunner }),
     checkpoints,
     approvals,
     writePort,
@@ -194,7 +231,7 @@ describe("security-gate: C3 schema → executor parity", () => {
   });
 
   it("never rejects schema-shaped arguments as invalid_arguments", async () => {
-    for (const name of WRITE_TOOLS) {
+    for (const name of ALL_C4_TOOLS) {
       const h = harness();
       await read(h, "src/orders.ts", `read-${name}`);
       const result = await invoke(h, name, sampleArgs(name, toolSchema(name)));
@@ -202,6 +239,55 @@ describe("security-gate: C3 schema → executor parity", () => {
         // A domain refusal (approval, revision, checkpoint) is fine; a validation refusal is not.
         expect({ tool: name, code: result.error.code }).not.toMatchObject({ code: "invalid_arguments" });
       }
+    }
+  });
+
+  it("proves the C4 sandbox tools reach their executors instead of failing validation", async () => {
+    // The read-only process tools must succeed against the injected fake runtime, and the two command
+    // launchers must at least reach the runtime (the real one adds the approval hand-off).
+    const list = await invoke(harness(), "code.shell.process.list", {});
+    expect(list.ok).toBe(true);
+    const logs = await invoke(harness(), "code.shell.process.logs", { processId: "proc-1", limit: 50 });
+    expect(logs.ok).toBe(true);
+    const verify = await invoke(harness(), "code.verify.run", { tools: ["lint", "test"] });
+    expect(verify.ok).toBe(true);
+    if (verify.ok) {
+      const payload = verify.result as { data?: { stats?: { tools?: number; passed?: number } } };
+      expect(payload.data?.stats?.tools).toBe(2);
+      expect(payload.data?.stats?.passed).toBe(2);
+    }
+    const exec = await invoke(harness(), "code.shell.exec", { command: "npm test" });
+    expect(exec.ok).toBe(true);
+    if (exec.ok) {
+      const payload = exec.result as { data?: { exitCode?: number; risk?: string } };
+      expect(payload.data?.exitCode).toBe(0);
+      expect(["low", "medium", "high"]).toContain(payload.data?.risk);
+    }
+  });
+
+  it("fails closed for every sandbox tool when the shell runtime is not configured", async () => {
+    // No shell/verify ports injected → the tools must refuse with tool_not_configured (503), never run.
+    const runtime = new CodeToolRuntime({
+      schemas: CODE_TOOL_SCHEMAS,
+      flags: { async assertEnabled() { return true; } } as never,
+      store: { async getCompany() { return {}; } },
+      audit: { async record() { return undefined; } } as never,
+      activity: { async record() { return undefined; } },
+      turns: new CodeTurnTracker(),
+      executors: allCanonicalExecutors(),
+      toPort: () => ({
+        async listDir() { return { entries: [] }; },
+        async readFile() { throw Object.assign(new Error("not a file"), { code: "not_a_file", status: 404 }); },
+        async runSearch() { return { matches: [], truncated: false, engine: "fallback" as const }; },
+      }) as never,
+    });
+    for (const name of SHELL_TOOLS) {
+      const result = await runtime.invoke(owner, {
+        companyId: "company-parity", projectId: "project-parity", sessionId: "session-parity",
+        tool: name, args: sampleArgs(name, toolSchema(name)), toolCallId: `nc-${name}`, turnId: "turn-parity",
+      } as never);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(["tool_not_configured", "sandbox_unavailable"]).toContain(result.error.code);
     }
   });
 

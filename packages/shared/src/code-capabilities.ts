@@ -442,6 +442,167 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  "code.shell.exec": {
+    inputSchema: {
+      type: "object",
+      required: ["command"],
+      additionalProperties: false,
+      properties: {
+        command: { type: "string", minLength: 1, maxLength: 4000, description: "The command line to run in the sandbox. Interactive commands and commands needing production credentials are refused." },
+        cwd: { type: "string", description: "Workspace-relative working directory; defaults to the workspace root." },
+        env: { type: "object", additionalProperties: { type: "string" }, description: "Non-secret environment variables. Secrets must be requested through secretRefs instead." },
+        timeoutMs: { type: "integer", minimum: 1000, maximum: 600000, default: 120000 },
+        secretRefs: { type: "array", items: { type: "string" }, maxItems: 10, description: "Names of company vault secrets to lease for exactly this call. The lease is revoked when the call ends and is never inherited." },
+        approved: { type: "boolean", default: false, description: "Set by the runtime after the approval system granted this exact command; never set it from model output." },
+      },
+    },
+    outputSchema: resultEnvelope("code.shell.exec", {
+      type: "object",
+      required: ["exitCode", "stdout", "stderr", "durationMs", "truncated", "risk"],
+      additionalProperties: false,
+      properties: {
+        exitCode: { type: ["integer", "null"] },
+        stdout: { type: "string" },
+        stderr: { type: "string" },
+        durationMs: { type: "integer" },
+        truncated: { type: "boolean" },
+        risk: { enum: ["low", "medium", "high"] },
+      },
+    }),
+  },
+  "code.shell.process.start": {
+    inputSchema: {
+      type: "object",
+      required: ["command"],
+      additionalProperties: false,
+      properties: {
+        command: { type: "string", minLength: 1, maxLength: 4000 },
+        cwd: { type: "string" },
+        env: { type: "object", additionalProperties: { type: "string" } },
+        approved: { type: "boolean", default: false },
+      },
+    },
+    outputSchema: resultEnvelope("code.shell.process.start", {
+      type: "object",
+      required: ["processId", "startedAt"],
+      additionalProperties: false,
+      properties: {
+        processId: { type: "string" },
+        startedAt: { type: "string" },
+      },
+    }),
+  },
+  "code.shell.process.list": {
+    inputSchema: { type: "object", required: [], additionalProperties: false, properties: {} },
+    outputSchema: resultEnvelope("code.shell.process.list", {
+      type: "object",
+      required: ["processes"],
+      additionalProperties: false,
+      properties: {
+        processes: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["processId", "command", "status"],
+            additionalProperties: false,
+            properties: {
+              processId: { type: "string" },
+              command: { type: "string" },
+              status: { enum: ["running", "stopped", "failed"] },
+              startedAt: { type: ["string", "null"] },
+              exitCode: { type: ["integer", "null"] },
+            },
+          },
+        },
+      },
+    }),
+  },
+  "code.shell.process.logs": {
+    inputSchema: {
+      type: "object",
+      required: ["processId"],
+      additionalProperties: false,
+      properties: {
+        processId: { type: "string", minLength: 1 },
+        offset: { type: "integer", minimum: 0, default: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 2000, default: 200 },
+      },
+    },
+    outputSchema: resultEnvelope("code.shell.process.logs", {
+      type: "object",
+      required: ["lines", "nextOffset", "eof"],
+      additionalProperties: false,
+      properties: {
+        lines: { type: "array", items: { type: "string" } },
+        nextOffset: { type: "integer" },
+        eof: { type: "boolean" },
+      },
+    }),
+  },
+  "code.shell.process.stop": {
+    inputSchema: {
+      type: "object",
+      required: ["processId"],
+      additionalProperties: false,
+      properties: {
+        processId: { type: "string", minLength: 1 },
+      },
+    },
+    outputSchema: resultEnvelope("code.shell.process.stop", {
+      type: "object",
+      required: ["processId", "stopped"],
+      additionalProperties: false,
+      properties: {
+        processId: { type: "string" },
+        stopped: { type: "boolean" },
+      },
+    }),
+  },
+  "code.verify.run": {
+    inputSchema: {
+      type: "object",
+      required: ["tools"],
+      additionalProperties: false,
+      properties: {
+        tools: { type: "array", minItems: 1, maxItems: 4, items: { enum: ["lint", "typecheck", "test", "build"] } },
+        changedOnly: { type: "boolean", default: false, description: "Verify only the files changed in this turn where the tool supports it." },
+        timeoutMs: { type: "integer", minimum: 1000, maximum: 600000, default: 600000 },
+      },
+    },
+    outputSchema: resultEnvelope("code.verify.run", {
+      type: "object",
+      required: ["results", "stats"],
+      additionalProperties: false,
+      properties: {
+        results: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["tool", "ok", "summary", "findings"],
+            additionalProperties: false,
+            properties: {
+              tool: { enum: ["lint", "typecheck", "test", "build"] },
+              ok: { type: "boolean" },
+              summary: { type: "string" },
+              findings: { type: "array", items: { type: "string" } },
+              raw: { type: "string" },
+            },
+          },
+        },
+        stats: {
+          type: "object",
+          required: ["tools", "passed", "failed", "durationMs"],
+          additionalProperties: false,
+          properties: {
+            tools: { type: "integer" },
+            passed: { type: "integer" },
+            failed: { type: "integer" },
+            durationMs: { type: "integer" },
+          },
+        },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -809,8 +970,188 @@ export const CODE_WRITE_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/** Every `code.*` capability (reads first, then the mutating tools). */
-export const CODE_CAPABILITIES: CapabilityDefinition[] = [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES];
+/**
+ * C4: sandbox execution tools.
+ *
+ * These are the first tools that run commands rather than touch files, so they are gated by the
+ * `code.shell` sub-flag (on top of the master flag) and the two command-launching tools are `high` risk
+ * with `requiresConfirmation: true`: a dangerous command must go through the existing approval system
+ * before the sandbox runs it. `code.verify.run` only replays the project's configured verification
+ * commands, so it stays `medium` and is gated by `code.write`.
+ *
+ * Secret handling is per call (`secretRefs`): the lease is scoped to one tool call, has a TTL, is
+ * revoked when the call ends, and is never inherited by later calls or written into a shell profile.
+ *
+ * Inventory ids 362-367 continue the catalog (C3 ended at 361).
+ */
+const SHELL_PERMISSION = ["workspace:write"];
+
+export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.shell.exec",
+    inventoryIds: [362],
+    type: "tool",
+    domain: "code",
+    name: "Run sandbox command",
+    description: "Run one non-interactive command inside the admitted sandbox and return the exit code, stdout, stderr and duration. Dangerous commands require an approval, secrets are leased per call, and output is redacted and truncated.",
+    useWhen: [
+      "The agent must run a build, a test suite, a formatter or an inspection command that the sandbox image provides.",
+      "A verification step needs the project's own tooling rather than a fixed tool call.",
+    ],
+    doNotUseWhen: [
+      "The command is interactive or long-running: use code.shell.process.start.",
+      "The command needs production credentials or network access outside the allowlist: it will be refused.",
+      "A read/search tool answers the question (code.fs.grep, code.fs.read): running a shell command for that is wasteful and riskier.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    // Approval is decided by the server-side PolicyEngine from the command's risk class, not by the
+    // capability contract: a safe command inside an allowed session mode runs without an extra prompt,
+    // while an approval-class or hard-denied command is still gated (and hard-denied outright).
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.start",
+    inventoryIds: [363],
+    type: "tool",
+    domain: "code",
+    name: "Start sandbox process",
+    description: "Start a long-running process (a dev server, a watcher) inside the sandbox and return its process id. The process belongs to the sandbox and is stopped when the sandbox is cleaned up.",
+    useWhen: [
+      "A development server or watcher must keep running while the agent does something else.",
+      "A preview needs a background process rather than a blocking command.",
+    ],
+    doNotUseWhen: [
+      "A short command is enough: use code.shell.exec so the output is returned directly.",
+      "The process would need production credentials or unapproved network access.",
+      "The process is interactive: interactive commands are not supported.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    // See code.shell.exec: the PolicyEngine, not the capability contract, decides approvals.
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.start"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.start"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.list",
+    inventoryIds: [364],
+    type: "tool",
+    domain: "code",
+    name: "List sandbox processes",
+    description: "List the processes this sandbox started, with their status and exit code. Read-only: it starts nothing and reveals no environment values.",
+    useWhen: [
+      "The agent wants to know whether a previously started process is still running.",
+      "Before starting a server, to check whether one is already running.",
+    ],
+    doNotUseWhen: [
+      "The agent needs the process output: use code.shell.process.logs.",
+      "The path or process id is not known to this session.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.list"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.list"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.logs",
+    inventoryIds: [365],
+    type: "tool",
+    domain: "code",
+    name: "Read sandbox process logs",
+    description: "Read the buffered output of a sandbox process by offset so a long log can be paged. Secrets are redacted before the output is returned.",
+    useWhen: [
+      "A background process must be inspected (a failing dev server, a watcher error).",
+      "The agent needs the tail of a long log: page it with offset/limit instead of reading everything.",
+    ],
+    doNotUseWhen: [
+      "The process id belongs to another project or sandbox: ownership is enforced and the call is refused.",
+      "The agent needs the exit code only: code.shell.process.list already reports it.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.logs"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.logs"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.stop",
+    inventoryIds: [366],
+    type: "tool",
+    domain: "code",
+    name: "Stop sandbox process",
+    description: "Stop a process started through code.shell.process.start. Stopping a process the sandbox does not own is refused.",
+    useWhen: [
+      "A dev server or watcher is no longer needed and the sandbox should not keep running it.",
+      "A process must be restarted after a configuration change.",
+    ],
+    doNotUseWhen: [
+      "The process was started outside this project's sandbox.",
+      "The intent is to stop the sandbox itself: that is sandbox lifecycle, not a tool call.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.stop"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.stop"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.verify.run",
+    inventoryIds: [367],
+    type: "tool",
+    domain: "code",
+    name: "Verify changes",
+    description: "Run the project's configured verification commands (lint, typecheck, test, build) in the sandbox and return structured findings per tool with a pass/fail summary.",
+    useWhen: [
+      "After changing code, to prove the change does not break the project.",
+      "Before proposing a change as finished, so the model sees real results instead of assuming.",
+    ],
+    doNotUseWhen: [
+      "The project has no configured command for the requested tool: the result reports it as unavailable rather than inventing a command.",
+      "A single ad-hoc command is needed: use code.shell.exec.",
+      "The verification needs network access outside the egress allowlist.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.verify.run"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.verify.run"]!.outputSchema,
+    version: 1,
+  },
+];
+
+/** Every `code.*` capability (reads first, then the mutating file tools, then sandbox execution). */
+export const CODE_CAPABILITIES: CapabilityDefinition[] = [
+  ...CODE_READ_CAPABILITIES,
+  ...CODE_WRITE_CAPABILITIES,
+  ...CODE_SHELL_CAPABILITIES,
+];
 
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
@@ -822,6 +1163,19 @@ export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIE
   risk: capability.risk,
   testType: "integration",
   testFiles: ["tests/coding-agent-c3-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+export const CODE_SHELL_MATRIX: CapabilityMatrixEntry[] = CODE_SHELL_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c4-capabilities.test.ts", "tests/coding-agent-c3-schema-executor-parity.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
 
@@ -840,8 +1194,25 @@ export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(
   ]),
 );
 
+/**
+ * C4: the sandbox execution tools hang off their own sub-flag (`code.shell`) instead of `code.write`,
+ * so an operator can allow file edits while forbidding command execution (or the other way round).
+ * `code.verify.run` deliberately stays on `code.write`: it only replays the project's configured
+ * verification commands, so it belongs with the change tools it verifies.
+ */
+export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntries(
+  CODE_SHELL_CAPABILITIES
+    .filter((capability) => capability.id.startsWith("code.shell."))
+    .map((capability) => [capability.id, "code.shell"]),
+);
+
+export const CODE_TOOL_FLAG_KEYS_RESOLVED: Record<string, string> = {
+  ...CODE_TOOL_FLAG_KEYS,
+  ...CODE_TOOL_FLAG_OVERRIDES,
+};
+
 export function flagKeyForCodeTool(capabilityId: string, domain?: string): string | null {
-  const direct = CODE_TOOL_FLAG_KEYS[capabilityId];
+  const direct = CODE_TOOL_FLAG_KEYS_RESOLVED[capabilityId];
   if (direct) return direct;
   return domain === "code" ? "code.read" : null;
 }

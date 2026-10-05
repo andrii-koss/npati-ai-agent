@@ -1,0 +1,455 @@
+import {
+  classifyTerminalCommand,
+  normalizeTerminalCommand,
+  type TerminalRiskLevel,
+} from "./terminal-command-policy";
+
+/**
+ * C4: shell command classification for the Coding Agent.
+ *
+ * The Website Builder already had a policy for the interactive terminal
+ * (`terminal-command-policy.ts`), but it decides from the executable plus its arguments and therefore
+ * cannot see `a && rm -rf /`, command substitution, heredocs or variable indirection. This module
+ * extends that policy instead of replacing it:
+ *
+ * - `parseShellCommand` performs a real (dependency-free) tokenisation of the whole command line.
+ * - `classifyShellCommand` keeps the existing three levels (`safe` / `controlled` / `approval`, taken
+ *   from `classifyTerminalCommand` per segment) and adds the Coding Agent's fourth level `hard_deny`,
+ *   which no mode — not even the owner — may run.
+ * - Anything the parser cannot prove safe is escalated to `approval`, never downgraded to `safe`.
+ */
+
+export type CodeShellRisk = TerminalRiskLevel | "hard_deny";
+
+export interface ShellSegment {
+  argv: string[];
+  /** The operator that preceded this segment (`&&`, `||`, `;`, `|`, `&`). */
+  operator?: string;
+  raw: string;
+}
+
+export interface ParsedShellCommand {
+  segments: ShellSegment[];
+  usesSubshell: boolean;
+  usesBackticks: boolean;
+  usesHeredoc: boolean;
+  usesVariables: boolean;
+  redirectsToOutside: boolean;
+  parseError?: string;
+}
+
+export interface ShellClassification {
+  risk: CodeShellRisk;
+  reasons: string[];
+  /** Hard-deny rules or escalation triggers that fired. */
+  matched: string[];
+  segments: ShellSegment[];
+  parsed: ParsedShellCommand;
+}
+
+export interface ShellClassifierOptions {
+  allowlist?: string[];
+  protectedBranches?: string[];
+  workspaceRoot?: string;
+}
+
+export interface ShellLimits {
+  defaultMs?: number;
+  installMs?: number;
+}
+
+const READ_ONLY_EXECUTABLES = new Set([
+  "ls", "cat", "head", "tail", "wc", "rg", "grep", "find", "fd", "tree", "stat", "file", "du", "df",
+  "pwd", "echo", "printf", "sed", "awk", "cut", "sort", "uniq", "diff", "jq", "node", "python", "python3",
+  "go", "cargo", "rustc", "java", "javac", "php", "composer", "tsc", "vitest", "jest", "pytest", "ruff",
+  "eslint", "prettier", "gofmt", "make", "git", "which", "env", "date", "basename", "dirname", "true", "test",
+]);
+
+const INSTALL_EXECUTABLES = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "poetry", "uv", "go", "cargo", "composer", "bundle", "apt", "apt-get", "apk"]);
+const NETWORK_EXECUTABLES = new Set(["curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet"]);
+
+const HARD_DENY_RULES: Array<{ id: string; pattern: RegExp; reason: string }> = [
+  { id: "rm_root", pattern: /(?:^|[\s;&|("'`=])rm\s+(?:-[A-Za-z]*\s+)*(?:-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*r[A-Za-z]*|--recursive\s+--force|--force\s+--recursive)\s+(?:\/|\/\*|~|~\/\*|\$HOME|\/etc|\/usr|\/var|\/bin|\/sbin|\/lib)(?:\s|$|\*|[)"'`;&|])/,
+    reason: "recursive forced delete of the filesystem root or a system directory" },
+  { id: "mkfs", pattern: /(?:^|[\s;&|("'`=])mkfs(?:\.\w+)?\s/, reason: "filesystem formatting is never allowed" },
+  { id: "dd_device", pattern: /(?:^|[\s;&|("'`=])dd\s+[^;&|]*of=\/dev\//, reason: "raw write to a block device" },
+  { id: "fork_bomb", pattern: /:\s*\(\s*\)\s*\{.*\|.*&.*\}\s*;?\s*:/, reason: "fork bomb" },
+  { id: "chmod_root", pattern: /(?:^|[\s;&|("'`=])chmod\s+(?:-[A-Za-z]+\s+)*777\s+(?:\/|\/\*)\s*(?:$|[;&|])/, reason: "world-writable root" },
+  { id: "docker_socket", pattern: /\/var\/run\/docker\.sock/, reason: "the host docker socket is never reachable from the sandbox" },
+  { id: "sandbox_network", pattern: /(?:^|[\s;&|("'`=])(?:iptables|ip6tables|nft|ip\s+route|systemctl|mount|umount|insmod|modprobe)\s/, reason: "changing sandbox or host network/system configuration" },
+  { id: "host_secrets", pattern: /(?:^|[\s;&|("'`=])(?:cat|less|more|head|tail|cp|scp|tar|base64|xxd)\s+(?:[^;&|]*\s)?(?:\/etc\/shadow|\/etc\/sudoers|\/root\/\.ssh|~\/\.ssh|\/host\/)/, reason: "reading host secrets" },
+  { id: "write_outside_workspace", pattern: /(?:>>?|tee\s+(?:-a\s+)?)\s*(?:\/(?!workspace|tmp|dev\/null|proc\/self)[A-Za-z0-9._-]+)/, reason: "writing outside the workspace" },
+  { id: "protected_branch_force_push", pattern: /git\s+push\s+(?:[^;&|]*\s)?(?:--force|-f)(?:\s|$)/, reason: "force push is refused in protected branches" },
+];
+
+function stripQuotes(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return trimmed.slice(1, -1);
+  return trimmed;
+}
+
+/** A real tokeniser for a shell command line: operators, quoting and escaping are handled. */
+export function parseShellCommand(command: string): ParsedShellCommand {
+  const segments: ShellSegment[] = [];
+  const parsed: ParsedShellCommand = {
+    segments, usesSubshell: false, usesBackticks: false, usesHeredoc: false, usesVariables: false,
+    redirectsToOutside: false,
+  };
+  if (typeof command !== "string" || !command.trim()) {
+    return { ...parsed, parseError: "empty_command" };
+  }
+  parsed.usesSubshell = /\$\(/.test(command);
+  parsed.usesBackticks = /`[^`]*`/.test(command);
+  parsed.usesHeredoc = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/.test(command);
+  parsed.usesVariables = /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(command);
+  parsed.redirectsToOutside = /(?:^|[\s;&|])>>?\s*(?:\/(?!workspace|tmp|dev\/null|proc\/self))/.test(command);
+
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let pendingOperator: string | undefined;
+  const push = () => {
+    const raw = current.trim();
+    if (raw) segments.push({ argv: tokenise(raw), operator: pendingOperator, raw });
+    current = "";
+    pendingOperator = undefined;
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]!;
+    if (quote) {
+      current += char;
+      if (char === quote && command[index - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (char === "'" || char === "\"") { quote = char; current += char; continue; }
+    const two = command.slice(index, index + 2);
+    if (two === "&&" || two === "||" || two === ">>" || two === "2>") {
+      if (two === ">>" || two === "2>") { current += two; index += 1; continue; }
+      push();
+      pendingOperator = two;
+      index += 1;
+      continue;
+    }
+    if (char === "|" || char === ";" || char === "&") {
+      if (char === "|" && command[index + 1] === "|") { push(); pendingOperator = "||"; index += 1; continue; }
+      push();
+      pendingOperator = char;
+      continue;
+    }
+    current += char;
+  }
+  if (quote) parsed.parseError = "unterminated_quote";
+  push();
+  if (!segments.length) parsed.parseError = parsed.parseError ?? "no_segments";
+  return parsed;
+}
+
+function tokenise(raw: string): string[] {
+  const argv: string[] = [];
+  let token = "";
+  let quote: '"' | "'" | null = null;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index]!;
+    if (quote) {
+      if (char === quote && raw[index - 1] !== "\\") { quote = null; continue; }
+      token += char;
+      continue;
+    }
+    if (char === "'" || char === "\"") { quote = char; continue; }
+    if (char === "\\" && raw[index + 1]) { token += raw[index + 1]; index += 1; continue; }
+    if (/\s/.test(char)) { if (token) { argv.push(token); token = ""; } continue; }
+    token += char;
+  }
+  if (token) argv.push(token);
+  return argv;
+}
+
+function hasRecursiveForce(argv: string[]): boolean {
+  return argv.some((value) => /^-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*$|^-[A-Za-z]*f[A-Za-z]*r[A-Za-z]*$/.test(value) || value === "--recursive-force");
+}
+
+function targetsOutsideWorkspace(argv: string[], workspaceRoot?: string): boolean {
+  return argv.some((value) => {
+    if (value.startsWith("/workspace")) return false;
+    if (!value.startsWith("/") && !value.startsWith("~")) return false;
+    if (value === "/dev/null") return false;
+    if (workspaceRoot && value.startsWith(workspaceRoot)) return false;
+    return true;
+  });
+}
+
+/** Exact or subdomain match only: `npmjs.org.evil.com` is not allowlisted by `npmjs.org`. */
+export function isAllowlistedHost(host: string, allowlist: string[]): boolean {
+  const target = host.trim().toLowerCase().replace(/\.$/, "");
+  if (!target) return false;
+  return allowlist.some((entry) => {
+    const allowed = entry.trim().toLowerCase().replace(/\.$/, "");
+    if (!allowed) return false;
+    return target === allowed || target.endsWith(`.${allowed}`);
+  });
+}
+
+export function resolveCommandLimits(command: string, limits: ShellLimits = {}): { timeoutMs: number; timeoutClass: "default" | "install" } {
+  const timeoutClass = classifyShellCommand(command).timeoutClass;
+  if (timeoutClass === "install") return { timeoutMs: limits.installMs ?? 600_000, timeoutClass: "install" };
+  return { timeoutMs: limits.defaultMs ?? 120_000, timeoutClass: "default" };
+}
+
+/** Read-only git subcommands that the Coding Agent may run without approval. */
+export const READ_ONLY_GIT_SUBCOMMANDS = [
+  "status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "blame", "describe",
+  "shortlog", "whatchanged", "grep", "cat-file", "show-ref", "for-each-ref", "merge-base",
+] as const;
+
+/**
+ * Options that turn even a read-only-looking git command into something else: they can run arbitrary
+ * programs, read or write files, or point git at another repository. Their presence disables the
+ * downgrade entirely (the command stays `approval`).
+ */
+export const FORBIDDEN_GIT_OPTIONS = [
+  "-c", "--config-env", "--exec", "--exec-path", "--upload-pack", "--receive-pack", "--ext-diff",
+  "--textconv", "--output", "--no-index", "--git-dir", "--work-tree", "-C", "--force", "--hard",
+  "--amend",
+] as const;
+
+/** Subcommands and option forms that mutate state: never downgraded. */
+export const MUTATING_GIT_FORMS = [
+  "push", "commit", "checkout", "switch", "reset", "clean", "rebase", "cherry-pick", "revert", "merge",
+  "apply", "am", "gc", "prune", "filter-branch", "update-ref", "worktree", "submodule",
+] as const;
+
+/**
+ * Read-only utilities the Coding Agent may run without approval. The Website Builder terminal policy
+ * is stricter (it also serves the interactive terminal), so the level is lowered **here only**, and
+ * only for a command that provably neither writes nor executes anything (see
+ * `readOnlyUtilityCommand`).
+ */
+export const READ_ONLY_UTILITIES = [
+  "ls", "cat", "head", "tail", "wc", "rg", "grep", "fd", "tree", "stat", "file", "du", "df", "pwd",
+  "echo", "printf", "cut", "sort", "uniq", "diff", "jq", "which", "basename", "dirname", "true", "test",
+  "find",
+] as const;
+
+/**
+ * Options that turn a nominally read-only utility into something that writes or spawns: their
+ * presence cancels the downgrade, so the command keeps the base policy's level (`approval`).
+ */
+const READ_ONLY_FORBIDDEN_OPTIONS = [
+  "-i", "--in-place", "--output", "-exec", "-execdir", "-delete", "-fprint", "-fprint0", "-fls",
+  "-fprintf", "-ok", "--files0-from",
+] as const;
+
+/** Executables that are read-only in their version-query form only (`node -v`, `python --version`). */
+const VERSION_ONLY_EXECUTABLES = new Set([
+  "node", "python", "python3", "go", "cargo", "rustc", "java", "php", "composer", "npm", "pnpm", "yarn",
+  "tsc", "make",
+]);
+const VERSION_FLAG = /^(?:-v|-V|--version|version)$/;
+
+/**
+ * Decides whether a plain utility invocation is provably read-only. Deliberately conservative: any
+ * output redirection, any option that can write or spawn, and any executable that can execute code
+ * (unless it only reports its version) keeps the base policy's level.
+ */
+export function readOnlyUtilityCommand(executable: string, args: string[], raw = ""): { safe: boolean; reason: string } {
+  if (/>|>>/.test(raw)) return { safe: false, reason: "the command redirects output, so it is not read-only" };
+  if (VERSION_ONLY_EXECUTABLES.has(executable)) {
+    return args.length > 0 && args.every((value) => VERSION_FLAG.test(value))
+      ? { safe: true, reason: `${executable} only reports its version` }
+      : { safe: false, reason: `${executable} can execute code and requires approval` };
+  }
+  if (!(READ_ONLY_UTILITIES as readonly string[]).includes(executable)) {
+    return { safe: false, reason: `${executable} is not a whitelisted read-only utility` };
+  }
+  const forbidden = args.find((value) => READ_ONLY_FORBIDDEN_OPTIONS.some((option) => value === option || value.startsWith(`${option}=`))
+    || (executable === "sort" && (value === "-o" || value.startsWith("-o "))));
+  if (forbidden) return { safe: false, reason: `option ${forbidden} can write, so the command is not read-only` };
+  return { safe: true, reason: `${executable} is a whitelisted read-only utility` };
+}
+
+const GIT_GLOBAL_OPTIONS_OK = new Set(["--no-pager", "--literal-pathspecs", "--no-optional-locks"]);const BRANCH_LIST_OPTIONS = /^(?:--list|--all|--remotes|-a|-r|-v|-vv|--verbose|--format=.*|--contains.*|--merged.*|--no-merged.*|--points-at.*|--sort=.*)$/;
+const TAG_LIST_OPTIONS = /^(?:--list|-l|--contains.*|--merged.*|--no-merged.*|--points-at.*|--sort=.*|-n\d*)$/;
+const REMOTE_READ_OPTIONS = /^(?:-v|--verbose|show|get-url)$/;
+const CONFIG_READ_OPTIONS = /^(?:--get|--get-all|--get-regexp|--list|-l)$/;
+
+/** Decides whether a git invocation is provably read-only (whitelist, opt-in per command). */
+export function readOnlyGitSubcommand(args: string[]): { safe: boolean; reason: string } {
+  const lowered = args.map((value) => value.toLowerCase());
+  const forbidden = lowered.find((value) => /^>>?/.test(value) || FORBIDDEN_GIT_OPTIONS.some((option) => value === option || value.startsWith(`${option}=`)));
+  if (forbidden) return { safe: false, reason: `git option ${forbidden} is not allowed for a read-only command` };
+  const mutating = lowered.find((value) => (MUTATING_GIT_FORMS as readonly string[]).includes(value));
+  if (mutating) return { safe: false, reason: `git ${mutating} mutates state and requires approval` };
+
+  let index = 0;
+  while (index < args.length && args[index]!.startsWith("-")) {
+    if (!GIT_GLOBAL_OPTIONS_OK.has(args[index]!)) return { safe: false, reason: `git global option ${args[index]} is not allowed` };
+    index += 1;
+  }
+  const subcommand = lowered[index];
+  const rest = lowered.slice(index + 1);
+  if (!subcommand) return { safe: false, reason: "git without a subcommand requires approval" };
+  if ((READ_ONLY_GIT_SUBCOMMANDS as readonly string[]).includes(subcommand)) {
+    return { safe: true, reason: `git ${subcommand} is read-only` };
+  }
+  if (subcommand === "branch") {
+    if (rest.some((value) => /^(?:-d|-D|-m|-M|-c|-C|--delete|--move|--copy|--edit-description|--set-upstream-to|--unset-upstream)/.test(value))) {
+      return { safe: false, reason: "git branch with a mutating option requires approval" };
+    }
+    const branchNames = rest.filter((value) => !value.startsWith("-"));
+    if (branchNames.length) return { safe: false, reason: "git branch with a branch name is not read-only" };
+    return rest.every((value) => BRANCH_LIST_OPTIONS.test(value))
+      ? { safe: true, reason: "git branch --list is read-only" }
+      : { safe: false, reason: "git branch with an unrecognised option requires approval" };
+  }
+  if (subcommand === "tag") {
+    return rest.length > 0 && rest.every((value) => TAG_LIST_OPTIONS.test(value))
+      ? { safe: true, reason: "git tag --list is read-only" }
+      : { safe: false, reason: "git tag requires approval unless it only lists tags" };
+  }
+  if (subcommand === "remote") {
+    return rest.length && REMOTE_READ_OPTIONS.test(rest[0]!) && rest.length <= 2
+      ? { safe: true, reason: "git remote read is read-only" }
+      : { safe: false, reason: "git remote changes require approval" };
+  }
+  if (subcommand === "stash") {
+    return rest[0] === "list" || rest[0] === "show"
+      ? { safe: true, reason: "git stash list is read-only" }
+      : { safe: false, reason: "git stash requires approval unless it only lists entries" };
+  }
+  if (subcommand === "config") {
+    return rest.length && CONFIG_READ_OPTIONS.test(rest[0]!)
+      ? { safe: true, reason: "git config read is read-only" }
+      : { safe: false, reason: "git config changes require approval" };
+  }
+  return { safe: false, reason: `git ${subcommand} is not on the read-only whitelist` };
+}
+
+const RISK_ORDER: Record<CodeShellRisk, number> = { safe: 0, controlled: 1, approval: 2, hard_deny: 3 };
+const escalate = (current: CodeShellRisk, next: CodeShellRisk): CodeShellRisk => (RISK_ORDER[next] > RISK_ORDER[current] ? next : current);
+
+export function classifyShellCommand(command: string, options: ShellClassifierOptions = {}): ShellClassification & { timeoutClass: "default" | "install" } {
+  const parsed = parseShellCommand(command);
+  const reasons: string[] = [];
+  const matched: string[] = [];
+  let risk: CodeShellRisk = "safe";
+  let timeoutClass: "default" | "install" = "default";
+
+  // 1. Hard-deny rules run against the raw command and against every segment: a rule that only
+  //    matches inside a subshell, heredoc or a later segment must still fire.
+  for (const rule of HARD_DENY_RULES) {
+    const haystacks = [command, ...parsed.segments.map((segment) => segment.raw)];
+    if (haystacks.some((value) => rule.pattern.test(value))) {
+      if (rule.id === "protected_branch_force_push") {
+        // Flags are not branch names: take the last token that is neither a flag nor the remote.
+        const branch = command.match(/git\s+push\s+([^;&|]*)/)?.[1]
+          ?.split(/\s+/)
+          .filter((token) => token && !token.startsWith("-") && token !== "origin")
+          .pop();
+        const protectedBranches = options.protectedBranches ?? ["main", "master", "release"];
+        if (!branch || !protectedBranches.includes(branch)) { risk = escalate(risk, "approval"); matched.push(`${rule.id}:unprotected_branch`); reasons.push(`${rule.reason} (branch not protected)`); continue; }
+      }
+      return { risk: "hard_deny", reasons: [...reasons, rule.reason], matched: [...matched, rule.id], segments: parsed.segments, parsed, timeoutClass };
+    }
+  }
+
+  // 2. Anything the parser cannot fully prove is escalated: substitution, heredocs and variables can
+  //    hide an arbitrary command, so they can never be `safe`.
+  if (parsed.parseError) { risk = escalate(risk, "approval"); reasons.push(`command could not be fully parsed (${parsed.parseError})`); matched.push("parse_error"); }
+  if (parsed.usesSubshell) { risk = escalate(risk, "approval"); reasons.push("command substitution hides another command"); matched.push("subshell"); }
+  if (parsed.usesBackticks) { risk = escalate(risk, "approval"); reasons.push("backtick substitution hides another command"); matched.push("backticks"); }
+  if (parsed.usesHeredoc) { risk = escalate(risk, "approval"); reasons.push("heredoc feeds an unverified program body"); matched.push("heredoc"); }
+  if (parsed.usesVariables) { risk = escalate(risk, "approval"); reasons.push("variable indirection hides the executed command"); matched.push("variables"); }
+  if (parsed.redirectsToOutside) { risk = escalate(risk, "approval"); reasons.push("redirect writes outside the workspace"); matched.push("redirect_outside"); }
+
+  // 3. Per-segment decisions come from the existing Website Builder policy, then get refined here.
+  for (const segment of parsed.segments) {
+    const [executable = "", ...args] = segment.argv;
+    if (!executable) continue;
+    // The Website Builder policy validates arguments and throws for shapes it does not recognise;
+    // that must escalate to approval, never crash the classifier.
+    let base: { level: CodeShellRisk; reason?: string; timeoutClass?: string };
+    try {
+      base = classifyTerminalCommand({ executable, args, command: segment.raw });
+    } catch (error) {
+      base = { level: "approval", reason: `terminal policy could not validate this command: ${error instanceof Error ? error.message : String(error)}`, timeoutClass: "default" };
+    }
+    let segmentRisk: CodeShellRisk = base.level;
+    reasons.push(`${executable}: ${base.reason ?? base.level}`);
+    // The Website Builder policy already classifies long-running install/build work.
+    if (base.timeoutClass === "install_build") timeoutClass = "install";
+
+    const readOnlyUtility = readOnlyUtilityCommand(executable, args, segment.raw);
+    if (readOnlyUtility.safe) {
+      // Provably read-only utilities (and version queries) do not mutate anything, so they must not
+      // require approval even though the shared terminal policy is stricter.
+      segmentRisk = "safe";
+      reasons.push(readOnlyUtility.reason);
+    } else if (!READ_ONLY_EXECUTABLES.has(executable) && !INSTALL_EXECUTABLES.has(executable) && !NETWORK_EXECUTABLES.has(executable)) {
+      segmentRisk = escalate(segmentRisk, "approval");
+      matched.push(`unknown_executable:${executable}`);
+      reasons.push(`unknown executable ${executable} requires approval`);
+    }
+    if (INSTALL_EXECUTABLES.has(executable) && /(?:^|\s)(?:install|ci|add|sync|download|fetch)(?:\s|$)/.test(` ${args.join(" ")} `)) {
+      timeoutClass = timeoutClass === "install" ? timeoutClass : "install";
+      if (readOnlyUtility.safe) segmentRisk = "controlled";
+    }
+    if (executable === "rm" && hasRecursiveForce(args)) {
+      if (targetsOutsideWorkspace(args, options.workspaceRoot)) {
+        return { risk: "hard_deny", reasons: [...reasons, "recursive delete outside the workspace"], matched: [...matched, "rm_outside_workspace"], segments: parsed.segments, parsed, timeoutClass };
+      }
+      segmentRisk = escalate(segmentRisk, "approval");
+      matched.push("rm_recursive_inside_workspace");
+      reasons.push("recursive delete inside the workspace requires approval");
+    }
+    if (NETWORK_EXECUTABLES.has(executable)) {
+      const host = args.find((value) => /^https?:\/\//.test(value)) ? new URL(args.find((value) => /^https?:\/\//.test(value))!).hostname : undefined;
+      const allowlist = options.allowlist ?? ["registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org", "proxy.golang.org", "crates.io", "github.com", "objects.githubusercontent.com"];
+      if (host && isAllowlistedHost(host, allowlist)) {
+        // A download from an allowlisted registry is controlled work, not something to review: the
+        // base terminal policy returns `approval` for every network call, so the level is set here.
+        segmentRisk = "controlled";
+        matched.push("network_host_allowlisted");
+        reasons.push(`network host ${host} is allowlisted`);
+      }
+      else { segmentRisk = escalate(segmentRisk, "approval"); matched.push("network_not_allowlisted"); reasons.push(`network host ${host ?? "(unknown)"} is not allowlisted`); }
+      if (/(?:\|\s*(?:sh|bash|zsh)\b)/.test(command)) {
+        return { risk: "hard_deny", reasons: [...reasons, "piping a download into a shell"], matched: [...matched, "curl_pipe_sh"], segments: parsed.segments, parsed, timeoutClass };
+      }
+    }
+    if (executable === "git") {
+      const readOnly = readOnlyGitSubcommand(args);
+      if (readOnly.safe) {
+        // The Website Builder terminal policy returns `approval` for every git invocation. The Coding
+        // Agent plan requires read-only git (status/diff/log/…) to be `safe`, so the level is lowered
+        // **only here** and **only** for a provably read-only subcommand without any mutating or
+        // dangerous option; the base policy itself is left untouched.
+        segmentRisk = "safe";
+        reasons.push(readOnly.reason);
+      } else {
+        const sub = args.find((value) => !value.startsWith("-"));
+        if (sub === "push" || sub === "commit") {
+          segmentRisk = escalate(segmentRisk, "approval");
+          matched.push(`git_${sub}`);
+          reasons.push(`git ${sub} requires approval`);
+        } else {
+          reasons.push(readOnly.reason);
+        }
+      }
+    }
+    if (executable === "sh" || executable === "bash" || executable === "zsh") {
+      if (/(?:^|\s)-c(?:\s|$)/.test(` ${args.join(" ")} `)) { segmentRisk = escalate(segmentRisk, "approval"); matched.push("shell_dash_c"); reasons.push("an inline shell script requires approval"); }
+    }
+    // The segment's contribution is applied last, so a whitelisted downgrade cannot mask risk that was
+    // detected elsewhere in the same segment or by the global parse checks above.
+    risk = escalate(risk, segmentRisk);
+  }
+
+  if (!reasons.length) reasons.push("read-only command");
+  return { risk, reasons, matched, segments: parsed.segments, parsed, timeoutClass };
+}
+
+/** Convenience for callers that only need the level (kept separate from the richer classification). */
+export function classifyShellRisk(command: string, options: ShellClassifierOptions = {}): CodeShellRisk {
+  return classifyShellCommand(command, options).risk;
+}
+
+export { stripQuotes };

@@ -53,6 +53,21 @@ const ERROR_STATUS: Record<string, number> = {
   write_failed: 502,
   delete_failed: 502,
   move_failed: 502,
+  // C4: sandbox execution
+  command_hard_denied: 403,
+  network_host_denied: 403,
+  production_credential_denied: 403,
+  interactive_command_not_supported: 400,
+  secret_lease_inherited: 409,
+  secret_lease_denied: 403,
+  secret_lease_expired: 409,
+  process_not_found: 404,
+  process_limit_exceeded: 429,
+  verify_unavailable: 503,
+  verify_failed: 502,
+  command_timeout: 504,
+  command_failed: 502,
+  command_not_found: 404,
 };
 
 type CompanyParams = { companyId: string };

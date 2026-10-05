@@ -3,8 +3,180 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C3 — edit tools, checkpoints and diff** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain, C2 read/search tools)
-- Next: **C4 — shell and dependency tools** (sandbox execution, allowlisted registries, SecretLease), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+- Last completed: **C4 — shell, processes, SecretLease and verification** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain, C2 read tools, C3 edit tools)
+- Next: **C4b — network policy (egress allowlist + proxy)** then **C4a — dependency policy**, per the hard order in `docs/coding-agent/00-audit.md` section 13. (Both were listed as part of the C4 family; the shell/lease half is done here.)
+
+## Implemented (C4, latest step)
+- **Six new `code.*` capabilities** (inventoryIds **362–367**): `code.shell.exec` and
+  `code.shell.process.start` (**high, `requiresConfirmation: true`**), `code.shell.process.list`/`logs`
+  (low, read-only), `code.shell.process.stop` (medium) and `code.verify.run` (medium). Counters are now
+  **367 total / 103 agent-callable / 264 runtime-only**.
+- **A dedicated `code.shell` sub-flag**: shell tools are gated by `code.shell`, `code.verify.run` by
+  `code.write`, and the base map still derives from `requiredPermissions`, so the operator can allow
+  file edits while forbidding command execution. The Inspector receives **three** flag states
+  (`code.read`, `code.write`, `code.shell`).
+- **Command risk classification** (`code-shell-classifier.ts`), reusing the Website Builder policy
+  (`terminal-command-policy.ts`) as the base and adding a fourth level: a full command parser (quotes,
+  `&&`/`||`/`;`/`|`, redirects, heredoc, `$( )`, backticks, variables) plus `safe` / `controlled` /
+  `approval` / **`hard_deny`**. `hard_deny` is unreachable by any mode and covers `rm -rf /`, fork bombs,
+  `mkfs`/`dd of=/dev/*`, the docker socket, network/sandbox reconfiguration, host secret reads, writes
+  outside the workspace and `curl|sh`; unknown executables default to **approval**, never safe.
+  Read-only utilities and read-only git subcommands are downgraded to `safe` through an explicit
+  allowlist guarded by a long forbidden-option list (`-c`, `--git-dir`, `--work-tree`, `-C`, `--output`,
+  `--no-index`, `--force`, `--amend`, `--exec`, `-i`/`--in-place`, `-exec`, `-delete`, `sort -o`,
+  redirects …), so `git status`/`diff`/`log` are safe while `git push`, `git commit`, `git reset --hard`
+  and `git diff > /etc/passwd` are not. Allowlisted registries are `controlled`; any other host is
+  `approval`. All seven documented bypass forms (`a && rm -rf /`, `$( )`, backticks, variables, heredoc,
+  `;`, `xargs`) classify as `hard_deny`.
+- **Shell runtime** (`code-shell-runtime.ts`): persistent cwd and **non-secret** env per CodeSession,
+  120 s / 600 s timeouts, head+tail output limits, closed stdin with `interactive_command_not_supported`
+  (detected from a real prompt-shaped output, not from any timeout — a real timeout is
+  `command_timeout` 504 retryable), process-tree termination, and the only execution path is the injected
+  sandbox port (no `child_process` for project commands; without the port, `sandbox_unavailable` 503).
+- **`SecretLeaseProvider`** (`code-secret-lease.ts`): a lease is issued for **one tool call** against the
+  existing Company credential store, carries a scope, minimal permissions and a TTL bounded by the call
+  timeout, and the value is **never** returned in the object — the sandbox resolves it through
+  `environmentReferences` (or a tmpfs file written by an injected port). One-shot `consume`, so a second
+  call with the same lease id yields `secret_lease_inherited`; revocation happens in `finally` (success,
+  failure, cancellation, timeout) plus a reaper; the shell session state holds no secrets (secret-looking
+  env names are rejected before start); production credentials are refused conservatively; and `issue`
+  writes `secret_lease.issue` to the AuditLog **before** the lease exists (no journal → no lease).
+- **`CodeProcessManager`**: background processes with a ring log buffer and offset reads, `stop`/`stopAll`
+  and per-session isolation; a background process that needs a secret requires its own approved lease.
+- **`code.verify.run`** with `code-verify-parser.ts`: runs the project's own verify commands (from the C1
+  toolchain) and parses `tsc`, `eslint`, `pytest`, `jest`/`vitest`, `go test` and `cargo` output into
+  structured `findings`/`summary`, degrading to a bounded raw excerpt for unknown formats.
+- **Wiring**: the executors receive ports; the canonical `CodeShellRuntime`, `CodeProcessManager`,
+  `SecretLeaseProvider` and `parseVerifyOutput` stand behind them (the duplicated registry and heuristics
+  that briefly lived in `app.ts` were removed), the sandbox transport stays single
+  (`ProjectSandboxService.execute/process` wrapped in two thin adapters), and without a port every shell
+  tool fails closed with `tool_not_configured` (503).
+
+## Files / migrations / capabilities changed (C4)
+- agent-api: **new** `code-shell-classifier.ts`, `code-verify-parser.ts`, `code-secret-lease.ts`,
+  `code-shell-runtime.ts`, `code-process-manager.ts`; changed `code-tool-executors.ts` (shell/verify
+  ports), `code-tool-routes.ts` (14 C4 error codes), `app.ts` (canonical modules behind the ports,
+  sandbox adapters, three flag states), `code-tool-schemas.json` (**19 tools**),
+  `code-tool-registry.ts` (**manifest v4**, frozen v3 checksum, `KNOWN_TOOL_MANIFESTS = [1,2,3,4]`).
+- `packages/shared`: `code-capabilities.ts` (+6), `capability-catalog.ts`, `capability-matrix.ts`,
+  `capability-inspector.ts` (`flagKeyForCapabilityId` now uses the resolved flag map).
+- Artifacts regenerated: `code-tool-schemas.published.json`, `tests/fixtures/code-tool-schema-snapshot.json`.
+- Config: `.env.example` + seven C4 variables (lease TTL/max TTL/reaper/tmpfs/allowlists, process log
+  lines).
+- Tests: **new** `coding-agent-c4-classifier.test.ts`, `coding-agent-c4-shell.test.ts`,
+  `coding-agent-c4-secret-lease.test.ts`, `coding-agent-c4-capabilities.test.ts`; parity tests extended to
+  all 19 tools; counters migrated to invariants in twelve files.
+- No migration in C4 (leases, sessions, processes and idempotency are in-process — persistence is C6a).
+
+## Verification (C4)
+- `npm run typecheck` → **0 errors**; `npm run build` for agent-api and web → **exit 0**;
+  `node scripts/code-tool-schemas-generate.mjs --check` → **exit 0**; `node scripts/verify-code-tool-schemas.mjs --check`
+  → **exit 0** (`19 tool(s), manifest v4, checksum 2575b953…425b`); `node scripts/sandbox-image-verify.mjs` → **exit 0**.
+- Definitive run: **27 files, 365 tests, 0 failures** — every C4 suite and every security-gate suite,
+  together with the C1/C1a/C1b/C1c/C2/C3 suites, the capability registry / full regression / Inspector
+  suites, invariants, agent-api and architecture. `npm run typecheck` → 0 errors; both builds → exit 0;
+  `code-tool-schemas-generate.mjs --check` → exit 0; `verify-code-tool-schemas.mjs --check` → exit 0
+  (`19 tool(s), manifest v4, checksum 2575b953…425b`); `sandbox-image-verify.mjs` → exit 0. The one red
+  test in a wider run is the **pre-existing, unrelated** `tests/manual-product-e2e-web.test.ts`
+  (`expected ['completed','queued','running'] to include 'failed'`), which reproduces standalone and has
+  been failing since before C1.
+
+## Tool policy matrix and the network enforcement gate (C4, owner-approved)
+- **Mode × risk matrix** (`MODE_RISK_MATRIX` in `code-policy-engine.ts`), exactly as approved:
+  | mode | safe | controlled | approval | hard_deny |
+  |---|---|---|---|---|
+  | `plan` | allow | deny | deny | deny |
+  | `ask` | allow | approval | approval | deny |
+  | `auto_edit` | allow | allow | approval | deny |
+  | `full_auto_sandbox` | allow | allow | approval | deny |
+  The existing `CodeSessionMode` values map explicitly: `plan → plan`, `edit → ask`, `auto → auto_edit`,
+  `full_auto → full_auto_sandbox` (the new names are also accepted directly). The mapping `edit → ask` is
+  the owner's wording; switching it to `auto_edit` is a one-line change in `matrixModeFor`. `controlled`
+  is decided **only** by this matrix — the temporary "controlled always needs approval" rule was removed.
+  `hard_deny` is still denied in every mode, role and even with `approved: true`.
+- **Network enforcement is a separate gate, not an approval side effect**: the
+  `network_enforcement` phase runs after hard-deny and **before** mode/risk/approval; when a command
+  needs the network and `NPATI_SANDBOX_EGRESS_ENFORCED !== "true"`, the engine returns
+  `network_enforcement_unavailable` (503, retryable) **in every mode, including `full_auto_sandbox`, and
+  even when an approval was granted** — the tests assert that the approval is *not* consumed. With
+  enforcement guaranteed, the matrix applies normally (allowlisted host → `controlled`, otherwise
+  `approval`).
+
+## Owner decisions accepted and implemented in C4
+1. **Credential environment** (migration `069_credential_environment`, additive): `company_browser_credentials.environment`
+   with `development | staging | production | unknown`, default **`unknown`** for existing and unknown rows.
+   `development`/`staging` are leasable; **`unknown` and `production` are refused**; the allowlist
+   (`NPATI_CODE_SECRET_LEASE_ALLOWED_IDS`/`_LABELS`) is now **only** an admin override for `unknown`
+   (owner/admin **and** a mandatory `secret_lease.override` audit entry written before the lease exists);
+   `production` is never leasable — not with the allowlist and not for an owner. An authoritative
+   `resolveCredential` lookup (wired in `app.ts`) outranks the marker that arrives in a tool call, so a
+   caller cannot claim a safer environment.
+2. **SecretLease delivery**: process-scoped `environmentReferences` is the accepted path for this step; the
+   value is available only to that tool call/process, is never written into a persistent shell environment
+   (secret-shaped env names are rejected before start), is unusable by the next tool call **or another
+   session** (`secret_lease_inherited`), and is revoked on completion, cancellation, failure and TTL.
+   `writeSecretFile`/tmpfs stays a provider capability and does not block the step.
+3. **Shell approvals**: the static per-command approval requirement was removed from `code.shell.*`
+   (`requiresConfirmation: false`, `risk: high`; `code.fs.delete` is the only remaining approval-gated
+   capability). Every `code.shell.exec` now passes through the **centralized server-side PolicyEngine**
+   with a fixed phase order — feature flag → RBAC → capability → hard deny → session mode → project rules
+   → risk classification → approval. `safe` commands may run automatically according to the session mode,
+   `approval`-class always needs approval, `hard_deny` is always denied, and **a direct API/tool call
+   cannot bypass the engine**: without an injected engine the runtime refuses with
+   `policy_engine_unavailable` (503) instead of running anything.
+4. **Persistence**: sessions, leases, process state and idempotency remain **in-process** for C4 by
+   decision; the event log, reconciler and recovery are C6a and are not implemented early. This limitation
+   is recorded here and in code comments.
+5. **Egress**: the classifier only classifies network commands. Until C4b provides the enforced egress
+   proxy/firewall (DNS/IP validation, redirect re-check, SSRF and DNS-rebinding protection), network
+   commands **fail closed**: `NPATI_SANDBOX_EGRESS_ENFORCED=false` makes even an allowlisted host fail with
+   `network_enforcement_unavailable` (503). C4b must guarantee enforcement outside the agent and then flip
+   that flag.
+- Real defects found and fixed while closing the step (none by weakening a check): the base policy was
+  applied as a **floor**, so read-only utilities and allowlisted registry downloads could never be
+  downgraded to `safe`/`controlled` (fixed by a per-segment risk resolution with an explicit allowlist
+  and forbidden options); any timeout was reported as an interactive command (a slow build looked like an
+  input error); the Inspector read the base flag map instead of the resolved one, so `code.shell.*`
+  showed `code.write`; and the C4 ports were initially wired to a second, duplicated shell/process
+  implementation instead of the canonical modules.
+
+## Real E2E status (C4)
+- Verified in-process with fake sandbox ports: classification (including every documented bypass form),
+  the gate order, timeouts and output limits, process management, lease lifecycle and non-inheritance,
+  the verify parsers, and both builds.
+- **Not verified here:** a real sandbox run (no Docker execution in this environment), real registry
+  downloads through the egress proxy, a real approval round-trip with a human approver, the LLM-driven
+  loop (C6) and the Activity run stream / `ExecutionSnapshot` (C6/C6b). No PostgreSQL migration in C4.
+
+## Known risks / open questions (C4)
+1. **Credential environment flag (decision needed):** the Company credential model has no environment
+   marker, so `isProductionCredential` denies everything except ids/labels explicitly allowed through
+   `NPATI_CODE_SECRET_LEASE_ALLOWED_IDS`/`_ALLOWED_LABELS` (or clearly dev/test/staging). Either add an
+   additive `environment` column or keep managing the allowlist.
+2. **Secret delivery is environment-reference based**; the tmpfs delivery path exists in the provider but
+   no `writeSecretFile` port is wired yet, so tmpfs delivery is unavailable in this deployment.
+3. `code.shell.exec` and `code.shell.process.start` require approval by capability contract, so even a
+   `safe` command asks for approval while `requiresConfirmation` is honoured by the caller; the runtime
+   additionally gates `approval`-class commands regardless of the capability flag.
+4. Shell sessions, leases, processes and idempotency caches are in-process: a restart forgets them
+   (safe, but noisy) — persistence is C6a.
+5. Egress allowlist enforcement lives in the sandbox/egress proxy (C4b); the classifier only decides
+   whether a network command is `controlled` (allowlisted host) or `approval` (anything else), so C4b
+   must still guarantee enforcement outside the agent.
+6. Activity run events and `ExecutionSnapshot` linkage remain `TODO(C6)`; C4 emits structured log events
+   with tool, versions, duration, exit code and truncation but no output content and no secrets.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (version 4, sections C4b and C4a), `docs/coding-agent/00-audit.md`
+  sections 7 and 13, and this file.
+- Execute **only C4b** (network policy): egress proxy enforcement with the allowlist, re-validation after
+  DNS resolution and redirects, per-company/capability network rules, and the `security-gate` tests that
+  prove an arbitrary host is unreachable from the sandbox while allowlisted registries are. Then C4a
+  (dependency policy: install without lifecycle scripts, lockfile reproducibility, allowlisted
+  registries) in the following session.
+- Keep the C4 guarantees intact: commands only through the sandbox port, `hard_deny`/`approval` gates
+  before execution, one-shot SecretLease with revocation, and audit before privileged actions.
+- Do not start C5 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C3, latest step)
 - **Seven new `code.*` capabilities** (inventoryIds **355–361**), so the registry is now **361 total /
