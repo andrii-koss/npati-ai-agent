@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
+import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 
@@ -13,6 +14,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly companies = new Map<string, Company>();
   private readonly companyAgents = new Map<string, CompanyAgent>();
   private readonly projects = new Map<string, Project>();
+  private readonly codeSessions = new Map<string, CodeSession>();
+  private readonly auditLog = new Map<string, AuditEntry[]>();
+  private readonly auditAnchors = new Map<string, AuditAnchor[]>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
@@ -334,6 +338,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
       name: input.name, description: input.description, type: input.type ?? "website", status: "ready",
       dataBackendId: input.dataBackendId, appScheme: input.appScheme,
+      toolchain: input.toolchain ?? null, defaultBranch: input.defaultBranch ?? null,
+      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+      retentionClass: input.retentionClass ?? DEFAULT_RETENTION_CLASS,
       revision: 1, createdAt: timestamp, updatedAt: timestamp,
     };
     this.projects.set(project.id, project);
@@ -357,11 +364,175 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(project);
   }
 
-  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }) {
+  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
     const project = await this.getProject(context, companyId, projectId);
     if (project.revision !== input.expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");
-    const next = { ...project, name: input.name, revision: project.revision + 1, updatedAt: now() };
+    const code = input.code ?? {};
+    const next: Project = {
+      ...project,
+      name: input.name ?? project.name,
+      toolchain: code.toolchain ?? project.toolchain ?? null,
+      defaultBranch: code.defaultBranch ?? project.defaultBranch ?? null,
+      dataClassification: code.dataClassification ?? project.dataClassification,
+      retentionClass: code.retentionClass ?? project.retentionClass,
+      revision: project.revision + 1, updatedAt: now(),
+    };
     this.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+  // --- C1: code sessions -------------------------------------------------------------------
+
+  async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
+    const project = await this.getProject(context, companyId, projectId);
+    if (input.agentId && !this.companyAgents.has(input.agentId)) throw new WorkspaceAccessError("Agent does not belong to this company");
+    if (input.parentSessionId) {
+      const parent = await this.getCodeSession(context, companyId, input.parentSessionId);
+      if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
+    }
+    const requested = input.dataClassification ?? project.dataClassification;
+    if (!isClassificationAtLeast(requested, project.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
+    }
+    const timestamp = now();
+    const session: CodeSession = {
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, projectId, userId: context.userId,
+      agentId: input.agentId ?? null, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null,
+      status: "active", parentSessionId: input.parentSessionId ?? null, runId: null,
+      summary: input.summary ?? null, dataClassification: requested,
+      retentionClass: input.retentionClass ?? project.retentionClass, toolManifestVersion: null,
+      createdAt: timestamp, updatedAt: timestamp,
+    };
+    this.codeSessions.set(session.id, session);
+    return structuredClone(session);
+  }
+
+  async getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
+    const session = this.codeSessions.get(sessionId);
+    if (!session || session.workspaceId !== context.workspaceId || session.companyId !== companyId
+      || session.userId !== context.userId) throw new WorkspaceNotFoundError("Code session not found");
+    return structuredClone(session);
+  }
+
+  async listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options: { includeArchived?: boolean; limit?: number } = {}): Promise<CodeSession[]> {
+    this.assertCompany(context, companyId);
+    const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+    return structuredClone([...this.codeSessions.values()]
+      .filter((session) => session.workspaceId === context.workspaceId && session.companyId === companyId
+        && session.userId === context.userId
+        && (!projectId || session.projectId === projectId)
+        && (options.includeArchived === true || session.status !== "archived"))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+      .slice(0, limit));
+  }
+
+  // --- C1c: append-only audit log ----------------------------------------------------------
+
+  /**
+   * Appends an audit entry, chaining it to the company's previous entry. Entries are stored frozen
+   * and returned as clones: there is no update or delete path anywhere in the store, which is the
+   * in-memory equivalent of the DB trigger used in PostgreSQL.
+   */
+  async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
+    this.assertCompany(context, companyId);
+    const chain = this.auditLog.get(companyId) ?? [];
+    const prevHash = chain.length ? chain[chain.length - 1]!.entryHash : null;
+    const sequence = chain.length + 1;
+    const createdAt = now();
+    const metadata = input.metadata ?? {};
+    const id = randomUUID();
+    const entry: AuditEntry = {
+      id, workspaceId: context.workspaceId, companyId, sequence, createdAt,
+      actor: input.actor, actorRole: input.actorRole, action: input.action,
+      resourceType: input.resourceType, resourceId: input.resourceId ?? null,
+      projectId: input.projectId ?? null, decision: input.decision, payloadHash: input.payloadHash,
+      requestId: input.requestId ?? null, correlationId: input.correlationId ?? null,
+      snapshotId: input.snapshotId ?? null, metadata, prevHash,
+      entryHash: auditEntryHash(prevHash, {
+        id, companyId, sequence, createdAt, actor: input.actor, actorRole: input.actorRole,
+        requestId: input.requestId ?? null, correlationId: input.correlationId ?? null, snapshotId: input.snapshotId ?? null,
+        action: input.action, resourceType: input.resourceType, resourceId: input.resourceId ?? null,
+        projectId: input.projectId ?? null, decision: input.decision, payloadHash: input.payloadHash, metadata,
+      }),
+    };
+    chain.push(entry);
+    this.auditLog.set(companyId, chain);
+    return structuredClone(entry);
+  }
+
+  async listAuditEntries(context: AuthContext, companyId: string, filters: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number } = {}): Promise<AuditEntry[]> {
+    this.assertCompany(context, companyId);
+    const limit = Math.max(1, Math.min(filters.limit ?? 200, 1000));
+    return structuredClone((this.auditLog.get(companyId) ?? [])
+      .filter((entry) => (!filters.actor || entry.actor === filters.actor)
+        && (!filters.requestId || entry.requestId === filters.requestId)
+        && (!filters.correlationId || entry.correlationId === filters.correlationId)
+        && (!filters.action || entry.action === filters.action)
+        && (filters.fromSequence === undefined || entry.sequence >= filters.fromSequence))
+      .slice(0, limit));
+  }
+
+  async verifyAuditChain(context: AuthContext, companyId: string, range: { fromSequence?: number; toSequence?: number } = {}): Promise<AuditChainVerification> {
+    this.assertCompany(context, companyId);
+    const entries = (this.auditLog.get(companyId) ?? []).filter((entry) =>
+      (range.fromSequence === undefined || entry.sequence >= range.fromSequence)
+      && (range.toSequence === undefined || entry.sequence <= range.toSequence));
+    const verification = verifyAuditEntries(entries);
+    return { ...verification, companyId };
+  }
+
+  async auditChainState(context: AuthContext, companyId: string): Promise<AuditChainState> {
+    this.assertCompany(context, companyId);
+    const chain = this.auditLog.get(companyId) ?? [];
+    return { companyId, entryCount: chain.length, headSequence: chain.length, headHash: chain.length ? chain[chain.length - 1]!.entryHash : null };
+  }
+
+  async recordAuditAnchor(context: AuthContext, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
+    this.assertCompany(context, companyId);
+    const record: AuditAnchor = {
+      id: randomUUID(), workspaceId: context.workspaceId, companyId, day: anchor.day, sequence: anchor.sequence,
+      entryCount: anchor.entryCount, headHash: anchor.headHash, anchorPath: anchor.anchorPath ?? null,
+      signature: anchor.signature ?? null, createdAt: now(),
+    };
+    const existing = this.auditAnchors.get(companyId) ?? [];
+    this.auditAnchors.set(companyId, [...existing.filter((item) => item.day !== anchor.day), record]);
+    return structuredClone(record);
+  }
+
+  async listAuditAnchors(context: AuthContext, companyId: string, limit = 90): Promise<AuditAnchor[]> {
+    this.assertCompany(context, companyId);
+    return structuredClone((this.auditAnchors.get(companyId) ?? [])
+      .sort((a, b) => b.day.localeCompare(a.day))
+      .slice(0, Math.max(1, Math.min(limit, 365))));
+  }
+
+  async latestAuditAnchor(context: AuthContext, companyId: string): Promise<AuditAnchor | null> {
+    return (await this.listAuditAnchors(context, companyId, 1))[0] ?? null;
+  }
+
+  async auditCompanies(context: AuthContext): Promise<string[]> {
+    return [...this.auditLog.entries()]
+      .filter(([, entries]) => entries.length > 0 && entries[0]!.workspaceId === context.workspaceId)
+      .map(([companyId]) => companyId)
+      .sort();
+  }
+
+  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
+    if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, session.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
+    }
+    const next: CodeSession = {
+      ...session,
+      status: patch.status ?? session.status,
+      summary: patch.summary ?? session.summary,
+      runId: patch.runId === undefined ? session.runId : patch.runId,
+      modelProfile: patch.modelProfile ?? session.modelProfile,
+      dataClassification: patch.dataClassification ?? session.dataClassification,
+      retentionClass: patch.retentionClass ?? session.retentionClass,
+      toolManifestVersion: patch.toolManifestVersion === undefined ? session.toolManifestVersion : patch.toolManifestVersion,
+      updatedAt: now(),
+    };
+    this.codeSessions.set(sessionId, next);
     return structuredClone(next);
   }
 

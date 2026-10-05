@@ -1,8 +1,23 @@
 FROM node:24-alpine
-RUN apk add --no-cache python3 py3-pip php php-phar composer git coreutils findutils util-linux
+# C1: coding toolchain inside the sandbox. Everything runs as the unprivileged user below; the
+# sandbox image is never granted the host docker socket and never mounts a host path.
+#
+# Base tooling for reading, searching, patching and building code. Language runtimes: Node (base
+# image), Python and PHP below. Go/Rust/Java toolchains are intentionally NOT added here — they are
+# heavy, and C1b decides whether they ship as digest-pinned image variants (see
+# docs/coding-agent/00-audit.md section 7.4); detection for them already works without the runtime.
+RUN apk add --no-cache \
+      python3 py3-pip \
+      php php-phar composer \
+      git openssh-client \
+      ripgrep \
+      build-base make g++ \
+      bash patch diffutils \
+      coreutils findutils util-linux \
+      jq unzip curl
 RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10 yarn@1.22.22
 ENV PATH="/opt/npati-package-managers/bin:${PATH}"
-RUN pnpm --version && yarn --version
+RUN pnpm --version && yarn --version && rg --version && make --version >/dev/null
 RUN command -v pip >/dev/null || ln -s "$(command -v pip3)" /usr/local/bin/pip
 RUN addgroup -g 10001 sandbox && adduser -D -u 10001 -G sandbox sandbox
 RUN mkdir -p /workspace && chown -R sandbox:sandbox /workspace

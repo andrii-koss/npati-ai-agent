@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { CompanyApprovalsRepository, ApprovalStatus } from "./approvals-repository";
+import type { AuditLogService } from "./audit-log";
 
 async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace:read" | "business:manage") {
   const c = await auth.authenticate(r);
@@ -25,9 +26,11 @@ export function registerCompanyApprovalsRoutes(
     auth: AuthProvider;
     store: WorkspaceStore;
     repo: CompanyApprovalsRepository;
+    /** C1c: when present, approval decisions are recorded in the tamper-evident journal. */
+    auditLog?: AuditLogService;
   }
 ) {
-  const { auth, store, repo } = deps;
+  const { auth, store, repo, auditLog } = deps;
 
   // List approvals for a company
   app.get<{
@@ -80,6 +83,27 @@ export function registerCompanyApprovalsRoutes(
       try {
         const c = await ctx(auth, r, "business:manage");
         await store.getCompany(c, r.params.companyId);
+        // C1c: an approval decision is a privileged, provable action. The journal records it (with the
+        // hash of the exact payload the approver saw) before the decision is applied, so an audit
+        // outage refuses the decision instead of losing it (fail closed).
+        const approval = await repo.get(c, r.params.companyId, r.params.approvalId);
+        if (auditLog) {
+          await auditLog.record(c, {
+            companyId: r.params.companyId,
+            actor: c.userId,
+            actorRole: "approver",
+            action: "approval.decide",
+            resourceType: "approval",
+            resourceId: r.params.approvalId,
+            correlationId: approval.runId ?? undefined,
+            decision: r.body.decision === "approved" ? "approved" : "rejected",
+            payload: approval.inputPayload ?? { approvalId: r.params.approvalId },
+            metadata: {
+              toolName: approval.toolName, riskLevel: approval.riskLevel, agentId: approval.agentId ?? null,
+              payloadHash: approval.payloadHash ?? null, notes: r.body.notes ? "[PROVIDED]" : null,
+            },
+          });
+        }
         const resolved = await repo.decide(
           c,
           r.params.companyId,
