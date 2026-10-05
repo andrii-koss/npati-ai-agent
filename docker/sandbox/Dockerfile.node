@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1.7
+#
+# C1b: Node/TypeScript sandbox variant — the default Coding Agent toolchain.
+#
+# C1 shipped this toolchain inside apps/agent-api/Dockerfile.project-sandbox (tag-based). This file is
+# the digest-pinned production path: `scripts/sandbox-image-build.mjs` builds Dockerfile.base first,
+# then passes its immutable digest through BASE_IMAGE.
+ARG BASE_IMAGE=ghcr.io/npati-ai/npati-sandbox-base@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM ${BASE_IMAGE}
+
+USER root
+# Python and PHP ride along because detection (C1) reports them and many repositories mix them with
+# Node; Go/Rust/Java have their own variants to keep this image small.
+RUN apk add --no-cache python3 py3-pip php php-phar composer \
+ && command -v pip >/dev/null || ln -s "$(command -v pip3)" /usr/local/bin/pip
+
+USER 10001:10001
+ENV NODE_ENV= \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false
+# Smoke check: every tool the agent promises must exist in the image, else the build fails here.
+RUN node --version && npm --version && pnpm --version && yarn --version \
+ && rg --version && make --version >/dev/null \
+ && python3 --version && php --version >/dev/null
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

@@ -1,0 +1,24 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "npati-sandbox-python",
+  "documentNamespace": "https://npati.ai/spdx/sandbox-python-1/sha256-98f001afad55538765b307c8fa65f07c0d1a9ec1620de77a1dcf08798363d8e3",
+  "creationInfo": {
+    "created": "2025-01-01T00:00:00.000Z",
+    "creators": ["Tool: npati-sandbox-image-sbom (fallback, syft unavailable)"],
+    "comment": "Placeholder SBOM: package inventory requires syft. Do not treat as a complete inventory."
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-sandbox-image",
+      "name": "ghcr.io/npati-ai/npati-sandbox-python@sha256:98f001afad55538765b307c8fa65f07c0d1a9ec1620de77a1dcf08798363d8e3",
+      "versionInfo": "sha256:98f001afad55538765b307c8fa65f07c0d1a9ec1620de77a1dcf08798363d8e3",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "supplier": "Organization: NPATI",
+      "comment": "Container image reference; contents not enumerated in fallback mode."
+    }
+  ]
+}

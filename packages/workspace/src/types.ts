@@ -203,8 +203,58 @@ export interface CodeToolManifest {
   createdAt: string;
 }
 
-export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";
-export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
+/** C1b: sandbox images addressed by digest, with the evidence an admission decision needs. */
+export type SandboxImageVariant = "base" | "node" | "python" | "go" | "rust" | "java" | "php";
+export const SANDBOX_IMAGE_VARIANTS: readonly SandboxImageVariant[] = ["base", "node", "python", "go", "rust", "java", "php"] as const;
+export type SandboxImageStatus = "unverified" | "verified" | "deprecated" | "revoked";
+export const SANDBOX_IMAGE_STATUSES: readonly SandboxImageStatus[] = ["unverified", "verified", "deprecated", "revoked"] as const;
+export interface SandboxImage {
+  id: string;
+  workspaceId: string;
+  variant: SandboxImageVariant;
+  /** Always `repo@sha256:<64 hex>`; a tag is never a valid identity. */
+  reference: string;
+  digest: string;
+  status: SandboxImageStatus;
+  signature?: string | null;
+  signatureIssuer?: string | null;
+  sbomPath?: string | null;
+  scanTool?: string | null;
+  scanAt?: string | null;
+  scanCritical: number;
+  scanHigh: number;
+  waiverOwner?: string | null;
+  waiverExpiresAt?: string | null;
+  waiverReason?: string | null;
+  previousReference?: string | null;
+  revokedAt?: string | null;
+  revokedBy?: string | null;
+  revokeReason?: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface SandboxImageInput {
+  variant: SandboxImageVariant;
+  reference: string;
+  digest: string;
+  status?: SandboxImageStatus;
+  signature?: string | null;
+  signatureIssuer?: string | null;
+  sbomPath?: string | null;
+  scanTool?: string | null;
+  scanAt?: string | null;
+  scanCritical?: number;
+  scanHigh?: number;
+  waiverOwner?: string | null;
+  waiverExpiresAt?: string | null;
+  waiverReason?: string | null;
+  previousReference?: string | null;
+}
+/** The exact shape of `repo@sha256:<64 hex>`; used by both the store and the admission policy. */
+export const SANDBOX_IMAGE_REFERENCE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[0-9]+)?@sha256:[0-9a-f]{64}$/;
+
+export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
 export type CodeSessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived" | "suspended_by_flag";
 export const CODE_SESSION_STATUSES: readonly CodeSessionStatus[] = ["active", "paused", "awaiting_approval", "completed", "failed", "cancelled", "archived", "suspended_by_flag"] as const;
 
@@ -539,6 +589,7 @@ export interface WorkspaceStore {
   updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
 
+
   /** C1a: feature flags (resolution is user -> company -> global) and their change history. */
   listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]>;
   setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag>;
@@ -546,6 +597,14 @@ export interface WorkspaceStore {
   /** C1a: published tool-schema manifest, so an old session reads with the manifest it was created with. */
   publishCodeToolManifest(context: AuthContext, manifest: { version: number; tools: CodeToolManifest["tools"]; checksum: string }): Promise<CodeToolManifest>;
   latestCodeToolManifest(context: AuthContext): Promise<CodeToolManifest | null>;
+
+  /** C1b: sandbox image catalogue. Admission reads it; allow/revoke/waiver write it (audited first). */
+  listSandboxImages(context: AuthContext): Promise<SandboxImage[]>;
+  getSandboxImage(context: AuthContext, reference: string): Promise<SandboxImage | null>;
+  upsertSandboxImage(context: AuthContext, input: SandboxImageInput): Promise<SandboxImage>;
+  revokeSandboxImage(context: AuthContext, reference: string, input: { actor: string; reason: string }): Promise<SandboxImage>;
+  latestVerifiedSandboxImage(context: AuthContext, variant: SandboxImageVariant): Promise<SandboxImage | null>;
+
 
   /** C1c: append-only audit journal. `appendAuditEntry` fails closed and is never idempotent-silent. */  appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry>;
   listAuditEntries(context: AuthContext, companyId: string, filters?: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number }): Promise<AuditEntry[]>;

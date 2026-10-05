@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+#
+# C1b: Rust sandbox variant (cargo / rustc / clippy + rustfmt).
+ARG BASE_IMAGE=ghcr.io/npati-ai/npati-sandbox-base@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM ${BASE_IMAGE}
+
+USER root
+# The toolchain version is pinned by the base image digest (apk `rust`/`cargo`), so no rustup download
+# happens at run time.
+RUN apk add --no-cache rust cargo \
+ && mkdir -p /home/sandbox/.cargo /home/sandbox/.rustup \
+ && chown -R sandbox:sandbox /home/sandbox/.cargo /home/sandbox/.rustup
+
+USER 10001:10001
+ENV CARGO_HOME=/home/sandbox/.cargo \
+    RUSTUP_HOME=/home/sandbox/.rustup \
+    CARGO_TERM_COLOR=never
+RUN rustc --version && cargo --version
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

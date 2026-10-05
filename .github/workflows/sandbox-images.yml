@@ -1,0 +1,176 @@
+name: Sandbox images
+
+# C1b: builds, scans, signs and publishes the Coding Agent sandbox images by digest, and re-checks
+# the published digests every week. Publishing is blocked by a single CRITICAL finding, by an
+# unverifiable signature, or by a catalog entry that is not digest-pinned.
+#
+# The catalog contract lives in docker/sandbox/images.json; the local guard (no Docker required) is
+# scripts/sandbox-image-verify.mjs and it is also wired into the main CI workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Build a single variant (node, python, php, go, rust, java); empty builds all"
+        required: false
+        default: ""
+      dry_run:
+        description: "Plan only: do not build, push or sign"
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    # Weekly rebuild/rescan window (the catalog age policy is 14 days, so this keeps images fresh).
+    - cron: "0 3 * * 1"
+  push:
+    paths:
+      - "docker/sandbox/**"
+      - "scripts/sandbox-image-*.mjs"
+      - ".github/workflows/sandbox-images.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/npati-ai
+  # Rescan window used by the guard; mirrors the C1 configuration default.
+  NPATI_CODE_MAX_IMAGE_AGE_DAYS: "14"
+
+jobs:
+  # Fast, Docker-free guard: catalog consistency, digest pinning, hardening of every Dockerfile.
+  verify:
+    name: Verify catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - name: Catalog guard
+        run: node scripts/sandbox-image-verify.mjs
+      - name: Guard self-test (a violated catalog must fail)
+        run: |
+          set +e
+          node scripts/sandbox-image-verify.mjs --catalog docker/sandbox/.negative-check.json
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::the guard accepted a deliberately invalid catalog"
+            exit 1
+          fi
+          echo "guard correctly rejected the invalid catalog (exit $code)"
+
+  build:
+    name: Build ${{ matrix.variant }}
+    needs: [verify]
+    if: ${{ github.event_name != 'schedule' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [node, python, php, go, rust, java]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v3
+      - uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+          cache: true
+      - uses: anchore/sbom-action/download-syft@v0
+      - name: Build and push (records the real digest)
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            node scripts/sandbox-image-build.mjs --variant ${{ matrix.variant }} --dry-run
+          else
+            node scripts/sandbox-image-build.mjs --variant ${{ matrix.variant }}
+          fi
+      - name: SBOM
+        run: node scripts/sandbox-image-sbom.mjs --variant ${{ matrix.variant }}
+      - name: Scan (CRITICAL blocks publishing, HIGH needs a waiver)
+        run: node scripts/sandbox-image-scan.mjs --variant ${{ matrix.variant }} --tool trivy
+      - name: Sign and verify with cosign
+        run: node scripts/sandbox-image-sign.mjs --variant ${{ matrix.variant }}
+      - name: Guard after publishing
+        run: node scripts/sandbox-image-verify.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-${{ matrix.variant }}
+          path: |
+            docker/sandbox/images.json
+            docker/sandbox/sbom/*.spdx.json
+          if-no-files-found: error
+
+  # Weekly: re-scan the digests that are already published; a new CRITICAL opens an issue and fails.
+  rescan:
+    name: Rescan published digests
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+          cache: true
+      - name: Rescan every catalog image
+        id: rescan
+        continue-on-error: true
+        run: node scripts/sandbox-image-scan.mjs --all --tool trivy
+      - name: Report unresolved critical findings
+        if: ${{ steps.rescan.outcome == 'failure' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "Sandbox image rescan found unresolved CRITICAL findings";
+            const body = [
+              "The weekly rescan of the Coding Agent sandbox images failed.",
+              "",
+              "Publishing and rolling forward are blocked until this is resolved:",
+              "- rebuild the affected variant (`node scripts/sandbox-image-build.mjs --variant <id>`)",
+              "- or set the catalog entry to `revoked` so no new session can start on that digest",
+              "- run `node scripts/sandbox-image-scan.mjs --all` and `node scripts/sandbox-image-sign.mjs --all` afterwards",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n");
+            const existing = await github.rest.issues.listForRepo({ ...context.repo, state: "open", labels: "security,sandbox-images" });
+            if (existing.data.length) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.data[0].number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body, labels: ["security", "sandbox-images"] });
+            }
+      - name: Fail the run when findings were not waived
+        if: ${{ steps.rescan.outcome == 'failure' }}
+        run: |
+          echo "::error::sandbox image rescan found CRITICAL (or unwaived HIGH) findings"
+          exit 1
+      - name: Guard after rescan
+        run: node scripts/sandbox-image-verify.mjs

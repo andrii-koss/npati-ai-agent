@@ -5,6 +5,7 @@ import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
 import { CodeFlagsPanel } from "./CodeFlagsPanel";
+import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 
 // --- Types -------------------------------------------------------------------
 
@@ -817,6 +818,14 @@ export function CodeSettingsPage() {
               notify={(type, message) => setFeedback({ type, message })}
               onMasterEnabledChange={setMasterEnabled}
               onSessionsSuspended={() => reload()}
+            />
+          )}
+
+          {companyId && (
+            <CodeSandboxImagesPanel
+              companyId={companyId}
+              isUk={isUk}
+              notify={(type, message) => setFeedback({ type, message })}
             />
           )}
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
@@ -20,6 +20,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly featureFlags = new Map<string, FeatureFlag>();
   private readonly featureFlagHistory: FeatureFlagHistoryEntry[] = [];
   private readonly codeToolManifests = new Map<number, CodeToolManifest>();
+  private readonly sandboxImages = new Map<string, SandboxImage>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
@@ -604,6 +605,53 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const versions = [...this.codeToolManifests.keys()].sort((a, b) => b - a);
     const latest = versions.length ? this.codeToolManifests.get(versions[0]!) : undefined;
     return latest ? structuredClone(latest) : null;
+  }
+
+  // --- C1b: sandbox image supply chain ------------------------------------------------------
+
+  async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
+    return structuredClone([...this.sandboxImages.values()]
+      .filter((image) => image.workspaceId === context.workspaceId)
+      .sort((a, b) => (a.variant === b.variant ? b.createdAt.localeCompare(a.createdAt) : a.variant.localeCompare(b.variant))));
+  }
+
+  async getSandboxImage(context: AuthContext, reference: string): Promise<SandboxImage | null> {
+    const image = this.sandboxImages.get(`${context.workspaceId}|${reference}`);
+    return image ? structuredClone(image) : null;
+  }
+
+  async upsertSandboxImage(context: AuthContext, input: SandboxImageInput): Promise<SandboxImage> {
+    const key = `${context.workspaceId}|${input.reference}`;
+    const existing = this.sandboxImages.get(key);
+    const record: SandboxImage = {
+      id: existing?.id ?? randomUUID(), workspaceId: context.workspaceId, variant: input.variant,
+      reference: input.reference, digest: input.digest, status: input.status ?? existing?.status ?? "unverified",
+      signature: input.signature ?? null, signatureIssuer: input.signatureIssuer ?? null, sbomPath: input.sbomPath ?? null,
+      scanTool: input.scanTool ?? null, scanAt: input.scanAt ?? null,
+      scanCritical: input.scanCritical ?? 0, scanHigh: input.scanHigh ?? 0,
+      waiverOwner: input.waiverOwner ?? null, waiverExpiresAt: input.waiverExpiresAt ?? null, waiverReason: input.waiverReason ?? null,
+      previousReference: input.previousReference ?? existing?.previousReference ?? null,
+      revokedAt: existing?.revokedAt ?? null, revokedBy: existing?.revokedBy ?? null, revokeReason: existing?.revokeReason ?? null,
+      createdBy: existing?.createdBy ?? context.userId, createdAt: existing?.createdAt ?? now(), updatedAt: now(),
+    };
+    this.sandboxImages.set(key, record);
+    return structuredClone(record);
+  }
+
+  async revokeSandboxImage(context: AuthContext, reference: string, input: { actor: string; reason: string }): Promise<SandboxImage> {
+    const key = `${context.workspaceId}|${reference}`;
+    const existing = this.sandboxImages.get(key);
+    if (!existing) throw new WorkspaceNotFoundError("Sandbox image not found");
+    const record: SandboxImage = { ...existing, status: "revoked", revokedAt: now(), revokedBy: input.actor, revokeReason: input.reason, updatedAt: now() };
+    this.sandboxImages.set(key, record);
+    return structuredClone(record);
+  }
+
+  async latestVerifiedSandboxImage(context: AuthContext, variant: SandboxImageVariant): Promise<SandboxImage | null> {
+    const candidates = [...this.sandboxImages.values()]
+      .filter((image) => image.workspaceId === context.workspaceId && image.variant === variant && image.status === "verified")
+      .sort((a, b) => (b.scanAt ?? b.createdAt).localeCompare(a.scanAt ?? a.createdAt));
+    return candidates.length ? structuredClone(candidates[0]!) : null;
   }
 
   async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);

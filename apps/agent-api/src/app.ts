@@ -70,6 +70,9 @@ import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
 import { assertManifestConsistent, currentToolManifest } from "./code-tool-registry";
+import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
+import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
+import { registerSandboxImageRoutes } from "./sandbox-image-routes";
 import { FeatureFlagService } from "./feature-flags";
 import type { CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
@@ -986,6 +989,15 @@ export function buildApp(config: AppConfig = {}) {
       }
     } catch { /* ignore */ }
     return stopped;
+  });
+  // C1b: sandbox image admission control. Created here so the routes and the runner-facing services
+  // share one policy; without a configured signer identity it denies every image (see the policy).
+  const sandboxImageConfig = sandboxImagePolicyConfig(process.env, config.dataDirectory);
+  const sandboxImagePolicy = new SandboxImagePolicy(workspaceStore, {
+    ...sandboxImageConfig,
+    verifier: sandboxImageConfig.signer.identity && sandboxImageConfig.signer.issuer ? new CosignImageSignatureVerifier() : undefined,
+    flags: featureFlagService,
+    audit: auditLogService,
   });
   const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService, featureFlagService);
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
@@ -2638,6 +2650,8 @@ ${localized.next}`;
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
   registerCodeRoutes(app, authProvider, codeService, featureFlagService);
+  // C1b: the sandbox image admission port (list/allow/revoke/scan/verify for operators).
+  registerSandboxImageRoutes(app, authProvider, sandboxImagePolicy, workspaceStore);
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);

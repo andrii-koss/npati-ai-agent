@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { SandboxImageAdmission } from "./sandbox-image-policy";
 import { randomUUID, createHash } from "node:crypto";
 import { chmod, chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -58,11 +59,56 @@ export async function assignSandboxOwner(directory: string): Promise<void> {
   await chmod(directory, 0o777).catch(() => undefined);
   await chown(directory, 10001, 10001).catch(() => undefined);
 }
-export class DockerSandboxProvider implements SandboxProvider {
-  private readonly limits: RunnerLimits;
+/**
+ * C1b: the full `docker create` command line for a project sandbox, as a pure function.
+ *
+ * Kept separate from the provider so the hardening properties are directly testable: unprivileged
+ * user, read-only root filesystem, all capabilities dropped, no-new-privileges, tmpfs workspace, an
+ * internal network only, and (when configured) a seccomp profile. There is deliberately no
+ * `--privileged`, no host path mount and no docker socket.
+ */
+export function buildSandboxCreateArgs(input: {
+  sandboxName: string;
+  sandboxId: string;
+  network: string;
+  scope: SandboxScope;
+  image: string;
+  cpus: string;
+  memory: string;
+  pids: number;
+  diskBytes: number;
+  seccompProfile?: string;
+}): string[] {
+  return [
+    "create", "--name", input.sandboxName, "--label", `npati.scope=${label(input.scope)}`, "--label", `npati.sandbox=${input.sandboxId}`,
+    "--network", input.network, "--network-alias", "project-preview", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+    ...(input.seccompProfile ? ["--security-opt", `seccomp=${input.seccompProfile}`] : []),
+    "--cpus", input.cpus, "--memory", input.memory, "--pids-limit", String(input.pids),
+    "--tmpfs", `/workspace:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=${input.diskBytes}`,
+    "--tmpfs", "/tmp:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=64m",
+    "--workdir", "/workspace", "--env", "HOME=/workspace/.npati-runtime",
+    "--env", "NPM_CONFIG_CACHE=/workspace/.npati-runtime/npm",
+    "--env", "npm_config_proxy=http://egress:8080",
+    "--env", "npm_config_https_proxy=http://egress:8080",
+    "--env", "npm_config_audit=false",
+    "--env", "npm_config_fund=false",
+    "--env", "PIP_CACHE_DIR=/workspace/.npati-runtime/pip",
+    "--env", "PIP_TARGET=/workspace/.npati-runtime/python",
+    "--env", "PYTHONPATH=/workspace/.npati-runtime/python",
+    "--env", "NEXT_TELEMETRY_DISABLED=1",
+    "--env", "HTTP_PROXY=http://egress:8080",
+    "--env", "HTTPS_PROXY=http://egress:8080",
+    "--env", "http_proxy=http://egress:8080",
+    "--env", "https_proxy=http://egress:8080",
+    "--env", "NO_PROXY=localhost,127.0.0.1",
+    input.image, "sleep", "infinity",
+  ];
+}
+
+export class DockerSandboxProvider implements SandboxProvider {  private readonly limits: RunnerLimits;
   private readonly activity = new Map<string, number>();
   private touch(id: string) { this.activity.set(id, Date.now()); }
-  constructor(limits: Partial<RunnerLimits> = {}) { this.limits = { ...defaults, ...limits }; if (!this.limits.allowedHosts.split(",").every((host) => /^[a-z0-9.-]+$/.test(host) && !host.startsWith(".") && !host.endsWith("."))) throw new Error("Invalid sandbox allowlist");
+  constructor(limits: Partial<RunnerLimits> = {}, /** C1b admission policy; absent means every image is refused. */ private readonly imagePolicy?: SandboxImageAdmission) { this.limits = { ...defaults, ...limits }; if (!this.limits.allowedHosts.split(",").every((host) => /^[a-z0-9.-]+$/.test(host) && !host.startsWith(".") && !host.endsWith("."))) throw new Error("Invalid sandbox allowlist");
     if (!/^(?:0\.[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)$/.test(this.limits.cpu) || !/^[1-9][0-9]*(?:[kmg])?$/i.test(this.limits.memory) || !Number.isSafeInteger(this.limits.diskBytes) || this.limits.diskBytes < 16_000_000 || !Number.isSafeInteger(this.limits.pids) || this.limits.pids < 16) throw new Error("Invalid sandbox resource limits"); }
   private async docker(argsList: string[], timeoutMs = 30_000, stdin?: string | Buffer, outputLimit?: number) {
     const action = [argsList[0], argsList[0] === "network" ? argsList[1] : undefined].filter(Boolean).join(".");
@@ -96,6 +142,42 @@ export class DockerSandboxProvider implements SandboxProvider {
     return { id, state: value === "running" ? "running" : value === "created" ? "created" : value === "exited" ? "stopped" : "failed", createdAt: createdAt ?? new Date().toISOString(), lastActivityAt: new Date(Number.isFinite(storedAt) ? storedAt : Date.now()).toISOString() };
   }
   async createSandbox(scope: SandboxScope): Promise<SandboxStatus> {
+    // C1b: admission control happens before any container is created. The policy decides which digest
+    // may run and returns the exact reference to use, so a tag never reaches `docker create`.
+    const admitted = await this.admitImage(scope);
+    return this.createSandboxInternal(scope, admitted);
+  }
+
+  /**
+   * Resolves the image for this sandbox through the admission policy. Deny by default: without a
+   * configured policy no image is admitted (`sandbox_image_policy_unavailable`), and every policy
+   * refusal becomes a structured `SandboxProviderError` with the policy's own code.
+   */
+  private async admitImage(scope: SandboxScope): Promise<{ reference: string; dev: boolean }> {
+    if (!this.imagePolicy) {
+      this.logAdmission("denied", { code: "sandbox_image_policy_unavailable", reference: this.limits.image, companyId: scope.companyId });
+      throw new SandboxProviderError("sandbox_image_policy_unavailable", "Sandbox image admission policy is not configured", 403, "image_admission");
+    }
+    try {
+      const result = await this.imagePolicy.admit(
+        { workspaceId: scope.workspaceId, userId: scope.userId, permissions: ["workspace:read"] },
+        { companyId: scope.companyId, reference: this.limits.image },
+      );
+      this.logAdmission("allowed", { reference: result.reference, dev: result.dev, companyId: scope.companyId });
+      return { reference: result.reference, dev: result.dev };
+    } catch (error) {
+      const failure = error as { code?: string; message?: string; status?: number; details?: Record<string, unknown> };
+      const code = failure.code ?? "sandbox_image_denied";
+      this.logAdmission("denied", { code, reference: this.limits.image, companyId: scope.companyId, details: failure.details ?? {} });
+      throw new SandboxProviderError(code, failure.message ?? "Sandbox image was refused by policy", failure.status === 409 ? 409 : 403, "image_admission");
+    }
+  }
+
+  private logAdmission(outcome: "allowed" | "denied", meta: Record<string, unknown>) {
+    console.info(`[sandbox-image-admission] ${outcome} ${JSON.stringify(meta)}`);
+  }
+
+  private async createSandboxInternal(scope: SandboxScope, admitted: { reference: string; dev: boolean }): Promise<SandboxStatus> {
     if (!scope.workspaceId || !scope.userId || !scope.companyId || !scope.projectId) throw new SandboxProviderError("invalid_scope", "Sandbox scope is incomplete", 400);
     const id = randomUUID(), names = this.names(id);
     let phase = "network.create";
@@ -108,33 +190,15 @@ export class DockerSandboxProvider implements SandboxProvider {
       phase = "proxy.start";
       await this.docker(["start", names.proxy]);
       phase = "sandbox.create";
-      await this.docker([
-        "create", "--name", names.sandbox, "--label", `npati.scope=${label(scope)}`, "--label", `npati.sandbox=${id}`,
-        "--network", names.network, "--network-alias", "project-preview", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--cpus", this.limits.cpu, "--memory", this.limits.memory, "--pids-limit", String(this.limits.pids),
-        "--tmpfs", `/workspace:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=${this.limits.diskBytes}`,
-        "--tmpfs", "/tmp:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=64m",
-        "--workdir", "/workspace", "--env", "HOME=/workspace/.npati-runtime",
-        "--env", "NPM_CONFIG_CACHE=/workspace/.npati-runtime/npm",
-        "--env", "npm_config_proxy=http://egress:8080",
-        "--env", "npm_config_https_proxy=http://egress:8080",
-        "--env", "npm_config_audit=false",
-        "--env", "npm_config_fund=false",
-        "--env", "PIP_CACHE_DIR=/workspace/.npati-runtime/pip",
-        "--env", "PIP_TARGET=/workspace/.npati-runtime/python",
-        "--env", "PYTHONPATH=/workspace/.npati-runtime/python",
-        "--env", "NEXT_TELEMETRY_DISABLED=1",
-        "--env", "HTTP_PROXY=http://egress:8080",
-        "--env", "HTTPS_PROXY=http://egress:8080",
-        "--env", "http_proxy=http://egress:8080",
-        "--env", "https_proxy=http://egress:8080",
-        "--env", "NO_PROXY=localhost,127.0.0.1",
-        this.limits.image, "sleep", "infinity",
-      ]);
+      await this.docker(buildSandboxCreateArgs({
+        sandboxName: names.sandbox, sandboxId: id, network: names.network, scope, image: admitted.reference,
+        cpus: this.limits.cpu, memory: this.limits.memory, pids: this.limits.pids, diskBytes: this.limits.diskBytes,
+        seccompProfile: process.env.NPATI_SANDBOX_SECCOMP_PROFILE,
+      }));
       this.touch(id);
       return this.state(scope, id);
     } catch (error) {
-      if (error instanceof SandboxProviderError) error.diagnostics = { ...error.diagnostics, dockerAction: phase, sandboxId: id, image: phase.startsWith("proxy") ? this.limits.proxyImage : phase.startsWith("sandbox") ? this.limits.image : undefined, container: phase.startsWith("proxy") ? names.proxy : phase.startsWith("sandbox") ? names.sandbox : undefined, network: names.network };
+      if (error instanceof SandboxProviderError) error.diagnostics = { ...error.diagnostics, dockerAction: phase, sandboxId: id, image: phase.startsWith("proxy") ? this.limits.proxyImage : phase.startsWith("sandbox") ? admitted.reference : undefined, container: phase.startsWith("proxy") ? names.proxy : phase.startsWith("sandbox") ? names.sandbox : undefined, network: names.network };
       await args("docker", ["rm", "-f", names.sandbox]).catch(() => undefined);
       await args("docker", ["rm", "-f", names.proxy]).catch(() => undefined);
       await args("docker", ["network", "rm", names.network]).catch(() => undefined);

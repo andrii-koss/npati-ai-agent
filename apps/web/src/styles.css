@@ -21651,5 +21651,69 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
   }
 }
 
+/* --- C1b: sandbox images panel --------------------------------------------------------- */
+
+.code-images {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.code-images-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.code-images-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-images-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-images-admission {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--npati-gray-100);
+}
+
+.code-images-admission-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .code-images {
+    padding: 12px;
+  }
+
+  .code-images-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .code-images-admission-row {
+    width: 100%;
+  }
+}
+
 
 
