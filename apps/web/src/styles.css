@@ -21561,5 +21561,95 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
   }
 }
 
+/* C1a: Coding Agent feature-flag panel (same palette as the rest of the Code section). */
+.code-flags {
+  gap: 14px;
+}
+
+.code-flags-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 4px 0 2px;
+}
+
+.code-flags-warning {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--npati-gray-100);
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.code-flags-master {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+}
+
+.code-flags-master-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.code-flags-master-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.code-flags-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--npati-black);
+  cursor: pointer;
+}
+
+.code-switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--npati-red);
+  cursor: pointer;
+}
+
+.code-switch input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 640px) {
+  .code-flags-master {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .code-flags-master-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 
 

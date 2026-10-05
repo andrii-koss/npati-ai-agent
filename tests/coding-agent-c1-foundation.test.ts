@@ -7,6 +7,7 @@ import { AuthenticationError } from "../apps/agent-api/src/auth";
 import { detectToolchain } from "../apps/agent-api/src/code-toolchain-detector";
 import { DEFAULT_CODE_AGENT_LIMITS, CODE_AGENT_ENABLED_BY_DEFAULT, resolveCodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
 import { ProjectService } from "../apps/agent-api/src/project-service";
+import type { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
 import type { ProjectWorkspace } from "../apps/agent-api/src/project-workspace";
 
 const owner: AuthContext = { workspaceId: "ws-c1", userId: "user-c1", permissions: ["workspace:read", "workspace:write", "business:manage"] };
@@ -26,13 +27,21 @@ function fakeWorkspace(files: Record<string, string>) {
   } as unknown as ProjectWorkspace;
 }
 
+/**
+ * C1a made every coding entry point deny-by-default (dark launch): `CodeService` without a flag
+ * service refuses mutations. This suite exercises the C1 foundation logic, so it injects an explicit
+ * allow-all stub — the denial path itself is covered by the `security-gate: C1a dark launch` suite in
+ * `tests/coding-agent-c1a-flags.test.ts`, which never uses this stub.
+ */
+const allowAllFlags = { assertEnabled: async () => true as const, isEnabled: async () => true } as unknown as FeatureFlagService;
+
 async function harness(files: Record<string, string> = {}, importer?: CodeService["importRepository"]) {
   const store = new InMemoryWorkspaceStore();
   await store.initialize();
   const company = await store.createCompany(owner, { name: "C1 Co" }, "c1-company");
   const projects = new ProjectService(store);
   const importStub = importer ?? (async () => ({ imported: 0 }));
-  const service = new CodeService(store, projects, fakeWorkspace(files), { importRepository: importStub });
+  const service = new CodeService(store, projects, fakeWorkspace(files), { importRepository: importStub }, undefined, undefined, allowAllFlags);
   return { store, company, projects, service };
 }
 
@@ -155,7 +164,8 @@ describe("C1 — code sessions", () => {
     const { service, company } = await harness();
     const project = await service.createProject(owner, company.id, { name: "Repo" });
     const session = await service.createSession(owner, company.id, project.id, { mode: "plan", summary: "initial" });
-    expect(session).toMatchObject({ projectId: project.id, mode: "plan", status: "active", dataClassification: "confidential", retentionClass: "standard", runId: null, toolManifestVersion: null });
+    // C1a (rule 12): the session pins the tool-schema manifest version it was created with.
+    expect(session).toMatchObject({ projectId: project.id, mode: "plan", status: "active", dataClassification: "confidential", retentionClass: "standard", runId: null, toolManifestVersion: 1 });
     expect((await service.getSession(owner, company.id, session.id)).id).toBe(session.id);
     const withProjects = await service.listSessionsWithProjects(owner, company.id);
     expect(withProjects[0]).toMatchObject({ id: session.id, projectName: "Repo" });
@@ -220,18 +230,18 @@ describe("security-gate: C1 isolation and repository credentials", () => {
   it("rejects anonymous and under-privileged API callers and returns feature-safe errors", async () => {
     const { service } = await harness();
     const app = Fastify();
-    registerCodeRoutes(app, { authenticate: async () => { throw new AuthenticationError("unauthorized"); } } as never, service);
+    registerCodeRoutes(app, { authenticate: async () => { throw new AuthenticationError("unauthorized"); } } as never, service, allowAllFlags);
     const anonymous = await app.inject({ method: "GET", url: "/companies/c1/code/projects" });
     expect(anonymous.statusCode).toBe(401);
 
     const readOnly = Fastify();
-    registerCodeRoutes(readOnly, { authenticate: async () => reader } as never, service);
+    registerCodeRoutes(readOnly, { authenticate: async () => reader } as never, service, allowAllFlags);
     const denied = await readOnly.inject({ method: "POST", url: "/companies/c1/code/projects", payload: { name: "x" } });
     expect(denied.statusCode).toBe(403);
     expect(denied.json().error.code).toBe("code_access_denied");
 
     const unavailable = Fastify();
-    registerCodeRoutes(unavailable, { authenticate: async () => owner } as never, undefined);
+    registerCodeRoutes(unavailable, { authenticate: async () => owner } as never, undefined, allowAllFlags);
     const featureOff = await unavailable.inject({ method: "GET", url: "/companies/c1/code/projects" });
     expect(featureOff.statusCode).toBe(503);
     expect(featureOff.json().error.code).toBe("code_unavailable");
@@ -241,7 +251,7 @@ describe("security-gate: C1 isolation and repository credentials", () => {
   it("exposes the C1 API over HTTP with ownership enforced", async () => {
     const { service, company } = await harness({ "package.json": JSON.stringify({ scripts: { test: "vitest run" } }) });
     const app = Fastify();
-    registerCodeRoutes(app, { authenticate: async () => owner } as never, service);
+    registerCodeRoutes(app, { authenticate: async () => owner } as never, service, allowAllFlags);
 
     const created = await app.inject({ method: "POST", url: `/companies/${company.id}/code/projects`, payload: { name: "HTTP repo" } });
     expect(created.statusCode).toBe(201);

@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest } from "./types";
 import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
@@ -51,6 +51,8 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   const auditAnchorColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", day::text AS day,
   sequence, entry_count AS "entryCount", head_hash AS "headHash", anchor_path AS "anchorPath",
   signature, created_at AS "createdAt"`;
+  const featureFlagColumns = `id, workspace_id AS "workspaceId", scope, scope_id AS "scopeId", flag_key AS "flagKey",
+  stage, enabled, rollout_percent AS "rolloutPercent", allowlist, revision, updated_by AS "updatedBy", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -833,6 +835,77 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const featureFlagsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='067_feature_flags_and_versioning'");
+    if (!featureFlagsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration067 } = await import("./migration-067");
+        await runMigration067(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('067_feature_flags_and_versioning')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+  }
+
+  // --- C1a: feature flags and tool manifests ------------------------------------------------
+
+  async listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]> {
+    const result = await this.pool.query<FeatureFlag>(`SELECT ${featureFlagColumns} FROM feature_flags
+      WHERE workspace_id=$1 ORDER BY flag_key, scope, scope_id`, [context.workspaceId]);
+    return result.rows;
+  }
+
+  async setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag> {
+    const scopeId = input.scope === "global" ? "" : (input.scopeId ?? "");
+    if (input.scope !== "global" && !scopeId) throw new WorkspaceAccessError("scopeId is required for company and user scoped flags");
+    const current = await this.pool.query<FeatureFlag>(`SELECT ${featureFlagColumns} FROM feature_flags
+      WHERE workspace_id=$1 AND scope=$2 AND scope_id=$3 AND flag_key=$4`, [context.workspaceId, input.scope, scopeId, input.flagKey]);
+    const previous = current.rows[0] ?? null;
+    if (input.expectedRevision !== undefined && previous && previous.revision !== input.expectedRevision) {
+      throw new WorkspaceAccessError("Feature flag changed by another request. Reload and try again.");
+    }
+    const stage = input.stage ?? previous?.stage ?? "off";
+    const enabled = input.enabled ?? previous?.enabled ?? false;
+    const rolloutPercent = input.rolloutPercent ?? previous?.rolloutPercent ?? 0;
+    const allowlist = input.allowlist ?? previous?.allowlist ?? [];
+    const result = await this.pool.query<FeatureFlag>(`INSERT INTO feature_flags
+      (id, workspace_id, scope, scope_id, flag_key, stage, enabled, rollout_percent, allowlist, revision, updated_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10)
+      ON CONFLICT (workspace_id, scope, scope_id, flag_key) DO UPDATE
+        SET stage=$6, enabled=$7, rollout_percent=$8, allowlist=$9,
+            revision=feature_flags.revision+1, updated_by=$10, updated_at=now()
+      RETURNING ${featureFlagColumns}`,
+      [randomUUID(), context.workspaceId, input.scope, scopeId, input.flagKey, stage, enabled, rolloutPercent, JSON.stringify(allowlist), context.userId]);
+    await this.pool.query(`INSERT INTO feature_flag_history
+      (id, workspace_id, flag_key, scope, scope_id, previous_value, next_value, actor)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [randomUUID(), context.workspaceId, input.flagKey, input.scope, scopeId,
+        previous ? JSON.stringify(previous) : null, JSON.stringify(result.rows[0]!), context.userId]);
+    return result.rows[0]!;
+  }
+
+  async listFeatureFlagHistory(context: AuthContext, flagKey?: string, limit = 100): Promise<FeatureFlagHistoryEntry[]> {
+    const result = await this.pool.query<FeatureFlagHistoryEntry>(`SELECT id, workspace_id AS "workspaceId", flag_key AS "flagKey",
+      scope, scope_id AS "scopeId", previous_value AS "previousValue", next_value AS "nextValue", actor, created_at AS "createdAt"
+      FROM feature_flag_history WHERE workspace_id=$1 AND ($2::text IS NULL OR flag_key=$2)
+      ORDER BY created_at DESC LIMIT $3`, [context.workspaceId, flagKey ?? null, Math.max(1, Math.min(limit, 500))]);
+    return result.rows;
+  }
+
+  async publishCodeToolManifest(context: AuthContext, manifest: { version: number; tools: CodeToolManifest["tools"]; checksum: string }): Promise<CodeToolManifest> {
+    const result = await this.pool.query<CodeToolManifest>(`INSERT INTO code_tool_manifest (version, tools, checksum)
+      VALUES($1,$2,$3)
+      ON CONFLICT (version) DO UPDATE SET tools=$2, checksum=$3
+      RETURNING version, tools, checksum, created_at AS "createdAt"`, [manifest.version, JSON.stringify(manifest.tools), manifest.checksum]);
+    return result.rows[0]!;
+  }
+
+  async latestCodeToolManifest(context: AuthContext): Promise<CodeToolManifest | null> {
+    const result = await this.pool.query<CodeToolManifest>(`SELECT version, tools, checksum, created_at AS "createdAt"
+      FROM code_tool_manifest ORDER BY version DESC LIMIT 1`);
+    return result.rows[0] ?? null;
   }
 
   // --- C1c: append-only audit log ----------------------------------------------------------

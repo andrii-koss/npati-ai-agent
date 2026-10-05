@@ -69,6 +69,8 @@ import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
+import { assertManifestConsistent, currentToolManifest } from "./code-tool-registry";
+import { FeatureFlagService } from "./feature-flags";
 import type { CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
 import { registerProjectDeployRoutes } from "./project-deploy-routes";
@@ -971,7 +973,31 @@ export function buildApp(config: AppConfig = {}) {
   const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
   // C1: code projects and code sessions. No tools and no agent loop here; the runner is C6.
-  const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService);
+  // C1a: the Coding Agent is dark by default; every code mutation (and later every tool) passes here.
+  const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, {}, async (ctx, companyId) => {
+    // Best-effort kill-switch cleanup: stop the company's project sandboxes. Full teardown and
+    // SecretLease revocation are C4/C6 work; failures here must not block the kill switch.
+    let stopped = 0;
+    try {
+      const projects = await projectService.list(ctx, companyId, true);
+      for (const project of projects) {
+        if (!project.sandboxId || !projectSandbox) continue;
+        await projectSandbox.destroy(ctx, project).then(() => { stopped += 1; }).catch(() => undefined);
+      }
+    } catch { /* ignore */ }
+    return stopped;
+  });
+  const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService, featureFlagService);
+  // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
+  // published checksum), so a session can always be read with the exact tool versions it used.
+  try {
+    assertManifestConsistent();
+    const manifest = currentToolManifest();
+    void workspaceStore.publishCodeToolManifest(
+      { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: "system", permissions: ["workspace:read"] },
+      { version: manifest.version, tools: manifest.tools, checksum: manifest.checksum },
+    ).catch(() => undefined);
+  } catch (error) { app.log.error({ err: error }, "code_tool_manifest_inconsistent"); }
   const projectFileLeaseManager = new ProjectFileLeaseManager();
   const projectDeployService = new ProjectDeployService(
     workspaceStore,
@@ -2611,7 +2637,7 @@ ${localized.next}`;
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
-  registerCodeRoutes(app, authProvider, codeService);
+  registerCodeRoutes(app, authProvider, codeService, featureFlagService);
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);

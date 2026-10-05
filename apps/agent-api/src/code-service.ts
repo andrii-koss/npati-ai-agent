@@ -4,6 +4,8 @@ import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import { TOOLCHAIN_MANIFEST_FILES, detectToolchain } from "./code-toolchain-detector";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
+import { currentToolManifest } from "./code-tool-registry";
+import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError } from "./feature-flags";
 
 /** Structured error so every code entry point fails predictably (rule 9). */
 export class CodeError extends Error {
@@ -58,8 +60,20 @@ export class CodeService {
      * audit outage refuses the action instead of performing it unaudited (fail closed).
      */
     private readonly audit?: { record(ctx: AuthContext, input: { companyId: string; actor: string; actorRole: string; action: string; resourceType: string; resourceId?: string; projectId?: string; decision: "allowed" | "denied" | "approved" | "rejected"; payload?: unknown; metadata?: Record<string, unknown> }): Promise<unknown> },
+    /**
+     * C1a: every mutation additionally passes the feature-flag gate. When the flag service is missing
+     * the service denies instead of allowing: an unconfigured deployment is a dark deployment.
+     */
+    private readonly flags?: { assertEnabled(ctx: AuthContext, flagKey: string, options?: { companyId?: string; userId?: string }): Promise<true> },
   ) {
     this.limits = { ...resolveCodeAgentLimits(), ...limits };
+  }
+
+  /** Deny-by-default gate applied by every state-changing code action. */
+  private async assertWriteEnabled(ctx: AuthContext, companyId: string, subFlag: "code.write" | "code.read") {
+    if (!this.flags) throw new FeatureDisabledError(CODE_AGENT_MASTER_FLAG, "Coding Agent is disabled: feature flags are not configured");
+    await this.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId });
+    await this.flags.assertEnabled(ctx, subFlag, { companyId });
   }
 
   private async auditCodeAction(ctx: AuthContext, companyId: string, action: string, resourceType: string, resourceId: string | undefined, projectId: string | undefined, payload: unknown, metadata: Record<string, unknown> = {}) {
@@ -128,6 +142,7 @@ export class CodeService {
    */
   async createProject(ctx: AuthContext, companyId: string, input: CreateCodeProjectInput): Promise<Project> {
     this.assertWrite(ctx);
+    await this.assertWriteEnabled(ctx, companyId, "code.write");
     const name = typeof input?.name === "string" ? input.name.trim() : "";
     if (!name || name.length > 200) throw new CodeError("invalid_name", "Project name must be between 1 and 200 characters", 400);
     const dataClassification = input.dataClassification === undefined ? DEFAULT_DATA_CLASSIFICATION : this.assertClassification(input.dataClassification);
@@ -170,6 +185,7 @@ export class CodeService {
   /** User edits: toolchain/verify commands, default branch, classification and retention. */
   async updateProject(ctx: AuthContext, companyId: string, projectId: string, input: UpdateCodeProjectInput): Promise<Project> {
     this.assertWrite(ctx);
+    await this.assertWriteEnabled(ctx, companyId, "code.write");
     const project = await this.projects.get(ctx, companyId, projectId);
     if (!Number.isInteger(input?.expectedRevision) || input.expectedRevision < 1) throw new CodeError("invalid_revision", "expectedRevision is required", 400);
     const code: ProjectCodeSettings = {};
@@ -214,13 +230,20 @@ export class CodeService {
 
   async createSession(ctx: AuthContext, companyId: string, projectId: string, input: CodeSessionInput = {}): Promise<CodeSession> {
     this.assertWrite(ctx);
+    await this.assertWriteEnabled(ctx, companyId, "code.write");
     const project = await this.projects.get(ctx, companyId, projectId);
     if (project.status === "archived") throw new CodeError("project_archived", "Cannot start a session in an archived project", 409);
     if (input.dataClassification !== undefined) this.assertClassification(input.dataClassification);
     await this.auditCodeAction(ctx, companyId, "code.session.create", "code_session", undefined, projectId,
       { projectId, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null, dataClassification: input.dataClassification ?? project.dataClassification });
     const session = await this.store.createCodeSession(ctx, companyId, projectId, input);
-    return session;
+    // C1a (rule 12): the session pins the tool-schema manifest version it was created with, so a
+    // later tool release cannot change how this session is read or replayed.
+    try {
+      return await this.store.updateCodeSession(ctx, companyId, session.id, { toolManifestVersion: currentToolManifest().version });
+    } catch {
+      return session;
+    }
   }
 
   async getSession(ctx: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
@@ -242,6 +265,9 @@ export class CodeService {
 
   async updateSessionStatus(ctx: AuthContext, companyId: string, sessionId: string, status: CodeSessionStatus, summary?: string): Promise<CodeSession> {
     this.assertWrite(ctx);
+    // Status transitions of a running session belong to the agent loop (C6); archiving stays a
+    // History-management action and is therefore allowed while the feature is dark.
+    if (status !== "archived") await this.assertWriteEnabled(ctx, companyId, "code.write");
     const session = await this.store.getCodeSession(ctx, companyId, sessionId);
     if (session.status === "archived" && status !== "archived") throw new CodeError("session_archived", "Archived sessions cannot be reactivated in C1", 409);
     await this.auditCodeAction(ctx, companyId, `code.session.${status === "archived" ? "archive" : "status"}`, "code_session", sessionId, session.projectId,

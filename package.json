@@ -16,6 +16,7 @@
     "test:stability": "vitest run tests/multi-provider-company-stability.test.ts tests/scale-certification-production.test.ts tests/phase12-scale-criteria.test.ts tests/production-p03-reliability-scale.test.ts",
     "test:email-stability": "vitest run tests/email-flood-stability-and-security.test.ts tests/email-ai-inbox.test.ts tests/email-messaging-gateway.test.ts tests/email-transport.test.ts",
     "audit:capabilities": "node scripts/verify-capability-matrix.mjs",
+    "audit:code-tools": "node scripts/verify-code-tool-schemas.mjs --check",
     "benchmark:scale": "node scripts/scale-benchmark.mjs",
     "cert:scale": "docker compose -f docker-compose.yml -f docker-compose.scale.yml run --rm scale-certifier",
     "cert:scale:smoke": "docker compose -f docker-compose.yml -f docker-compose.scale.yml run --rm scale-certifier node scripts/run-scale-certification.mjs --smoke",

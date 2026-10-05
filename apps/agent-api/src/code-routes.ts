@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { CodeError, type CodeService } from "./code-service";
+import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError, FeatureFlagError, isValidCodeFlagKey, type FeatureFlagService } from "./feature-flags";
+import { API_VERSION, resolveApiVersion } from "./api-versioning";
 
 type CompanyParams = { companyId: string };
 type ProjectParams = { companyId: string; projectId: string };
@@ -9,7 +11,13 @@ type SessionParams = { companyId: string; sessionId: string };
 
 function fail(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: false } });
+  if (error instanceof FeatureDisabledError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, flagKey: error.flagKey, retryable: false } });
+  if (error instanceof FeatureFlagError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: false } });
   if (error instanceof CodeError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: error.retryable } });
+  // Revision conflicts from the store surface as a stable code so clients can reload and retry.
+  if (error instanceof WorkspaceAccessError && /changed by another request/i.test(error.message)) {
+    return reply.code(409).send({ error: { code: "flag_revision_conflict", message: error.message, retryable: true } });
+  }
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: "code_access_denied", message: error.message, retryable: false } });
   if (error instanceof WorkspaceNotFoundError) return reply.code(404).send({ error: { code: "code_not_found", message: error.message, retryable: false } });
   const message = error instanceof Error ? error.message : "Coding Agent request failed";
@@ -17,19 +25,37 @@ function fail(reply: FastifyReply, error: unknown) {
 }
 
 /**
- * C1: code project and code session API.
+ * C1/C1a: code project and code session API.
  *
- * C1a puts every route behind the coding feature flag; until the flag service exists these routes
- * are only reachable by an authenticated owner/admin of the company (checked server-side on every
- * call), and they expose no tools, no sandbox execution and no model calls.
+ * Reads stay available at all times (History is read-only when the feature is off); every mutation
+ * additionally requires the master flag and its own sub-flag, checked here *and* in the service, so a
+ * direct service call or a forgotten route cannot bypass the gate. The feature is dark by default.
  */
-export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, service?: CodeService) {
+export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, service?: CodeService, flags?: FeatureFlagService) {
+  // C1a: every code API response advertises the API version it was served with.
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (request.url.includes("/code/") || request.url.includes("/code?")) reply.header("x-npati-api-version", API_VERSION);
+    return payload;
+  });
+
   const authorize = async (request: FastifyRequest, permission: "workspace:read" | "business:manage") => {
+    // C1a: the client states the API version it supports; an unsupported one is rejected with
+    // `unsupported_api_version` and every response carries the version it was served with.
+    resolveApiVersion(request.headers);
     const ctx = await auth.authenticate(request);
     if (!ctx.permissions.includes(permission) && !ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
       throw new WorkspaceAccessError("Missing permission: " + permission);
     }
     if (!service) throw new CodeError("code_unavailable", "Coding Agent is unavailable", 503, true);
+    return { ctx, service };
+  };
+
+  /** Mutation gate: master + sub-flag, evaluated on the server for the company in the path. */
+  const authorizeWrite = async (request: FastifyRequest, companyId: string, subFlag: string) => {
+    const { ctx, service } = await authorize(request, "business:manage");
+    if (!flags) throw new FeatureDisabledError(CODE_AGENT_MASTER_FLAG, "Coding Agent is unavailable: feature flags are not configured");
+    await flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId });
+    await flags.assertEnabled(ctx, subFlag, { companyId });
     return { ctx, service };
   };
 
@@ -53,7 +79,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
     } } } },
     async (request, reply) => {
       try {
-        const { ctx, service } = await authorize(request, "business:manage");
+        const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
         const project = await service.createProject(ctx, request.params.companyId, request.body as never);
         return reply.code(201).send(project);
       } catch (error) { return fail(reply, error); }
@@ -62,7 +88,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
 
   app.post<{ Params: ProjectParams }>("/companies/:companyId/projects/:projectId/code/detect-toolchain", async (request, reply) => {
     try {
-      const { ctx, service } = await authorize(request, "business:manage");
+      const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
       return await service.detectAndPersist(ctx, request.params.companyId, request.params.projectId);
     } catch (error) { return fail(reply, error); }
   });
@@ -79,7 +105,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
     } } } },
     async (request, reply) => {
       try {
-        const { ctx, service } = await authorize(request, "business:manage");
+        const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
         return await service.updateProject(ctx, request.params.companyId, request.params.projectId, request.body as never);
       } catch (error) { return fail(reply, error); }
     },
@@ -105,7 +131,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
     } } } },
     async (request, reply) => {
       try {
-        const { ctx, service } = await authorize(request, "business:manage");
+        const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
         const session = await service.createSession(ctx, request.params.companyId, request.params.projectId, request.body as never);
         return reply.code(201).send(session);
       } catch (error) { return fail(reply, error); }
@@ -121,6 +147,8 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
 
   app.post<{ Params: SessionParams }>("/companies/:companyId/code/sessions/:sessionId/archive", async (request, reply) => {
     try {
+      // Archiving is part of History management, so it stays available even when the feature is off
+      // (the user must always be able to tidy up and later delete their data).
       const { ctx, service } = await authorize(request, "business:manage");
       return await service.archiveSession(ctx, request.params.companyId, request.params.sessionId);
     } catch (error) { return fail(reply, error); }
@@ -132,4 +160,81 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
       return { limits: service.getLimits() };
     } catch (error) { return fail(reply, error); }
   });
+
+  // --- C1a: feature flags ---------------------------------------------------------------
+
+  /** Read-only flag view: works while the feature is off, which is how the UI knows it is dark. */
+  app.get<{ Params: CompanyParams }>("/companies/:companyId/code/flags", async (request, reply) => {
+    try {
+      const { ctx, service } = await authorize(request, "workspace:read");
+      if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
+      // Ownership probe: flag configuration is never readable for a company the caller cannot access.
+      await service.listProjects(ctx, request.params.companyId, true);
+      const described = await flags.describe(ctx, { companyId: request.params.companyId });
+      return {
+        flags: described.flags.map((flag) => ({ key: flag.key, enabled: flag.enabled, scope: flag.scope, stage: flag.stage, source: flag.source })),
+        master: { key: described.master.key, enabled: described.master.enabled, scope: described.master.scope, stage: described.master.stage, source: described.master.source },
+        darkLaunch: described.darkLaunch,
+        configured: (await flags.list(ctx)).filter((flag) => flag.scope === "global" || flag.scopeId === request.params.companyId),
+      };
+    } catch (error) { return fail(reply, error); }
+  });
+
+  app.put<{ Params: CompanyParams; Body: { scope: "global" | "company" | "user"; scopeId?: string; flagKey: string; stage?: "off" | "internal" | "allowlist" | "percent" | "ga"; enabled?: boolean; rolloutPercent?: number; allowlist?: string[]; expectedRevision?: number } }>(
+    "/companies/:companyId/code/flags",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["scope", "flagKey"], properties: {
+      scope: { type: "string", enum: ["global", "company", "user"] },
+      scopeId: { type: "string", maxLength: 200 },
+      flagKey: { type: "string", maxLength: 120 },
+      stage: { type: "string", enum: ["off", "internal", "allowlist", "percent", "ga"] },
+      enabled: { type: "boolean" },
+      rolloutPercent: { type: "integer", minimum: 0, maximum: 100 },
+      allowlist: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 500 },
+      expectedRevision: { type: "integer", minimum: 1 },
+    } } } },
+    async (request, reply) => {
+      try {
+        const ctx = await auth.authenticate(request);
+        if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
+        // Changing a flag is an administrative act: `business:manage` alone must not be enough, so the
+        // role check runs before any company lookup (a plain member gets 403 flag_admin_required).
+        if (!ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Changing a feature flag requires the owner/admin role", retryable: false } });
+        }
+        if (!isValidCodeFlagKey(request.body.flagKey)) {
+          return reply.code(400).send({ error: { code: "invalid_flag_key", message: `Invalid coding flag key "${request.body.flagKey}"`, retryable: false } });
+        }
+        // A flag change is only ever made from a company the caller can access.
+        if (!service) return reply.code(503).send({ error: { code: "code_unavailable", message: "Coding Agent is unavailable", retryable: true } });
+        await service.listProjects(ctx, request.params.companyId, true);
+        const saved = await flags.setFlag(ctx, request.body, { auditCompanyId: request.params.companyId });
+        return reply.send(saved);
+      } catch (error) { return fail(reply, error); }
+    },
+  );
+
+  app.post<{ Params: CompanyParams; Body: { reason?: string; scope?: "global" | "company" } }>(
+    "/companies/:companyId/code/flags/kill-switch",
+    { schema: { body: { type: "object", additionalProperties: false, properties: {
+      reason: { type: "string", maxLength: 500 },
+      scope: { type: "string", enum: ["global", "company"] },
+    } } } },
+    async (request, reply) => {
+      try {
+        const ctx = await auth.authenticate(request);
+        if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
+        // Same administrative role requirement as a flag change; a plain member cannot stop the feature.
+        if (!ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Using the kill switch requires the owner/admin role", retryable: false } });
+        }
+        if (!service) return reply.code(503).send({ error: { code: "code_unavailable", message: "Coding Agent is unavailable", retryable: true } });
+        await service.listProjects(ctx, request.params.companyId, true);
+        const result = await flags.killSwitch(ctx, {
+          companyId: request.body?.scope === "global" ? undefined : request.params.companyId,
+          reason: request.body?.reason,
+        });
+        return reply.send({ flag: result.flag, suspendedSessions: result.suspendedSessions, stoppedSandboxes: result.stoppedSandboxes });
+      } catch (error) { return fail(reply, error); }
+    },
+  );
 }
