@@ -6,6 +6,8 @@ import { useTranslation } from "./i18n";
 import type { Project } from "./ProjectSection";
 import { DataStudioAuthSection } from "./DataStudioAuthSection";
 import { DataStudioApiSection } from "./DataStudioApiSection";
+import { DataStudioBackupsSection } from "./DataStudioBackupsSection";
+import { DataStudioOperationsSection } from "./DataStudioOperationsSection";
 
 // --- Types ---
 export type FieldType =
@@ -127,7 +129,7 @@ export function DataStudioPage() {
 
   // Tab & collection selection
   const [selectedCollection, setSelectedCollection] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations" | "auth" | "api">("data");
+  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations" | "auth" | "api" | "backups" | "operations">("data");
 
   // Data view state (rows)
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -928,6 +930,20 @@ export function DataStudioPage() {
             >
               📜 {isUk ? "Історія міграцій" : "Migrations"} ({overview?.migrations.length || 0})
             </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${activeTab === "backups" ? "active" : ""}`}
+              onClick={() => setActiveTab("backups")}
+            >
+              💾 {isUk ? "Бекапи" : "Backups"}
+            </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${activeTab === "operations" ? "active" : ""}`}
+              onClick={() => setActiveTab("operations")}
+            >
+              🚀 {isUk ? "Promote та квоти" : "Promote & Quotas"}
+            </button>
           </div>
         </aside>
 
@@ -1029,6 +1045,43 @@ export function DataStudioPage() {
                 </table>
               </div>
             </div>
+          ) : activeTab === "backups" ? (
+            /* --- Backups & Restore View (D7) --- */
+            overview?.backend?.id ? (
+              <DataStudioBackupsSection
+                companyId={companyId}
+                backendId={overview.backend.id}
+                environment={environment}
+                isUk={isUk}
+                notify={notify}
+              />
+            ) : (
+              <div className="data-studio-pane">
+                <div className="data-studio-empty-card">
+                  <h2>{isUk ? "Data не підключено" : "No Data attached"}</h2>
+                  <p>{isUk ? "Прикріпіть DataBackend до проєкту, щоб працювати з бекапами." : "Attach a DataBackend to this project to manage backups."}</p>
+                </div>
+              </div>
+            )
+          ) : activeTab === "operations" ? (
+            /* --- Promote & Quotas View (D7) --- */
+            overview?.backend?.id ? (
+              <DataStudioOperationsSection
+                companyId={companyId}
+                backendId={overview.backend.id}
+                environment={environment}
+                isUk={isUk}
+                notify={notify}
+                syncStatus={overview.environment.syncStatus}
+              />
+            ) : (
+              <div className="data-studio-pane">
+                <div className="data-studio-empty-card">
+                  <h2>{isUk ? "Data не підключено" : "No Data attached"}</h2>
+                  <p>{isUk ? "Прикріпіть DataBackend до проєкту, щоб керувати promote та квотами." : "Attach a DataBackend to this project to manage promotions and quotas."}</p>
+                </div>
+              </div>
+            )
           ) : !currentTable ? (
             /* --- No Collection Selected State --- */
             <div className="empty-collection-state">

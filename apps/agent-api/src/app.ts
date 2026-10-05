@@ -39,7 +39,11 @@ import { registerWorkspaceRoutes } from "./workspace-routes";
 import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
 import { DataBackendRepository } from "./data-studio/repository";
-import { SharedPostgresProvisioner } from "./data-studio/provisioner";
+import { SharedPostgresProvisioner, ProvisionerRouter } from "./data-studio/provisioner";
+import { ExternalPostgresProvisioner } from "./data-studio/external-provisioner";
+import { QuotaService } from "./data-studio/quota-service";
+import { PromoteService } from "./data-studio/promote-service";
+import { BackupService } from "./data-studio/backup-service";
 import { DataBackendService } from "./data-studio/service";
 import { PostgresDataProvider } from "./data-studio/data-provider";
 import { registerDataBackendRoutes } from "./data-studio/routes";
@@ -839,6 +843,7 @@ export function buildApp(config: AppConfig = {}) {
   let projectSandbox: ProjectSandboxService | undefined = config.projectSandbox;
   const dataBackendRepository = config.databaseUrl ? new DataBackendRepository(config.databaseUrl) : undefined;
   const projectsAdminPassword = process.env.NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD;
+  const snapshotDirectory = process.env.NPATI_PROJECTS_SNAPSHOT_DIR || path.join(config.dataDirectory ?? ".data", "data-backend-snapshots");
   const sharedPostgresProvisioner = dataBackendRepository && projectsAdminPassword
     ? new SharedPostgresProvisioner({
         host: process.env.NPATI_PROJECTS_POSTGRES_HOST || "postgres-projects",
@@ -846,39 +851,58 @@ export function buildApp(config: AppConfig = {}) {
         adminUser: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_USER || "npati_projects_admin",
         adminPassword: projectsAdminPassword,
         maintenanceDatabase: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_DB || "postgres",
-        snapshotDirectory: process.env.NPATI_PROJECTS_SNAPSHOT_DIR || path.join(config.dataDirectory ?? ".data", "data-backend-snapshots"),
+        snapshotDirectory,
       }, dataBackendRepository)
     : undefined;
-  const dataProvider = sharedPostgresProvisioner ? new PostgresDataProvider({
+  // D7: DataBackends may live on the shared cluster or on an external Postgres the owner provides.
+  const externalPostgresProvisioner = dataBackendRepository ? new ExternalPostgresProvisioner(dataBackendRepository, { snapshotDirectory }) : undefined;
+  const databaseProvisioner = dataBackendRepository && (sharedPostgresProvisioner || externalPostgresProvisioner)
+    ? new ProvisionerRouter(sharedPostgresProvisioner, externalPostgresProvisioner)
+    : undefined;
+  const dataProvider = databaseProvisioner ? new PostgresDataProvider({
     maxCollections: Number(process.env.NPATI_DATA_MAX_COLLECTIONS) || 50,
     maxFields: Number(process.env.NPATI_DATA_MAX_FIELDS) || 100,
     maxRows: Number(process.env.NPATI_DATA_MAX_ROWS) || 100,
     maxQueriesPerMinute: Number(process.env.NPATI_DATA_MAX_QUERIES_PER_MINUTE) || 600,
     maxDatabaseBytes: Number(process.env.NPATI_DATA_MAX_DATABASE_BYTES) || 1_000_000_000,
-  }, sharedPostgresProvisioner) : undefined;
-  const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, dataProvider) : undefined;
-  const projectMigrationEngine = dataBackendRepository && sharedPostgresProvisioner && dataProvider
-    ? new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)
+  }, databaseProvisioner) : undefined;
+  const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, databaseProvisioner, dataProvider) : undefined;
+  const projectMigrationEngine = dataBackendRepository && databaseProvisioner && dataProvider
+    ? new ProjectMigrationEngine(databaseProvisioner, dataProvider, dataBackendRepository)
+    : undefined;
+  const quotaService = dataBackendRepository && databaseProvisioner
+    ? new QuotaService(dataBackendRepository, databaseProvisioner)
+    : undefined;
+  const promoteService = dataBackendRepository && databaseProvisioner && projectMigrationEngine && dataProvider
+    ? new PromoteService(dataBackendRepository, databaseProvisioner, projectMigrationEngine, dataProvider)
+    : undefined;
+  const backupService = dataBackendRepository && databaseProvisioner
+    ? new BackupService(dataBackendRepository, databaseProvisioner, dataProvider)
     : undefined;
   const projectRedirectRepository = new ProjectRedirectRepository({ get: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId) }, config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const projectAuthService = dataBackendRepository && sharedPostgresProvisioner
+  const projectAuthService = dataBackendRepository && databaseProvisioner
     ? new ProjectAuthService({
         store: workspaceStore,
         repository: dataBackendRepository,
-        provisioner: sharedPostgresProvisioner,
+        provisioner: databaseProvisioner,
         redirects: projectRedirectRepository,
       })
     : undefined;
-  const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
+  const projectService = new ProjectService(workspaceStore, async (context, project) => {
+    if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project");
+    await projectSandbox?.destroy(context, project);
+    // D7: deleting a Project only detaches it; the DataBackend keeps serving other Projects.
+    await dataBackendService?.detachProjectArtifacts(context, project.companyId, project.id).catch(() => undefined);
+  });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   // The gateway vendors the Project API client into the Project workspace, so it needs the workspace handle.
-  const projectApiGatewayService = dataBackendRepository && sharedPostgresProvisioner
-    ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, projectAuthService, dataProvider, undefined, projectWorkspace)
+  const projectApiGatewayService = dataBackendRepository && databaseProvisioner
+    ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, databaseProvisioner, projectAuthService, dataProvider, undefined, projectWorkspace, quotaService)
     : undefined;
-  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
+  const dataStudioService = dataBackendRepository && databaseProvisioner && dataProvider && projectMigrationEngine
     ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectApiGatewayService) : undefined;
   const agentDataStudioService = dataBackendRepository && dataProvider && projectMigrationEngine
-    ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace, projectAuthService)
+    ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace, projectAuthService, promoteService)
     : undefined;
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
@@ -891,6 +915,10 @@ export function buildApp(config: AppConfig = {}) {
     syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
     syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
   }, projectApiGatewayService ? (ctx, companyId, projectId) => projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : undefined);
+  const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
+    ? setInterval(() => { void backupService.runScheduled(); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
+    : undefined;
+  backupTimer?.unref();
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
@@ -2510,7 +2538,7 @@ ${localized.next}`;
     beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
   });
   registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
-  registerDataBackendRoutes(app, authProvider, dataBackendService);
+  registerDataBackendRoutes(app, authProvider, dataBackendService, { promote: promoteService, backups: backupService, quotas: quotaService });
   registerDataStudioRoutes(app, authProvider, dataStudioService);
   registerProjectAuthRoutes(app, authProvider, projectAuthService);
   registerProjectApiGatewayRoutes(app, projectApiGatewayService, projectAuthService);
@@ -2518,7 +2546,7 @@ ${localized.next}`;
     await projectApiGatewayService?.close();
     await projectAuthService?.close();
     await dataProvider?.close();
-    await sharedPostgresProvisioner?.close();
+    await databaseProvisioner?.close();
     await dataBackendRepository?.close();
   });
   registerProjectFileRoutes(app, projectWorkspace, authProvider);
@@ -2635,7 +2663,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();

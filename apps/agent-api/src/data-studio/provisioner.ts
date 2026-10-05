@@ -14,6 +14,8 @@ export interface DatabaseProvisioner {
   getConnection(backend: DataBackend, environment: DataEnvironmentName, role: DatabaseRole): Promise<ProjectDatabaseConnection>;
   rotateCredentials(backend: DataBackend, environment: DataEnvironmentName, role: DatabaseRole): Promise<void>;
   suspendRuntime(backend: DataBackend, environment: DataEnvironmentName): Promise<void>;
+  /** D7: reverses `suspendRuntime` so an archived DataBackend can be activated again. */
+  resumeRuntime(backend: DataBackend, environment: DataEnvironmentName): Promise<void>;
   snapshot(backend: DataBackend, environment: DataEnvironmentName): Promise<ProjectSnapshot>;
   restoreSnapshot(backend: DataBackend, environment: DataEnvironmentName, snapshot: ProjectSnapshot): Promise<void>;
   getUsage(backend: DataBackend, environment: DataEnvironmentName): Promise<ProjectDatabaseUsage>;
@@ -26,6 +28,49 @@ export interface SharedPostgresConfig {
   adminPassword: string;
   maintenanceDatabase: string;
   snapshotDirectory: string;
+}
+
+/**
+ * D7: DataBackends can live on the shared `postgres-projects` cluster or on an external
+ * Postgres the owner provides. Every consumer keeps depending on `DatabaseProvisioner`;
+ * this router only picks the implementation for the backend being addressed.
+ */
+export class ProvisionerRouter implements DatabaseProvisioner {
+  constructor(
+    private readonly shared?: DatabaseProvisioner,
+    private readonly external?: DatabaseProvisioner,
+  ) {}
+
+  private pick(backend: DataBackend): DatabaseProvisioner {
+    const provisioner = backend.provider === "external_postgres" ? this.external : this.shared;
+    if (!provisioner) {
+      throw new DataStudioError(
+        503,
+        "provision",
+        backend.provider === "external_postgres"
+          ? "External database support is not configured on this installation"
+          : "The shared project database (postgres-projects) is not configured on this installation",
+        false,
+        "PROVISIONER_UNAVAILABLE",
+      );
+    }
+    return provisioner;
+  }
+
+  provisionDatabase(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).provisionDatabase(backend, environment); }
+  deprovisionDatabase(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).deprovisionDatabase(backend, environment); }
+  getConnection(backend: DataBackend, environment: DataEnvironmentName, role: DatabaseRole) { return this.pick(backend).getConnection(backend, environment, role); }
+  rotateCredentials(backend: DataBackend, environment: DataEnvironmentName, role: DatabaseRole) { return this.pick(backend).rotateCredentials(backend, environment, role); }
+  suspendRuntime(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).suspendRuntime(backend, environment); }
+  resumeRuntime(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).resumeRuntime(backend, environment); }
+  snapshot(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).snapshot(backend, environment); }
+  restoreSnapshot(backend: DataBackend, environment: DataEnvironmentName, snapshot: ProjectSnapshot) { return this.pick(backend).restoreSnapshot(backend, environment, snapshot); }
+  getUsage(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).getUsage(backend, environment); }
+
+  async close() {
+    await (this.shared as { close?: () => Promise<void> } | undefined)?.close?.().catch(() => undefined);
+    await (this.external as { close?: () => Promise<void> } | undefined)?.close?.().catch(() => undefined);
+  }
 }
 
 function ownerContext(backend: DataBackend): AuthContext {
@@ -152,6 +197,11 @@ export class SharedPostgresProvisioner implements DatabaseProvisioner {
     await this.adminPool.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " NOLOGIN");
     await this.adminPool.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename=$1 AND datname=$2 AND pid<>pg_backend_pid()",
       [names.runtime, names.database]);
+  }
+
+  async resumeRuntime(backend: DataBackend, environment: DataEnvironmentName): Promise<void> {
+    const names = objectNames(backend, environment);
+    await this.adminPool.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " LOGIN");
   }
 
   async snapshot(backend: DataBackend, environment: DataEnvironmentName): Promise<ProjectSnapshot> {

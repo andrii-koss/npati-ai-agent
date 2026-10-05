@@ -3,7 +3,7 @@ import { DataStudioError } from "./identifier";
 import type { DataBackendRepository } from "./repository";
 import type { DatabaseProvisioner } from "./provisioner";
 import type { DataProvider } from "./data-provider";
-import type { DataBackend, DataProviderKind } from "./types";
+import type { DataBackend, DataEnvironmentName, DataProviderKind } from "./types";
 
 export class DataBackendService {
   constructor(
@@ -18,16 +18,25 @@ export class DataBackendService {
     return this.provisioner;
   }
 
-  async create(ctx: AuthContext, companyId: string, input: { name: string; provider?: DataProviderKind }): Promise<DataBackend> {
+  async create(ctx: AuthContext, companyId: string, input: { name: string; provider?: DataProviderKind; connectionString?: string }): Promise<DataBackend> {
     await this.store.getCompany(ctx, companyId);
     const name = typeof input?.name === "string" ? input.name.trim() : "";
     if (!name || name.length > 200) throw new DataStudioError(400, "create_backend", "Name must be 1-200 characters", false, "INVALID_NAME");
     const provider = input.provider ?? "shared_postgres";
-    if (provider !== "shared_postgres") throw new DataStudioError(400, "create_backend", "Provider is not available in D1", false, "UNSUPPORTED_PROVIDER");
+    if (!["shared_postgres", "external_postgres"].includes(provider)) {
+      throw new DataStudioError(400, "create_backend", "Unsupported provider", false, "UNSUPPORTED_PROVIDER");
+    }
+    if (provider === "external_postgres" && !/^postgres(?:ql)?:\/\//i.test(input.connectionString ?? "")) {
+      throw new DataStudioError(400, "create_backend", "An external backend needs a postgres:// connection string", false, "INVALID_CONNECTION_STRING");
+    }
     const provisioner = this.available();
     const backend = await this.repository.create(ctx, companyId, name, provider);
     try {
       for (const environment of ["dev", "prod"] as const) {
+        if (provider === "external_postgres") {
+          // The owner connection string never leaves Core secret storage; only a reference is kept.
+          await this.repository.putSecret(ctx, companyId, backend.id, environment, "external_owner", input.connectionString!);
+        }
         await provisioner.provisionDatabase(backend, environment);
         if (this.dataProvider) {
           const schema = await this.dataProvider.introspectSchema(backend, environment);
@@ -46,11 +55,21 @@ export class DataBackendService {
   async activate(ctx: AuthContext, companyId: string, id: string) {
     await this.store.getCompany(ctx, companyId);
     const backend = await this.repository.get(ctx, companyId, id);
-    if (backend.status === "archived" || backend.status === "deleting") throw new DataStudioError(409, "activate_backend", "Backend cannot be activated", false, "BACKEND_INACTIVE");
+    if (backend.status === "deleting") throw new DataStudioError(409, "activate_backend", "Backend is being deleted", false, "BACKEND_INACTIVE");
     const provisioner = this.available();
     for (const environment of ["dev", "prod"] as const) {
       const current = await this.repository.environment(ctx, companyId, id, environment);
-      if (current.status === "ready") continue;
+      if (current.status === "ready") {
+        // D7: an archived backend only had its runtime role suspended, the database still exists.
+        await provisioner.resumeRuntime(backend, environment).catch(() => undefined);
+        await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "ready" });
+        continue;
+      }
+      if (current.status === "archived") {
+        await provisioner.resumeRuntime(backend, environment).catch(() => undefined);
+        await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "ready" });
+        continue;
+      }
       await provisioner.provisionDatabase(backend, environment);
       if (this.dataProvider) {
         const schema = await this.dataProvider.introspectSchema(backend, environment);
@@ -96,28 +115,87 @@ export class DataBackendService {
     return this.repository.get(ctx, companyId, id);
   }
 
-  async attach(ctx: AuthContext, companyId: string, projectId: string, backendId: string | null) {
-    await this.store.getProject(ctx, companyId, projectId);
+  /** D7: quota overrides for one environment (values are validated by QuotaService). */
+  async setEnvironmentLimits(
+    ctx: AuthContext,
+    companyId: string,
+    backendId: string,
+    environment: DataEnvironmentName,
+    limits: Record<string, number>,
+  ): Promise<Record<string, number>> {
+    await this.store.getCompany(ctx, companyId);
+    await this.repository.get(ctx, companyId, backendId);
+    await this.repository.setEnvironment(ctx, companyId, backendId, environment, { limits });
+    const updated = await this.repository.environment(ctx, companyId, backendId, environment);
+    return updated.limits ?? {};
+  }
+
+  async attach(ctx: AuthContext, companyId: string, projectId: string, backendId: string | null) {    await this.store.getProject(ctx, companyId, projectId);
     if (backendId) await this.repository.get(ctx, companyId, backendId);
     const dataBackendId = await this.repository.attach(ctx, companyId, projectId, backendId);
     return { projectId, dataBackendId };
   }
 
-  async remove(ctx: AuthContext, companyId: string, id: string, confirmation: string) {
+  /**
+   * D7 two-phase removal. The backend is detached from every project first; its databases, roles,
+   * keys and secrets are then purged only after the configured snapshot retention window, so a
+   * mistaken removal is still recoverable. `immediate` skips the wait (used by tooling and tests).
+   */
+  async remove(ctx: AuthContext, companyId: string, id: string, confirmation: string, options: { immediate?: boolean } = {}) {
     await this.store.getCompany(ctx, companyId);
     const backend = await this.repository.get(ctx, companyId, id);
     if (confirmation !== backend.name) throw new DataStudioError(400, "delete_backend", "Confirmation name does not match", false, "CONFIRMATION_REQUIRED");
     const provisioner = this.available();
     await this.repository.beginRemoval(ctx, companyId, id);
     for (const environment of ["dev", "prod"] as const) {
-      const env = await this.repository.environment(ctx, companyId, id, environment);
-      if (env.status === "ready" || env.status === "archived") {
-        await provisioner.snapshot(backend, environment);
-        await provisioner.deprovisionDatabase(backend, environment);
-        await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "unavailable" });
+      const env = await this.repository.environment(ctx, companyId, id, environment).catch(() => null);
+      if (env && (env.status === "ready" || env.status === "archived")) {
+        await provisioner.snapshot(backend, environment).catch(() => undefined);
+        if (options.immediate) {
+          await provisioner.deprovisionDatabase(backend, environment);
+          await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "unavailable" });
+        } else {
+          await provisioner.suspendRuntime(backend, environment).catch(() => undefined);
+        }
       }
     }
-    await this.repository.remove(ctx, companyId, id);
-    return { id, deleted: true };
+    if (options.immediate) {
+      await this.repository.deleteSecrets(id).catch(() => undefined);
+      await this.repository.remove(ctx, companyId, id);
+      return { id, deleted: true, deferred: false };
+    }
+    const retentionDays = Math.max(1, Number(process.env.NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS) || 30);
+    const removeAfter = new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000);
+    await this.repository.setRemovalDeadline(ctx, companyId, id, removeAfter);
+    return { id, deleted: false, deferred: true, removeAfter: removeAfter.toISOString(), retentionDays };
+  }
+
+  /**
+   * D7 cleanup when a Project disappears: the DataBackend stays, but everything bound to that
+   * project is removed — its CORS origins, its API request logs and its auth redirect URLs.
+   */
+  async detachProjectArtifacts(ctx: AuthContext, companyId: string, projectId: string): Promise<{ detached: boolean; cleanedOrigins: number; cleanedRedirects: number }> {
+    const project = await this.store.getProject(ctx, companyId, projectId).catch(() => null);
+    const backendId = project?.dataBackendId;
+    if (!backendId) return { detached: false, cleanedOrigins: 0, cleanedRedirects: 0 };
+    let cleanedOrigins = 0;
+    for (const environment of ["dev", "prod"] as const) {
+      const env = await this.repository.environment(ctx, companyId, backendId, environment).catch(() => null);
+      if (!env) continue;
+      const byProject = (env.providerConfig?.corsOriginsByProject ?? {}) as Record<string, string[]>;
+      if (!(projectId in byProject)) continue;
+      const next = { ...byProject };
+      delete next[projectId];
+      await this.repository.setEnvironment(ctx, companyId, backendId, environment, {
+        providerConfig: { ...env.providerConfig, corsOriginsByProject: next },
+      }).catch(() => undefined);
+      cleanedOrigins += 1;
+    }
+    const redirects = await this.repository.pool.query("DELETE FROM project_redirect_urls WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3",
+      [ctx.workspaceId, companyId, projectId]).catch(() => null);
+    await this.repository.pool.query("DELETE FROM project_api_request_logs WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3",
+      [ctx.workspaceId, companyId, projectId]).catch(() => undefined);
+    await this.repository.attach(ctx, companyId, projectId, null).catch(() => undefined);
+    return { detached: true, cleanedOrigins, cleanedRedirects: redirects?.rowCount ?? 0 };
   }
 }

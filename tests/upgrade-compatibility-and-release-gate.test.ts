@@ -51,15 +51,15 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   });
 
   describe("All 306 Mapped Statuses & Zero Capability Disappearance", () => {
-    it("verifies the 306 baseline and all 347 current capabilities are retained", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(347);
-      expect(CAPABILITY_CATALOG.length).toBe(347);
+    it("verifies the 306 baseline and all 348 current capabilities are retained", () => {
+      expect(CAPABILITY_MATRIX.length).toBe(348);
+      expect(CAPABILITY_CATALOG.length).toBe(348);
 
       const catalogIds = new Set(CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds || []));
       const matrixIds = new Set(CAPABILITY_MATRIX.map((c) => c.id));
 
-      expect(catalogIds.size).toBe(347);
-      expect(matrixIds.size).toBe(347);
+      expect(catalogIds.size).toBe(348);
+      expect(matrixIds.size).toBe(348);
 
       // Diff check: every ID 1..306 must be in both
       for (let i = 1; i <= 306; i++) {
@@ -170,7 +170,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(status.get(80)).toBe("NOT_IMPLEMENTED");
       expect(status.get(81)).toBe("VERIFIED_EXISTING");
       expect(status.get(82)).toBe("VERIFIED_EXISTING");
-      expect(status.get(83)).toBe("VERIFIED_EXISTING");
+      expect(status.get(84)).toBe("VERIFIED_EXISTING");
       expect(status.get(84)).toBe("VERIFIED_EXISTING");
       expect(status.get(85)).toBe("VERIFIED_EXISTING");
       expect(status.get(86)).toBe("VERIFIED_EXISTING");

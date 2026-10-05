@@ -20,6 +20,7 @@ export const DATA_CAPABILITY_GROUPS = {
     "project.data.schema.apply",
     "project.data.templates.list",
     "project.data.templates.apply",
+    "project.data.promote",
   ],
   "auth.admin": [
     "project.auth.inspect",
@@ -300,6 +301,7 @@ export const PROJECT_DATA_CAPABILITIES: CapabilityDefinition[] = [
         projectId: { type: "string" },
         templateId: { type: "string", enum: ["ecommerce", "blog", "crm", "saas-basic"] },
         dryRun: { type: "boolean", description: "Preview plan and diff without applying" },
+        seedDemoData: { type: "boolean", description: "Also insert optional demo rows (dev environment only)" },
       },
     },
     version: 1,
@@ -384,10 +386,35 @@ export const PROJECT_DATA_CAPABILITIES: CapabilityDefinition[] = [
     },
     version: 1,
   },
+  {
+    id: "project.data.promote",
+    inventoryIds: [348],
+    type: "tool",
+    domain: "storage",
+    name: "Project Data Promote",
+    description: "Previews and applies a dev → prod promotion of the DataBackend (schema migrations only; dev rows are copied only when explicitly requested with withData). Requires prod to be synced and always needs human approval.",
+    useWhen: ["An authorized agent prepared schema changes in dev and the owner wants them in production."],
+    doNotUseWhen: ["Prod has schema drift, the Project has no DataBackend, or the owner has not approved the promotion."],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: ["workspace:write"],
+    inputSchema: {
+      type: "object",
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string" },
+        withData: { type: "boolean", description: "Copy dev rows into prod (defaults to false)" },
+        dryRun: { type: "boolean", description: "Only return the diff and flags" },
+      },
+    },
+    version: 1,
+  },
 ];
 
-export const PROJECT_DATA_MATRIX: CapabilityMatrixEntry[] = PROJECT_DATA_CAPABILITIES.map((capability) => ({
-  id: capability.inventoryIds[0]!,
+export const PROJECT_DATA_MATRIX: CapabilityMatrixEntry[] = PROJECT_DATA_CAPABILITIES.map((capability) => ({  id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
   name: capability.name,
   type: "tool",

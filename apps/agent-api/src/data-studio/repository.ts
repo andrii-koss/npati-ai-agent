@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
 import { DataStudioError } from "./identifier";
-import type { DataBackend, DataBackendEnvironment, DataEnvironmentName, DataProviderKind } from "./types";
+import type { BackupPolicy, DataBackend, DataBackendEnvironment, DataBackendPromotion, DataEnvironmentName, DataProviderKind, ProjectSnapshot, SnapshotKind, StoredDatabaseRole } from "./types";
 import type { ProjectAccessPolicy } from "@npati/shared";
 import type { ProjectKeyBundle } from "./auth-crypto";
 
-const backendColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy", name, provider, status, created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
-const environmentColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", environment, provider_config AS "providerConfig", migrator_secret_ref AS "migratorSecretRef", runtime_secret_ref AS "runtimeSecretRef", signing_key_ref AS "signingKeyRef", status, schema_fingerprint AS "schemaFingerprint", expected_schema AS "expectedSchema", sync_status AS "syncStatus", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
+const backendColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy", name, provider, status, remove_after::text AS "removeAfter", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
+const environmentColumns = 'id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", environment, provider_config AS "providerConfig", migrator_secret_ref AS "migratorSecretRef", runtime_secret_ref AS "runtimeSecretRef", signing_key_ref AS "signingKeyRef", status, schema_fingerprint AS "schemaFingerprint", expected_schema AS "expectedSchema", sync_status AS "syncStatus", limits, backup_policy AS "backupPolicy", created_at::text AS "createdAt", updated_at::text AS "updatedAt"';
 
 export class DataBackendRepository {
   readonly pool: Pool;
@@ -96,16 +96,19 @@ export class DataBackendRepository {
   async setEnvironment(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, patch: {
     status?: DataBackendEnvironment["status"]; providerConfig?: Record<string, unknown>;
     migratorSecretRef?: string; runtimeSecretRef?: string; schemaFingerprint?: string; syncStatus?: DataBackendEnvironment["syncStatus"];
+    limits?: Record<string, number>; backupPolicy?: BackupPolicy;
   }): Promise<void> {
     await this.get(ctx, companyId, id);
     await this.pool.query(
       "UPDATE data_backend_environments SET status=COALESCE($1,status),provider_config=COALESCE($2::jsonb,provider_config)," +
       "migrator_secret_ref=COALESCE($3,migrator_secret_ref),runtime_secret_ref=COALESCE($4,runtime_secret_ref)," +
-      "schema_fingerprint=COALESCE($5,schema_fingerprint),sync_status=COALESCE($6,sync_status),updated_at=now() " +
+      "schema_fingerprint=COALESCE($5,schema_fingerprint),sync_status=COALESCE($6,sync_status)," +
+      "limits=COALESCE($11::jsonb,limits),backup_policy=COALESCE($12::jsonb,backup_policy),updated_at=now() " +
       "WHERE backend_id=$7 AND environment=$8 AND workspace_id=$9 AND company_id=$10",
       [patch.status ?? null, patch.providerConfig ? JSON.stringify(patch.providerConfig) : null, patch.migratorSecretRef ?? null,
         patch.runtimeSecretRef ?? null, patch.schemaFingerprint ?? null, patch.syncStatus ?? null,
-        id, environment, ctx.workspaceId, companyId],
+        id, environment, ctx.workspaceId, companyId,
+        patch.limits ? JSON.stringify(patch.limits) : null, patch.backupPolicy ? JSON.stringify(patch.backupPolicy) : null],
     );
   }
 
@@ -115,7 +118,7 @@ export class DataBackendRepository {
       [JSON.stringify(schema), fingerprint, id, environment, ctx.workspaceId, companyId]);
   }
 
-  async putSecret(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, role: "migrator" | "runtime" | "signing", value: string): Promise<string> {
+  async putSecret(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, role: StoredDatabaseRole, value: string): Promise<string> {
     await this.get(ctx, companyId, id);
     const ref = randomUUID();
     const result = await this.pool.query<{ id: string }>(
@@ -127,7 +130,7 @@ export class DataBackendRepository {
     return result.rows[0]!.id;
   }
 
-  async resolveSecret(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, role: "migrator" | "runtime" | "signing"): Promise<string> {
+  async resolveSecret(ctx: AuthContext, companyId: string, id: string, environment: DataEnvironmentName, role: StoredDatabaseRole): Promise<string> {
     await this.get(ctx, companyId, id);
     const result = await this.pool.query<{ encryptedValue: string }>(
       'SELECT encrypted_value AS "encryptedValue" FROM data_backend_secrets WHERE backend_id=$1 AND environment=$2 AND role=$3',
@@ -272,6 +275,148 @@ export class DataBackendRepository {
 
   async releaseLock(id: string, environment: DataEnvironmentName, token: string): Promise<void> {
     await this.pool.query("DELETE FROM data_backend_migration_locks WHERE backend_id=$1 AND environment=$2 AND owner_token=$3", [id, environment, token]);
+  }
+
+  // =========================================================================
+  // D7: backups, promotions, lifecycle
+  // =========================================================================
+
+  /** Applied migrations of one environment, in version order (used by promote). */
+  async listAppliedMigrations(backendId: string, environment: DataEnvironmentName): Promise<Array<{ version: number; operation: unknown }>> {
+    const result = await this.pool.query<{ version: string; operation: unknown }>(
+      "SELECT version::text AS version, operation FROM data_backend_migrations " +
+      "WHERE backend_id=$1 AND environment=$2 AND status='applied' ORDER BY version",
+      [backendId, environment],
+    );
+    return result.rows.map((row) => ({ version: Number(row.version), operation: row.operation }));
+  }
+
+  /** Records a snapshot taken by a provisioner (file already written). */
+  async insertSnapshot(backendId: string, environment: DataEnvironmentName, snapshot: {
+    id: string; path: string; kind: SnapshotKind; reason?: string; sizeBytes?: number; createdBy?: string; retentionDays?: number;
+  }): Promise<void> {
+    await this.pool.query(
+      "INSERT INTO data_backend_snapshots(id,backend_id,environment,file_path,kind,reason,size_bytes,created_by,expires_at) " +
+      "VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9::integer * interval '1 day')",
+      [snapshot.id, backendId, environment, snapshot.path, snapshot.kind, snapshot.reason ?? null,
+        snapshot.sizeBytes ?? null, snapshot.createdBy ?? null, Math.max(1, snapshot.retentionDays ?? 30)],
+    );
+  }
+
+  async listSnapshots(backendId: string, environment: DataEnvironmentName, limit = 100): Promise<ProjectSnapshot[]> {
+    const result = await this.pool.query<ProjectSnapshot>(
+      'SELECT id, backend_id AS "backendId", environment, file_path AS path, created_at::text AS "createdAt", ' +
+      'kind, reason, size_bytes AS "sizeBytes" FROM data_backend_snapshots ' +
+      "WHERE backend_id=$1 AND environment=$2 ORDER BY created_at DESC LIMIT $3",
+      [backendId, environment, Math.max(1, Math.min(limit, 200))],
+    );
+    return result.rows;
+  }
+
+  async getSnapshot(backendId: string, environment: DataEnvironmentName, snapshotId: string): Promise<ProjectSnapshot | null> {
+    const result = await this.pool.query<ProjectSnapshot>(
+      'SELECT id, backend_id AS "backendId", environment, file_path AS path, created_at::text AS "createdAt", ' +
+      'kind, reason, size_bytes AS "sizeBytes" FROM data_backend_snapshots ' +
+      "WHERE backend_id=$1 AND environment=$2 AND id=$3",
+      [backendId, environment, snapshotId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async deleteSnapshotRecord(snapshotId: string): Promise<void> {
+    await this.pool.query("DELETE FROM data_backend_snapshots WHERE id=$1", [snapshotId]);
+  }
+
+  /** Snapshots whose retention expired, for pruning (files are removed by the caller). */
+  async expiredSnapshots(limit = 100): Promise<ProjectSnapshot[]> {
+    const result = await this.pool.query<ProjectSnapshot>(
+      'SELECT id, backend_id AS "backendId", environment, file_path AS path, created_at::text AS "createdAt", ' +
+      'kind, reason, size_bytes AS "sizeBytes" FROM data_backend_snapshots WHERE expires_at < now() ORDER BY created_at ASC LIMIT $1',
+      [Math.max(1, Math.min(limit, 500))],
+    );
+    return result.rows;
+  }
+
+  /** Automatic snapshots beyond the configured keep count for a backend + environment. */
+  async surplusScheduledSnapshots(backendId: string, environment: DataEnvironmentName, keep: number): Promise<ProjectSnapshot[]> {
+    const result = await this.pool.query<ProjectSnapshot>(
+      'SELECT id, backend_id AS "backendId", environment, file_path AS path, created_at::text AS "createdAt", ' +
+      'kind, reason, size_bytes AS "sizeBytes" FROM data_backend_snapshots ' +
+      "WHERE backend_id=$1 AND environment=$2 AND kind='scheduled' ORDER BY created_at DESC OFFSET $3",
+      [backendId, environment, Math.max(0, keep)],
+    );
+    return result.rows;
+  }
+
+  /** Backends with their environments; used by the backup scheduler tick. */
+  async allBackends(): Promise<Array<{ backend: DataBackend; environments: DataBackendEnvironment[] }>> {
+    const backends = await this.pool.query<DataBackend>("SELECT " + backendColumns + " FROM data_backends ORDER BY created_at");
+    const environments = await this.pool.query<DataBackendEnvironment & { backendIdValue: string }>(
+      "SELECT id, workspace_id AS \"workspaceId\", company_id AS \"companyId\", backend_id AS \"backendId\", environment, " +
+      "provider_config AS \"providerConfig\", status, schema_fingerprint AS \"schemaFingerprint\", sync_status AS \"syncStatus\", " +
+      "limits, backup_policy AS \"backupPolicy\", created_at AS \"createdAt\", updated_at AS \"updatedAt\" FROM data_backend_environments",
+    );
+    return backends.rows.map((backend) => ({ backend, environments: environments.rows.filter((env) => env.backendId === backend.id) }));
+  }
+
+  async setRemovalDeadline(ctx: AuthContext, companyId: string, id: string, removeAfter: Date): Promise<void> {
+    const result = await this.pool.query(
+      "UPDATE data_backends SET status='deleting',remove_after=$1,updated_at=now() " +
+      "WHERE id=$2 AND workspace_id=$3 AND company_id=$4 AND created_by=$5",
+      [removeAfter.toISOString(), id, ctx.workspaceId, companyId, ctx.userId],
+    );
+    if (!result.rowCount) throw new DataStudioError(404, "delete_backend", "Data backend not found", false, "BACKEND_NOT_FOUND");
+  }
+
+  /** Backends whose retention window elapsed and can be purged now. */
+  async dueRemovals(): Promise<DataBackend[]> {
+    const result = await this.pool.query<DataBackend>(
+      "SELECT " + backendColumns + " FROM data_backends WHERE status='deleting' AND remove_after IS NOT NULL AND remove_after <= now()",
+    );
+    return result.rows;
+  }
+
+  async insertPromotion(promotion: DataBackendPromotion): Promise<void> {
+    await this.pool.query(
+      "INSERT INTO data_backend_promotions(id,workspace_id,company_id,backend_id,target_environment,status,diff,flags,snapshot_ref,with_data,approved_by,error,applied_at) " +
+      "VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)",
+      [promotion.id, promotion.workspaceId, promotion.companyId, promotion.backendId, promotion.targetEnvironment,
+        promotion.status, JSON.stringify(promotion.diff ?? []), JSON.stringify(promotion.flags ?? {}), promotion.snapshotRef ?? null,
+        promotion.withData, promotion.approvedBy ?? null, promotion.error ?? null, promotion.appliedAt ?? null],
+    );
+  }
+
+  async updatePromotion(id: string, patch: { status?: DataBackendPromotion["status"]; snapshotRef?: string; error?: string; approvedBy?: string; appliedAt?: string }): Promise<void> {
+    await this.pool.query(
+      "UPDATE data_backend_promotions SET status=COALESCE($1,status),snapshot_ref=COALESCE($2,snapshot_ref),error=COALESCE($3,error)," +
+      "approved_by=COALESCE($4,approved_by),applied_at=COALESCE($5::timestamptz,applied_at) WHERE id=$6",
+      [patch.status ?? null, patch.snapshotRef ?? null, patch.error ?? null, patch.approvedBy ?? null, patch.appliedAt ?? null, id],
+    );
+  }
+
+  async listPromotions(backendId: string, limit = 20): Promise<DataBackendPromotion[]> {
+    const result = await this.pool.query<DataBackendPromotion>(
+      'SELECT id, workspace_id AS "workspaceId", company_id AS "companyId", backend_id AS "backendId", ' +
+      'target_environment AS "targetEnvironment", status, diff, flags, snapshot_ref AS "snapshotRef", ' +
+      'with_data AS "withData", approved_by AS "approvedBy", error, created_at::text AS "createdAt", applied_at::text AS "appliedAt" ' +
+      "FROM data_backend_promotions WHERE backend_id=$1 ORDER BY created_at DESC LIMIT $2",
+      [backendId, Math.max(1, Math.min(limit, 100))],
+    );
+    return result.rows;
+  }
+
+  /** Removes every secret (roles and signing keys) of a backend, used by the purge step. */
+  async deleteSecrets(backendId: string): Promise<void> {
+    await this.pool.query("DELETE FROM data_backend_secrets WHERE backend_id=$1", [backendId]);
+  }
+
+  async deleteSnapshots(backendId: string): Promise<ProjectSnapshot[]> {
+    const rows = await this.pool.query<ProjectSnapshot>(
+      'SELECT id, backend_id AS "backendId", environment, file_path AS path, created_at::text AS "createdAt" FROM data_backend_snapshots WHERE backend_id=$1',
+      [backendId],
+    );
+    await this.pool.query("DELETE FROM data_backend_snapshots WHERE backend_id=$1", [backendId]);
+    return rows.rows;
   }
 
   async close() { await this.pool.end(); }
