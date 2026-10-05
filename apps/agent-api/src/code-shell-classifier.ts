@@ -3,6 +3,7 @@ import {
   normalizeTerminalCommand,
   type TerminalRiskLevel,
 } from "./terminal-command-policy";
+import { detectPackageManager, type PackageManager } from "./code-deps-policy";
 
 /**
  * C4: shell command classification for the Coding Agent.
@@ -45,6 +46,19 @@ export interface ShellClassification {
   matched: string[];
   segments: ShellSegment[];
   parsed: ParsedShellCommand;
+  /**
+   * C4a: dependency-install hint (manager, action, whether the source is a URL/tarball). It lets the
+   * PolicyEngine decide about installs without parsing the command a second time.
+   */
+  deps?: DepsHint;
+}
+
+/** C4a: what a command does with dependencies, as far as the classifier can tell. */
+export interface DepsHint {
+  manager: PackageManager;
+  action: "install" | "add" | "audit" | "script" | "reconfigure";
+  /** True when the command installs from a URL, git reference, tarball or local file. */
+  fromUrl: boolean;
 }
 
 export interface ShellClassifierOptions {
@@ -80,7 +94,120 @@ const HARD_DENY_RULES: Array<{ id: string; pattern: RegExp; reason: string }> = 
   { id: "host_secrets", pattern: /(?:^|[\s;&|("'`=])(?:cat|less|more|head|tail|cp|scp|tar|base64|xxd)\s+(?:[^;&|]*\s)?(?:\/etc\/shadow|\/etc\/sudoers|\/root\/\.ssh|~\/\.ssh|\/host\/)/, reason: "reading host secrets" },
   { id: "write_outside_workspace", pattern: /(?:>>?|tee\s+(?:-a\s+)?)\s*(?:\/(?!workspace|tmp|dev\/null|proc\/self)[A-Za-z0-9._-]+)/, reason: "writing outside the workspace" },
   { id: "protected_branch_force_push", pattern: /git\s+push\s+(?:[^;&|]*\s)?(?:--force|-f)(?:\s|$)/, reason: "force push is refused in protected branches" },
+  // C4a: a download piped into a shell executes code nobody reviewed. Both orders, with or without
+  // whitespace, and the process-substitution form are covered.
+  { id: "download_pipe_shell", pattern: /(?:curl|wget)\b[^;&|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash)\b/, reason: "piping a download into a shell" },
+  { id: "download_process_substitution", pattern: /(?:sh|bash|zsh|dash)\s+(?:-c\s+)?<\(\s*(?:curl|wget)\b/, reason: "running a downloaded script through process substitution" },
 ];
+
+/** Registry configuration files: writing to them re-points every future install. */
+const REGISTRY_CONFIG_FILES = /(?:\.npmrc|\.yarnrc(?:\.yml)?|\.yarnrc|pip\.conf|\.pypirc)\b/;
+
+/** Commands that make a store write or rewrite a registry configuration file. */
+const REGISTRY_CONFIG_WRITE = /(?:sed\s+(?:-[A-Za-z]*i[A-Za-z]*|--in-place)|>>?\s*\S*(?:\.npmrc|\.yarnrc|pip\.conf)|tee\s+(?:-a\s+)?\S*(?:\.npmrc|\.yarnrc|pip\.conf))/;
+
+const INSTALL_URL_ARGUMENT = /^(?:https?:\/\/|git\+|git@|file:)|\.(?:tgz|tar\.gz|whl)$/;
+const RECONFIGURE_ARGS = /(?:^|\s)(?:config\s+set|set\s+registry|config\s+--set)(?:\s|$)/;
+const LIFECYCLE_SCRIPT_ARGS = /(?:^|\s)(?:rebuild|postinstall|preinstall|prepublish|prepare|husky\s+install)(?:\s|$)/;
+
+/** Flags that keep an install reproducible and non-executing. Anything else cancels the downgrade. */
+export const REPRODUCIBLE_INSTALL_FLAGS = [
+  "--ignore-scripts", "--no-fund", "--no-audit", "--prefer-offline", "--offline", "--frozen-lockfile",
+  "--immutable", "--locked", "--only-binary=:all:", "--no-interaction", "--prefer-dist", "--no-progress",
+  "--no-root", "--no-ansi", "--frozen", "--no-install-project", "--non-interactive", "--no-dev",
+] as const;
+
+/** Flags or arguments that make an install non-reproducible or able to execute code. */
+const UNSAFE_INSTALL_ARGS = /--(?:foreground-scripts|scripts-prepend-node-path|ignore-scripts=false)|--registry=|--index-url|--extra-index-url|--no-optional=false/;
+
+/**
+ * C4a: recognises a *reproducible install* — an install/fetch shape whose every argument is a
+ * hardened, non-executing flag. Only these are lowered to `controlled` at the Coding Agent layer,
+ * because C4a must be able to run them without an approval while still refusing anything that can
+ * execute code, mutate a registry or fetch from an arbitrary source.
+ */
+export function reproducibleInstallCommand(executable: string, args: string[]): { controlled: boolean; reason: string } {
+  const manager = executable === "npm" || executable === "npx" ? "npm"
+    : executable === "pnpm" ? "pnpm"
+      : executable === "yarn" ? "yarn"
+        : executable === "cargo" ? "cargo"
+          : executable === "go" ? "go"
+            : executable === "pip" || executable === "pip3" ? "pip"
+              : executable === "uv" ? "uv"
+                : executable === "poetry" ? "poetry"
+                  : executable === "composer" ? "composer" : undefined;
+  if (!manager) return { controlled: false, reason: `${executable} is not a package manager install` };
+  if (args.some((value) => UNSAFE_INSTALL_ARGS.test(value))) return { controlled: false, reason: "the install passes a flag that can execute code or re-point the registry" };
+  const flags = args.filter((value) => value.startsWith("-"));
+  const positional = args.filter((value) => !value.startsWith("-"));
+  const allowed = (value: string) => (REPRODUCIBLE_INSTALL_FLAGS as readonly string[]).includes(value)
+    || (/^-r$/.test(value)) || (/^[A-Za-z0-9@._/+~-]+$/.test(value) && !/^(?:https?|git\+|file:)/.test(value));
+  if (!flags.every(allowed)) return { controlled: false, reason: "the install uses a flag that is not part of the hardened set" };
+
+  switch (manager) {
+    case "npm":
+      // `npm ci` is the only npm install that is reproducible without further flags.
+      return positional[0] === "ci"
+        ? { controlled: true, reason: "npm ci is a reproducible install with scripts disabled" }
+        : { controlled: false, reason: "npm needs `ci` for a reproducible install" };
+    case "pnpm":
+      return positional[0] === "install" && flags.includes("--frozen-lockfile")
+        ? { controlled: true, reason: "pnpm install --frozen-lockfile is a reproducible install" }
+        : { controlled: false, reason: "pnpm needs `install --frozen-lockfile`" };
+    case "yarn":
+      return positional[0] === "install" && (flags.includes("--frozen-lockfile") || flags.includes("--immutable"))
+        ? { controlled: true, reason: "yarn install with a frozen lockfile is reproducible" }
+        : { controlled: false, reason: "yarn needs `install --frozen-lockfile` or `--immutable`" };
+    case "cargo":
+      return positional[0] === "fetch" && flags.includes("--locked")
+        ? { controlled: true, reason: "cargo fetch --locked is a reproducible fetch" }
+        : { controlled: false, reason: "cargo needs `fetch --locked`" };
+    case "go":
+      return positional[0] === "mod" && positional[1] === "download" && positional.length === 2
+        ? { controlled: true, reason: "go mod download is a reproducible fetch" }
+        : { controlled: false, reason: "go needs `mod download`" };
+    case "pip":
+      return positional[0] === "install" && flags.includes("-r") && flags.includes("--only-binary=:all:")
+        ? { controlled: true, reason: "pip install --only-binary=:all: -r is reproducible and binary-only" }
+        : { controlled: false, reason: "pip needs `install --only-binary=:all: -r <file>`" };
+    case "uv":
+      return positional[0] === "sync" && flags.includes("--frozen")
+        ? { controlled: true, reason: "uv sync --frozen is reproducible" }
+        : { controlled: false, reason: "uv needs `sync --frozen`" };
+    case "poetry":
+      return positional[0] === "install"
+        ? { controlled: true, reason: "poetry install --no-root is reproducible" }
+        : { controlled: false, reason: "poetry needs `install`" };
+    case "composer":
+      return positional[0] === "install" && flags.includes("--no-scripts") && flags.includes("--no-plugins")
+        ? { controlled: true, reason: "composer install --no-scripts --no-plugins is reproducible" }
+        : { controlled: false, reason: "composer needs `install --no-scripts --no-plugins`" };
+    default:
+      return { controlled: false, reason: `${manager} is not covered by the reproducible install shapes` };
+  }
+}
+
+/**
+ * C4a: derives the dependency hint for a command line. Returns `undefined` when no package manager is
+ * involved, so callers can treat the field as "this is an install command".
+ */
+export function detectDepsHint(command: string): DepsHint | undefined {
+  const text = String(command ?? "");
+  const lowered = text.toLowerCase();
+  // Git-hook installation is dangerous even when no package manager is named: `husky install` writes
+  // hooks that run on every commit, so it still gets a `script` hint (and therefore an approval) rather
+  // than being reported as "no dependency work involved".
+  if (/\bhusky\s+install\b/.test(lowered)) return { manager: "unknown", action: "script", fromUrl: false };
+  const manager = detectPackageManager(text);
+  if (manager === "unknown") return undefined;
+  const fromUrl = /(?:https?:\/\/|git\+|git@|file:)/.test(lowered) || /\.(?:tgz|tar\.gz|whl)(?:\s|$)/.test(lowered);
+  const action: DepsHint["action"] = LIFECYCLE_SCRIPT_ARGS.test(lowered) || /\bhusky\s+install\b/.test(lowered) ? "script"
+    : RECONFIGURE_ARGS.test(lowered) || /--registry=/.test(lowered) ? "reconfigure"
+      : /(?:^|\s)(?:add|i)(?:\s|$)/.test(lowered) ? "add"
+        : /(?:^|\s)audit(?:\s|$)/.test(lowered) ? "audit"
+          : "install";
+  return { manager, action, fromUrl };
+}
 
 function stripQuotes(value: string): string {
   const trimmed = value.trim();
@@ -332,6 +459,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
   const matched: string[] = [];
   let risk: CodeShellRisk = "safe";
   let timeoutClass: "default" | "install" = "default";
+  const deps = detectDepsHint(command);
 
   // 1. Hard-deny rules run against the raw command and against every segment: a rule that only
   //    matches inside a subshell, heredoc or a later segment must still fire.
@@ -347,7 +475,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
         const protectedBranches = options.protectedBranches ?? ["main", "master", "release"];
         if (!branch || !protectedBranches.includes(branch)) { risk = escalate(risk, "approval"); matched.push(`${rule.id}:unprotected_branch`); reasons.push(`${rule.reason} (branch not protected)`); continue; }
       }
-      return { risk: "hard_deny", reasons: [...reasons, rule.reason], matched: [...matched, rule.id], segments: parsed.segments, parsed, timeoutClass };
+      return { risk: "hard_deny", reasons: [...reasons, rule.reason], matched: [...matched, rule.id], segments: parsed.segments, parsed, timeoutClass, deps };
     }
   }
 
@@ -394,7 +522,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     }
     if (executable === "rm" && hasRecursiveForce(args)) {
       if (targetsOutsideWorkspace(args, options.workspaceRoot)) {
-        return { risk: "hard_deny", reasons: [...reasons, "recursive delete outside the workspace"], matched: [...matched, "rm_outside_workspace"], segments: parsed.segments, parsed, timeoutClass };
+        return { risk: "hard_deny", reasons: [...reasons, "recursive delete outside the workspace"], matched: [...matched, "rm_outside_workspace"], segments: parsed.segments, parsed, timeoutClass, deps };
       }
       segmentRisk = escalate(segmentRisk, "approval");
       matched.push("rm_recursive_inside_workspace");
@@ -412,7 +540,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
       }
       else { segmentRisk = escalate(segmentRisk, "approval"); matched.push("network_not_allowlisted"); reasons.push(`network host ${host ?? "(unknown)"} is not allowlisted`); }
       if (/(?:\|\s*(?:sh|bash|zsh)\b)/.test(command)) {
-        return { risk: "hard_deny", reasons: [...reasons, "piping a download into a shell"], matched: [...matched, "curl_pipe_sh"], segments: parsed.segments, parsed, timeoutClass };
+        return { risk: "hard_deny", reasons: [...reasons, "piping a download into a shell"], matched: [...matched, "curl_pipe_sh"], segments: parsed.segments, parsed, timeoutClass, deps };
       }
     }
     if (executable === "git") {
@@ -438,13 +566,57 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     if (executable === "sh" || executable === "bash" || executable === "zsh") {
       if (/(?:^|\s)-c(?:\s|$)/.test(` ${args.join(" ")} `)) { segmentRisk = escalate(segmentRisk, "approval"); matched.push("shell_dash_c"); reasons.push("an inline shell script requires approval"); }
     }
+    // C4a: install-related escalations. None of them lowers a level; `npm ci`,
+    // `pnpm install --frozen-lockfile` and `cargo fetch --locked` stay `controlled` as before.
+    let installEscalated = false;
+    if (INSTALL_EXECUTABLES.has(executable) || executable === "corepack" || executable === "npx") {
+      const argsText = ` ${args.join(" ")} `;
+      const urlArgument = args.find((value) => INSTALL_URL_ARGUMENT.test(value));
+      if (urlArgument) {
+        installEscalated = true;
+        segmentRisk = escalate(segmentRisk, "approval");
+        matched.push("install_from_url");
+        reasons.push(`installing from ${urlArgument.startsWith("http") ? "a URL" : "a non-registry source"} requires approval`);
+      }
+      if (RECONFIGURE_ARGS.test(argsText) || args.some((value) => value.startsWith("--registry="))) {
+        installEscalated = true;
+        segmentRisk = escalate(segmentRisk, "approval");
+        matched.push("registry_reconfigure");
+        reasons.push("changing the package registry requires approval");
+      }
+      if (LIFECYCLE_SCRIPT_ARGS.test(argsText)) {
+        installEscalated = true;
+        segmentRisk = escalate(segmentRisk, "approval");
+        matched.push("lifecycle_scripts");
+        reasons.push("running lifecycle scripts requires approval and an explicit allowlist");
+      }
+      // A reproducible install (hardened flags only, no URL, no script execution) is controlled work:
+      // C4a must run it without an approval, while anything else keeps the base policy's level.
+      const reproducible = reproducibleInstallCommand(executable, args);
+      if (reproducible.controlled && !installEscalated) {
+        segmentRisk = "controlled";
+        timeoutClass = "install";
+        matched.push("reproducible_install");
+        reasons.push(reproducible.reason);
+      }
+    }
+    if (REGISTRY_CONFIG_FILES.test(command) && REGISTRY_CONFIG_WRITE.test(command)) {
+      segmentRisk = escalate(segmentRisk, "approval");
+      matched.push("registry_config_write");
+      reasons.push("rewriting a registry configuration file requires approval");
+    }
+    if (executable === "husky" && args[0] === "install") {
+      segmentRisk = escalate(segmentRisk, "approval");
+      matched.push("git_hooks_install");
+      reasons.push("installing git hooks requires approval");
+    }
     // The segment's contribution is applied last, so a whitelisted downgrade cannot mask risk that was
     // detected elsewhere in the same segment or by the global parse checks above.
     risk = escalate(risk, segmentRisk);
   }
 
   if (!reasons.length) reasons.push("read-only command");
-  return { risk, reasons, matched, segments: parsed.segments, parsed, timeoutClass };
+  return { risk, reasons, matched, segments: parsed.segments, parsed, timeoutClass, deps };
 }
 
 /** Convenience for callers that only need the level (kept separate from the richer classification). */

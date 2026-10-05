@@ -39,7 +39,18 @@ export type CodeToolErrorCode =
   | "write_failed"
   | "move_failed"
   | "delete_failed"
-  | "checkpoint_failed";
+  | "checkpoint_failed"
+  // C4a dependency codes. Kept in the same union so every tool reports one structured shape.
+  | "lockfile_required"
+  | "package_not_found"
+  | "typosquat_suspected"
+  | "source_requires_approval"
+  | "registry_change_requires_approval"
+  | "audit_unavailable"
+  | "audit_blocked"
+  | "install_unavailable"
+  | "secret_in_diff"
+  | "network_isolation_unavailable";
 
 /** Structured tool error: the shape the model receives instead of a stack trace. */
 export class CodeToolError extends Error {

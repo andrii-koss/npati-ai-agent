@@ -25,7 +25,7 @@ import {
  * Tools that must never run without an explicit approval through the existing approval system:
  * deletion (C3) plus launching commands or background processes in the sandbox (C4).
  */
-const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete"]);
+const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete", "code.deps.add"]);
 
 /**
  * C3: mutating Coding Agent tools.
@@ -154,7 +154,15 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
     expect(v3.version).toBe(3);
     expect(v3.tools).toHaveLength(13);
     expect(v3.checksum).toBe(PUBLISHED_V3_TOOL_SCHEMA_CHECKSUM);
-    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version)).toEqual([1, 2, 3, CODE_TOOL_MANIFEST_VERSION]);
+    // Every manifest published so far stays resolvable (v1 empty, v2 reads, v3 file tools, v4 sandbox
+    // execution, v5 dependency tools), and the list always ends with the current version.
+    const manifestVersions = KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version);
+    expect(manifestVersions).toEqual([...manifestVersions].sort((a, b) => a - b));
+    expect(new Set(manifestVersions).size).toBe(manifestVersions.length);
+    expect(manifestVersions).toContain(1);
+    expect(manifestVersions).toContain(2);
+    expect(manifestVersions).toContain(3);
+    expect(manifestVersions[manifestVersions.length - 1]).toBe(CODE_TOOL_MANIFEST_VERSION);
 
     // Every published version is unique and immutable-looking: one entry per `name@version`.
     const keys = CODE_TOOL_SCHEMAS.map((tool) => `${tool.name}@${tool.version}`);

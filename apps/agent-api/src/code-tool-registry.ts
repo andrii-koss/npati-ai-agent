@@ -82,15 +82,43 @@ const C3_TOOL_NAMES: readonly string[] = [
 ];
 export const C3_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C3_TOOL_NAMES.includes(tool.name));
 
+/**
+ * The C4 published subset (reads, mutating file tools, sandbox execution and verification). Kept for the
+ * same reason as C2/C3: manifest v4 must keep resolving for sessions created before C4a, and its checksum
+ * is frozen (see `PUBLISHED_V4_TOOL_SCHEMA_CHECKSUM`).
+ */
+const C4_TOOL_NAMES: readonly string[] = [
+  ...C3_TOOL_NAMES,
+  "code.shell.exec",
+  "code.shell.process.start",
+  "code.shell.process.list",
+  "code.shell.process.logs",
+  "code.shell.process.stop",
+  "code.verify.run",
+];
+export const C4_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C4_TOOL_NAMES.includes(tool.name));
+
+/** The C4a dependency subset (inspection, audit and adding a dependency). */
+const C4A_TOOL_NAMES: readonly string[] = ["code.deps.inspect", "code.deps.audit", "code.deps.add"];
+export const C4A_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C4A_TOOL_NAMES.includes(tool.name));
+
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 4;
+export const CODE_TOOL_MANIFEST_VERSION = 5;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
  * Regenerate with: `node scripts/code-tool-schemas-generate.mjs --manifest-version N`.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "2575b9535a0e2900a485e954fde3049ed5a751c0163becdf82937768802d425b";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "ea9cf82b2bb4ca1e2e29b5b364d10a0895e9ded6e94f9dc3cf82d600717d9f19";
+
+/**
+ * Checksum of the C4 published set (19 tools: reads, mutating file tools, sandbox execution and
+ * verification). Frozen so manifest v4 keeps resolving for sessions created before C4a and so that
+ * editing one of those schemas without publishing a new version fails the tests instead of rewriting
+ * history.
+ */
+export const PUBLISHED_V4_TOOL_SCHEMA_CHECKSUM = "2575b9535a0e2900a485e954fde3049ed5a751c0163becdf82937768802d425b";
 
 /**
  * Checksum of the C3 published set (13 tools: the reads plus the mutating file tools). Frozen for the
@@ -212,6 +240,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest([], 1),
   toolManifest(C2_TOOL_SCHEMAS, 2),
   toolManifest(C3_TOOL_SCHEMAS, 3),
+  toolManifest(C4_TOOL_SCHEMAS, 4),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

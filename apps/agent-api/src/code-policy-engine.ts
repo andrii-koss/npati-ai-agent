@@ -1,5 +1,5 @@
 import type { AuthContext } from "@npati/workspace";
-import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIES } from "@npati/shared";
+import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_DEPS_CAPABILITIES } from "@npati/shared";
 
 /**
  * C4: centralized server-side policy engine.
@@ -35,6 +35,16 @@ export interface PolicyRequest {
   toolCallId?: string;
   /** True only when egress enforcement is actually guaranteed (C4b); otherwise network commands are denied. */
   networkEnforcementGuaranteed?: boolean;
+  /**
+   * C4a: what a dependency tool is about to do. A source other than `registry`, a registry
+   * reconfiguration or an install that would run lifecycle scripts can never be an implicit allow —
+   * the engine turns them into an approval regardless of the session mode.
+   */
+  deps?: {
+    source?: "registry" | "git" | "tarball" | "http" | "local_path";
+    installScripts?: boolean;
+    registryChange?: boolean;
+  };
 }
 
 export interface PolicyResult {
@@ -92,7 +102,7 @@ export const SHELL_FLAG = "code.shell";
  * be approved regardless of the command risk class).
  */
 const APPROVAL_GATED_TOOLS = new Set(
-  [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES, ...CODE_SHELL_CAPABILITIES]
+  [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES, ...CODE_SHELL_CAPABILITIES, ...CODE_DEPS_CAPABILITIES]
     .filter((capability) => capability.requiresConfirmation === true)
     .map((capability) => capability.id),
 );
@@ -328,6 +338,22 @@ export class PolicyEngine {
         );
       }
       reasons.push("network:enforced");
+    }
+
+    // C4a: a dependency change whose source is not a registry entry, that would reconfigure the
+    // registry, or that would run lifecycle scripts is never an implicit allow — it needs a human
+    // approval even in `full_auto_sandbox`, because it runs third-party code with the project's rights.
+    if (request.deps) {
+      const depsApprovalReasons: string[] = [];
+      if (request.deps.source !== undefined && request.deps.source !== "registry") {
+        depsApprovalReasons.push(`deps:source=${request.deps.source}`);
+      }
+      if (request.deps.registryChange === true) depsApprovalReasons.push("deps:registry_change");
+      if (request.deps.installScripts === true) depsApprovalReasons.push("deps:lifecycle_scripts");
+      if (depsApprovalReasons.length) {
+        reasons.push(...depsApprovalReasons);
+        return this.requireApproval(request, reasons, risk, "approval");
+      }
     }
 
     // Phase 8 — approval and the mode x risk matrix. `hard_deny` already returned in phase 4, and the

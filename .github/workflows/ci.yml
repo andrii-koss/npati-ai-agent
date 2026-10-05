@@ -11,6 +11,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security-gate:
+    # C4a/SG-1: mandatory. Security-gate suites must never fail, be skipped or be weakened, so this job
+    # has no `continue-on-error` and no path filter — a failure blocks the workflow.
+    name: Security gate (SG-1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: npm ci
+      - run: npm run security-gate
+
   platform:
     name: Node 22 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

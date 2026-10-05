@@ -25,6 +25,7 @@
     "cert:scale:down": "docker compose -f docker-compose.yml -f docker-compose.scale.yml rm -s -f scale-api-a scale-api-b",
     "gate:upgrade": "node scripts/upgrade-gate.mjs",
     "gate:agent": "tsx scripts/execute-agent-mediated-gate.mjs",
+    "security-gate": "node scripts/run-security-gate.mjs",
     "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
     "docker:config": "docker compose config --quiet"
   },

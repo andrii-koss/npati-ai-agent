@@ -916,5 +916,176 @@
         }
       }
     }
+  },
+  {
+    "name": "code.deps.inspect",
+    "version": 1,
+    "status": "active",
+    "description": "Inspect the dependency manifests and lockfiles of the project workspace (no installation, no network). Declared dependencies, the resolved lockfile and per-ecosystem metadata come back as untrusted data.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "description": "Workspace-relative manifest or lockfile path; defaults to the detected one." },
+        "manager": { "type": "string", "enum": ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"], "description": "Restrict the inspection to one package manager; detection is used when omitted." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.deps.inspect" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["manager", "lockfile", "declared"],
+          "additionalProperties": false,
+          "properties": {
+            "manager": { "type": "string" },
+            "lockfile": { "type": ["string", "null"] },
+            "declared": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string" },
+                  "version": { "type": ["string", "null"] },
+                  "scope": { "type": "string", "enum": ["runtime", "dev", "peer", "optional", "unknown"] },
+                  "source": { "type": ["string", "null"] }
+                }
+              }
+            },
+            "metadata": { "type": "object", "additionalProperties": true }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.deps.audit",
+    "version": 1,
+    "status": "active",
+    "description": "Run a dependency vulnerability audit for the project (lockfile-based, allowlisted registries only) and return a structured advisory report with a blocked verdict when the configured severities are hit.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "manager": { "type": "string", "enum": ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"] },
+        "lockfilePath": { "type": "string", "description": "Workspace-relative lockfile to audit; defaults to the detected one." },
+        "blockOn": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["critical", "high", "moderate", "low"] },
+          "description": "Severities that make the audit result blocked; defaults to critical and high."
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.deps.audit" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["report", "blocked"],
+          "additionalProperties": false,
+          "properties": {
+            "report": {
+              "type": "object",
+              "required": ["critical", "high", "moderate", "low", "advisories"],
+              "additionalProperties": false,
+              "properties": {
+                "critical": { "type": "integer" },
+                "high": { "type": "integer" },
+                "moderate": { "type": "integer" },
+                "low": { "type": "integer" },
+                "advisories": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": { "type": "string" },
+                      "package": { "type": "string" },
+                      "severity": { "type": "string" },
+                      "title": { "type": "string" },
+                      "url": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
+            "blocked": { "type": "boolean" },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.deps.add",
+    "version": 1,
+    "status": "active",
+    "description": "Add a dependency to the project. The install runs with lifecycle scripts disabled by default, only against allowlisted registries, and any source other than a registry entry requires an approval through the existing approval system.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 214 },
+        "version": { "type": "string", "description": "Version or range; the resolved exact version is reported back." },
+        "manager": { "type": "string", "enum": ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"] },
+        "dev": { "type": "boolean", "default": false, "description": "Add as a development dependency." },
+        "source": { "type": "string", "enum": ["registry", "git", "tarball", "http", "local_path"], "default": "registry", "description": "Where the dependency comes from. Anything other than registry requires an approval." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.deps.add" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["manager", "name", "source", "verdict", "reasons"],
+          "additionalProperties": false,
+          "properties": {
+            "manager": { "type": "string" },
+            "name": { "type": "string" },
+            "version": { "type": ["string", "null"] },
+            "source": { "type": "string" },
+            "verdict": { "type": "string", "enum": ["added", "require_approval", "denied"] },
+            "reasons": { "type": "array", "items": { "type": "string" } },
+            "metadata": { "type": "object", "additionalProperties": true },
+            "approvalId": { "type": ["string", "null"] }
+          }
+        }
+      }
+    }
   }
 ]
