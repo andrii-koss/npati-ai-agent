@@ -67,6 +67,9 @@ import { ProjectGitService } from "./project-git-service";
 import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
+import { CodeService } from "./code-service";
+import { registerCodeRoutes } from "./code-routes";
+import type { CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
 import { registerProjectDeployRoutes } from "./project-deploy-routes";
 import { ProjectBrowserQaService } from "./project-browser-qa-service";
@@ -108,6 +111,8 @@ import { SlackMessagingAdapter } from "./slack-messaging";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { MessagingScopeRouter } from "./messaging-scope-router";
 import { AuditRepository } from "./audit-repository";
+import { AuditLogService } from "./audit-log";
+import { resolveAuditConfig } from "./audit-config";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
 import { EmailChatActions } from "./email-chat-actions";
@@ -262,6 +267,8 @@ export interface AppConfig {
   omnirouteVisionModel?: string;
   dataDirectory?: string;
   projectWorkspaceRoot?: string;
+  /** C1: Coding Agent limits (configuration, not literals). */
+  codeAgentLimits?: Partial<CodeAgentLimits>;
   hubBaseUrl?: string;
   hubApiKey?: string;
   databaseUrl?: string;
@@ -833,6 +840,9 @@ export function buildApp(config: AppConfig = {}) {
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
+  // C1c: tamper-evident journal for privileged decisions (append-only, hash-chained, anchored daily).
+  const auditConfig = resolveAuditConfig(process.env, config.dataDirectory);
+  const auditLogService = config.databaseUrl ? new AuditLogService(workspaceStore, auditConfig) : undefined;
   const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
   const emailAgentTools = new EmailAgentTools(emailInboxRepo);
   const browserCredentials = config.databaseUrl ? new BrowserCredentialsRepository(config.databaseUrl) : undefined;
@@ -940,9 +950,25 @@ export function buildApp(config: AppConfig = {}) {
   backupTimer?.unref();
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
+  // C1c: background chain verification and the daily anchor. Both are read-only unless a break is
+  // detected; a failed verification logs a critical alert and (by configuration) blocks new
+  // privileged audit writes for that company until an operator investigates.
+  const auditVerifyTimer = auditLogService ? setInterval(() => {
+    void auditLogService.verifyAll({ workspaceId: config.workspaceId ?? "default", userId: "audit-verifier", permissions: ["workspace:read"] })
+      .then((failures) => { for (const failure of failures) app.log.error({ failure }, "audit_chain_verification_failed"); })
+      .catch((error) => app.log.warn({ err: error }, "audit_chain_verification_error"));
+  }, auditConfig.verifyIntervalMs) : undefined;
+  auditVerifyTimer?.unref();
+  const auditAnchorTimer = auditLogService ? setInterval(() => {
+    void auditLogService.writeDailyAnchors({ workspaceId: config.workspaceId ?? "default", userId: "audit-anchor", permissions: ["workspace:read"] })
+      .catch((error) => app.log.warn({ err: error }, "audit_anchor_write_failed"));
+  }, auditConfig.anchorIntervalMs) : undefined;
+  auditAnchorTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
   const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
+  // C1: code projects and code sessions. No tools and no agent loop here; the runner is C6.
+  const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService);
   const projectFileLeaseManager = new ProjectFileLeaseManager();
   const projectDeployService = new ProjectDeployService(
     workspaceStore,
@@ -2582,6 +2608,7 @@ ${localized.next}`;
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
+  registerCodeRoutes(app, authProvider, codeService);
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
@@ -2615,7 +2642,7 @@ ${localized.next}`;
     },
   );
   registerContentLibraryRoutes(app, authProvider, workspaceStore, contentLibrary);
-  if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo });
+  if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo, auditLog: auditLogService });
   registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   const messagingResultAttachments=async(auth:AuthContext,message:string):Promise<GatewayOutboundAttachment[]>=>{
@@ -2680,18 +2707,18 @@ ${localized.next}`;
     const result = await messagingRoutes.dispatchEmail(connection, message);
     return result.status !== "ignored";
   });
-  if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo });
+  if (auditRepo) registerAuditRoutes(app, { auth: authProvider, store: workspaceStore, repo: auditRepo, auditLog: auditLogService });
   registerEmailInboxRoutes(app, { auth: authProvider, store: workspaceStore, repo: emailInboxRepo, auditRepo, aiEngine, automationHooks: emailAutomationHooks, attachmentStorage: emailAttachmentStorage, worker: emailInboxWorker });
   registerApiKeyRoutes(app, apiKeysRepo, authProvider, workspaceStore);
   registerScopedMemoryRoutes(app,{engine:scopedMemory,apiKeys:apiKeysRepo,store:workspaceStore,runtime:companyRuntime});
   registerMemoryDocumentRoutes(app,authProvider,memoryDocuments);
-  registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies});
+  registerGuardrailPolicyRoutes(app,{auth:authProvider,store:workspaceStore,repo:guardrailPolicies,auditLog:auditLogService});
   registerReliabilityAndOperationsRoutes(app, authProvider, workspaceStore);
   registerBrowserAutomationRoutes(app, authProvider);
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();

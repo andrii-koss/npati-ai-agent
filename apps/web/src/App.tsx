@@ -22,6 +22,7 @@ import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
 import { WebsiteEditor } from "./WebsiteEditor";
 import { DataStudioPage } from "./DataStudioPage";
 import { DataStudioSettingsPage } from "./DataStudioSettingsPage";
+import { CodeSettingsPage } from "./CodeSettingsPage";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -1320,6 +1321,19 @@ function SettingsPage() {
       description: language === "uk" ? "Створюйте та редагуйте сайти на Next.js та за допомогою AI." : "Create, customize, and manage responsive websites with Next.js and AI.",
     },
     {
+      to: "/settings/code",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+      ),
+      title: language === "uk" ? "Код" : "Code",
+      description: language === "uk"
+        ? "Код-проєкти та сесії Coding Agent (експериментально, за feature flags)."
+        : "Code projects and Coding Agent sessions (experimental, behind feature flags).",
+    },
+    {
       to: "/settings/data-studio",
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1508,6 +1522,7 @@ export function App() {
             <Route path="/email" element={<Navigate to="/settings/email/inbox" replace />} />
             <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
             <Route path="/settings/data-studio" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
+        <Route path="/settings/code" element={<Workspace><CodeSettingsPage /></Workspace>} />
             <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
             <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
             <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />

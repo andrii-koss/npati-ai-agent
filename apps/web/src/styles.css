@@ -21470,5 +21470,96 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
   border-top: 1px solid var(--npati-gray-100);
 }
 
+/* Settings → Code (C1 foundation): detail rows, repository cell, toolchain chips and limits block. */
+.code-repository {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-repository .ds-muted {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.code-toolchain {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.code-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--npati-gray-100);
+  font-size: 13px;
+}
+
+.code-detail-row:last-child {
+  border-bottom: none;
+}
+
+.code-detail-row > span:first-child {
+  color: #64748b;
+}
+
+.code-detail-row code {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.code-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-limits {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+}
+
+.code-limits summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--npati-black);
+}
+
+.code-limits ul {
+  margin: 10px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.code-limits li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.code-limits code {
+  color: #475569;
+}
+
+@media (max-width: 640px) {
+  .code-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
 
 

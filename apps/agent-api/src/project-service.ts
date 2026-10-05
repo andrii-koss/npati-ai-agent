@@ -1,4 +1,4 @@
-import { PROJECT_TYPES, type AuthContext, type ProjectInput, type ProjectStatus, type WorkspaceStore } from "@npati/workspace";
+import { PROJECT_TYPES, type AuthContext, type ProjectCodeSettings, type ProjectInput, type ProjectStatus, type WorkspaceStore } from "@npati/workspace";
 import { defaultAppScheme, isValidAppScheme } from "@npati/shared";
 
 const projectTypes = new Set<string>(PROJECT_TYPES);
@@ -67,6 +67,17 @@ export class ProjectService {
     if (!clean || clean.length > 200) throw new Error("Project name must be between 1 and 200 characters");
     if (!Number.isInteger(expectedRevision) || expectedRevision < 1) throw new Error("Invalid expectedRevision");
     return this.store.updateProject(context, companyId, projectId, { name: clean, expectedRevision });
+  }
+
+  /**
+   * C1: persists code-specific project metadata (toolchain, default branch, classification,
+   * retention). Permission checks live in CodeService; this is the store-facing write path shared by
+   * detection and user edits.
+   */
+  async updateCodeSettings(context: AuthContext, companyId: string, projectId: string, expectedRevision: number, code: ProjectCodeSettings) {
+    await this.get(context, companyId, projectId);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 1) throw new Error("Invalid expectedRevision");
+    return this.store.updateProject(context, companyId, projectId, { expectedRevision, code });
   }
 
   async archive(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {

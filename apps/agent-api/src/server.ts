@@ -1,5 +1,6 @@
 import { logBuildInfo } from "./build-info";
 import { buildApp } from "./app";
+import { resolveCodeAgentLimits } from "./code-agent-config";
 import { MinioObjectStorage } from "./object-storage";
 
 const minioEndpoint = process.env.MINIO_ENDPOINT;
@@ -30,6 +31,8 @@ const app = buildApp({
   omnirouteVisionModel: process.env.OMNIROUTE_VISION_MODEL,
   dataDirectory: process.env.NPATI_DATA_DIR,
   projectWorkspaceRoot: process.env.NPATI_PROJECT_WORKSPACE_ROOT,
+  // C1: Coding Agent limits come from configuration (env-overridable), never from literals.
+  codeAgentLimits: resolveCodeAgentLimits(),
   hubBaseUrl: process.env.NPATI_HUB_BASE_URL,
   hubApiKey: process.env.NPATI_HUB_API_KEY,
   npatiBackendUrl: process.env.NPATI_BACKEND_URL ?? process.env.NPATI_HUB_BASE_URL,

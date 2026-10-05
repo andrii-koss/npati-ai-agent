@@ -32,9 +32,50 @@ export interface Company {
 export type CompanyInput = Partial<Omit<Company, "id" | "workspaceId" | "userId" | "mainAgentId" | "revision" | "createdAt" | "updatedAt">> & { name: string };
 export interface CompanyPage { items: Company[]; nextCursor: string | null; }
 
-export type ProjectType = "website" | "web_app" | "landing_page" | "mobile_app";
-export const PROJECT_TYPES: readonly ProjectType[] = ["website", "web_app", "landing_page", "mobile_app"] as const;
+export type ProjectType = "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
+export const PROJECT_TYPES: readonly ProjectType[] = ["website", "web_app", "landing_page", "mobile_app", "code_project"] as const;
 export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived";
+
+/**
+ * Data classification and retention classes (C1). The enums live here so every entity created in
+ * C1-C6 carries both fields; the real retention windows are decided in R1.
+ */
+export type DataClassification = "public" | "internal" | "confidential" | "restricted";
+export const DATA_CLASSIFICATIONS: readonly DataClassification[] = ["public", "internal", "confidential", "restricted"] as const;
+export const DEFAULT_DATA_CLASSIFICATION: DataClassification = "confidential";
+export type RetentionClass = "ephemeral" | "short" | "standard" | "extended" | "until_deleted";
+export const RETENTION_CLASSES: readonly RetentionClass[] = ["ephemeral", "short", "standard", "extended", "until_deleted"] as const;
+export const DEFAULT_RETENTION_CLASS: RetentionClass = "standard";
+
+const classificationRank: Record<DataClassification, number> = { public: 0, internal: 1, confidential: 2, restricted: 3 };
+/** True when `value` is at least as strict as `floor`. */
+export function isClassificationAtLeast(value: DataClassification, floor: DataClassification): boolean {
+  return classificationRank[value] >= classificationRank[floor];
+}
+/** Returns the stricter of two classifications (used for inheritance). */
+export function strictestClassification(a: DataClassification, b: DataClassification): DataClassification {
+  return classificationRank[a] >= classificationRank[b] ? a : b;
+}
+
+/** Toolchain metadata detected from the workspace and editable by the owner (C1). */
+export interface CodeVerifyCommands { test?: string; lint?: string; typecheck?: string; build?: string; }
+export interface CodeToolchain {
+  languages: string[];
+  packageManagers: string[];
+  verifyCommands: CodeVerifyCommands;
+  /** Where the values came from: `detected` by the scanner or `manual` after a user edit. */
+  source: "detected" | "manual";
+  detectedAt: string;
+  /** Files that produced the detection, for explainability in the UI. */
+  evidence: string[];
+}
+export interface ProjectCodeSettings {
+  toolchain?: CodeToolchain;
+  defaultBranch?: string;
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+}
+
 export interface Project {
   id: string; companyId: string; workspaceId: string; createdBy: string;
   name: string; description?: string; type: ProjectType; status: ProjectStatus;
@@ -44,9 +85,115 @@ export interface Project {
   dataBackendId?: string;
   /** Deep link scheme of a generated mobile app (mobile_app projects). */
   appScheme?: string;
+  /** C1: code project metadata, classification and retention. */
+  toolchain?: CodeToolchain | null;
+  defaultBranch?: string | null;
+  dataClassification: DataClassification;
+  retentionClass: RetentionClass;
   revision: number; createdAt: string; updatedAt: string;
 }
-export interface ProjectInput { name: string; description?: string; type: ProjectType; dataBackendId?: string; appScheme?: string; }
+export interface ProjectInput {
+  name: string; description?: string; type: ProjectType; dataBackendId?: string; appScheme?: string;
+  /** C1: optional overrides; the store applies the defaults when omitted. */
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  defaultBranch?: string;
+  toolchain?: CodeToolchain;
+}
+
+/** C1c: tamper-evident audit log types. */
+export type AuditDecision = "allowed" | "denied" | "approved" | "rejected";
+export interface AuditEntryInput {
+  actor: string;
+  actorRole: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string | null;
+  projectId?: string | null;
+  decision: AuditDecision;
+  /** SHA-256 of the canonical action payload; computed by the caller or by `AuditLogService`. */
+  payloadHash: string;
+  requestId?: string | null;
+  correlationId?: string | null;
+  snapshotId?: string | null;
+  /** Already-redacted metadata: must never contain secrets or prompt content. */
+  metadata?: Record<string, unknown>;
+}
+export interface AuditEntry extends AuditEntryInput {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  sequence: number;
+  createdAt: string;
+  prevHash: string | null;
+  entryHash: string;
+  metadata: Record<string, unknown>;
+}
+export interface AuditAnchor {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  day: string;
+  sequence: number;
+  entryCount: number;
+  headHash: string;
+  anchorPath?: string | null;
+  signature?: string | null;
+  createdAt: string;
+}
+export interface AuditChainState { companyId: string; entryCount: number; headSequence: number; headHash: string | null; }
+export interface AuditChainVerification {
+  companyId: string;
+  ok: boolean;
+  entryCount: number;
+  /** Sequence number of the first entry that breaks the chain, when `ok` is false. */
+  brokenAtSequence?: number;
+  reason?: string;
+  /** Hash of the last verified entry; compared against the latest anchor. */
+  headHash: string | null;
+}
+
+export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
+export type CodeSessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived";
+export const CODE_SESSION_STATUSES: readonly CodeSessionStatus[] = ["active", "paused", "awaiting_approval", "completed", "failed", "cancelled", "archived"] as const;
+
+/**
+ * A code session is the unit the CodingAgentRunner will drive in C6. It deliberately links to the
+ * existing company Run instead of duplicating run state, and carries the classification and
+ * retention fields required by rule 18.
+ */
+export interface CodeSession {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  agentId?: string | null;
+  mode: CodeSessionMode;
+  modelProfile?: string | null;
+  status: CodeSessionStatus;
+  parentSessionId?: string | null;
+  /** Existing company run driving this session (C6); null until a run is attached. */
+  runId?: string | null;
+  summary?: string | null;
+  /** Set when the session finishes and drives History (C7). */
+  dataClassification: DataClassification;
+  retentionClass: RetentionClass;
+  /** C1a fills this with the set of code.* tool versions the session was created with. */
+  toolManifestVersion?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CodeSessionInput {
+  mode?: CodeSessionMode;
+  agentId?: string;
+  modelProfile?: string;
+  parentSessionId?: string;
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  summary?: string;
+}
 
 export type CheckpointTrigger = "manual" | "pre_run" | "post_run" | "pre_restore";
 
@@ -334,12 +481,28 @@ export interface WorkspaceStore {
   createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string): Promise<{ project: Project; created: boolean }>;
   listProjects(context: AuthContext, companyId: string, includeArchived?: boolean): Promise<Project[]>;
   getProject(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
-  updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }): Promise<Project>;
+  updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }): Promise<Project>;
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;
   setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null): Promise<Project>;
   updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project>;
   updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
+
+  /** C1c: append-only audit journal. `appendAuditEntry` fails closed and is never idempotent-silent. */
+  appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry>;
+  listAuditEntries(context: AuthContext, companyId: string, filters?: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number }): Promise<AuditEntry[]>;
+  verifyAuditChain(context: AuthContext, companyId: string, range?: { fromSequence?: number; toSequence?: number }): Promise<AuditChainVerification>;
+  auditChainState(context: AuthContext, companyId: string): Promise<AuditChainState>;
+  recordAuditAnchor(context: AuthContext, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor>;
+  listAuditAnchors(context: AuthContext, companyId: string, limit?: number): Promise<AuditAnchor[]>;
+  latestAuditAnchor(context: AuthContext, companyId: string): Promise<AuditAnchor | null>;
+  /** Company ids that have at least one audit entry, used by the background verifier/anchor job. */
+  auditCompanies(context: AuthContext): Promise<string[]>;
+
+  /** C1: code sessions. Scoped by workspace + company + project + owner. */  createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession>;
+  getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession>;
+  listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options?: { includeArchived?: boolean; limit?: number }): Promise<CodeSession[]>;
+  updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession>;
   createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint>;
   listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
   getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint>;

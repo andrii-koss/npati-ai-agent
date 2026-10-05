@@ -40,7 +40,7 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
 
   app.post<{ Params: { companyId: string }; Body: ProjectInput }>("/companies/:companyId/projects", {
     schema: { body: { type: "object", additionalProperties: false, required: ["name", "type"], properties: {
-      name: { type: "string" }, type: { type: "string", enum: ["website", "web_app", "landing_page", "mobile_app"] },
+      name: { type: "string" }, type: { type: "string", enum: ["website", "web_app", "landing_page", "mobile_app", "code_project"] },
       description: { type: "string" },
       // Mobile projects (D6) attach to an existing DataBackend instead of copying a database.
       dataBackendId: { type: "string" },

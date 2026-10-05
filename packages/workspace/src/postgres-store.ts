@@ -4,7 +4,9 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
+import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
@@ -33,7 +35,22 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
   last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",
-  last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", app_scheme AS "appScheme", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", app_scheme AS "appScheme",
+  toolchain, default_branch AS "defaultBranch", data_classification AS "dataClassification",
+  retention_class AS "retentionClass", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  const codeSessionColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
+  user_id AS "userId", agent_id AS "agentId", mode, model_profile AS "modelProfile", status,
+  parent_session_id AS "parentSessionId", run_id AS "runId", summary,
+  data_classification AS "dataClassification", retention_class AS "retentionClass",
+  tool_manifest_version AS "toolManifestVersion", created_at AS "createdAt", updated_at AS "updatedAt"`;
+  const auditEntryColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", sequence,
+  created_at AS "createdAt", actor, actor_role AS "actorRole", request_id AS "requestId",
+  correlation_id AS "correlationId", snapshot_id AS "snapshotId", action, resource_type AS "resourceType",
+  resource_id AS "resourceId", project_id AS "projectId", decision, payload_hash AS "payloadHash",
+  prev_hash AS "prevHash", entry_hash AS "entryHash", metadata`;
+  const auditAnchorColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", day::text AS day,
+  sequence, entry_count AS "entryCount", head_hash AS "headHash", anchor_path AS "anchorPath",
+  signature, created_at AS "createdAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -793,6 +810,145 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const codeSessionMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='065_code_projects_and_sessions'");    if (!codeSessionMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration065 } = await import("./migration-065");
+        await runMigration065(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('065_code_projects_and_sessions')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    const auditLogMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='066_tamper_evident_audit_log'");
+    if (!auditLogMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration066 } = await import("./migration-066");
+        await runMigration066(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('066_tamper_evident_audit_log')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+  }
+
+  // --- C1c: append-only audit log ----------------------------------------------------------
+
+  /**
+   * Appends one audit entry. The chain is computed inside a transaction that holds a per-company
+   * advisory lock, so concurrent privileged actions cannot fork or reorder the chain; the database
+   * triggers (migration 066) independently reject out-of-order inserts and any UPDATE/DELETE.
+   * Failures propagate: privileged actions must fail closed when the audit cannot be written.
+   */
+  async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
+    await this.assertCompany(context, companyId);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`audit:${companyId}`]);
+      const head = await client.query<{ sequence: string; entry_hash: string }>(
+        "SELECT sequence, entry_hash FROM audit_log WHERE company_id=$1 ORDER BY sequence DESC LIMIT 1",
+        [companyId],
+      );
+      const prevHash = head.rows[0]?.entry_hash ?? null;
+      const sequence = head.rows[0] ? Number(head.rows[0].sequence) + 1 : 1;
+      const createdAt = new Date().toISOString();
+      const id = randomUUID();
+      const metadata = input.metadata ?? {};
+      const entryHash = auditEntryHash(prevHash, {
+        id, companyId, sequence, createdAt, actor: input.actor, actorRole: input.actorRole,
+        requestId: input.requestId ?? null, correlationId: input.correlationId ?? null, snapshotId: input.snapshotId ?? null,
+        action: input.action, resourceType: input.resourceType, resourceId: input.resourceId ?? null,
+        projectId: input.projectId ?? null, decision: input.decision, payloadHash: input.payloadHash, metadata,
+      });
+      const inserted = await client.query<AuditEntry>(`INSERT INTO audit_log
+        (id, workspace_id, company_id, sequence, created_at, actor, actor_role, request_id, correlation_id, snapshot_id,
+         action, resource_type, resource_id, project_id, decision, payload_hash, prev_hash, entry_hash, metadata)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        RETURNING ${auditEntryColumns}`,
+        [id, context.workspaceId, companyId, sequence, createdAt, input.actor, input.actorRole,
+          input.requestId ?? null, input.correlationId ?? null, input.snapshotId ?? null,
+          input.action, input.resourceType, input.resourceId ?? null, input.projectId ?? null,
+          input.decision, input.payloadHash, prevHash, entryHash, JSON.stringify(metadata)]);
+      await client.query("COMMIT");
+      return inserted.rows[0]!;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async listAuditEntries(context: AuthContext, companyId: string, filters: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number } = {}): Promise<AuditEntry[]> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::text IS NULL OR actor=$3)
+        AND ($4::text IS NULL OR request_id=$4)
+        AND ($5::text IS NULL OR correlation_id=$5)
+        AND ($6::text IS NULL OR action=$6)
+        AND ($7::bigint IS NULL OR sequence >= $7)
+      ORDER BY sequence ASC LIMIT $8`,
+      [context.workspaceId, companyId, filters.actor ?? null, filters.requestId ?? null, filters.correlationId ?? null,
+        filters.action ?? null, filters.fromSequence ?? null, Math.max(1, Math.min(filters.limit ?? 200, 1000))]);
+    return result.rows;
+  }
+
+  async verifyAuditChain(context: AuthContext, companyId: string, range: { fromSequence?: number; toSequence?: number } = {}): Promise<AuditChainVerification> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::bigint IS NULL OR sequence >= $3)
+        AND ($4::bigint IS NULL OR sequence <= $4)
+      ORDER BY sequence ASC`,
+      [context.workspaceId, companyId, range.fromSequence ?? null, range.toSequence ?? null]);
+    return verifyAuditEntries(result.rows);
+  }
+
+  async auditChainState(context: AuthContext, companyId: string): Promise<AuditChainState> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<{ entry_count: string; head_sequence: string | null; head_hash: string | null }>(
+      "SELECT count(*)::text AS entry_count, max(sequence)::text AS head_sequence, (array_agg(entry_hash ORDER BY sequence DESC))[1] AS head_hash FROM audit_log WHERE company_id=$1",
+      [companyId]);
+    const row = result.rows[0];
+    return {
+      companyId,
+      entryCount: Number(row?.entry_count ?? 0),
+      headSequence: Number(row?.head_sequence ?? 0),
+      headHash: row?.head_hash ?? null,
+    };
+  }
+
+  async recordAuditAnchor(context: AuthContext, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<AuditAnchor>(`INSERT INTO audit_anchors
+      (id, workspace_id, company_id, day, sequence, entry_count, head_hash, anchor_path, signature)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (company_id, day) DO UPDATE SET sequence=$5, entry_count=$6, head_hash=$7, anchor_path=$8, signature=$9, created_at=now()
+      RETURNING ${auditAnchorColumns}`,
+      [randomUUID(), context.workspaceId, companyId, anchor.day, anchor.sequence, anchor.entryCount, anchor.headHash, anchor.anchorPath ?? null, anchor.signature ?? null]);
+    return result.rows[0]!;
+  }
+
+  async listAuditAnchors(context: AuthContext, companyId: string, limit = 90): Promise<AuditAnchor[]> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<AuditAnchor>(`SELECT ${auditAnchorColumns} FROM audit_anchors
+      WHERE workspace_id=$1 AND company_id=$2 ORDER BY day DESC LIMIT $3`,
+      [context.workspaceId, companyId, Math.max(1, Math.min(limit, 365))]);
+    return result.rows;
+  }
+
+  async latestAuditAnchor(context: AuthContext, companyId: string): Promise<AuditAnchor | null> {
+    const anchors = await this.listAuditAnchors(context, companyId, 1);
+    return anchors[0] ?? null;
+  }
+
+  async auditCompanies(context: AuthContext): Promise<string[]> {
+    const result = await this.pool.query<{ company_id: string }>(
+      "SELECT DISTINCT company_id FROM audit_log WHERE workspace_id=$1 ORDER BY company_id", [context.workspaceId]);
+    return result.rows.map((row) => row.company_id);
   }
 
   async health() {
@@ -1129,11 +1285,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
     await this.assertCompany(context, companyId);
     const created = await this.pool.query<Project>(`INSERT INTO projects
-      (id,workspace_id,company_id,created_by,name,description,type,create_request_key,data_backend_id,app_scheme)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      (id,workspace_id,company_id,created_by,name,description,type,create_request_key,data_backend_id,app_scheme,
+       data_classification,retention_class,default_branch,toolchain)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       ON CONFLICT (workspace_id,company_id,created_by,create_request_key) DO NOTHING
       RETURNING ${projectColumns}`,
-      [randomUUID(),context.workspaceId,companyId,context.userId,input.name,input.description ?? null,input.type,idempotencyKey,input.dataBackendId ?? null,input.appScheme ?? null]);
+      [randomUUID(), context.workspaceId, companyId, context.userId, input.name, input.description ?? null, input.type, idempotencyKey,
+        input.dataBackendId ?? null, input.appScheme ?? null,
+        input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION, input.retentionClass ?? DEFAULT_RETENTION_CLASS,
+        input.defaultBranch ?? null, input.toolchain ? JSON.stringify(input.toolchain) : null]);
     if (created.rows[0]) return { project: created.rows[0], created: true };
     const existing = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
       WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND create_request_key=$4`,
@@ -1159,13 +1319,22 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0];
   }
 
-  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name: string; expectedRevision: number }) {
-    await this.getProject(context, companyId, projectId);
+  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
+    const current = await this.getProject(context, companyId, projectId);
+    const name = input.name === undefined ? current.name : input.name;
+    const code = input.code ?? {};
     const result = await this.pool.query<Project>(`UPDATE projects
-      SET name=$5, revision=revision+1, updated_at=now()
+      SET name=$5,
+          toolchain=COALESCE($7, toolchain),
+          default_branch=COALESCE($8, default_branch),
+          data_classification=COALESCE($9, data_classification),
+          retention_class=COALESCE($10, retention_class),
+          revision=revision+1, updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4
         AND revision=$6 AND status<>'archived' RETURNING ${projectColumns}`,
-      [projectId,context.workspaceId,companyId,context.userId,input.name,input.expectedRevision]);
+      [projectId, context.workspaceId, companyId, context.userId, name, input.expectedRevision,
+        code.toolchain ? JSON.stringify(code.toolchain) : null, code.defaultBranch ?? null,
+        code.dataClassification ?? null, code.retentionClass ?? null]);
     if (!result.rows[0]) throw new Error("Project changed by another request or is archived");
     return result.rows[0];
   }
@@ -1226,6 +1395,82 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4`,
       [projectId,context.workspaceId,companyId,context.userId]);
     return Boolean(result.rowCount);
+  }
+
+  // --- C1: code sessions -------------------------------------------------------------------
+
+  async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
+    const project = await this.getProject(context, companyId, projectId);
+    await this.assertProjectAgent(context, companyId, input.agentId);
+    if (input.parentSessionId) {
+      const parent = await this.getCodeSession(context, companyId, input.parentSessionId);
+      if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
+    }
+    // A session can never be classified below its project; raising is always allowed here (C5a adds roles).
+    const requested = input.dataClassification ?? project.dataClassification;
+    if (!isClassificationAtLeast(requested, project.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
+    }
+    const session = await this.pool.query<CodeSession>(`INSERT INTO code_sessions
+      (id, workspace_id, company_id, project_id, user_id, agent_id, mode, model_profile, status, parent_session_id,
+       summary, data_classification, retention_class)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12)
+      RETURNING ${codeSessionColumns}`,
+      [randomUUID(), context.workspaceId, companyId, projectId, context.userId, input.agentId ?? null,
+        input.mode ?? "edit", input.modelProfile ?? null, input.parentSessionId ?? null, input.summary ?? null,
+        requested, input.retentionClass ?? project.retentionClass]);
+    return session.rows[0]!;
+  }
+
+  async getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
+    const result = await this.pool.query<CodeSession>(`SELECT ${codeSessionColumns} FROM code_sessions
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4`,
+      [sessionId, context.workspaceId, companyId, context.userId]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Code session not found");
+    return result.rows[0];
+  }
+
+  async listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options: { includeArchived?: boolean; limit?: number } = {}): Promise<CodeSession[]> {
+    await this.assertCompany(context, companyId);
+    const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+    const result = await this.pool.query<CodeSession>(`SELECT ${codeSessionColumns} FROM code_sessions
+      WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3
+        AND ($4::text IS NULL OR project_id=$4)
+        AND ($5::boolean OR status<>'archived')
+      ORDER BY updated_at DESC, id LIMIT $6`,
+      [context.workspaceId, companyId, context.userId, projectId ?? null, options.includeArchived === true, limit]);
+    return result.rows;
+  }
+
+  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {
+    const current = await this.getCodeSession(context, companyId, sessionId);
+    if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, current.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
+    }
+    const result = await this.pool.query<CodeSession>(`UPDATE code_sessions
+      SET status=COALESCE($5,status),
+          summary=COALESCE($6,summary),
+          run_id=COALESCE($7,run_id),
+          model_profile=COALESCE($8,model_profile),
+          data_classification=COALESCE($9,data_classification),
+          retention_class=COALESCE($10,retention_class),
+          tool_manifest_version=COALESCE($11,tool_manifest_version),
+          updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
+      RETURNING ${codeSessionColumns}`,
+      [sessionId, context.workspaceId, companyId, context.userId, patch.status ?? null, patch.summary ?? null,
+        patch.runId === undefined ? null : patch.runId, patch.modelProfile ?? null,
+        patch.dataClassification ?? null, patch.retentionClass ?? null,
+        patch.toolManifestVersion === undefined ? null : patch.toolManifestVersion]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Code session not found");
+    return result.rows[0];
+  }
+
+  /** Rejects an agent id that does not belong to the company (tenant isolation for sessions). */
+  private async assertProjectAgent(context: AuthContext, companyId: string, agentId?: string) {
+    if (!agentId) return;
+    const result = await this.pool.query("SELECT 1 FROM company_agents WHERE id=$1 AND workspace_id=$2 AND company_id=$3", [agentId, context.workspaceId, companyId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Agent does not belong to this company");
   }
 
   async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
