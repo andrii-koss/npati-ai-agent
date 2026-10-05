@@ -327,7 +327,6 @@ export function DataStudioSettingsPage() {
         ).catch(() => ({ environments: [] as BackendEnvironment[] }))));
         if (cancelled) return;
         setEnvironments(Object.fromEntries(detailed.map((backend, index) => [backend.id, details[index]?.environments ?? []])));
-        setTableCounts({});
       } catch (cause) {
         if (cancelled) return;
         setProjects([]); setBackends([]); setEnvironments({}); setTableCounts({});
@@ -361,10 +360,10 @@ export function DataStudioSettingsPage() {
     if (!attached.some((item) => item.id === projectId)) setProjectId(attached[0]?.id ?? "");
   }, [detailId, projects, projectId]);
   const loadOverview = useCallback(async () => {
-    if (!companyId || !projectId || !project?.dataBackendId) { setOverview(null); return; }
+    if (!activeCompanyId || !projectId || !project?.dataBackendId) { setOverview(null); return; }
     setLoading(true);
     try {
-      const result = await apiFetch<Overview>(`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data-studio/${environment}`);
+      const result = await apiFetch<Overview>(`/companies/${encodeURIComponent(activeCompanyId)}/projects/${encodeURIComponent(projectId)}/data-studio/${environment}`);
       setOverview(result);
       setError(null);
     } catch (cause) {
@@ -373,7 +372,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, projectId, project?.dataBackendId, environment]);
+  }, [activeCompanyId, projectId, project?.dataBackendId, environment]);
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
   useEffect(() => { setRowCounts({}); }, [projectId, environment]);
@@ -383,9 +382,10 @@ export function DataStudioSettingsPage() {
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 
   const createDatabase = useCallback(async (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => {
+    if (!createTargetCompanyId) return;
     setBackendBusy(true);
     try {
-      const created = await apiFetch<BackendSummary>(`/companies/${encodeURIComponent(companyId)}/data-backends`, {
+      const created = await apiFetch<BackendSummary>(`/companies/${encodeURIComponent(createTargetCompanyId)}/data-backends`, {
         method: "POST",
         body: JSON.stringify({ name: input.name, provider: input.provider, connectionString: input.connectionString || undefined }),
       });
@@ -410,7 +410,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [companyId, isUk, notify, refresh]);
+  }, [createTargetCompanyId, isUk, notify, refresh]);
 
   const toggleArchive = useCallback(async (backend: BackendSummary) => {
     const archiving = backend.status === "ready";
@@ -427,7 +427,7 @@ export function DataStudioSettingsPage() {
     }
     setBackendBusy(true);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}/${archiving ? "archive" : "activate"}`, { method: "POST" });
+      await apiFetch(`/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}/${archiving ? "archive" : "activate"}`, { method: "POST" });
       notify(archiving ? (isUk ? "Базу заархівовано" : "Database archived") : (isUk ? "Базу активовано" : "Database activated"));
       refresh();
     } catch (cause) {
@@ -435,7 +435,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [companyId, isUk, notify, refresh]);
+  }, [isUk, notify, refresh]);
 
   const renameDatabase = useCallback(async (backend: BackendSummary) => {
     const name = await promptModal({
@@ -448,7 +448,7 @@ export function DataStudioSettingsPage() {
     if (!clean || clean === backend.name) return;
     setBackendBusy(true);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
+      await apiFetch(`/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ name: clean }),
       });
@@ -459,7 +459,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [companyId, isUk, notify, refresh]);
+  }, [isUk, notify, refresh]);
 
   const deleteDatabase = useCallback(async (backend: BackendSummary) => {
     const confirmed = await confirmModal({
@@ -482,7 +482,7 @@ export function DataStudioSettingsPage() {
     }
     setBackendBusy(true);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
+      await apiFetch(`/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
         method: "DELETE",
         body: JSON.stringify({ confirmName: backend.name }),
       });
@@ -494,12 +494,36 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [companyId, detailId, isUk, notify, refresh]);
+  }, [detailId, isUk, notify, refresh]);
 
-  const attachProject = useCallback(async (targetProjectId: string, backendId: string | null) => {
+  /** Moves a database (with all of its data) into another company of the same workspace. */
+  const transferDatabase = useCallback(async (backend: BackendSummary, input: { targetCompanyId: string; confirmName: string }): Promise<void> => {
     setBackendBusy(true);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(targetProjectId)}/data-backend`, backendId
+      const result = await apiFetch<TransferResult>(
+        `/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}/transfer`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+      notify(isUk
+        ? `Базу перенесено до «${result.targetCompanyName}». Від'єднано проєктів: ${result.detachedProjects}.`
+        : `Database moved to “${result.targetCompanyName}”. Detached projects: ${result.detachedProjects}.`);
+      setTransferOpen(false);
+      setDetailId(null);
+      setCompanyFilter(ALL_COMPANIES);
+      refresh();
+    } catch (cause) {
+      const code = errorCode(cause);
+      notify(transferErrorMessage(isUk, code, cause instanceof Error ? cause.message : "Could not transfer the database"), "error");
+      throw cause;
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [isUk, notify, refresh]);
+
+  const attachProject = useCallback(async (targetCompanyId: string, targetProjectId: string, backendId: string | null) => {
+    setBackendBusy(true);
+    try {
+      await apiFetch(`/companies/${encodeURIComponent(targetCompanyId)}/projects/${encodeURIComponent(targetProjectId)}/data-backend`, backendId
         ? { method: "PUT", body: JSON.stringify({ dataBackendId: backendId }) }
         : { method: "DELETE" });
       notify(backendId ? (isUk ? "Проєкт прикріплено" : "Project attached") : (isUk ? "Проєкт відкріплено" : "Project detached"));
@@ -510,11 +534,11 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [companyId, isUk, notify, projectId, refresh]);
+  }, [isUk, notify, projectId, refresh]);
 
   // --- Schema operations ----------------------------------------------------
 
-  const basePath = `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data-studio/${environment}`;
+  const basePath = `/companies/${encodeURIComponent(activeCompanyId)}/projects/${encodeURIComponent(projectId)}/data-studio/${environment}`;
 
   const previewOperation = useCallback(async (operation: SchemaOperation): Promise<PreviewResult> => {
     return apiFetch<PreviewResult>(`${basePath}/schema/preview`, { method: "POST", body: JSON.stringify({ operation }) });
@@ -655,10 +679,10 @@ export function DataStudioSettingsPage() {
 
   useEffect(() => {
     if (!tableCountKey) return;
-    const targets = tableCountKey.split("|").map((entry) => {
-      const [companyOfBackend, backendId, attachedProjectId] = entry.split(":");
-      return { companyOfBackend, backendId, attachedProjectId };
-    }).filter((entry) => entry.attachedProjectId);
+    const targets = tableCountKey.split("|").flatMap((entry) => {
+      const [companyOfBackend = "", backendId = "", attachedProjectId = ""] = entry.split(":");
+      return attachedProjectId ? [{ companyOfBackend, backendId, attachedProjectId }] : [];
+    });
     if (!targets.length) return;
     let cancelled = false;
     void Promise.all(targets.map(async (target) => {
@@ -734,7 +758,6 @@ export function DataStudioSettingsPage() {
     </select>
   );
 
-  /** Company the "New database" button creates in. */
   const unavailableNotice = backendsError?.code === "DATA_STUDIO_UNAVAILABLE" && (
     <div className="data-studio-alert error" role="alert">
       {dataStudioUnavailableMessage(isUk)}
@@ -762,6 +785,9 @@ export function DataStudioSettingsPage() {
                 <span>{detail.name}</span>
               </h1>
               <p className="hero-copy">
+                <span className="data-studio-badge" title={isUk ? "Компанія-власник бази" : "Owning company"}>
+                  {isUk ? "Компанія" : "Company"}: {detail.companyName}
+                </span>{" "}
                 <span className={`status-pill ${statusPillClass(detail.status)}`}>{detail.status}</span>{" "}
                 <span className="data-studio-badge">{detail.provider === "external_postgres" ? (isUk ? "зовнішня" : "external") : "NPATI"}</span>{" "}
                 {detailEnvironments.map((env) => (
@@ -778,6 +804,9 @@ export function DataStudioSettingsPage() {
               </button>
               <button type="button" className="button-secondary" onClick={() => void toggleArchive(detail)} disabled={backendBusy}>
                 {detail.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
+              </button>
+              <button type="button" className="button-secondary" onClick={() => setTransferOpen(true)} disabled={backendBusy}>
+                {isUk ? "Перенести в іншу компанію" : "Move to another company"}
               </button>
               <button type="button" className="button-secondary" onClick={() => void deleteDatabase(detail)} disabled={backendBusy}>
                 {isUk ? "Видалити" : "Delete"}
@@ -826,10 +855,10 @@ export function DataStudioSettingsPage() {
             {detailProjects.map((item) => (
               <div key={item.id} className="ds-attach-row">
                 <span className="data-studio-chip">{item.name}{item.type ? ` · ${item.type}` : ""}</span>
-                <Link className="automation-action-btn run-btn" to={`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(item.id)}/data`}>
+                <Link className="automation-action-btn run-btn" to={`/companies/${encodeURIComponent(detail.companyId)}/projects/${encodeURIComponent(item.id)}/data`}>
                   {isUk ? "Відкрити Data Studio" : "Open Data Studio"}
                 </Link>
-                <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void attachProject(item.id, null)}>
+                <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void attachProject(detail.companyId, item.id, null)}>
                   {isUk ? "Відкріпити" : "Detach"}
                 </button>
               </div>
@@ -847,10 +876,10 @@ export function DataStudioSettingsPage() {
                   aria-label={isUk ? `База для ${item.name}` : `Database for ${item.name}`}
                   value=""
                   disabled={backendBusy}
-                  onChange={(event) => { if (event.target.value) void attachProject(item.id, event.target.value); }}
+                  onChange={(event) => { if (event.target.value) void attachProject(detail.companyId, item.id, event.target.value); }}
                 >
                   <option value="">{isUk ? "До цієї бази" : "To this database"}</option>
-                  {backends.filter((backend) => backend.status === "ready").map((backend) => (
+                  {detailCompanyBackends.map((backend) => (
                     <option key={backend.id} value={backend.id}>{backend.name}</option>
                   ))}
                 </select>
@@ -975,7 +1004,7 @@ export function DataStudioSettingsPage() {
                             </button>
                           </>
                         )}
-                        <Link className="automation-action-btn" to={`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data`}>
+                        <Link className="automation-action-btn" to={`/companies/${encodeURIComponent(detail.companyId)}/projects/${encodeURIComponent(projectId)}/data`}>
                           {isUk ? "У проєкті" : "In project"}
                         </Link>
                       </div>
@@ -1000,6 +1029,18 @@ export function DataStudioSettingsPage() {
             onNotify={notify}
           />
         )}
+
+        {transferOpen && (
+          <TransferDatabaseDrawer
+            isUk={isUk}
+            backend={detail}
+            companies={detailCompanies}
+            attachedProjects={detailProjects.length}
+            busy={backendBusy}
+            onClose={() => setTransferOpen(false)}
+            onTransfer={(input) => transferDatabase(detail, input)}
+          />
+        )}
       </main>
     );
   }
@@ -1018,13 +1059,19 @@ export function DataStudioSettingsPage() {
             </h1>
             <p className="hero-copy">
               {isUk
-                ? "Бази даних вашої компанії: кожен новий сайт підключається до бази автоматично, а таблиці створюються тут або агентом."
-                : "Your company databases: every new site is attached automatically, and tables are created here or by an agent."}
+                ? "Бази даних усіх ваших компаній: у списку видно, якій компанії належить кожна база. Новий сайт підключається до бази автоматично, а таблиці створюються тут або агентом."
+                : "Databases across all of your companies: the list shows which company owns each database. Every new site is attached automatically, and tables are created here or by an agent."}
             </p>
           </div>
           <div className="automations-header-actions">
             {companySelect}
-            <button type="button" className="button-primary automations-action-primary" onClick={() => setCreateOpen(true)} disabled={!companyId}>
+            <button
+              type="button"
+              className="button-primary automations-action-primary"
+              onClick={() => setCreateOpen(true)}
+              disabled={!createTargetCompanyId}
+              title={isUk ? "Створити базу в цій компанії" : "Create a database in this company"}
+            >
               ＋ {isUk ? "Нова база даних" : "New database"}
             </button>
           </div>
@@ -1033,6 +1080,7 @@ export function DataStudioSettingsPage() {
 
       {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
       {unavailableNotice}
+      {backendsWarning && <div className="data-studio-alert warning" role="status">{backendsWarning}</div>}
       {backendsError && !unavailableNotice && <div className="data-studio-alert error" role="alert">{backendsError.message}</div>}
 
       {!companies.length && (
@@ -1046,7 +1094,11 @@ export function DataStudioSettingsPage() {
         <div>
           <strong>{stats.total}</strong>
           <span>{isUk ? "Баз даних" : "Databases"}</span>
-          <small>{isUk ? "DataBackend у цій компанії" : "DataBackends in this company"}</small>
+          <small>
+            {companyFilter === ALL_COMPANIES
+              ? (isUk ? `у ${companies.length} компаніях` : `across ${companies.length} companies`)
+              : (isUk ? "у вибраній компанії" : "in the selected company")}
+          </small>
         </div>
         <div>
           <strong>{stats.readyEnvironments} / {stats.totalEnvironments}</strong>
@@ -1061,7 +1113,11 @@ export function DataStudioSettingsPage() {
         <div>
           <strong>{stats.attachedProjects}</strong>
           <span>{isUk ? "Проєктів прикріплено" : "Attached projects"}</span>
-          <small>{isUk ? `з ${projects.length} у компанії` : `of ${projects.length} in the company`}</small>
+          <small>
+            {companyFilter === ALL_COMPANIES
+              ? (isUk ? `з ${companyProjects.length} у вибраних компаніях` : `of ${companyProjects.length} in the selected companies`)
+              : (isUk ? `з ${companyProjects.length} у компанії` : `of ${companyProjects.length} in the company`)}
+          </small>
         </div>
       </section>
 
@@ -1072,7 +1128,7 @@ export function DataStudioSettingsPage() {
             type="text"
             role="searchbox"
             className="inspector-search-input"
-            placeholder={isUk ? "Пошук за назвою або провайдером…" : "Search by name or provider…"}
+            placeholder={isUk ? "Пошук за назвою, компанією або провайдером…" : "Search by name, company or provider…"}
             aria-label={isUk ? "Пошук баз даних" : "Search databases"}
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -1087,7 +1143,7 @@ export function DataStudioSettingsPage() {
         <div className="inspector-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={databaseFilter === "all"} className={`inspector-tab ${databaseFilter === "all" ? "active" : ""}`} onClick={() => setDatabaseFilter("all")}>
             <span>{isUk ? "Усі" : "All"}</span>
-            <small className="tab-count">{backends.length}</small>
+            <small className="tab-count">{companyBackends.length}</small>
           </button>
           <button type="button" role="tab" aria-selected={databaseFilter === "ready"} className={`inspector-tab ${databaseFilter === "ready" ? "active" : ""}`} onClick={() => setDatabaseFilter("ready")}>
             <span>{isUk ? "Готові" : "Ready"}</span>
@@ -1103,7 +1159,7 @@ export function DataStudioSettingsPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            {isUk ? `Показано ${filteredBackends.length} з ${backends.length}` : `Showing ${filteredBackends.length} of ${backends.length}`}
+            {isUk ? `Показано ${filteredBackends.length} з ${companyBackends.length}` : `Showing ${filteredBackends.length} of ${companyBackends.length}`}
             {searchQuery ? (isUk ? ` за запитом «${searchQuery}»` : ` matching “${searchQuery}”`) : ""}
           </span>
         </div>
@@ -1114,11 +1170,13 @@ export function DataStudioSettingsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ minWidth: "240px" }}>{isUk ? "Назва" : "Name"}</th>
-                <th style={{ width: "160px" }}>{isUk ? "Провайдер" : "Provider"}</th>
-                <th style={{ width: "140px" }}>{isUk ? "Статус" : "Status"}</th>
-                <th style={{ width: "240px" }}>dev / prod</th>
-                <th style={{ width: "110px" }}>{isUk ? "Таблиць" : "Tables"}</th>
+                <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
+                <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
+                <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
+                <th style={{ width: "130px" }}>{isUk ? "Статус" : "Status"}</th>
+                <th style={{ width: "220px" }}>dev / prod</th>
+                <th style={{ width: "100px" }}>{isUk ? "Таблиць" : "Tables"}</th>
+                <th style={{ width: "100px" }}>{isUk ? "Проєктів" : "Projects"}</th>
                 <th style={{ width: "260px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
               </tr>
             </thead>
@@ -1126,9 +1184,11 @@ export function DataStudioSettingsPage() {
               {Array.from({ length: 3 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} style={{ opacity: 0.5 }}>
                   <td><span style={{ display: "inline-block", width: "160px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "110px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "90px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "70px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "140px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "40px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "40px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "120px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} /></td>
                 </tr>
@@ -1145,7 +1205,7 @@ export function DataStudioSettingsPage() {
               ? "Створіть базу — і кожен новий сайт підключатиметься до неї автоматично."
               : "Create a database — every new site will be attached to it automatically."}
           </p>
-          <button type="button" className="button-primary automations-action-primary" onClick={() => setCreateOpen(true)} disabled={!companyId}>
+          <button type="button" className="button-primary automations-action-primary" onClick={() => setCreateOpen(true)} disabled={!createTargetCompanyId}>
             ＋ {isUk ? "Створити першу базу" : "Create the first database"}
           </button>
         </div>
@@ -1154,7 +1214,7 @@ export function DataStudioSettingsPage() {
           <div className="automations-empty-icon">🔍</div>
           <h3>{isUk ? "Нічого не знайдено" : "Nothing found"}</h3>
           <p>{isUk ? "Змініть запит або фільтр." : "Change the query or the filter."}</p>
-          <button type="button" className="button-secondary" onClick={() => { setSearchQuery(""); setDatabaseFilter("all"); }}>
+          <button type="button" className="button-secondary" onClick={() => { setSearchQuery(""); setDatabaseFilter("all"); setCompanyFilter(ALL_COMPANIES); }}>
             {isUk ? "Скинути фільтри" : "Clear filters"}
           </button>
         </div>
@@ -1163,12 +1223,13 @@ export function DataStudioSettingsPage() {
           <table className="automations-table">
             <thead>
               <tr>
-                <th style={{ minWidth: "240px" }}>{isUk ? "Назва" : "Name"}</th>
-                <th style={{ width: "160px" }}>{isUk ? "Провайдер" : "Provider"}</th>
-                <th style={{ width: "140px" }}>{isUk ? "Статус" : "Status"}</th>
-                <th style={{ minWidth: "220px" }}>dev / prod</th>
-                <th style={{ width: "110px" }}>{isUk ? "Таблиць" : "Tables"}</th>
-                <th style={{ width: "110px" }}>{isUk ? "Проєктів" : "Projects"}</th>
+                <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
+                <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
+                <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
+                <th style={{ width: "130px" }}>{isUk ? "Статус" : "Status"}</th>
+                <th style={{ minWidth: "200px" }}>dev / prod</th>
+                <th style={{ width: "100px" }}>{isUk ? "Таблиць" : "Tables"}</th>
+                <th style={{ width: "100px" }}>{isUk ? "Проєктів" : "Projects"}</th>
                 <th style={{ width: "300px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
               </tr>
             </thead>
@@ -1181,6 +1242,9 @@ export function DataStudioSettingsPage() {
                     <td className="automation-title-cell">
                       <button type="button" className="ds-name-link" onClick={() => setDetailId(backend.id)}>{backend.name}</button>
                       <p>{isUk ? "Оновлено" : "Updated"}: {backend.updatedAt ? new Date(backend.updatedAt).toLocaleDateString(isUk ? "uk-UA" : "en-US") : "—"}</p>
+                    </td>
+                    <td>
+                      <span className="data-studio-badge" title={isUk ? "Компанія-власник бази" : "Owning company"}>{backend.companyName}</span>
                     </td>
                     <td>{backend.provider === "external_postgres" ? (isUk ? "Зовнішня" : "External") : "NPATI Postgres"}</td>
                     <td><span className={`status-pill ${statusPillClass(backend.status)}`}>{backend.status}</span></td>
@@ -1219,6 +1283,7 @@ export function DataStudioSettingsPage() {
         <CreateDatabaseDrawer
           isUk={isUk}
           busy={backendBusy}
+          companyName={companies.find((company) => company.id === createTargetCompanyId)?.name}
           onClose={() => setCreateOpen(false)}
           onCreate={createDatabase}
         />
@@ -1232,11 +1297,13 @@ export function DataStudioSettingsPage() {
 interface CreateDatabaseDrawerProps {
   isUk: boolean;
   busy: boolean;
+  /** Shown in the footer so the owner knows which company receives the database. */
+  companyName?: string;
   onClose: () => void;
   onCreate: (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => Promise<void>;
 }
 
-function CreateDatabaseDrawer({ isUk, busy, onClose, onCreate }: CreateDatabaseDrawerProps) {
+function CreateDatabaseDrawer({ isUk, busy, companyName, onClose, onCreate }: CreateDatabaseDrawerProps) {
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<"shared_postgres" | "external_postgres">("shared_postgres");
   const [connectionString, setConnectionString] = useState("");
@@ -1331,9 +1398,13 @@ function CreateDatabaseDrawer({ isUk, busy, onClose, onCreate }: CreateDatabaseD
 
           <div className="browser-form-footer">
             <div className="browser-form-footer-hint">
-              {isUk
-                ? "Буде створено два середовища (dev і prod) з окремими ролями доступу."
-                : "Two environments (dev and prod) with separate access roles will be created."}
+              {companyName
+                ? (isUk
+                  ? `Буде створено в компанії «${companyName}»: два середовища (dev і prod) з окремими ролями доступу.`
+                  : `Created in the company “${companyName}”: two environments (dev and prod) with separate access roles.`)
+                : (isUk
+                  ? "Буде створено два середовища (dev і prod) з окремими ролями доступу."
+                  : "Two environments (dev and prod) with separate access roles will be created.")}
             </div>
             <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={!canSubmit || working || busy}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1344,6 +1415,151 @@ function CreateDatabaseDrawer({ isUk, busy, onClose, onCreate }: CreateDatabaseD
             </button>
           </div>
         </form>
+      </aside>
+    </div>
+  );
+}
+
+// --- Transfer database drawer -----------------------------------------------
+
+interface TransferDatabaseDrawerProps {
+  isUk: boolean;
+  backend: BackendSummary;
+  /** Companies the database can move to (every company except the current one). */
+  companies: CompanySummary[];
+  /** Projects of the current company attached to this database: they stay behind. */
+  attachedProjects: number;
+  busy: boolean;
+  onClose: () => void;
+  onTransfer: (input: { targetCompanyId: string; confirmName: string }) => Promise<void>;
+}
+
+function TransferDatabaseDrawer({ isUk, backend, companies, attachedProjects, busy, onClose, onTransfer }: TransferDatabaseDrawerProps) {
+  const [targetCompanyId, setTargetCompanyId] = useState(() => companies[0]?.id ?? "");
+  const [confirmName, setConfirmName] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const targetRef = useRef<HTMLSelectElement | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => targetRef.current?.focus(), 30);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const nameMatches = confirmName.trim() === backend.name;
+  const canSubmit = Boolean(targetCompanyId) && nameMatches && targetCompanyId !== backend.companyId;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setWorking(true);
+    setLocalError(null);
+    try {
+      await onTransfer({ targetCompanyId, confirmName: confirmName.trim() });
+    } catch (cause) {
+      setLocalError(transferErrorMessage(isUk, errorCode(cause), cause instanceof Error ? cause.message : "Could not transfer the database"));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="company-drawer-backdrop" onMouseDown={() => onClose()}>
+      <aside className="company-drawer automations-drawer" role="dialog" aria-modal="true" aria-label={isUk ? "Перенести базу даних" : "Move the database"} onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <span>Data Studio</span>
+            <h2>{isUk ? "Перенести базу даних" : "Move the database"}</h2>
+          </div>
+          <button type="button" className="automations-drawer-close" aria-label={isUk ? "Закрити" : "Close"} onClick={onClose}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </header>
+
+        {companies.length === 0 ? (
+          <section>
+            <h3>{isUk ? "Немає куди переносити" : "No target company"}</h3>
+            <p className="ds-muted">
+              {isUk
+                ? "У робочому просторі лише одна компанія. Створіть другу — і базу можна буде перенести разом з усіма даними."
+                : "The workspace has a single company. Create another one — then the database can move together with all of its data."}
+            </p>
+            <div className="browser-form-footer">
+              <div className="browser-form-footer-hint">
+                <Link to="/settings/company">{isUk ? "створити компанію" : "create a company"}</Link>
+              </div>
+              <button type="button" className="button-secondary" onClick={onClose}>{isUk ? "Закрити" : "Close"}</button>
+            </div>
+          </section>
+        ) : (
+          <form onSubmit={submit}>
+            <section>
+              <h3>{isUk ? "Куди перенести" : "Where to move"}</h3>
+              <label className="browser-form-field">
+                <span>{isUk ? "Цільова компанія" : "Target company"} <i className="required-star">*</i></span>
+                <select ref={targetRef} value={targetCompanyId} onChange={(event) => { setTargetCompanyId(event.target.value); setLocalError(null); }}>
+                  {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+                </select>
+              </label>
+
+              <div className="data-studio-alert info" role="status">
+                {isUk
+                  ? "База переїде разом з усіма даними: таблиці, ключі API, налаштування Auth, бекапи. Фізична база та ролі не перестворюються — дані не втрачаються."
+                  : "The database moves with all of its data: tables, API keys, Auth settings and backups. The physical database and its roles are not recreated — nothing is lost."}
+              </div>
+
+              {attachedProjects > 0 && (
+                <div className="data-studio-alert warning" role="alert">
+                  {isUk
+                    ? `Буде від'єднано проєктів: ${attachedProjects} — вони залишаться в старій компанії без бази; після перенесення прикріпіть базу до проєктів нової компанії.`
+                    : `Projects to detach: ${attachedProjects} — they stay in the old company without a database; after the move attach the database to the new company's projects.`}
+                </div>
+              )}
+
+              <label className="browser-form-field">
+                <span>
+                  {isUk
+                    ? <>Введіть назву бази <code>{backend.name}</code> для підтвердження <i className="required-star">*</i></>
+                    : <>Type the database name <code>{backend.name}</code> to confirm <i className="required-star">*</i></>}
+                </span>
+                <input
+                  value={confirmName}
+                  placeholder={backend.name}
+                  onChange={(event) => { setConfirmName(event.target.value); setLocalError(null); }}
+                />
+                {confirmName.trim() && !nameMatches && (
+                  <small className="ds-hint-error">{isUk ? "Назва не збігається" : "Name does not match"}</small>
+                )}
+              </label>
+            </section>
+
+            {localError && <div className="data-studio-alert error" role="alert">{localError}</div>}
+
+            <div className="browser-form-footer">
+              <div className="browser-form-footer-hint">
+                {isUk
+                  ? "Після перенесення стару компанію можна видалити — база даних і дані залишаться в новій компанії."
+                  : "After the move the old company can be deleted — the database and its data stay in the new company."}
+              </div>
+              <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={!canSubmit || working || busy}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12h14" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
+                {working || busy ? (isUk ? "Переносимо…" : "Moving…") : isUk ? "Перенести базу" : "Move database"}
+              </button>
+            </div>
+          </form>
+        )}
       </aside>
     </div>
   );
