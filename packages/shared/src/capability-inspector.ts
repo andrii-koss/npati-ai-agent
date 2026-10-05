@@ -48,7 +48,30 @@ export interface InspectorReport {
     status: string;
     risk: string;
     reasonCode?: string;
+    /** C2: feature flag that gates this capability (null for capabilities without a gate). */
+    flagKey?: string | null;
+    /** C2: flag state at inspection time; "unknown" when no flag source is available. */
+    flagState?: "on" | "off" | "unknown" | null;
   }>;
+}
+
+/**
+ * C2: Coding Agent capabilities are gated by the `code.read` sub-flag (C1a). The inspector only
+ * reports the state; it never turns a flag on and it degrades to "unknown" when the server has no
+ * flag source, so a missing flag service can never look like an enabled feature.
+ */
+export const CODE_CAPABILITY_DOMAIN = "code";
+export const CODE_READ_FLAG = "code.read";
+
+export function flagKeyForCapability(domain: string): string | null {
+  return domain === CODE_CAPABILITY_DOMAIN ? CODE_READ_FLAG : null;
+}
+
+export interface InspectOptions {
+  /** Flag states resolved server-side, keyed by flag key. */
+  flagStates?: Record<string, boolean>;
+  /** True when a flag source was available at all. */
+  flagSourceAvailable?: boolean;
 }
 
 export interface RunInspectorInput {
@@ -126,7 +149,7 @@ export class CapabilityInspectorService {
     this.resolver = resolver;
   }
 
-  inspect(slice: InspectorSlice = "all", resolutionContext?: ResolutionContext): InspectorReport {
+  inspect(slice: InspectorSlice = "all", resolutionContext?: ResolutionContext, options: InspectOptions = {}): InspectorReport {
     const matrix = CAPABILITY_MATRIX;
 
     let evaluatedDetails: Record<string, { status: string; reasonCode?: string }> = {};
@@ -134,6 +157,15 @@ export class CapabilityInspectorService {
       const res = this.resolver.resolve(resolutionContext);
       evaluatedDetails = res.details;
     }
+
+    const flagStateFor = (domain: string): { flagKey: string | null; flagState: "on" | "off" | "unknown" | null } => {
+      const flagKey = flagKeyForCapability(domain);
+      if (!flagKey) return { flagKey: null, flagState: null };
+      const value = options.flagStates?.[flagKey];
+      if (value === true) return { flagKey, flagState: "on" };
+      if (value === false) return { flagKey, flagState: "off" };
+      return { flagKey, flagState: "unknown" };
+    };
 
     const allItems = matrix.map((m) => {
       const detail = evaluatedDetails[m.capabilityId];
@@ -147,6 +179,7 @@ export class CapabilityInspectorService {
         status: m.status,
         risk: m.risk,
         reasonCode: detail?.reasonCode,
+        ...flagStateFor(m.domain),
       };
     });
 

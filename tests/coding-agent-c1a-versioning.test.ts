@@ -25,13 +25,16 @@ const tool = (overrides: Partial<CodeToolSchema> = {}): CodeToolSchema => ({
 });
 
 describe("C1a — tool schema registry", () => {
-  it("starts empty with a frozen manifest version and checksum", () => {
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(0);
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(1);
-    expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(SHA256_EMPTY);
+  it("freezes the published manifest version and checksum", () => {
+    // C2 published the six read-only tools, so the registry is no longer empty; the invariant is that
+    // the frozen constants, the registry and the resolver all agree with each other.
+    expect(CODE_TOOL_SCHEMAS.length).toBeGreaterThan(0);
+    expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(2);
+    expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
     expect(toolSchemaChecksum([])).toBe(SHA256_EMPTY);
     expect(() => assertManifestConsistent()).not.toThrow();
-    expect(currentToolManifest()).toMatchObject({ version: 1, tools: [], checksum: SHA256_EMPTY });
+    expect(currentToolManifest()).toMatchObject({ version: CODE_TOOL_MANIFEST_VERSION, checksum: PUBLISHED_TOOL_SCHEMA_CHECKSUM });
+    expect(currentToolManifest().tools).toHaveLength(CODE_TOOL_SCHEMAS.length);
   });
 
   it("canonicalises and checksums independently of key order and formatting", () => {
@@ -82,10 +85,11 @@ describe("C1a — tool schema registry", () => {
   });
 
   it("resolves the manifest a session was pinned to and refuses unknown versions", () => {
+    // Manifest v1 is the pre-C2 (empty) manifest: sessions created before the tools keep resolving.
     expect(resolveManifestForSession(1).version).toBe(1);
     expect(resolveManifestForSession(1).tools).toEqual([]);
-    expect(() => resolveManifestForSession(2)).toThrow(CodeToolSchemaError);
-    try { resolveManifestForSession(2); } catch (error) { expect((error as CodeToolSchemaError).code).toBe("unknown_tool_manifest"); }
+    expect(() => resolveManifestForSession(999)).toThrow(CodeToolSchemaError);
+    try { resolveManifestForSession(999); } catch (error) { expect((error as CodeToolSchemaError).code).toBe("unknown_tool_manifest"); }
     try { resolveManifestForSession(0); } catch (error) { expect((error as CodeToolSchemaError).code).toBe("invalid_tool_manifest_version"); }
     // A future build can serve an older manifest explicitly.
     const legacy = toolManifest([tool()], 7);
@@ -176,7 +180,7 @@ describe("security-gate: C1a tool schema CI guard", () => {
     const stored = JSON.parse(readFileSync(path.resolve("tests/fixtures/code-tool-schema-snapshot.json"), "utf8")) as { manifestVersion: number; checksum: string; tools: unknown[] };
     expect(stored.manifestVersion).toBe(CODE_TOOL_MANIFEST_VERSION);
     expect(stored.checksum).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
-    expect(stored.checksum).toBe(SHA256_EMPTY);
+    expect(stored.tools).toHaveLength(CODE_TOOL_SCHEMAS.length);
     expect(compareSnapshots(stored, CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION)).toMatchObject({ ok: true, errors: [] });
   });
 

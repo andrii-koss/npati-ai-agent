@@ -202,7 +202,7 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     });
     expect(capsRes.statusCode).toBe(200);
     const tools = capsRes.json();
-    expect(tools.length).toBe(84); // Exactly 84 agent-callable tools
+    expect(tools.length).toBe(90); // Exactly 90 agent-callable tools
 
     const skillsRes = await app.inject({
       method: "GET",
@@ -304,8 +304,8 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     });
     expect(inspectRes.statusCode).toBe(200);
     const inspectorReport = inspectRes.json();
-    expect(inspectorReport.counts.all).toBe(348);
-    expect(inspectorReport.counts.agentCallable).toBe(84);
+    expect(inspectorReport.counts.all).toBe(354);
+    expect(inspectorReport.counts.agentCallable).toBe(90);
 
     // Verify activity timeline without secret leak
     const mockRun: any = {

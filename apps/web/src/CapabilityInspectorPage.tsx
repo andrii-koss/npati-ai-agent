@@ -39,6 +39,9 @@ interface CapabilityItem {
   agentCallable: boolean;
   status: string;
   risk: string;
+  /** C2: feature flag gating this capability, when the backend reports one. */
+  flagKey?: string | null;
+  flagState?: "on" | "off" | "unknown" | null;
   reasonCode?: string;
 }
 
@@ -573,6 +576,8 @@ export function CapabilityInspectorPage() {
                   >
                     {t("capabilityInspector.table.colStatus")} {sortField === "status" && (sortAsc ? "▲" : "▼")}
                   </th>
+                  {/* C2: feature-flag gate for the capability (Coding Agent tools). */}
+                  <th style={{ width: "92px" }}>Flag</th>
                 </tr>
               </thead>
               <tbody>
@@ -648,13 +653,27 @@ export function CapabilityInspectorPage() {
                             {st.label}
                           </span>
                         </td>
+                        <td>
+                          {/* C2: Coding Agent capabilities are gated by a feature flag; the badge shows
+                              the server-side state ("unknown" means no flag source was available). */}
+                          {item.flagKey ? (
+                            <span
+                              className={`status-pill ${item.flagState === "on" ? "verified" : item.flagState === "off" ? "denied" : "partial"}`}
+                              title={`${item.flagKey}: ${item.flagState ?? "unknown"}`}
+                            >
+                              flag: {item.flagState ?? "unknown"}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--npati-gray-400)" }}>—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })
                 )}
                 {!loading && pageItems.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
+                    <td colSpan={9} style={{ textAlign: "center", padding: "2.5rem 1rem", color: "var(--npati-gray-500)" }}>
                       {t("capabilityInspector.table.empty")}
                     </td>
                   </tr>

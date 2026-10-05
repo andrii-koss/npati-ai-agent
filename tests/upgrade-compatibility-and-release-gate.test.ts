@@ -51,15 +51,15 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   });
 
   describe("All 306 Mapped Statuses & Zero Capability Disappearance", () => {
-    it("verifies the 306 baseline and all 348 current capabilities are retained", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(348);
-      expect(CAPABILITY_CATALOG.length).toBe(348);
+    it("verifies the 306 baseline and all 354 current capabilities are retained", () => {
+      expect(CAPABILITY_MATRIX.length).toBe(354);
+      expect(CAPABILITY_CATALOG.length).toBe(354);
 
       const catalogIds = new Set(CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds || []));
       const matrixIds = new Set(CAPABILITY_MATRIX.map((c) => c.id));
 
-      expect(catalogIds.size).toBe(348);
-      expect(matrixIds.size).toBe(348);
+      expect(catalogIds.size).toBe(354);
+      expect(matrixIds.size).toBe(354);
 
       // Diff check: every ID 1..306 must be in both
       for (let i = 1; i <= 306; i++) {

@@ -7261,3 +7261,7 @@ CAPABILITY_CATALOG.push(...PROJECT_QA_CAPABILITIES);
 
 import { PROJECT_DATA_CAPABILITIES } from "./project-data-capabilities";
 CAPABILITY_CATALOG.push(...PROJECT_DATA_CAPABILITIES);
+
+// C2: read-only Coding Agent tools (domain "code", inventory ids 349-354).
+import { CODE_READ_CAPABILITIES } from "./code-capabilities";
+CAPABILITY_CATALOG.push(...CODE_READ_CAPABILITIES);
