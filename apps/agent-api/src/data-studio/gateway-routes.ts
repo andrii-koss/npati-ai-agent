@@ -167,7 +167,7 @@ export function registerProjectApiGatewayRoutes(
   // Auth Endpoints
   // =========================================================================
 
-  const handleRegister = (request: FastifyRequest<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>, reply: FastifyReply) =>
+  const handleRegister = (request: FastifyRequest<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string; redirectTo?: string } }>, reply: FastifyReply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -183,8 +183,8 @@ export function registerProjectApiGatewayRoutes(
       });
     });
 
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/register`, PUBLIC_WRITE_ROUTE, handleRegister);
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/signup`, PUBLIC_WRITE_ROUTE, handleRegister);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string; redirectTo?: string } }>(`${base}/auth/register`, PUBLIC_WRITE_ROUTE, handleRegister);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string; redirectTo?: string } }>(`${base}/auth/signup`, PUBLIC_WRITE_ROUTE, handleRegister);
 
   const handleLogin = (request: FastifyRequest<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>, reply: FastifyReply) =>
     runWithGateway(request, reply, async (auth) => {
@@ -262,7 +262,7 @@ export function registerProjectApiGatewayRoutes(
     }),
   );
 
-  app.post<{ Params: ProjectRouteParams; Body: { email: string } }>(`${base}/auth/forgot-password`, PUBLIC_WRITE_ROUTE, (request, reply) =>
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; redirectTo?: string } }>(`${base}/auth/forgot-password`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -273,6 +273,7 @@ export function registerProjectApiGatewayRoutes(
         auth.environment,
         request.body.email,
         request.ip,
+        request.body.redirectTo,
       );
     }),
   );

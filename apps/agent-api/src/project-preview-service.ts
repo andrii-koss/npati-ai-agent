@@ -100,6 +100,17 @@ export async function detectProjectStack(
   // 3. Framework & Dev command detection
   if (pkg) {
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    // Expo (React Native) projects preview through an Expo Web export served statically (D6).
+    // The static export avoids Metro WebSockets and keeps bundle responses inside the preview
+    // proxy limits; the port matches the static branch so the existing proxy path is reused.
+    const hasExpo = Boolean(deps["expo"] || deps["react-native"] && (pathSet.has("app.json") || pathSet.has("app.config.js") || pathSet.has("app.config.ts")));
+    if (hasExpo) {
+      const port = 3000;
+      const command = pkg.scripts?.export
+        ? `${packageManager} run export && npx -y serve -s dist -l ${port}`
+        : `npx expo export --platform web --output-dir dist && npx -y serve -s dist -l ${port}`;
+      return { packageManager, framework: "expo", command, port };
+    }
     const hasNext = Boolean(deps["next"] || Array.from(pathSet).some((p) => /^next\.config\.(?:js|ts|mjs)$/.test(p)));
     const hasVite = Boolean(deps["vite"] || Array.from(pathSet).some((p) => /^vite\.config\.(?:js|ts|mjs)$/.test(p)));
     const hasAstro = Boolean(deps["astro"] || Array.from(pathSet).some((p) => /^astro\.config\.(?:js|ts|mjs)$/.test(p)));

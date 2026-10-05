@@ -186,6 +186,28 @@ export function registerProjectAuthRoutes(
     Body: Partial<ProjectAuthSettings>;
   }>(`${base}/settings`, updateSettingsHandler);
 
+  // Deep link redirect allowlist for mobile apps (D6): only registered targets may receive tokens.
+  app.get<{ Params: AuthRouteParams }>(`${base}/redirects`, (request, reply) =>
+    runAdmin(request, reply, "workspace:read", (ctx) =>
+      service!.getRedirectUrls(ctx, request.params.companyId, request.params.projectId, request.params.environment),
+    ),
+  );
+
+  app.put<{
+    Params: AuthRouteParams;
+    Body: { redirectUrls?: string[] };
+  }>(`${base}/redirects`, (request, reply) =>
+    runAdmin(request, reply, "business:manage", (ctx) =>
+      service!.updateRedirectUrls(
+        ctx,
+        request.params.companyId,
+        request.params.projectId,
+        request.params.environment,
+        request.body?.redirectUrls ?? [],
+      ),
+    ),
+  );
+
   app.get<{ Params: AuthRouteParams }>(`${base}/policies`, (request, reply) =>
     runAdmin(request, reply, "workspace:read", (ctx) =>
       service!.getAccessPolicies(ctx, request.params.companyId, request.params.projectId, request.params.environment),

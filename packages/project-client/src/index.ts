@@ -11,6 +11,80 @@ class MemoryStorage implements ProjectClientStorage {
   removeItem(key: string) { this.store.delete(key); }
 }
 
+/**
+ * Secure store surface compatible with `expo-secure-store` (getItemAsync/setItemAsync/deleteItemAsync).
+ * Kept structural so the SDK does not depend on React Native at module scope.
+ */
+export interface SecureStoreLike {
+  getItemAsync(key: string): Promise<string | null>;
+  setItemAsync(key: string, value: string): Promise<void>;
+  deleteItemAsync(key: string): Promise<void>;
+}
+
+/**
+ * Stores the session (including the refresh token) in the platform secure storage
+ * (iOS Keychain / Android Keystore) instead of plain AsyncStorage.
+ */
+export function createSecureStoreStorage(secureStore: SecureStoreLike): ProjectClientStorage {
+  return {
+    getItem: (key) => secureStore.getItemAsync(key),
+    setItem: async (key, value) => { await secureStore.setItemAsync(key, value); },
+    removeItem: async (key) => { await secureStore.deleteItemAsync(key); },
+  };
+}
+
+export type AuthDeepLinkKind = "verify_email" | "reset_password";
+
+export interface AuthDeepLink {
+  kind: AuthDeepLinkKind;
+  token: string;
+}
+
+/** Truthy inside a browser or a React Native runtime, where a secret key must never be used. */
+function isUntrustedClientRuntime(): boolean {
+  const globalScope = globalThis as { window?: unknown; navigator?: { product?: string } };
+  return typeof globalScope.window !== "undefined" || globalScope.navigator?.product === "ReactNative";
+}
+
+/**
+ * Builds the app deep link base used for email verification / password reset.
+ * Register exactly this value in Data Studio → Authentication → Redirect URLs;
+ * the server appends `?kind=...&token=...` to it.
+ */
+export function buildAuthRedirectUrl(scheme: string): string {
+  return `${scheme}://auth/callback`;
+}
+
+/**
+ * Parses an incoming auth deep link and extracts the one-time token.
+ * Supported shapes:
+ *   <scheme>://auth/callback?kind=verify_email&token=...
+ *   <scheme>://auth/verify?token=...
+ *   <scheme>://auth/reset?token=...
+ */
+export function parseAuthDeepLink(url: string): AuthDeepLink | null {
+  if (typeof url !== "string" || !url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const token = parsed.searchParams.get("token");
+  if (!token) return null;
+  const explicit = parsed.searchParams.get("kind");
+  const path = parsed.pathname.toLowerCase();
+  const kind: AuthDeepLinkKind | null = explicit === "verify_email" || explicit === "reset_password"
+    ? explicit
+    : path.includes("reset")
+      ? "reset_password"
+      : path.includes("verify") || path.includes("callback")
+        ? "verify_email"
+        : null;
+  if (!kind) return null;
+  return { kind, token };
+}
+
 export interface ProjectUser {
   id: string;
   email: string;
@@ -81,7 +155,7 @@ export interface ProjectClientOptions {
 }
 
 export interface ProjectAuthClient {
-  signUp(input: { email: string; password: string; name?: string }): Promise<{ user: ProjectUser; session: ProjectSession | null }>;
+  signUp(input: { email: string; password: string; name?: string; redirectTo?: string }): Promise<{ user: ProjectUser; session: ProjectSession | null }>;
   signIn(input: { email: string; password: string }): Promise<{ user: ProjectUser; session: ProjectSession }>;
   signOut(): Promise<void>;
   getUser(): Promise<ProjectUser | null>;
@@ -89,7 +163,7 @@ export interface ProjectAuthClient {
   setSession(session: ProjectSession | null): Promise<void>;
   refreshToken(): Promise<ProjectSession | null>;
   verifyEmail(token: string): Promise<{ success: boolean }>;
-  forgotPassword(email: string): Promise<{ success: boolean }>;
+  forgotPassword(email: string, options?: { redirectTo?: string }): Promise<{ success: boolean }>;
   resetPassword(input: { token: string; newPassword: string }): Promise<{ success: boolean }>;
   onAuthStateChange(callback: AuthChangeCallback): () => void;
 }
@@ -109,7 +183,7 @@ export interface ProjectClient {
 }
 
 export function createProjectClient(options: ProjectClientOptions): ProjectClient {
-  if (typeof (globalThis as { window?: unknown }).window !== "undefined" && options.secretKey) throw new Error("PROJECT_SECRET_KEY cannot be used in a browser");
+  if (isUntrustedClientRuntime() && options.secretKey) throw new Error("PROJECT_SECRET_KEY cannot be used in a browser or mobile app");
   const fetchFn = options.fetch ?? (typeof globalThis !== "undefined" ? globalThis.fetch : undefined);
   if (!fetchFn) {
     throw new Error("No fetch implementation available in current environment");
@@ -349,10 +423,10 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
       });
     },
 
-    async forgotPassword(email) {
+    async forgotPassword(email, options) {
       return request<{ success: boolean }>("/auth/forgot-password", {
         method: "POST",
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(options?.redirectTo ? { email, redirectTo: options.redirectTo } : { email }),
       });
     },
 

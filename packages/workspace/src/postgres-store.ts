@@ -33,7 +33,7 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
   last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",
-  last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", app_scheme AS "appScheme", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -769,6 +769,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const mobileAppMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='063_mobile_app_projects'");
+    if (!mobileAppMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration063 } = await import("./migration-063");
+        await runMigration063(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('063_mobile_app_projects')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   async health() {
@@ -1105,11 +1117,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
     await this.assertCompany(context, companyId);
     const created = await this.pool.query<Project>(`INSERT INTO projects
-      (id,workspace_id,company_id,created_by,name,description,type,create_request_key)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      (id,workspace_id,company_id,created_by,name,description,type,create_request_key,data_backend_id,app_scheme)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       ON CONFLICT (workspace_id,company_id,created_by,create_request_key) DO NOTHING
       RETURNING ${projectColumns}`,
-      [randomUUID(),context.workspaceId,companyId,context.userId,input.name,input.description ?? null,input.type,idempotencyKey]);
+      [randomUUID(),context.workspaceId,companyId,context.userId,input.name,input.description ?? null,input.type,idempotencyKey,input.dataBackendId ?? null,input.appScheme ?? null]);
     if (created.rows[0]) return { project: created.rows[0], created: true };
     const existing = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
       WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND create_request_key=$4`,

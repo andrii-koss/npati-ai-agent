@@ -333,7 +333,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const project: Project = {
       id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
       name: input.name, description: input.description, type: input.type ?? "website", status: "ready",
-      dataBackendId: input.dataBackendId,
+      dataBackendId: input.dataBackendId, appScheme: input.appScheme,
       revision: 1, createdAt: timestamp, updatedAt: timestamp,
     };
     this.projects.set(project.id, project);

@@ -28,7 +28,7 @@ const serverArgs = (values: string[]) => {
   }
   return true;
 };
-const frameworkCli = (value: string) => ["next", "vite", "astro", "nuxt", "remix", "react-scripts", "svelte-kit"].includes(value);
+const frameworkCli = (value: string) => ["next", "vite", "astro", "nuxt", "remix", "react-scripts", "svelte-kit", "expo"].includes(value);
 export function normalizeTerminalCommand(input: string | TerminalCommandSpec): NormalizedTerminalCommand {
   const spec = typeof input === "string" ? { command: input } : input;
   if (!spec || typeof spec !== "object") throw new Error("Invalid terminal command");
@@ -71,7 +71,7 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   const cliArgs = program === "npx" && action === "--yes" ? args.slice(1) : program === "npx" ? args : program === "npm" && action === "exec" && args[0] === "--" ? args.slice(2) : ["pnpm", "yarn"].includes(program!) && action === "exec" ? args.slice(1) : [];
   const scaffold = cli?.replace(/@latest$/, "");
   if (scaffold && ["create-next-app", "create-vite", "create-astro", "create-remix", "create-react-app"].includes(scaffold) && relative(cliArgs[0] ?? "") && cliArgs.slice(1).every((arg, index, rest) => ["--typescript", "--javascript", "--eslint", "--app", "--src-dir", "--no-src-dir", "--tailwind", "--no-tailwind", "--use-npm", "--use-pnpm", "--use-yarn", "--yes", "-y"].includes(arg) || arg === "--template" && ["react", "react-ts", "vanilla", "vanilla-ts", "vue", "vue-ts", "svelte", "svelte-ts"].includes(rest[index + 1] ?? "") || index > 0 && rest[index - 1] === "--template")) return result("controlled", "Scaffold web project inside sandbox", "install_build");
-  if (cli && frameworkCli(cli) && ["build", "dev", "start", "preview", "sync"].includes(cliArgs[0] ?? "") && (cliArgs[0] !== "sync" || cli === "svelte-kit") && serverArgs(cliArgs.slice(1))) return result("controlled", "Run framework CLI inside sandbox", cliArgs[0] === "build" ? "install_build" : "default");
+  if (cli && frameworkCli(cli) && ["build", "dev", "start", "preview", "sync", "export"].includes(cliArgs[0] ?? "") && (cliArgs[0] !== "sync" || cli === "svelte-kit") && serverArgs(cliArgs.slice(1))) return result("controlled", "Run framework CLI inside sandbox", ["build", "export"].includes(cliArgs[0] ?? "") ? "install_build" : "default");
   if (program === "node" && action && relative(action) && /\.(?:js|mjs|cjs)$/.test(action) && serverArgs(args)) return result("controlled", "Run Node project server inside sandbox");
   if (["pip", "pip3"].includes(program!) && action === "install" && (args.every(packageName) || (args.length === 2 && args[0] === "-r" && relative(args[1]!)))) return result("controlled", "Install Python dependencies inside sandbox", "install_build");
   if (program === "composer" && action === "install" && args.every((word) => ["--no-interaction", "--prefer-dist", "--no-progress"].includes(word))) return result("controlled", "Install Composer dependencies inside sandbox", "install_build");

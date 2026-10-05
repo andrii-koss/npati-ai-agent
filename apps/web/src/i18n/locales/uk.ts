@@ -1,6 +1,14 @@
 import type { TranslationSchema } from "../types";
 
 export const uk: TranslationSchema = {
+  projectSection: {
+    types: {
+      website: "Сайт",
+      webApp: "Вебзастосунок",
+      landingPage: "Лендінг",
+      mobileApp: "Мобільний застосунок",
+    },
+  },
   common: {
     save: "Зберегти",
     cancel: "Скасувати",

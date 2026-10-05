@@ -2,14 +2,19 @@ import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { ProjectMultiAgentService } from "./project-multi-agent";
-import { WEBSITE_FILE_TOOLS, canBuildWebsite } from "./project-agent-capabilities";
+import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS, canBuildWebsite, canBuildMobileApp } from "./project-agent-capabilities";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { CompanyDelegationRuntime } from "./company-runtime";
-import { type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework, createDefaultWebsiteDocument, getWebsiteAdapter } from "@npati/shared";
+import type { DataBackendService } from "./data-studio/service";
+import type { ProjectRedirectRepository } from "./data-studio/redirect-repository";
+import {
+  type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework,
+  createDefaultWebsiteDocument, getWebsiteAdapter, createMobileAppScaffold, defaultAppScheme, slugifyProjectName,
+} from "@npati/shared";
 
 export class ProjectOrchestrationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
@@ -83,6 +88,8 @@ export class ProjectOrchestrator {
     private readonly gitService?: ProjectGitService,
     private readonly deployService?: ProjectDeployService,
     private readonly qaService?: ProjectBrowserQaService,
+    private readonly dataBackends?: DataBackendService,
+    private readonly authRedirects?: ProjectRedirectRepository,
   ) {}
 
   /**
@@ -141,13 +148,84 @@ export class ProjectOrchestrator {
       description: "Builds and repairs websites requested in chat.",
       systemInstruction: "Inspect the project files, implement the requested website, and verify the result.",
       modelId: main?.modelId,
-      tools: [...WEBSITE_FILE_TOOLS, "project.terminal.exec", "project.terminal.process", "project.preview.start", "project.preview.status"],
+      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS],
       isActive: true,
     }, "website-builder-agent-v1");
     if (!canBuildWebsite(agent) || !agent.isActive) {
       throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required website project tools.", 400);
     }
     return agent;
+  }
+
+  /** Mobile projects (D6) get an Expo-focused agent with the same file and preview tools. */
+  private async ensureMobileAppAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
+    const existing = await this.selectProjectAgent(ctx, companyId);
+    if (existing) return existing;
+    const company = await this.workspaceStore.getCompany(ctx, companyId);
+    const main = company.mainAgentId
+      ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId)
+      : undefined;
+    const agent = await this.workspaceStore.createCompanyAgent(ctx, companyId, {
+      name: "Mobile App Builder",
+      role: "Mobile app developer",
+      description: "Builds Expo (React Native) apps that use the project Project API and Project Auth.",
+      systemInstruction: "Inspect the mobile project files, implement the requested screens with the vendored SDK, and verify the Expo Web preview.",
+      modelId: main?.modelId,
+      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS],
+      isActive: true,
+    }, "mobile-app-builder-agent-v1");
+    if (!canBuildMobileApp(agent) || !agent.isActive) {
+      throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required mobile project tools.", 400);
+    }
+    return agent;
+  }
+
+  /**
+   * Resolves the DataBackend a mobile project must share with the website (D6).
+   * Never copies a database: one backend, several projects.
+   */
+  private async resolveMobileDataBackend(
+    ctx: AuthContext,
+    companyId: string,
+    requested: { dataBackendId?: string; prompt?: string },
+  ): Promise<{ backendId?: string; choices?: Array<{ id: string; name: string }> }> {
+    if (!this.dataBackends) return { backendId: undefined };
+    const backends = await this.dataBackends.list(ctx, companyId);
+    const usable = backends.filter((backend) => backend.status === "ready");
+    if (!usable.length) {
+      throw new ProjectOrchestrationError(
+        "DATA_BACKEND_REQUIRED",
+        "This Company has no DataBackend yet. Create Data and a schema for the website first (Data Studio), then the mobile app can share them.",
+        400,
+      );
+    }
+    if (requested.dataBackendId) {
+      const match = usable.find((backend) => backend.id === requested.dataBackendId);
+      if (!match) throw new ProjectOrchestrationError("DATA_BACKEND_NOT_FOUND", "The requested DataBackend is not available for this Company", 404);
+      return { backendId: match.id };
+    }
+    if (usable.length === 1) return { backendId: usable[0]!.id };
+    const prompt = (requested.prompt ?? "").toLowerCase();
+    const named = usable.filter((backend) => backend.name && prompt.includes(backend.name.toLowerCase()));
+    if (named.length === 1) return { backendId: named[0]!.id };
+    return { choices: usable.map((backend) => ({ id: backend.id, name: backend.name })) };
+  }
+
+  /** Registers the app deep link so verification and reset links can return to the app (D6). */
+  private async registerMobileRedirects(ctx: AuthContext, companyId: string, projectId: string, scheme: string) {
+    if (!this.authRedirects) return;
+    const url = `${scheme}://auth/callback`;
+    for (const environment of ["dev", "prod"] as const) {
+      await this.authRedirects.replace(ctx, companyId, projectId, environment, [url]).catch(() => undefined);
+    }
+  }
+
+  private async scaffoldMobileAppProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, scheme: string) {
+    const scaffold = createMobileAppScaffold({ name: projectName, slug: slugifyProjectName(projectName), scheme });
+    for (const [filePath, content] of Object.entries(scaffold.files)) {
+      try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
+      catch { await this.projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
+    }
   }
 
   /**
@@ -157,28 +235,55 @@ export class ProjectOrchestrator {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    details: { name: string; description?: string; framework?: string; purpose?: string }
+    details: { name: string; description?: string; framework?: string; purpose?: string; projectType?: "website" | "mobile_app" }
   ): Promise<string> {
-    const content = [
-      `# ${details.name}`,
-      "",
-      "## Purpose & Overview",
-      details.purpose || details.description || "Modern AI-generated web project.",
-      "",
-      "## Architecture & Tech Stack",
-      `- Framework: ${details.framework || "Vite + React"}`,
-      "- Language: TypeScript / JavaScript",
-      "",
-      "## Engineering Mandate & Guidelines",
-      "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
-      "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
-      "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",
-      "- **Preserve Stability**: Ensure configuration, routing, and functional components remain intact across iterations.",
-      "",
-      "## Project Status",
-      `- Initialized: ${new Date().toISOString()}`,
-      "- Mode: Active development",
-    ].join("\n");
+    const isMobileApp = details.projectType === "mobile_app";
+    const content = isMobileApp
+      ? [
+          `# ${details.name}`,
+          "",
+          "## Purpose & Overview",
+          details.purpose || details.description || "AI-generated mobile app (Expo / React Native).",
+          "",
+          "## Architecture & Tech Stack",
+          `- Framework: ${details.framework || "Expo (React Native)"} with TypeScript`,
+          "- Preview: Expo Web export served in the sandbox (Live Preview); store builds are not part of this step.",
+          "",
+          "## Backend Rules (Project API & Project Auth)",
+          "- This app shares the DataBackend of its website: same collections, same end users, same access policies and RLS. Never create or copy a database.",
+          "- Use only PROJECT_PUBLISHABLE_KEY (public). PROJECT_SECRET_KEY, DATABASE_URL and any database role credentials must never appear in the app code, bundle, logs or prompts.",
+          "- Import the client SDK from `./npati-client` (already generated in the project root) and pass the deep link redirect from `./src/config`.",
+          "- Refresh tokens stay in expo-secure-store; never fall back to plain AsyncStorage.",
+          "",
+          "## Engineering Mandate & Guidelines",
+          "- **Targeted Edits Rule**: always search and inspect relevant files before modifying. Make surgical, targeted edits.",
+          "- **No Blind Rewrites**: do NOT recreate the whole project or overwrite unchanged screens.",
+          "- **Preserve Stability**: keep navigation, auth state and API wiring intact across iterations.",
+          "",
+          "## Project Status",
+          `- Initialized: ${new Date().toISOString()}`,
+          "- Mode: Active development",
+        ].join("\n")
+      : [
+          `# ${details.name}`,
+          "",
+          "## Purpose & Overview",
+          details.purpose || details.description || "Modern AI-generated web project.",
+          "",
+          "## Architecture & Tech Stack",
+          `- Framework: ${details.framework || "Vite + React"}`,
+          "- Language: TypeScript / JavaScript",
+          "",
+          "## Engineering Mandate & Guidelines",
+          "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
+          "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
+          "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",
+          "- **Preserve Stability**: Ensure configuration, routing, and functional components remain intact across iterations.",
+          "",
+          "## Project Status",
+          `- Initialized: ${new Date().toISOString()}`,
+          "- Mode: Active development",
+        ].join("\n");
 
     try {
       const existing = await this.projectWorkspace.readFile(ctx, companyId, projectId, "PROJECT.md");
@@ -253,10 +358,13 @@ export class ProjectOrchestrator {
     };
   }> {
     const isRepositoryAction = params.intentDecision.intent === "COMMIT_PROJECT" || params.intentDecision.intent === "CONNECT_REPOSITORY";
+    const isMobileApp = params.intentDecision.targetDetails?.projectType === "mobile_app";
     const selectedAgent = isRepositoryAction
       ? await this.selectProjectAgent(ctx, params.companyId, [])
         ?? await this.workspaceStore.getCompanyAgent(ctx, params.companyId, (await this.workspaceStore.getCompany(ctx, params.companyId)).mainAgentId!)
-      : await this.ensureWebsiteAgent(ctx, params.companyId);
+      : isMobileApp
+        ? await this.ensureMobileAppAgent(ctx, params.companyId)
+        : await this.ensureWebsiteAgent(ctx, params.companyId);
     // 1. Resolve or Create Project
     let project: Project;
     let isCreate = false;
@@ -275,22 +383,50 @@ export class ProjectOrchestrator {
         params.prompt,
         params.intentDecision.targetDetails?.entityName,
       );
-      const framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "HTML/CSS";
+      const projectType = isMobileApp ? "mobile_app" : "website";
+      let framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "HTML/CSS";
+      let dataBackendId: string | undefined;
+      if (isMobileApp) {
+        const selection = await this.resolveMobileDataBackend(ctx, params.companyId, {
+          dataBackendId: params.intentDecision.targetDetails?.dataBackendId,
+          prompt: params.prompt,
+        });
+        if (selection.choices?.length) {
+          throw new ProjectOrchestrationError(
+            "DATA_BACKEND_CHOICE_REQUIRED",
+            `This Company has several DataBackends — tell me which one the mobile app should share (the app never gets its own copy of the database): ${selection.choices.map((choice) => choice.name).join(", ")}.`,
+            400,
+          );
+        }
+        dataBackendId = selection.backendId;
+        framework = "Expo";
+      }
 
       const { project: created } = await this.projectService.create(ctx, params.companyId, {
         name,
         description: params.prompt,
-        type: "website",
+        type: projectType,
+        dataBackendId,
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
-      project = await this.projectService.updatePreview(ctx, params.companyId, created.id, { framework });
+      project = await this.projectService.updatePreview(ctx, params.companyId, created.id, {
+        framework,
+        ...(isMobileApp ? { runtime: "expo" } : {}),
+      });
 
-      if (framework === "Next.js" || framework === "HTML/CSS") await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", params.prompt);
+      if (isMobileApp) {
+        const scheme = project.appScheme || defaultAppScheme(project.name);
+        await this.scaffoldMobileAppProject(ctx, params.companyId, project.id, project.name, scheme);
+        await this.registerMobileRedirects(ctx, params.companyId, project.id, scheme);
+      } else if (framework === "Next.js" || framework === "HTML/CSS") {
+        await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", params.prompt);
+      }
 
       // Initialize PROJECT.md
       await this.initSharedProjectContext(ctx, params.companyId, project.id, {
         name: project.name,
         framework,
         purpose: params.prompt,
+        projectType,
       });
     }
 
@@ -305,6 +441,7 @@ export class ProjectOrchestrator {
       "3. Keep all working pages, styles, assets, and configurations functional.",
       project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
       project.framework === "Next.js" ? "4. The Next.js project structure, package.json, and layout are ALREADY scaffolded in the workspace. Do not run create-next-app or re-scaffold; inspect and edit the existing files directly." : "",
+      project.type === "mobile_app" ? "4. This is an Expo (React Native) app. The template, screens and ./npati-client SDK are ALREADY in the workspace. Use PROJECT_PUBLISHABLE_KEY from ./src/config only; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
       "5. Focus ONLY on inspecting, creating, and modifying project source files. Do NOT execute 'npm run build', terminal commands, or preview tools (`project.terminal.exec`, `project.preview.start`) manually — the system automatically installs dependencies, executes production build verification, and launches Live Preview immediately after this step.",
       sharedContext ? `\n[Shared Project Context (PROJECT.md)]:\n${sharedContext.slice(0, 2000)}` : "",
       `\nUser Task: ${params.prompt}`,

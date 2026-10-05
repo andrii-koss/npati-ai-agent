@@ -27,6 +27,7 @@ import {
 import { ensureAuthTables } from "./auth-migration";
 import { RlsPolicyCompiler } from "./rls-compiler";
 import { type EmailProvider, UnconfiguredEmailProvider } from "./email-provider";
+import type { ProjectRedirectRepository } from "./redirect-repository";
 
 export interface ProjectAuthServiceOptions {
   store: WorkspaceStore;
@@ -35,6 +36,8 @@ export interface ProjectAuthServiceOptions {
   emailProvider?: EmailProvider;
   rateLimiter?: AuthRateLimiter;
   poolFactory?: (backend: DataBackend, environment: DataEnvironmentName, role: "migrator" | "runtime") => Promise<Pool> | Pool;
+  /** Per-project redirect URL allowlist used for mobile deep links (D6). */
+  redirects?: ProjectRedirectRepository;
 }
 
 export class ProjectAuthService {
@@ -44,6 +47,7 @@ export class ProjectAuthService {
   readonly emailProvider: EmailProvider;
   readonly rateLimiter: AuthRateLimiter;
   private readonly poolFactory?: (backend: DataBackend, environment: DataEnvironmentName, role: "migrator" | "runtime") => Promise<Pool> | Pool;
+  private readonly redirects?: ProjectRedirectRepository;
   private readonly pools = new Map<string, Pool>();
 
   constructor(options: ProjectAuthServiceOptions) {
@@ -53,6 +57,55 @@ export class ProjectAuthService {
     this.emailProvider = options.emailProvider ?? new UnconfiguredEmailProvider();
     this.rateLimiter = options.rateLimiter ?? new AuthRateLimiter();
     this.poolFactory = options.poolFactory;
+    this.redirects = options.redirects;
+  }
+
+  private ownerContext(backend: DataBackend): AuthContext {
+    return { workspaceId: backend.workspaceId, userId: backend.createdBy, permissions: ["workspace:read", "business:manage"] };
+  }
+
+  /**
+   * Validates a client-supplied redirect target against the project allowlist (D6).
+   * Returns null when the client did not ask for a deep link, so the token-only flow still works.
+   */
+  private async resolveAuthRedirect(
+    backend: DataBackend,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    redirectTo?: string,
+  ): Promise<string | null> {
+    if (!redirectTo) return null;
+    if (!this.redirects) {
+      throw new DataStudioError(400, "redirect", "Redirect URL is not registered for this project", false, "REDIRECT_NOT_ALLOWED");
+    }
+    return this.redirects.assertAllowed(this.ownerContext(backend), companyId, projectId, environment, redirectTo);
+  }
+
+  private authLink(redirectTo: string | null, token: string): string | undefined {
+    if (!redirectTo) return undefined;
+    const separator = redirectTo.includes("?") ? "&" : "?";
+    return `${redirectTo}${separator}token=${encodeURIComponent(token)}`;
+  }
+
+  async getRedirectUrls(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName): Promise<{ redirectUrls: string[] }> {
+    const backend = await this.getBackend(ctx, companyId, projectId);
+    if (!this.redirects) return { redirectUrls: [] };
+    return { redirectUrls: await this.redirects.list(this.ownerContext(backend), companyId, projectId, environment) };
+  }
+
+  async updateRedirectUrls(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    urls: string[],
+  ): Promise<{ redirectUrls: string[] }> {
+    const backend = await this.getBackend(ctx, companyId, projectId);
+    if (!this.redirects) {
+      throw new DataStudioError(503, "redirect", "Redirect URL storage is unavailable", true, "REDIRECTS_UNAVAILABLE");
+    }
+    return { redirectUrls: await this.redirects.replace(this.ownerContext(backend), companyId, projectId, environment, urls) };
   }
 
   private async getBackend(ctx: AuthContext, companyId: string, projectId: string): Promise<DataBackend> {
@@ -178,11 +231,12 @@ export class ProjectAuthService {
     companyId: string,
     projectId: string,
     environment: DataEnvironmentName,
-    input: { email: string; password: string; metadata?: Record<string, unknown> },
+    input: { email: string; password: string; metadata?: Record<string, unknown>; redirectTo?: string },
     ip?: string,
   ): Promise<{ user: ProjectAuthUser; session: ProjectAuthSession | null; message?: string }> {
     const backend = await this.getBackend(ctx, companyId, projectId);
     const settings = await this.getAuthSettings(ctx, companyId, projectId, environment);
+    const redirectTo = await this.resolveAuthRedirect(backend, companyId, projectId, environment, input.redirectTo);
 
     if (!settings.allowRegistration) {
       throw new DataStudioError(403, "auth_register", "User registration is disabled for this project", false, "REGISTRATION_DISABLED");
@@ -254,7 +308,7 @@ export class ProjectAuthService {
         await client.query("COMMIT");
 
         // Send email (throws EMAIL_SERVICE_UNCONFIGURED if unconfigured)
-        await this.emailProvider.sendVerificationEmail(emailNorm, verifyToken, emailNorm);
+        await this.emailProvider.sendVerificationEmail(emailNorm, verifyToken, emailNorm, { link: this.authLink(redirectTo, verifyToken) });
 
         return {
           user,
@@ -646,8 +700,10 @@ export class ProjectAuthService {
     environment: DataEnvironmentName,
     email: string,
     ip?: string,
+    redirectTo?: string,
   ): Promise<{ success: boolean; message: string }> {
     const backend = await this.getBackend(ctx, companyId, projectId);
+    const resolvedRedirect = await this.resolveAuthRedirect(backend, companyId, projectId, environment, redirectTo);
     const emailNorm = (email ?? "").trim().toLowerCase();
 
     if (ip) this.rateLimiter.check(`ip:${ip}`);
@@ -680,7 +736,7 @@ export class ProjectAuthService {
       [tokenHash, user.id, expiresAt],
     );
 
-    await this.emailProvider.sendPasswordResetEmail(user.email, resetToken, user.email);
+    await this.emailProvider.sendPasswordResetEmail(user.email, resetToken, user.email, { link: this.authLink(resolvedRedirect, resetToken) });
     return genericResponse;
   }
 

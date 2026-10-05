@@ -1,6 +1,7 @@
-import type { AuthContext, ProjectInput, ProjectStatus, WorkspaceStore } from "@npati/workspace";
+import { PROJECT_TYPES, type AuthContext, type ProjectInput, type ProjectStatus, type WorkspaceStore } from "@npati/workspace";
+import { defaultAppScheme, isValidAppScheme } from "@npati/shared";
 
-const projectTypes = new Set(["website", "web_app", "landing_page"]);
+const projectTypes = new Set<string>(PROJECT_TYPES);
 
 export class ProjectService {
   constructor(private readonly store: WorkspaceStore, private readonly beforeRemove?: (context: AuthContext, project: Awaited<ReturnType<WorkspaceStore["getProject"]>>) => Promise<void>) {}
@@ -17,8 +18,17 @@ export class ProjectService {
     if (input.description !== undefined && (typeof input.description !== "string" || input.description.length > 5000)) {
       throw new Error("Project description must be at most 5000 characters");
     }
+    // Mobile projects carry their deep link scheme (D6); an explicit scheme must be valid.
+    let appScheme: string | undefined;
+    if (input.type === "mobile_app") {
+      if (input.appScheme !== undefined && !isValidAppScheme(String(input.appScheme))) throw new Error("Invalid app scheme");
+      appScheme = input.appScheme ? String(input.appScheme) : defaultAppScheme(name);
+    } else if (input.appScheme !== undefined) {
+      throw new Error("App scheme is only supported for mobile_app projects");
+    }
     return this.store.createProject(context, companyId, {
       name, type: input.type, description: input.description?.trim() || undefined,
+      dataBackendId: input.dataBackendId, appScheme,
     }, idempotencyKey);
   }
 
