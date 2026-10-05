@@ -3,8 +3,156 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C4 — shell, processes, SecretLease and verification** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain, C2 read tools, C3 edit tools)
-- Next: **C4b — network policy (egress allowlist + proxy)** then **C4a — dependency policy**, per the hard order in `docs/coding-agent/00-audit.md` section 13. (Both were listed as part of the C4 family; the shell/lease half is done here.)
+- Last completed: **C4a — supply-chain security** (after C0, C1, C1c, C1a, C1b, C2, C3, C4)
+- Next: **C4b — network policy** (enforced egress proxy/firewall, DNS/IP validation, redirect re-check, SSRF and DNS-rebinding protection; then `NPATI_SANDBOX_EGRESS_ENFORCED=true`), per `00-audit.md` section 13.
+
+## Implemented (C4a, latest step)
+- **Install policy per package manager** (`code-deps-policy.ts`, fully env-configured): npm
+  `npm ci --ignore-scripts --no-fund`, pnpm `--frozen-lockfile --ignore-scripts`, yarn
+  `--frozen-lockfile`/`--immutable`, pip `--only-binary=:all:` (sdist → separate plan **requiring
+  approval**), uv `uv sync --frozen --no-install-project`, poetry `--no-root`, composer
+  `--no-scripts --no-plugins`, cargo `cargo fetch --locked` → `cargo build --locked --offline`, go
+  `go mod download` + `go build -mod=readonly` with an allowlisted `GOPROXY`. **A lockfile is required**
+  for npm/pnpm/yarn/uv/poetry/composer/cargo/go; lifecycle scripts are **never** run by install — they run
+  only as a separate command for allowlisted packages and only after approval.
+- **Two phases**: `fetch` runs with the network, `build` runs **without** it; if the runner cannot
+  guarantee network isolation the build is refused (`network_isolation_unavailable`) instead of running
+  online, and a plan with blocking problems never reaches the runner. `scrubbedEnvironment` drops every
+  secret-shaped variable (GitHub/npm/AWS/Vault tokens, `SSH_*`, `PIP_INDEX_URL`, `KUBECONFIG`,
+  `COMPOSER_AUTH`, `GIT_CONFIG_*`, …) and adds hardening (`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/true`,
+  `HUSKY=0`, `npm_config_ignore_scripts=true`, `GIT_LFS_SKIP_SMUDGE=1`). Git is hardened both by arguments
+  (`core.hooksPath` to an empty dir, `protocol.file.allow=never`, `submodule.recurse=false`, empty LFS
+  filters and credential helper) and by environment (`GIT_CONFIG_GLOBAL/SYSTEM` pointed at empty files),
+  so **repository git hooks, submodules and filters never execute**.
+- **Classifier extensions** (`code-shell-classifier.ts`): `curl|wget … | sh` and `bash <(curl …)` →
+  `hard_deny`; installs from URL/git/tarball, registry reconfiguration, writes into registry config files,
+  explicit lifecycle-script runs and `husky install` → `approval`; plus a `deps` hint
+  (`{ manager, action, fromUrl }`) so the PolicyEngine does not re-parse the command. A documented finding:
+  the Website Builder base policy returned `npm ci`/`cargo fetch --locked`/`pip install -r …` as
+  **approval** (it concatenates raw words with args, so strict conditions never matched); a strict
+  allowlist of reproducible install forms now downgrades only those to `controlled`, while
+  `--registry=`, `--foreground-scripts` and URL forms stay `approval`.
+- **Dependency guard** (`code-deps-guard.ts`): `checkDependency` **never** touches the network (metadata
+  comes through an injected port). Registry outside the allowlist → `deny` (no lookup at all); package not
+  found → `deny` (invented names); published less than 7 days ago (`NPATI_CODE_DEPS_MIN_AGE_DAYS`) → `deny`;
+  typosquat (Levenshtein ≤2 to a popular package, or transposed letters, scope-aware) → `require_approval`
+  naming the similar package; `hasInstallScripts` → `require_approval`; metadata failure →
+  `require_approval` (never auto-allow). Sources other than the registry (`git`, `tarball`, `http`,
+  `local_path`) and registry/index reconfiguration require approval.
+- **Audit and secret scanning**: `code-deps-audit.ts` has own parsers for npm v7 and legacy, pip-audit,
+  composer, cargo and osv-scanner; unknown/unparseable output is `parsed:false` with a bounded raw excerpt
+  and **blocks** the commit (`audit_output_unparsed`), and a missing audit runner is `audit_unavailable`
+  (503) — never "assume clean". `shouldBlockCommit` blocks automation on critical/high. `code-secret-scanner.ts`
+  covers nine secret kinds, always redacts the preview, scans **only added lines** of a diff with the new
+  file path and line number, and `assertNoSecretsInDiff` throws `secret_in_diff` (403) without the value.
+- **Diff guard** (`code-diff-guard.ts`): CI workflows, Dockerfiles, git hooks, package-manager configs,
+  dependency `sources`/`repositories` (including TOML tables such as `[[tool.poetry.source]]` and
+  `[tool.uv.index]`) and lifecycle scripts (plus scripts that download and execute code) are **sensitive**
+  and require approval in `ask`, `auto_edit` and `full_auto_sandbox` — they never pass automatically.
+- **Three new capabilities** (inventoryIds **368–370**; counters now **370 total / 106 agent-callable**):
+  `code.deps.inspect` (low, `code.read`), `code.deps.audit` (medium, `code.shell`), `code.deps.add`
+  (**high, `requiresConfirmation: true`**, `code.shell`). Tool schemas: **22 tools, manifest v5**
+  (frozen v4 checksum, `KNOWN_TOOL_MANIFESTS = [1,2,3,4,5]` so old sessions still resolve). The
+  PolicyEngine adds a `deps` request field: a non-registry source, a registry reconfiguration or install
+  scripts forces `require_approval` in **every** mode, including `full_auto_sandbox`; the
+  `network_enforcement` phase, the mode × risk matrix and hard-deny are unchanged. Install and audit run
+  through the single `codeShellRuntimePort`, so the PolicyEngine (and its network gate) always decides.
+- **SG-1 CI gate**: `scripts/run-security-gate.mjs` (pure Node) runs a fixed list of **20** security-gate
+  suites and fails on any failure, any `skipped`/`todo` (rule 12) or an empty report, then runs both guard
+  scripts; exposed as `npm run security-gate` and added as a mandatory `security-gate` job in
+  `.github/workflows/ci.yml` (no `continue-on-error`).
+- No migration in C4a (policy, guards and scanning are stateless; the in-memory limitation from C4 stands).
+
+## Verification (C4a)
+- `npm run typecheck` → **0 errors**; both builds → **exit 0**;
+  `code-tool-schemas-generate.mjs --manifest-version 5` → exit 0, `--check` → exit 0
+  (`22 tool(s), manifest v5`); `verify-code-tool-schemas.mjs --check` → exit 0
+  (`checksum ea9cf82b…d9f19`); `sandbox-image-verify.mjs` → exit 0;
+  `typosquat-dataset-generate.mjs --check` → exit 0.
+- **`npm run security-gate` → exit 0: `passed=287 failed=0 skipped=0 todo=0`**, with all four steps
+  green (22 security-gate suites, tool schema guard, sandbox image guard, typosquat dataset guard). This
+  is the SG-1 acceptance criterion and it is now a mandatory CI job; the gate also fails on any `skipped`
+  or `todo` test (rule 12), on an empty report, on a configured suite that did not run, and on a suite
+  that reported no tests at all (a file that failed to load).
+
+## Owner decisions accepted and implemented (C4a)
+1. **Typosquat dataset**: versioned curated datasets live in the repository, one per supported ecosystem
+   (`data/typosquat/{npm,pypi,cargo,go,composer,maven}.json`) with `schemaVersion`, `ecosystem`,
+   `datasetVersion`, `generatedAt`, `source` metadata, `hash` (sha256 of the canonical sorted name list)
+   and `packageNames` (npm 87, pypi 62, cargo 70, go 57, composer 58, maven 56 entries; maven keys are
+   `groupId:artifactId`, go entries are module paths). Runtime performs **no external ranking call**. If a
+   dataset is missing, invalid, of the wrong ecosystem, hash-mismatched or stale
+   (`NPATI_CODE_TYPOSQUAT_MAX_AGE_DAYS`, default 365) the guard returns **`require_approval` with
+   `typosquat_dataset_unavailable:<reason>`** and never `allow`; the list is not hardcoded in the
+   PolicyEngine (`popularPackages` remains an explicit test/admin override only).
+2. **Registry allowlist**: conservative official defaults without wildcards — npm `registry.npmjs.org`;
+   pypi `pypi.org`, `files.pythonhosted.org`; cargo `index.crates.io`, `static.crates.io`; go
+   `proxy.golang.org`, `sum.golang.org`; composer `repo.packagist.org`; maven `repo.maven.apache.org`,
+   `plugins.gradle.org`. An empty allowlist denies everything, hosts are never added automatically, the
+   `NPATI_CODE_REGISTRY_ALLOWLIST` override is additive and rejects `*`/suffix patterns, and a host only
+   matches exactly or as a subdomain of a listed host. The code carries an explicit note that **C4b must
+   re-validate the redirect target against this same policy after DNS resolution**.
+3. **`code.deps.*` flags stay under `code.shell`** (add/audit/inspect); no move to `code.write` and no new
+   flag in this step.
+4. **Network isolation unchanged**: `supportsNetworkIsolation: false` with fail-closed remains, with no
+   workaround. **C4b must implement real enforcement** (`sandbox → enforced network policy → NPATI egress
+   proxy → DNS/IP validation → destination`); `NPATI_SANDBOX_EGRESS_ENFORCED=true` **does not by itself
+   prove readiness** — the SandboxProvider/runner must verify that enforcement actually works and
+   otherwise return `network_enforcement_unavailable` before any execution starts. C4a is therefore
+   **implementation-complete, with network-dependent real E2E gated by C4b**.
+
+## Follow-up recommended for the next step
+- Add `tests/**` to type checking (a `tsconfig.tests.json` plus `npm run typecheck:tests` in CI): the
+  blocker that kept C4a red was a missing `import path from "node:path"` in a test file, invisible to
+  `npm run typecheck` (which only covers workspace `src`) and invisible to the vitest JSON reporter. The
+  gate now catches that class through `findEmptySuites`, but a real type check of tests would catch it
+  earlier and more clearly.
+- Real defects found and fixed while closing the step (none by weakening a check): five secret-scanner
+  patterns lacked a capture group, so `match[1]` was `undefined` and those findings were **silently
+  dropped** (a secret could pass unnoticed); a valid audit report with no vulnerability sections was
+  treated as `parsed:false`, so `shouldBlockCommit` blocked **every commit on a healthy tree**;
+  `detectDepsHint` did not recognise `husky install`, so the PolicyEngine saw no deps phase for git-hook
+  installation; and TOML dependency sources were not detected, so a private index added through
+  `[[tool.poetry.source]]`/`[tool.uv.index]` could have passed **without approval**. The gate script itself
+  invoked the guards through a shell on Windows and broke on the space in `C:\Program Files\nodejs\node.exe`.
+
+## Real E2E status (C4a)
+- Verified in-process with fake runners and metadata ports: install plans and flags per manager, the two
+  phases, scrubbed environment, git hardening, guard verdicts, audit parsers, secret scanning and diff
+  decisions, plus the SG-1 gate end to end and both builds.
+- **Not verified here:** a real install in a real sandbox (no Docker in this environment), real
+  `npm audit`/`pip-audit`/`composer audit`/`cargo audit`/`osv-scanner` runs, a private registry through a
+  SecretLease, and GitHub actually parsing the new CI job (the YAML was written by hand and has not been
+  parsed by GitHub yet). No migration in C4a.
+
+## Known risks / open questions (C4a)
+1. **Popular-package list for typosquat detection** is configuration input, not a built-in dataset — it
+   must be supplied (`NPATI_CODE_DEPS_POPULAR_PACKAGES` or the injected list) for the check to be
+   meaningful.
+2. **Registry allowlist** is configuration; an empty allowlist denies everything, which is the intended
+   fail-closed default but must be filled before any install works.
+3. `code.deps.audit`/`code.deps.add` are gated by `code.shell` (per the approved table) although
+   `code.deps.add` is semantically closer to `code.write`; changing it is one line in
+   `CODE_TOOL_FLAG_OVERRIDES`.
+4. Install runs with `supportsNetworkIsolation: false` today, so any plan with a build phase is refused
+   (fail closed) until C4b provides enforced network isolation.
+5. `code.deps.inspect` uses a minimal manifest parser (package.json/composer.json/requirements.txt/go.mod/
+   pyproject/Cargo sections) written at the app layer because the deps modules had no manifest parser.
+6. `audit_blocked`/`shouldBlockCommit` are wired for commit/PR flows that arrive with C6; today the
+   verdict is returned to the caller.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (version 4, section C4b), `docs/coding-agent/00-audit.md` sections 7
+  and 13, and this file.
+- Execute **only C4b**: enforced egress — proxy/firewall that the sandbox cannot bypass, allowlist per
+  company/capability, re-validation after DNS resolution and after every redirect, SSRF and DNS-rebinding
+  protection, and the `security-gate` tests proving an arbitrary host is unreachable while allowlisted
+  registries and git hosts work. Then flip `NPATI_SANDBOX_EGRESS_ENFORCED=true`, which turns the current
+  blanket network refusal into matrix-driven decisions.
+- Keep C4/C4a guarantees intact: commands only through the sandbox port, PolicyEngine decides (with the
+  separate network gate), one-shot SecretLease with revocation, no lifecycle scripts without approval,
+  sensitive changes always require approval, and add the new suites to `scripts/run-security-gate.mjs`.
+- Do not start C5 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C4, latest step)
 - **Six new `code.*` capabilities** (inventoryIds **362–367**): `code.shell.exec` and

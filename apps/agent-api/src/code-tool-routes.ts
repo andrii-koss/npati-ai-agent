@@ -68,6 +68,21 @@ const ERROR_STATUS: Record<string, number> = {
   command_timeout: 504,
   command_failed: 502,
   command_not_found: 404,
+  // C4a: dependency path. The verdict codes mirror the dependency guard; the audit codes mirror the
+  // audit module so the model always gets the same code the guard produced.
+  lockfile_required: 409,
+  package_not_found: 404,
+  typosquat_suspected: 409,
+  source_requires_approval: 403,
+  registry_change_requires_approval: 403,
+  audit_unavailable: 503,
+  audit_blocked: 409,
+  install_unavailable: 503,
+  secret_in_diff: 403,
+  network_isolation_unavailable: 503,
+  network_enforcement_unavailable: 503,
+  policy_engine_unavailable: 503,
+  policy_denied: 403,
 };
 
 type CompanyParams = { companyId: string };

@@ -35,14 +35,19 @@ const TOOL_NAMES = [
   "code.shell.process.logs",
   "code.shell.process.stop",
   "code.verify.run",
+  "code.deps.inspect",
+  "code.deps.audit",
+  "code.deps.add",
 ] as const;
 
 /**
  * Tools that must never run without an explicit approval through the existing approval system:
- * destructive changes (`code.fs.delete`) and launching commands in the sandbox (`code.shell.exec`,
- * `code.shell.process.start`). Mirrored in the capability contract, so the test checks equality.
+ * destructive changes (`code.fs.delete`) and adding a dependency (`code.deps.add`, which installs
+ * third-party code). Shell execution is approved by the PolicyEngine per risk class instead of a static
+ * capability flag, per the owner's decision. Mirrored in the capability contract, so the test checks
+ * equality.
  */
-const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete"]);
+const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete", "code.deps.add"]);
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
@@ -65,6 +70,9 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.shell.process.logs": "low",
   "code.shell.process.stop": "medium",
   "code.verify.run": "medium",
+  "code.deps.inspect": "low",
+  "code.deps.audit": "medium",
+  "code.deps.add": "high",
 };
 
 const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
@@ -77,11 +85,12 @@ const required = (schema: JsonSchema | undefined): string[] =>
   ((schema?.required ?? []) as string[]).slice().sort();
 
 describe("security-gate: C2 tool schema parity", () => {
-  it("describes exactly the same thirteen tools in the registry and in the capability catalogue", () => {
+  it("describes exactly the same tools in the registry and in the capability catalogue", () => {
     expect([...toolByName.keys()].sort()).toEqual([...TOOL_NAMES].sort());
     expect([...capabilityById.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect(CODE_CAPABILITIES).toHaveLength(19);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(19);
+    // No hardcoded count: the three sources must agree, whichever step published the last tool.
+    expect(CODE_CAPABILITIES).toHaveLength(TOOL_NAMES.length);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(TOOL_NAMES.length);
   });
 
   it("keeps argument schemas identical field by field for every tool", () => {

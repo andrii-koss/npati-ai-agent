@@ -71,7 +71,25 @@ export type CodeToolErrorCode =
   | "write_unavailable"
   | "edit_no_match"
   | "edit_ambiguous"
-  | "patch_conflict";
+  | "patch_conflict"
+  // C4a: dependency path
+  | "lockfile_required"
+  | "package_not_found"
+  | "typosquat_suspected"
+  | "source_requires_approval"
+  | "registry_change_requires_approval"
+  | "audit_unavailable"
+  | "audit_blocked"
+  | "install_unavailable"
+  | "secret_in_diff"
+  | "network_isolation_unavailable"
+  | "network_enforcement_unavailable"
+  | "policy_engine_unavailable"
+  | "policy_denied"
+  | "command_hard_denied"
+  | "interactive_command_not_supported"
+  | "command_timeout"
+  | "process_not_found";
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
@@ -82,6 +100,9 @@ const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   "checkpoint_unavailable", "checkpoint_not_found", "approval_required", "approval_invalid",
   "approval_unavailable", "write_failed", "delete_failed", "move_failed", "write_unavailable",
   "edit_no_match", "edit_ambiguous", "patch_conflict",
+  "lockfile_required", "package_not_found", "typosquat_suspected", "source_requires_approval",
+  "registry_change_requires_approval", "audit_unavailable", "audit_blocked", "install_unavailable",
+  "secret_in_diff", "network_isolation_unavailable",
 ]);
 
 /** Recognises a canonical `CodeToolError` (different class, same contract) by shape. */

@@ -4844,8 +4844,9 @@ CAPABILITY_MATRIX.push(...PROJECT_DATA_MATRIX);
 
 // C2: read-only Coding Agent tools (domain "code", inventory ids 349-354).
 // C3: mutating Coding Agent tools (inventory ids 355-361).
-// C4: sandbox execution tools (inventory ids 362-367).
-import { CODE_READ_MATRIX, CODE_WRITE_MATRIX, CODE_SHELL_MATRIX } from "./code-capabilities";
+// C4: sandbox execution tools (inventory ids 362-367). C4a: dependency tools (368-370).
+import { CODE_READ_MATRIX, CODE_WRITE_MATRIX, CODE_SHELL_MATRIX, CODE_DEPS_MATRIX } from "./code-capabilities";
 CAPABILITY_MATRIX.push(...CODE_READ_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_WRITE_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_SHELL_MATRIX);
+CAPABILITY_MATRIX.push(...CODE_DEPS_MATRIX);

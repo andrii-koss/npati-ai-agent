@@ -73,7 +73,10 @@ import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
-import { CodeToolRuntime, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
+import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
+import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-deps-policy";
+import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
+import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
 import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
@@ -1292,6 +1295,150 @@ export function buildApp(config: AppConfig = {}) {
       };
     },
   } : undefined;
+  // C4a: the dependency port. Inspection reads manifests through the existing workspace port, and both
+  // the audit and the install run through the C4 shell runtime port, which is the only path that carries
+  // the PolicyEngine decision — including the network enforcement gate, so nothing here can bypass it.
+  const CODE_DEPS_MANIFESTS: ReadonlyArray<{ manager: string; manifest: string; lockfile: string | null }> = [
+    { manager: "pnpm", manifest: "package.json", lockfile: "pnpm-lock.yaml" },
+    { manager: "yarn", manifest: "package.json", lockfile: "yarn.lock" },
+    { manager: "npm", manifest: "package.json", lockfile: "package-lock.json" },
+    { manager: "uv", manifest: "pyproject.toml", lockfile: "uv.lock" },
+    { manager: "poetry", manifest: "pyproject.toml", lockfile: "poetry.lock" },
+    { manager: "pip", manifest: "requirements.txt", lockfile: null },
+    { manager: "go", manifest: "go.mod", lockfile: "go.sum" },
+    { manager: "cargo", manifest: "Cargo.toml", lockfile: "Cargo.lock" },
+    { manager: "composer", manifest: "composer.json", lockfile: "composer.lock" },
+  ];
+  const readWorkspaceText = async (ctx: AuthContext, companyId: string, projectId: string, file: string): Promise<string | null> => {
+    try {
+      const result = await projectWorkspace.readFile(ctx, companyId, projectId, file);
+      if (typeof result === "string") return result;
+      return (result as { content?: string } | null)?.content ?? null;
+    } catch { return null; }
+  };
+  const parseDeclaredDependencies = (manager: string, text: string): Array<{ name: string; version: string | null; scope: string }> => {
+    if (manager === "npm" || manager === "pnpm" || manager === "yarn" || manager === "composer") {
+      try {
+        const parsed = JSON.parse(text) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; require?: Record<string, string>; "require-dev"?: Record<string, string> };
+        const groups: Array<[Record<string, string> | undefined, string]> = [
+          [parsed.dependencies ?? parsed.require, "runtime"],
+          [parsed.devDependencies ?? parsed["require-dev"], "dev"],
+          [parsed.peerDependencies, "peer"],
+          [parsed.optionalDependencies, "optional"],
+        ];
+        return groups.flatMap(([group, scope]) => Object.entries(group ?? {}).map(([name, version]) => ({ name, version: String(version), scope })));
+      } catch { return []; }
+    }
+    const declared: Array<{ name: string; version: string | null; scope: string }> = [];
+    let section = "";
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+      const sectionMatch = /^\[(.+)\]$/.exec(line);
+      if (sectionMatch) { section = sectionMatch[1]!.toLowerCase(); continue; }
+      if (manager === "pip") {
+        const match = /^([A-Za-z0-9._-]+)\s*(?:[=<>!~]=?\s*([^\s;#]+))?/.exec(line);
+        if (match) declared.push({ name: match[1]!, version: match[2] ?? null, scope: "runtime" });
+        continue;
+      }
+      if (manager === "go") {
+        const match = /^([^\s]+)\s+v?([^\s]+)/.exec(line);
+        if (match && !line.startsWith("module") && !line.startsWith("go ")) declared.push({ name: match[1]!, version: match[2]!, scope: line.includes("// indirect") ? "optional" : "runtime" });
+        continue;
+      }
+      const scoped = section === "dependencies" || section === "dev-dependencies" || section === "tool.poetry.dependencies" || section === "tool.poetry.group.dev.dependencies";
+      if (!scoped) continue;
+      const match = /^"?([A-Za-z0-9._-]+)"?\s*=\s*"?([^"\s]+)"?/.exec(line);
+      if (match) declared.push({ name: match[1]!, version: match[2]!, scope: section.includes("dev") ? "dev" : "runtime" });
+    }
+    return declared;
+  };
+  const resolveDepsTarget = async (ctx: AuthContext, companyId: string, projectId: string, requestedManager?: string, requestedPath?: string) => {
+    const candidates = requestedManager ? CODE_DEPS_MANIFESTS.filter((entry) => entry.manager === requestedManager) : CODE_DEPS_MANIFESTS;
+    for (const candidate of candidates) {
+      const manifestPath = requestedPath ?? candidate.manifest;
+      const text = await readWorkspaceText(ctx, companyId, projectId, manifestPath);
+      if (text === null) continue;
+      const lockfileText = candidate.lockfile ? await readWorkspaceText(ctx, companyId, projectId, candidate.lockfile) : null;
+      return { manager: candidate.manager, manifestPath, manifestText: text, lockfile: candidate.lockfile && lockfileText !== null ? candidate.lockfile : null };
+    }
+    return null;
+  };
+  const codeDepsPort = {
+    inspect: async ({ ctx, companyId, projectId, path: requestedPath, manager: requestedManager }: { ctx: AuthContext; companyId: string; projectId: string; path?: string; manager?: string }) => {
+      const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager, requestedPath);
+      if (!target) throw new CodeToolError("package_not_found", "No dependency manifest was found in the project workspace", 404, "resolve", false, "code.deps.inspect");
+      return {
+        manager: target.manager,
+        lockfile: target.lockfile,
+        declared: parseDeclaredDependencies(target.manager, target.manifestText),
+        metadata: { manifest: target.manifestPath },
+      };
+    },
+    audit: async ({ ctx, companyId, projectId, manager: requestedManager, lockfilePath, blockOn }: { ctx: AuthContext; companyId: string; projectId: string; manager?: string; lockfilePath?: string; blockOn?: string[] }) => {
+      const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager, lockfilePath);
+      if (!target) throw new CodeToolError("package_not_found", "No dependency manifest was found in the project workspace", 404, "resolve", false, "code.deps.audit");
+      if (target.manager === "yarn" || target.manager === "pnpm" || target.manager === "npm" || target.manager === "pip" || target.manager === "poetry" || target.manager === "composer" || target.manager === "cargo" || target.manager === "go") {
+        const auditRunner = async ({ command }: { command: string }) => {
+          if (!codeShellRuntimePort) throw new CodeToolError("audit_unavailable", "Dependency audit needs the sandbox shell runtime", 503, "configure", true, "code.deps.audit");
+          const executed = await codeShellRuntimePort.exec({ ctx, companyId, projectId, command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved: false });
+          return { exitCode: executed.exitCode ?? 1, stdout: executed.stdout, stderr: executed.stderr };
+        };
+        const report = await runDependencyAudit({
+          manager: target.manager as Parameters<typeof runDependencyAudit>[0]["manager"],
+          lockfilePath: target.lockfile ?? target.manifestPath,
+          auditRunner,
+        });
+        const gate = shouldBlockCommit(report, blockOn?.length ? { blockOn: blockOn as never } : {});
+        return {
+          report: { ...report, advisories: report.advisories.map((advisory) => ({ ...advisory })) },
+          blocked: gate.blocked,
+          ...(gate.reason ? { reason: gate.reason } : {}),
+        };
+      }
+      throw new CodeToolError("audit_unavailable", `No audit command is known for ${target.manager}`, 503, "configure", false, "code.deps.audit");
+    },
+    add: async ({ ctx, companyId, projectId, name, version, manager: requestedManager, dev, source, approved }: { ctx: AuthContext; companyId: string; projectId: string; name: string; version?: string; manager?: string; dev?: boolean; source?: string; approved: boolean }) => {
+      const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager);
+      const manager = (target?.manager ?? "npm") as Parameters<typeof classifyDependencySource>[0]["manager"];
+      const spec = version ? `${name}@${version}` : name;
+      const resolvedSource = (source ?? classifyDependencySource({ manager, spec })) as Parameters<typeof sourceRequiresApproval>[0];
+      const reasons: string[] = [];
+      if (sourceRequiresApproval(resolvedSource) && !approved) reasons.push("deps:source_requires_approval");
+      const registryHost = registryFromConfig({}).registryHosts[0] ?? "registry.npmjs.org";
+      if (!isRegistryAllowed(registryHost, resolveDepsGuardPolicy().allowedRegistries)) reasons.push("deps:registry_not_allowed");
+      const typosquat = findTyposquatTarget(name, resolveDepsGuardPolicy().popularPackages, 2);
+      if (typosquat) reasons.push(`deps:typosquat_suspected:${typosquat}`);
+      if (!target) reasons.push("deps:lockfile_missing");
+      if (reasons.length && !approved) {
+        return { manager, name, version: version ?? null, source: resolvedSource, verdict: "require_approval" as const, reasons, metadata: { registryHost, lockfile: target?.lockfile ?? null } };
+      }
+      const plan = buildInstallPlan({
+        manager: manager as Parameters<typeof buildInstallPlan>[0]["manager"],
+        args: [dev ? "add-dev" : "add", spec],
+        ...(target?.lockfile ? { lockfilePresent: true } : {}),
+        registryHost,
+      });
+      if (!codeShellRuntimePort) throw new CodeToolError("install_unavailable", "Dependency install needs the sandbox shell runtime", 503, "configure", true, "code.deps.add");
+      const runner = {
+        supportsNetworkIsolation: false,
+        run: async (command: string) => {
+          const executed = await codeShellRuntimePort!.exec({ ctx, companyId, projectId, command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved });
+          return { exitCode: executed.exitCode ?? 1, stdout: executed.stdout, stderr: executed.stderr };
+        },
+      };
+      const result = await runInstallPlan(plan, runner, { approved: approved === true });
+      return {
+        manager,
+        name,
+        version: version ?? null,
+        source: resolvedSource,
+        verdict: result.ok ? ("added" as const) : (result.code === "approval_required" ? ("require_approval" as const) : ("denied" as const)),
+        reasons: result.ok ? ["deps:installed"] : [result.code ?? "deps:install_failed", ...(result.message ? [result.message] : [])],
+        metadata: { commands: result.phases.map((phase) => phase.command), registryHost, lockfile: target?.lockfile ?? null },
+      };
+    },
+  };
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
@@ -1308,6 +1455,9 @@ export function buildApp(config: AppConfig = {}) {
       // C4: shell/process/verify execution is injected; without these ports those tools fail closed.
       shellRuntime: codeShellRuntimePort,
       verifyRunner: codeVerifyRunnerPort,
+      // C4a: dependency inspection/audit/install go through the dependency port, which itself runs the
+      // audit and the install through the shell runtime above (so the PolicyEngine still decides).
+      deps: codeDepsPort,
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,

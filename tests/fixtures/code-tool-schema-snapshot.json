@@ -1,7 +1,28 @@
 {
-  "manifestVersion": 4,
-  "checksum": "2575b9535a0e2900a485e954fde3049ed5a751c0163becdf82937768802d425b",
+  "manifestVersion": 5,
+  "checksum": "ea9cf82b2bb4ca1e2e29b5b364d10a0895e9ded6e94f9dc3cf82d600717d9f19",
   "tools": [
+    {
+      "key": "code.deps.add@1",
+      "name": "code.deps.add",
+      "version": 1,
+      "status": "active",
+      "checksum": "7b4dc7907307a688e9aecff2bd14507094ee884e1951a90a3e4bab909f9b7993"
+    },
+    {
+      "key": "code.deps.audit@1",
+      "name": "code.deps.audit",
+      "version": 1,
+      "status": "active",
+      "checksum": "bb87df0e9943bc7bc75d7c9bfe018c88278bd90c9d2493f4bdd717cfde77d10d"
+    },
+    {
+      "key": "code.deps.inspect@1",
+      "name": "code.deps.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "c5d931ccb60a5c3f128f717da9b864ea2bfda95cc770e9cc541321dabab254fa"
+    },
     {
       "key": "code.fs.apply_patch@1",
       "name": "code.fs.apply_patch",

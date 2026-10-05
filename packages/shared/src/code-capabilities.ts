@@ -603,6 +603,120 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  "code.deps.inspect": {
+    inputSchema: {
+      type: "object",
+      required: [],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "Workspace-relative manifest or lockfile path; defaults to the detected one." },
+        manager: { type: "string", enum: ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"], description: "Restrict the inspection to one package manager; detection is used when omitted." },
+      },
+    },
+    outputSchema: resultEnvelope("code.deps.inspect", {
+      type: "object",
+      required: ["manager", "lockfile", "declared"],
+      additionalProperties: false,
+      properties: {
+        manager: { type: "string" },
+        lockfile: { type: ["string", "null"] },
+        declared: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["name"],
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              version: { type: ["string", "null"] },
+              scope: { type: "string", enum: ["runtime", "dev", "peer", "optional", "unknown"] },
+              source: { type: ["string", "null"] },
+            },
+          },
+        },
+        metadata: { type: "object", additionalProperties: true },
+      },
+    }),
+  },
+  "code.deps.audit": {
+    inputSchema: {
+      type: "object",
+      required: [],
+      additionalProperties: false,
+      properties: {
+        manager: { type: "string", enum: ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"] },
+        lockfilePath: { type: "string", description: "Workspace-relative lockfile to audit; defaults to the detected one." },
+        blockOn: {
+          type: "array",
+          items: { type: "string", enum: ["critical", "high", "moderate", "low"] },
+          description: "Severities that make the audit result blocked; defaults to critical and high.",
+        },
+      },
+    },
+    outputSchema: resultEnvelope("code.deps.audit", {
+      type: "object",
+      required: ["report", "blocked"],
+      additionalProperties: false,
+      properties: {
+        report: {
+          type: "object",
+          required: ["critical", "high", "moderate", "low", "advisories"],
+          additionalProperties: false,
+          properties: {
+            critical: { type: "integer" },
+            high: { type: "integer" },
+            moderate: { type: "integer" },
+            low: { type: "integer" },
+            advisories: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string" },
+                  package: { type: "string" },
+                  severity: { type: "string" },
+                  title: { type: "string" },
+                  url: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        blocked: { type: "boolean" },
+        reason: { type: "string" },
+      },
+    }),
+  },
+  "code.deps.add": {
+    inputSchema: {
+      type: "object",
+      required: ["name"],
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 214 },
+        version: { type: "string", description: "Version or range; the resolved exact version is reported back." },
+        manager: { type: "string", enum: ["npm", "pnpm", "yarn", "pip", "poetry", "uv", "go", "cargo", "composer", "bundler", "maven", "gradle"] },
+        dev: { type: "boolean", default: false, description: "Add as a development dependency." },
+        source: { type: "string", enum: ["registry", "git", "tarball", "http", "local_path"], default: "registry", description: "Where the dependency comes from. Anything other than registry requires an approval." },
+      },
+    },
+    outputSchema: resultEnvelope("code.deps.add", {
+      type: "object",
+      required: ["manager", "name", "source", "verdict", "reasons"],
+      additionalProperties: false,
+      properties: {
+        manager: { type: "string" },
+        name: { type: "string" },
+        version: { type: ["string", "null"] },
+        source: { type: "string" },
+        verdict: { type: "string", enum: ["added", "require_approval", "denied"] },
+        reasons: { type: "array", items: { type: "string" } },
+        metadata: { type: "object", additionalProperties: true },
+        approvalId: { type: ["string", "null"] },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -1146,11 +1260,99 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
+/**
+ * C4a: dependency tools. `code.deps.inspect` only reads manifests and lockfiles (so it is gated by
+ * `code.read`), the audit needs sandbox execution and the allowlisted registries (`code.shell`), and
+ * `code.deps.add` mutates the dependency graph, so it is high risk and must be approved through the
+ * existing approval system — an install is never a silent side effect.
+ */
+export const CODE_DEPS_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.deps.inspect",
+    inventoryIds: [368],
+    type: "tool",
+    domain: "code",
+    name: "Inspect dependencies",
+    description: "Read the project's dependency manifests and lockfiles and report the declared dependencies, the resolved lockfile and per-ecosystem metadata without installing or touching the network.",
+    useWhen: [
+      "Before changing dependencies, to see what the project already declares and which lockfile governs it.",
+      "To decide whether a lockfile is present and reproducible before an install is attempted.",
+    ],
+    doNotUseWhen: [
+      "An installation or an upgrade is needed: use code.deps.add or a controlled install command.",
+      "The manifest lives outside the project workspace.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.inspect"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.inspect"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.deps.audit",
+    inventoryIds: [369],
+    type: "tool",
+    domain: "code",
+    name: "Audit dependencies",
+    description: "Run a lockfile-based vulnerability audit in the sandbox against allowlisted registries and return a structured advisory report with the configured block-on severities applied.",
+    useWhen: [
+      "After adding or updating dependencies, to prove no known critical or high advisory was pulled in.",
+      "Before proposing a dependency change as finished.",
+    ],
+    doNotUseWhen: [
+      "The project has no lockfile: the result reports lockfile_required instead of auditing a moving target.",
+      "The registry is not on the egress allowlist: the audit reports the network isolation state rather than bypassing it.",
+      "A fix is expected: this tool only reports.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.audit"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.audit"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.deps.add",
+    inventoryIds: [370],
+    type: "tool",
+    domain: "code",
+    name: "Add a dependency",
+    description: "Add one dependency to the project with lifecycle scripts disabled by default and only against allowlisted registries; any non-registry source requires an approval from the existing approval system.",
+    useWhen: [
+      "The task genuinely needs a new library and the dependency policy allows it.",
+      "A specific version must be pinned and recorded in the lockfile.",
+    ],
+    doNotUseWhen: [
+      "The source is a git URL, tarball, plain HTTP URL or a local path: those require an approval and are refused otherwise.",
+      "The registry would have to be changed: that needs an approval and is never done implicitly.",
+      "Lifecycle scripts would have to run: installs run with scripts disabled.",
+      "Production credentials would be involved: they are never issued to the agent.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.add"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.deps.add"]!.outputSchema,
+    version: 1,
+  },
+];
+
 /** Every `code.*` capability (reads first, then the mutating file tools, then sandbox execution). */
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_READ_CAPABILITIES,
   ...CODE_WRITE_CAPABILITIES,
   ...CODE_SHELL_CAPABILITIES,
+  ...CODE_DEPS_CAPABILITIES,
 ];
 
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
@@ -1179,6 +1381,19 @@ export const CODE_SHELL_MATRIX: CapabilityMatrixEntry[] = CODE_SHELL_CAPABILITIE
   status: "VERIFIED_EXISTING",
 }));
 
+export const CODE_DEPS_MATRIX: CapabilityMatrixEntry[] = CODE_DEPS_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c4a-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
 /**
  * Which feature flag gates which code tool. The read/search tools *and* `code.fs.diff` need `code.read`
  * (they only read), every mutating tool needs `code.write`; both sit on top of the master
@@ -1200,11 +1415,17 @@ export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(
  * `code.verify.run` deliberately stays on `code.write`: it only replays the project's configured
  * verification commands, so it belongs with the change tools it verifies.
  */
-export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntries(
-  CODE_SHELL_CAPABILITIES
+export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntries([
+  ...CODE_SHELL_CAPABILITIES
     .filter((capability) => capability.id.startsWith("code.shell."))
-    .map((capability) => [capability.id, "code.shell"]),
-);
+    .map((capability) => [capability.id, "code.shell"] as const),
+  // C4a: the dependency audit executes commands in the sandbox (allowlisted registries only) and the
+  // dependency add mutates the graph through an install, so both hang off the shell sub-flag; the
+  // inspection is pure reading and keeps the default `code.read`.
+  ...CODE_DEPS_CAPABILITIES
+    .filter((capability) => capability.id !== "code.deps.inspect")
+    .map((capability) => [capability.id, "code.shell"] as const),
+]);
 
 export const CODE_TOOL_FLAG_KEYS_RESOLVED: Record<string, string> = {
   ...CODE_TOOL_FLAG_KEYS,

@@ -32,6 +32,11 @@ const SHELL_TOOLS = [
 
 const ALL_C4_TOOLS = [...WRITE_TOOLS, ...SHELL_TOOLS] as const;
 
+/** C4a: the dependency tools, covered by the same schema → executor guard. */
+const DEPS_TOOLS = ["code.deps.inspect", "code.deps.audit", "code.deps.add"] as const;
+
+const ALL_TOOLS = [...ALL_C4_TOOLS, ...DEPS_TOOLS] as const;
+
 function toolSchema(name: string): CodeToolSchema {
   const found = CODE_TOOL_SCHEMAS.find((schema) => schema.name === name);
   if (!found) throw new Error(`Schema missing for ${name}`);
@@ -72,6 +77,12 @@ function minimalArgs(schema: CodeToolSchema): Record<string, unknown> {
 function sampleArgs(tool: string, schema: CodeToolSchema): Record<string, unknown> {
   const args = minimalArgs(schema);
   switch (tool) {
+    case "code.deps.inspect":
+      return { ...args, manager: "npm" };
+    case "code.deps.audit":
+      return { ...args, manager: "npm" };
+    case "code.deps.add":
+      return { ...args, name: "left-pad", source: "registry" };
     case "code.fs.edit":
       return { ...args, path: "src/orders.ts", old_string: "return 1;", new_string: "return 2;" };
     case "code.fs.write":
@@ -198,6 +209,20 @@ function harness(): Harness {
     },
   };
 
+  // C4a: dependency port double. The audit and the install would go through the shell runtime in
+  // production, so the double only has to prove the arguments reach the executor.
+  const deps = {
+    async inspect({ manager }: { manager?: string }) {
+      return { manager: manager ?? "npm", lockfile: "package-lock.json", declared: [{ name: "left-pad", version: "1.3.0", scope: "runtime" }] };
+    },
+    async audit({ manager }: { manager?: string }) {
+      return { report: { critical: 0, high: 0, moderate: 0, low: 0, advisories: [] }, blocked: false, manager: manager ?? "npm" } as never;
+    },
+    async add({ name, source }: { name: string; source?: string }) {
+      return { manager: "npm", name, version: "1.3.0", source: source ?? "registry", verdict: "added" as const, reasons: ["deps:installed"], metadata: {}, approvalId: null };
+    },
+  };
+
   const runtime = new CodeToolRuntime({
     schemas: CODE_TOOL_SCHEMAS,
     flags: { async assertEnabled() { return true; } } as never,
@@ -205,7 +230,7 @@ function harness(): Harness {
     audit: { async record() { return undefined; } } as never,
     activity: { async record() { return undefined; } },
     turns: new CodeTurnTracker(),
-    executors: allCanonicalExecutors({ shellRuntime, verifyRunner }),
+    executors: allCanonicalExecutors({ shellRuntime, verifyRunner, deps }),
     checkpoints,
     approvals,
     writePort,
@@ -231,7 +256,7 @@ describe("security-gate: C3 schema → executor parity", () => {
   });
 
   it("never rejects schema-shaped arguments as invalid_arguments", async () => {
-    for (const name of ALL_C4_TOOLS) {
+    for (const name of ALL_TOOLS) {
       const h = harness();
       await read(h, "src/orders.ts", `read-${name}`);
       const result = await invoke(h, name, sampleArgs(name, toolSchema(name)));
