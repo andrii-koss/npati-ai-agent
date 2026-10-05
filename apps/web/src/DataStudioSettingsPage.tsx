@@ -4,6 +4,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
+import { DataBackendSection } from "./DataBackendSection";
 import type { FieldDefinition, FieldType, SchemaOperation } from "./DataStudioPage";
 
 // --- Types ------------------------------------------------------------------
@@ -127,6 +128,7 @@ export function DataStudioSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [view, setView] = useState<"tables" | "databases">("tables");
   const [rowCounts, setRowCounts] = useState<Record<string, number>>({});
   const [countingRows, setCountingRows] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -294,6 +296,63 @@ export function DataStudioSettingsPage() {
     ...overview.drift.tables.changed.map((name) => `${isUk ? "змінена" : "changed"}: ${name}`),
   ] : [];
 
+  const viewSwitcher = (
+    <div className="ds-segmented inline" role="tablist" aria-label={isUk ? "Розділ Data Studio" : "Data Studio view"}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "tables"}
+        className={view === "tables" ? "active" : ""}
+        onClick={() => setView("tables")}
+      >
+        {isUk ? "Таблиці" : "Tables"}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "databases"}
+        className={view === "databases" ? "active" : ""}
+        onClick={() => setView("databases")}
+      >
+        {isUk ? "Бази даних" : "Databases"}
+      </button>
+    </div>
+  );
+
+  const companyPicker = companies.length > 1 && (
+    <div className="ds-toolbar">
+      <label className="ds-toolbar-field">
+        <span>{isUk ? "Компанія" : "Company"}</span>
+        <select value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+          {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+
+  // The databases view manages the DataBackends of the selected company; the tables view works
+  // inside one project's DataBackend.
+  if (view === "databases") {
+    return (
+      <div className="data-studio-pane">
+        <div className="pane-header">
+          <div>
+            <h2>Data Studio</h2>
+            <p>{isUk ? "Бази даних проєктів цієї компанії" : "Project databases for this company"}</p>
+          </div>
+          <div className="pane-actions">{viewSwitcher}</div>
+        </div>
+
+        {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
+        {companyPicker}
+
+        {companyId
+          ? <DataBackendSection companyId={companyId} />
+          : <div className="data-studio-alert info" role="status">{isUk ? "Створіть компанію, щоб працювати з базами даних." : "Create a company to manage project databases."}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="data-studio-pane">
       <div className="pane-header">
@@ -302,6 +361,7 @@ export function DataStudioSettingsPage() {
           <p>{isUk ? "Таблиці, схеми та дані ваших проєктів" : "Tables, schemas and data for your projects"}</p>
         </div>
         <div className="pane-actions">
+          {viewSwitcher}
           <button type="button" className="button-secondary" onClick={() => void loadOverview()} disabled={loading || !project?.dataBackendId}>
             {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
           </button>

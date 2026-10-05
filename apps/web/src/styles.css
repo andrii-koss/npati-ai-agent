@@ -21369,5 +21369,22 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
   }
 }
 
+/* Data Studio settings page: the same segmented control also sits in the pane header. */
+.ds-segmented.inline {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.ds-segmented.inline button {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+
+/* DataBackend management moved from the Company page into the Data Studio settings section. */
+.data-studio-pane .data-backend-section {
+  margin: 20px;
+}
+
 
 
