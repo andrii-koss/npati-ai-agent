@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant } from "./types";
 import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
@@ -53,6 +53,12 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   signature, created_at AS "createdAt"`;
   const featureFlagColumns = `id, workspace_id AS "workspaceId", scope, scope_id AS "scopeId", flag_key AS "flagKey",
   stage, enabled, rollout_percent AS "rolloutPercent", allowlist, revision, updated_by AS "updatedBy", updated_at AS "updatedAt"`;
+  const sandboxImageColumns = `id, workspace_id AS "workspaceId", variant, reference, digest, status, signature,
+  signature_issuer AS "signatureIssuer", sbom_path AS "sbomPath", scan_tool AS "scanTool", scan_at AS "scanAt",
+  scan_critical AS "scanCritical", scan_high AS "scanHigh", waiver_owner AS "waiverOwner",
+  waiver_expires_at AS "waiverExpiresAt", waiver_reason AS "waiverReason", previous_reference AS "previousReference",
+  revoked_at AS "revokedAt", revoked_by AS "revokedBy", revoke_reason AS "revokeReason",
+  created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -847,6 +853,65 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const sandboxImagesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='068_sandbox_image_supply_chain'");
+    if (!sandboxImagesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration068 } = await import("./migration-068");
+        await runMigration068(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('068_sandbox_image_supply_chain')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+  }
+
+  // --- C1b: sandbox image supply chain ------------------------------------------------------
+
+  async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
+    const result = await this.pool.query<SandboxImage>(`SELECT ${sandboxImageColumns} FROM sandbox_images
+      WHERE workspace_id=$1 ORDER BY variant, created_at DESC`, [context.workspaceId]);
+    return result.rows;
+  }
+
+  async getSandboxImage(context: AuthContext, reference: string): Promise<SandboxImage | null> {
+    const result = await this.pool.query<SandboxImage>(`SELECT ${sandboxImageColumns} FROM sandbox_images
+      WHERE workspace_id=$1 AND reference=$2`, [context.workspaceId, reference]);
+    return result.rows[0] ?? null;
+  }
+
+  async upsertSandboxImage(context: AuthContext, input: SandboxImageInput): Promise<SandboxImage> {
+    const result = await this.pool.query<SandboxImage>(`INSERT INTO sandbox_images
+      (id, workspace_id, variant, reference, digest, status, signature, signature_issuer, sbom_path, scan_tool, scan_at,
+       scan_critical, scan_high, waiver_owner, waiver_expires_at, waiver_reason, previous_reference, created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      ON CONFLICT (workspace_id, reference) DO UPDATE SET
+        variant=$3, digest=$5, status=$6, signature=$7, signature_issuer=$8, sbom_path=$9, scan_tool=$10, scan_at=$11,
+        scan_critical=$12, scan_high=$13, waiver_owner=$14, waiver_expires_at=$15, waiver_reason=$16,
+        previous_reference=COALESCE($17, sandbox_images.previous_reference), updated_at=now()
+      RETURNING ${sandboxImageColumns}`,
+      [randomUUID(), context.workspaceId, input.variant, input.reference, input.digest, input.status ?? "unverified",
+        input.signature ?? null, input.signatureIssuer ?? null, input.sbomPath ?? null, input.scanTool ?? null, input.scanAt ?? null,
+        input.scanCritical ?? 0, input.scanHigh ?? 0, input.waiverOwner ?? null, input.waiverExpiresAt ?? null, input.waiverReason ?? null,
+        input.previousReference ?? null, context.userId]);
+    return result.rows[0]!;
+  }
+
+  async revokeSandboxImage(context: AuthContext, reference: string, input: { actor: string; reason: string }): Promise<SandboxImage> {
+    const result = await this.pool.query<SandboxImage>(`UPDATE sandbox_images
+      SET status='revoked', revoked_at=now(), revoked_by=$3, revoke_reason=$4, updated_at=now()
+      WHERE workspace_id=$1 AND reference=$2 RETURNING ${sandboxImageColumns}`,
+      [context.workspaceId, reference, input.actor, input.reason]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Sandbox image not found");
+    return result.rows[0];
+  }
+
+  async latestVerifiedSandboxImage(context: AuthContext, variant: SandboxImageVariant): Promise<SandboxImage | null> {
+    const result = await this.pool.query<SandboxImage>(`SELECT ${sandboxImageColumns} FROM sandbox_images
+      WHERE workspace_id=$1 AND variant=$2 AND status='verified'
+      ORDER BY scan_at DESC NULLS LAST, created_at DESC LIMIT 1`, [context.workspaceId, variant]);
+    return result.rows[0] ?? null;
   }
 
   // --- C1a: feature flags and tool manifests ------------------------------------------------

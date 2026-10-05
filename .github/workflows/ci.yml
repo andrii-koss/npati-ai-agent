@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run audit:capabilities
+      - run: npm run audit:sandbox-images
       - run: npm test
       - run: npm run build
 

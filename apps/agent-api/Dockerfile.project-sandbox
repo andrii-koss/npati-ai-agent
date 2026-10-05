@@ -1,11 +1,25 @@
-FROM node:24-alpine
-# C1: coding toolchain inside the sandbox. Everything runs as the unprivileged user below; the
-# sandbox image is never granted the host docker socket and never mounts a host path.
+# syntax=docker/dockerfile:1.7
 #
-# Base tooling for reading, searching, patching and building code. Language runtimes: Node (base
-# image), Python and PHP below. Go/Rust/Java toolchains are intentionally NOT added here — they are
-# heavy, and C1b decides whether they ship as digest-pinned image variants (see
-# docs/coding-agent/00-audit.md section 7.4); detection for them already works without the runtime.
+# C1: coding toolchain inside the sandbox (CI smoke build of the default variant).
+#
+# C1b moved the real, digest-pinned images to docker/sandbox/:
+#   docker/sandbox/Dockerfile.base     shared hardening baseline (user 10001, no docker socket)
+#   docker/sandbox/Dockerfile.<variant> node | python | php | go | rust | java
+# and their published digests to docker/sandbox/images.json (verified by
+# scripts/sandbox-image-verify.mjs, wired into CI as `npm run audit:sandbox-images`).
+#
+# This file stays as the default buildable variant so the existing CI/compose jobs keep working with a
+# plain `docker build`. Production must pass an immutable base:
+#   docker build --file apps/agent-api/Dockerfile.project-sandbox \
+#     --build-arg BASE_IMAGE=node:24-alpine@sha256:<digest> -t npati/project-sandbox apps/agent-api
+# Never use a floating tag in production; the runtime refuses images that do not match a verified
+# digest in docker/sandbox/images.json.
+ARG BASE_IMAGE=node:24-alpine
+FROM ${BASE_IMAGE}
+
+# Base tooling for reading, searching, patching and building code. Everything runs as the
+# unprivileged user below; the sandbox image is never granted the host docker socket, never mounts a
+# host path and never runs privileged.
 RUN apk add --no-cache \
       python3 py3-pip \
       php php-phar composer \
@@ -19,8 +33,9 @@ RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnp
 ENV PATH="/opt/npati-package-managers/bin:${PATH}"
 RUN pnpm --version && yarn --version && rg --version && make --version >/dev/null
 RUN command -v pip >/dev/null || ln -s "$(command -v pip3)" /usr/local/bin/pip
-RUN addgroup -g 10001 sandbox && adduser -D -u 10001 -G sandbox sandbox
-RUN mkdir -p /workspace && chown -R sandbox:sandbox /workspace
+RUN addgroup -g 10001 sandbox && adduser -D -u 10001 -G sandbox -h /home/sandbox sandbox
+RUN mkdir -p /workspace && chown -R sandbox:sandbox /workspace /home/sandbox
+ENV HOME=/home/sandbox
 USER 10001:10001
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

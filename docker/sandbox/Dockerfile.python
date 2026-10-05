@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+#
+# C1b: Python sandbox variant (pip / poetry / uv + pytest / ruff / mypy).
+ARG BASE_IMAGE=ghcr.io/npati-ai/npati-sandbox-base@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM ${BASE_IMAGE}
+
+USER root
+RUN apk add --no-cache python3 py3-pip python3-dev py3-virtualenv \
+ && command -v pip >/dev/null || ln -s "$(command -v pip3)" /usr/local/bin/pip
+# Pinned tool versions: a floating verifier would make "verify commands" non-reproducible.
+RUN pip install --no-cache-dir --break-system-packages \
+      "pytest==8.3.3" "ruff==0.6.9" "mypy==1.11.2" "poetry==1.8.4" "uv==0.4.20"
+
+USER 10001:10001
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_INPUT=1 \
+    PYTHONDONTWRITEBYTECODE=1
+RUN python3 --version && pip --version && pytest --version && ruff --version && uv --version
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

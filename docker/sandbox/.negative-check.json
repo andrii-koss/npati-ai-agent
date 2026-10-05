@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "registry": "ghcr.io/npati-ai",
+  "images": [
+    {
+      "id": "sandbox-node-1",
+      "variant": "node",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-node:latest",
+      "digest": "sha256:aaaa000000000000000000000000000000000000000000000000000000000000",
+      "status": "verified",
+      "signature": { "tool": "cosign", "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main", "issuer": "https://token.actions.githubusercontent.com" },
+      "sbomPath": "docker/sandbox/sbom/sandbox-node-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 3, "high": 7 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-python-1",
+      "variant": "python",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-python@sha256:bbbb000000000000000000000000000000000000000000000000000000000000",
+      "digest": "sha256:cccc000000000000000000000000000000000000000000000000000000000000",
+      "status": "verified",
+      "signature": { "tool": "cosign", "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main", "issuer": "https://token.actions.githubusercontent.com" },
+      "sbomPath": "docker/sandbox/sbom/missing.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-php-1",
+      "variant": "php",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-php@sha256:dddd000000000000000000000000000000000000000000000000000000000000",
+      "digest": "sha256:dddd000000000000000000000000000000000000000000000000000000000000",
+      "status": "unknown-status",
+      "signature": { "tool": "cosign", "identity": "x", "issuer": "https://token.actions.githubusercontent.com" },
+      "sbomPath": "docker/sandbox/sbom/sandbox-php-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    }
+  ]
+}

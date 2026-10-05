@@ -1,0 +1,24 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "npati-sandbox-rust",
+  "documentNamespace": "https://npati.ai/spdx/sandbox-rust-1/sha256-41c2090c79ea71eecebb48b391ae36aaddc4933bc98a573783fde09374073233",
+  "creationInfo": {
+    "created": "2025-01-01T00:00:00.000Z",
+    "creators": ["Tool: npati-sandbox-image-sbom (fallback, syft unavailable)"],
+    "comment": "Placeholder SBOM: package inventory requires syft. Do not treat as a complete inventory."
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-sandbox-image",
+      "name": "ghcr.io/npati-ai/npati-sandbox-rust@sha256:41c2090c79ea71eecebb48b391ae36aaddc4933bc98a573783fde09374073233",
+      "versionInfo": "sha256:41c2090c79ea71eecebb48b391ae36aaddc4933bc98a573783fde09374073233",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "supplier": "Organization: NPATI",
+      "comment": "Container image reference; contents not enumerated in fallback mode."
+    }
+  ]
+}

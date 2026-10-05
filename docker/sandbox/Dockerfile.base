@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+#
+# C1b: shared hardening baseline for every Coding Agent sandbox variant.
+#
+# Digest policy: the upstream reference MUST be digest-pinned for a real build. The default below is a
+# placeholder on purpose, so a bare `docker build` fails loudly instead of silently pulling a floating
+# tag. `scripts/sandbox-image-build.mjs` resolves the real digest
+# (`docker buildx imagetools inspect node:24-alpine`) and passes it with --build-arg.
+#
+# Hardening properties of this image:
+#   - unprivileged user 10001:10001; the image has no docker socket, no setuid helper and no
+#     privileged capability requirement (the runner adds --cap-drop ALL, --read-only, no-new-privileges)
+#   - no package manager cache, no build secrets, no host paths baked in
+#   - languages are added by the variant images, never in the runtime process
+ARG UPSTREAM_BASE=node:24-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM ${UPSTREAM_BASE}
+
+# Base tooling shared by every variant: reading, searching, patching, building and fetching code.
+# apk versions come from the digest-pinned base image, which is what makes this layer reproducible;
+# bumping the base digest is the way to move them.
+RUN apk add --no-cache \
+      bash \
+      git openssh-client \
+      ripgrep \
+      build-base make g++ \
+      patch diffutils \
+      coreutils findutils util-linux \
+      jq unzip curl ca-certificates
+
+# Pinned global package managers (exact versions, no floating tags).
+RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10.15.0 yarn@1.22.22 \
+ && rm -rf /root/.npm
+ENV PATH="/opt/npati-package-managers/bin:${PATH}"
+
+# The sandbox always runs as this user; nothing below needs root.
+RUN addgroup -g 10001 sandbox \
+ && adduser -D -u 10001 -G sandbox -h /home/sandbox sandbox \
+ && mkdir -p /workspace /home/sandbox/.cache \
+ && chown -R sandbox:sandbox /workspace /home/sandbox
+
+ENV HOME=/home/sandbox
+WORKDIR /workspace
+USER 10001:10001
+CMD ["sleep", "infinity"]

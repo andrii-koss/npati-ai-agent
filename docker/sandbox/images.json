@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "registry": "ghcr.io/npati-ai",
+  "images": [
+    {
+      "id": "sandbox-node-1",
+      "variant": "node",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-node@sha256:1af7aff2620bfaeedf260e2d9f3f1d495ee6a98a83d6ee6995db2bd62609aa13",
+      "digest": "sha256:1af7aff2620bfaeedf260e2d9f3f1d495ee6a98a83d6ee6995db2bd62609aa13",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-node-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-python-1",
+      "variant": "python",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-python@sha256:98f001afad55538765b307c8fa65f07c0d1a9ec1620de77a1dcf08798363d8e3",
+      "digest": "sha256:98f001afad55538765b307c8fa65f07c0d1a9ec1620de77a1dcf08798363d8e3",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-python-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-php-1",
+      "variant": "php",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-php@sha256:6dcf3bf07318e8d2630881e8245fb9f0014bd633a910c93ef14d94e753f51e6a",
+      "digest": "sha256:6dcf3bf07318e8d2630881e8245fb9f0014bd633a910c93ef14d94e753f51e6a",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-php-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-go-1",
+      "variant": "go",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-go@sha256:924a23adb176f53ca1e84b8cf1440fa057dd1cd5de9463ed14d68b6d0e71e856",
+      "digest": "sha256:924a23adb176f53ca1e84b8cf1440fa057dd1cd5de9463ed14d68b6d0e71e856",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-go-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-rust-1",
+      "variant": "rust",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-rust@sha256:41c2090c79ea71eecebb48b391ae36aaddc4933bc98a573783fde09374073233",
+      "digest": "sha256:41c2090c79ea71eecebb48b391ae36aaddc4933bc98a573783fde09374073233",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-rust-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "sandbox-java-1",
+      "variant": "java",
+      "reference": "ghcr.io/npati-ai/npati-sandbox-java@sha256:0022df4f6745117b8d904a7d503aa1248ef26919e49f9a3a21966aa456aac1ce",
+      "digest": "sha256:0022df4f6745117b8d904a7d503aa1248ef26919e49f9a3a21966aa456aac1ce",
+      "status": "unverified",
+      "signature": {
+        "tool": "cosign",
+        "identity": "https://github.com/npati-ai/npati-agent/.github/workflows/sandbox-images.yml@refs/heads/main",
+        "issuer": "https://token.actions.githubusercontent.com"
+      },
+      "sbomPath": "docker/sandbox/sbom/sandbox-java-1.spdx.json",
+      "scan": { "tool": "trivy", "at": "2025-01-01T00:00:00.000Z", "critical": 0, "high": 0 },
+      "waiver": null,
+      "previousReference": null,
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    }
+  ]
+}

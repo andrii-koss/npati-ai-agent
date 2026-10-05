@@ -3,8 +3,119 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C1a — feature flags, staged rollout and versioning** (after C0 audit, C1 foundation, C1c audit log)
-- Next: **C1b — sandbox images pinned by digest** (then C2 tools), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+- Last completed: **C1b — sandbox image supply chain** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning)
+- Next: **C2 — the `code.*` tools** (read/search first), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+
+## Implemented (C1b, latest step)
+- **Declarative image catalog** `docker/sandbox/images.json` (schema v1, six variants: base, node, python,
+  php, go, rust, java) where every reference must be `repo@sha256:<64hex>`; the catalog is validated
+  strictly (no tags or `:latest`, mandatory `sbomPath`/`scanAt`/known `status`/`variant`, no duplicate
+  digests or ids). A missing catalog yields an empty catalog plus a log — never "trust everything".
+  **All digests are deterministic placeholders** until the first real build; this is stated in the
+  catalog warnings, in `docs/coding-agent/sandbox-images.md`, and enforced by `--require-verified`
+  (which is red by design today).
+- **Dockerfiles** `docker/sandbox/Dockerfile.{base,node,python,php,go,rust,java}`: digest-pinned base
+  (`ARG UPSTREAM_BASE=...@sha256:<digest>`), pinned package/runtime versions (pnpm 10.15.0, yarn 1.22.22,
+  pytest 8.3.3, ruff 0.6.9, mypy 1.11.2, poetry 1.8.4, uv 0.4.20, OpenJDK 21 + Maven/Gradle), Go with
+  `GOTOOLCHAIN=local`, unprivileged `USER 10001:10001`, `WORKDIR /workspace`, no docker socket and no
+  privileged mode — this closes the Go/Rust/Java toolchains C1 deliberately deferred.
+- **SBOM and scanning**: `docker/sandbox/sbom/*.spdx.json` per image (placeholder inventory, clearly
+  marked, replaced by real `syft` output in CI); `scripts/sandbox-image-scan.mjs` blocks publication on
+  any critical finding and requires a waiver (owner + reason + expiry) for high findings.
+- **Signing and trusted registry**: `CosignImageSignatureVerifier` (keyless, certificate identity +
+  OIDC issuer) and `NullImageSignatureVerifier`, which **always refuses** — with no configured verifier
+  every image is denied (fail closed).
+- **Admission control in the sandbox provider**: `SandboxImagePolicy.admit()` runs **before**
+  `docker create`, the admitted digest (not the configured tag) is what reaches the command line, and a
+  refusal creates neither container nor network. Refusal codes: `image_not_pinned`, `image_not_allowed`,
+  `image_revoked` (409 + `forcedUpgrade`/`replacement`), `image_digest_mismatch`, `image_scan_stale`
+  (older than `NPATI_CODE_MAX_IMAGE_AGE_DAYS`, default 14), `image_scan_failed`, `image_waiver_expired`,
+  `image_signature_invalid`, `image_admin_required`, `sandbox_image_policy_unavailable`.
+- **Deny by default in three places**: no signature verifier → refusal; no audit journal →
+  `allow`/`revoke`/`waiver` are not applied (the journal is written **before** the change); no injected
+  policy in the provider → refuse instead of starting.
+- **Dev mode** (`NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES=true`, default false) allows a locally built image
+  only when the environment is `development`/`test` **and** no production flag is enabled for the
+  company; such an image is recorded `unverified` and can never become `verified`.
+- **Rollout and digest immutability**: `selectForRollout` keeps a session on its own digest; a new digest
+  is adopted only when `code.sandbox_image.<digest-prefix8>` is enabled (the namespace was added to the
+  flag-key validator, otherwise the operator could not have enabled it at all); after a revoke the policy
+  returns `forcedUpgrade` with the last verified image of the same variant, so the runtime can notify and
+  move the session.
+- **Container hardening**: `buildSandboxCreateArgs()` (pure, testable) emits `--user 10001:10001`,
+  `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, tmpfs `/workspace` owned by 10001,
+  the internal network and an optional seccomp profile (`NPATI_SANDBOX_SECCOMP_PROFILE`), and never
+  `--privileged`, a docker socket, host mounts, `--pid=host`, `--network=host` or `:latest`.
+- **API and UI**: `GET/POST /companies/:companyId/code/sandbox-images`, `POST .../revoke`,
+  `POST .../:imageId/scan`, `POST .../admission-check` (all responses carry `apiVersion`), and the
+  «Sandbox images» panel on Settings → Code with status/scan badges, revoke confirmation, scan recording
+  and a manual admission check.
+- **CI**: `.github/workflows/sandbox-images.yml` (verify → build/SBOM/scan/sign, weekly `rescan` with an
+  issue on critical) plus `npm run audit:sandbox-images` in the existing platform job; the local guard
+  `scripts/sandbox-image-verify.mjs` runs on pure Node (no TS loader) and also checks the Dockerfiles
+  (digest-pinned `FROM`, `USER 10001:10001`, no `--privileged`/`docker.sock`).
+
+## Files / migrations / capabilities changed (C1b)
+- Migration **`packages/workspace/src/migration-068.ts`** (`068_sandbox_image_supply_chain`): table
+  `sandbox_images` with digest, status, signature/issuer, SBOM path, scan data, waiver fields,
+  `previous_reference` and revoke audit fields.
+- Workspace package: `types.ts` (`SandboxImage*` types, `SANDBOX_IMAGE_REFERENCE_PATTERN`, five store
+  methods), `postgres-store.ts`, `in-memory-store.ts`.
+- agent-api: **new** `sandbox-image-policy.ts`, `sandbox-image-catalog.ts`, `sandbox-image-signature.ts`,
+  `sandbox-image-routes.ts`; changed `docker-sandbox-provider.ts` (admission + seccomp),
+  `sandbox-runner-server.ts` (policy construction), `app.ts` (policy + route registration),
+  `feature-flags.ts` (rollout flag namespace).
+- New: `docker/sandbox/**` (7 Dockerfiles, catalog, 6 SBOMs, negative self-test fixture),
+  `scripts/sandbox-image-{lib,build,sbom,scan,sign,verify}.mjs`, `.github/workflows/sandbox-images.yml`,
+  `docs/coding-agent/sandbox-images.md`; changed `.github/workflows/ci.yml`, `package.json`
+  (`audit:sandbox-images`), `apps/agent-api/Dockerfile.project-sandbox` (kept buildable, digest via
+  `--build-arg`), `.env.example` (six new sandbox variables).
+- web: **new** `CodeSandboxImagesPanel.tsx`; changed `CodeSettingsPage.tsx`, `styles.css`.
+- Capabilities: none added (still **348 / 84**) — unchanged by design, tools arrive in C2.
+
+## Verification (C1b)
+- `npm run typecheck` → **0 errors**; `npm run build` for agent-api and web → **exit 0**;
+  `node scripts/sandbox-image-verify.mjs` → **exit 0** (0 errors, 6 placeholder warnings);
+  `node scripts/verify-code-tool-schemas.mjs --check` → **exit 0**.
+- `tests/coding-agent-c1b-images.test.ts` **14/14** and `tests/coding-agent-c1b-image-api.test.ts` **7/7**,
+  and the full security-gate regression slice — **18 files, 197 tests, all passing** (C1, C1a flags,
+  C1a versioning, C1a artifact guard, C1c audit, projects, sandbox provider/egress/terminal, capability
+  registry and full capability regression, invariants, Website Builder, Data Studio, agent-api, architecture).
+- Fixed during the step (all seven failures were real, none was solved by weakening a check):
+  five test fixtures used a bare hex digest where the canonical form is `sha256:<hex>`;
+  `AuthenticationError` was mapped to 400 instead of 401 by the image routes; an unexpected internal
+  failure mapped to 400 instead of 500; and `newDigestAdopted` built the rollout flag key from
+  `digest.slice(0,8)` — i.e. `sha256:b` — while the flag namespace was not even accepted by the key
+  validator, so the documented rollout mechanism could not be enabled at all.
+
+## Real E2E status (C1b)
+- Verified in-process: admission decisions and every refusal code, fail-closed audit for image
+  administration, catalog validation, the hardened command line, rollout/revoke semantics, the API error
+  contracts and both builds.
+- **Not verified here (no Docker registry, no `syft`/`trivy`/`cosign`):** actual image builds, real
+  SPDX inventories, vulnerability scans, cosign signatures, and a container actually starting from an
+  admitted digest. The catalog digests are placeholders, so the deploy gate (`--require-verified`) is red
+  by design until the first real build; the workflow YAML was written by hand and has not been parsed by
+  GitHub yet. Migration 068 and the DB store methods have not run against a live PostgreSQL.
+
+## Known risks / open questions (C1b)
+1. **Dev workflow break (needs confirmation)**: the default `NPATI_SANDBOX_IMAGE` is a tag, so from C1b the
+   sandbox refuses to start until either a digest from the catalog plus cosign identity/issuer is
+   configured, or `NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES=true` is combined with `NODE_ENV=development`.
+   This is intentional deny-by-default, but it changes the local flow.
+2. **Runner without `DATABASE_URL` sees only the file catalog**, so a `revoke` performed through the API
+   does not reach it (a warning is logged). Production runners must have database access; alternatively a
+   periodic catalog pull from the API can be added.
+3. The negative-check fixture (`docker/sandbox/.negative-check.json`) stays in the repo deliberately: the
+   CI `verify` job asserts that the guard **fails** on it. It can be moved to `tests/fixtures/` if that is
+   preferred.
+4. `apps/agent-api/Dockerfile.project-sandbox` remains tag-buildable so the existing CI/Dokploy path keeps
+   working; the digest-pinned production path is `docker/sandbox/*` with `--build-arg BASE_IMAGE=…@sha256:…`.
+   Forcing a digest there would break the current CI job until a real digest exists.
+5. `docker/sandbox/images.json` entries are `unverified` placeholders; the real rotas must be filled by the
+   first successful workflow run, and only then may any of them be promoted to `verified`.
+6. The gVisor/Kata/Firecracker decision is documented (evaluated, not implemented) in
+   `docs/coding-agent/sandbox-images.md`; a stronger runtime would be an alternative `SandboxRuntimeProvider`.
 
 ## Implemented (C1a, latest step)
 - **Feature-flag store** (migration **067**, additive): `feature_flags` with scope `global|company|user`,
@@ -225,18 +336,21 @@ Update this file after every completed step.
    workspace-scoped for that reason.
 
 ## Next-session handoff
-- Read `docs/coding-agent/PLAN.md` (version 4, section C1b), `docs/coding-agent/00-audit.md`
-  sections 7 and 13, and this file.
-- Execute **only C1b**: sandbox images addressed by digest — the build/publish pipeline, `NPATI_SANDBOX_IMAGE`
-  as `repo@sha256:…`, verification that the running image matches the recorded digest, the allow/revoke
-  list, the age policy (`NPATI_CODE_MAX_IMAGE_AGE_DAYS`) and the toolchain variants C1 deliberately
-  deferred (Go/Rust/Java), with `security-gate` tests: an image referenced by tag or an unverified
-  digest is refused, a revoked or missing digest refuses to start, and the recorded digest must match
-  the running container.
-- Image allow/revoke decisions are privileged: they must be written through `AuditLogService.record()`
-  (C1c) and fail closed, like flag changes already are.
-- Do not start C2 (the `code.*` tools) in that session; tools come after C1b (order in
-  `00-audit.md` section 13).
+- Read `docs/coding-agent/PLAN.md` (version 4, section C2), `docs/coding-agent/00-audit.md`
+  sections 5, 6 and 13, and this file.
+- Execute **only C2**: register the first `code.*` capabilities and tools in the canonical capability
+  registry (domain/type/risk/agent-callable/approval/schema version, visible in the Capability
+  Inspector — remember to update the inventory counter contracts **and** the `code.*` domain, which does
+  not exist yet), starting with read-only tools (`code.fs.read`, `code.fs.list`, `code.search`) built on
+  the C1 workspace and the C1b sandbox: versioned argument/result JSON schemas, per-tool limits,
+  structured errors (`status`, `message`, `step`, `tool`, `retryable`), an Activity event, a feature-flag
+  check per call, `tool_call_id` idempotency, and secret redaction in output. Publish the tool manifest
+  (bump `CODE_TOOL_MANIFEST_VERSION`, refresh `apps/agent-api/src/code-tool-schemas.published.json` and
+  the snapshot fixture via `npm run audit:code-tools -- --update`) so sessions pin the new versions, and
+  add the Inspector badge that shows the flag state per `code.*` capability.
+- Every new tool must run **only** in the sandbox admitted by the C1b policy, must respect the C1a flags
+  (`code.read` for reads), and its privileged actions must go through `AuditLogService.record()`.
+- Do not start C3 in that session; the order in `00-audit.md` section 13 is binding.
 - **`code_project` project type** on the existing `Project` entity (no new entity): the enum and CHECK
   constraint were extended additively, so Website Builder projects keep working unchanged.
 - **Classification and retention** exist on projects and sessions: `data_classification`

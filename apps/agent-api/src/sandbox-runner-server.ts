@@ -6,6 +6,40 @@ import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure } from "./sandbox-runner-diagnostics";
 import { SandboxProviderError, type SandboxScope } from "./sandbox-provider";
+import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type WorkspaceStore } from "@npati/workspace";
+import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
+import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
+
+/**
+ * C1b: the runner is where containers are actually created, so image admission is enforced here.
+ *
+ * With `DATABASE_URL` configured the runner reads the same catalogue (including revocations) as the
+ * API. Without it the runner falls back to the declarative catalogue file and an in-memory store:
+ * digests, signature, scan freshness and waivers are still enforced, but a revocation issued through
+ * the API is only visible once the runner can reach the database — so a production runner must have
+ * `DATABASE_URL` set.
+ */
+async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
+  const config = sandboxImagePolicyConfig(process.env);
+  const databaseUrl = process.env.DATABASE_URL ?? process.env.NPATI_DATABASE_URL;
+  let store: WorkspaceStore;
+  if (databaseUrl) {
+    const postgres = new PostgresWorkspaceStore(databaseUrl);
+    await postgres.initialize().catch((error) => console.error(`[sandbox-image-policy] database unavailable ${error instanceof Error ? error.message : ""}`));
+    store = postgres;
+  } else {
+    const memory = new InMemoryWorkspaceStore();
+    await memory.initialize();
+    console.warn("[sandbox-image-policy] DATABASE_URL is not set: image revocations from the API are not visible to this runner");
+    store = memory;
+  }
+  return new SandboxImagePolicy(store, {
+    ...config,
+    verifier: config.signer?.identity && config.signer?.issuer ? new CosignImageSignatureVerifier() : undefined,
+  });
+}
+const runnerImagePolicy = createRunnerImagePolicy();
+const imageAdmission: SandboxImageAdmission = { admit: async (context, input) => (await runnerImagePolicy).admit(context, input) };
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
@@ -20,7 +54,7 @@ const provider = new DockerSandboxProvider({
   maxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || 500,
   maxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || 20_000_000,
   allowedHosts: sandboxAllowedHostsWithProjectApi(process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com", process.env.NPATI_PROJECT_API_PUBLIC_URL),
-});
+}, imageAdmission);
 const dockerExec = promisify(execFile);
 async function runnerPreflight(): Promise<void> {
   const socketPresent = await stat("/var/run/docker.sock").then((value) => value.isSocket()).catch(() => false);
