@@ -6,51 +6,63 @@ standard `docker compose` installation described in the root `README.md`.
 
 ## 0. Dokploy / single-host production checklist
 
-`docker-compose.dokploy.yml` defines **12 services**. Two of them are gated behind compose
-profiles, so they only start when the profiles are enabled:
+`docker-compose.dokploy.yml` defines **12 services**: web, agent-api, company-worker,
+sandbox-runner, crawler, browser-use-worker, omniroute, qdrant, minio, redis, postgres and
+**`postgres-projects`**. In this file every service starts unconditionally — the compose profiles
+(`data-studio`, `local-sandbox`) exist only in the local development file `docker-compose.yml`,
+where they are opt-in.
 
-| Service | Profile | Why it matters |
+| Service | Holds | Why it matters |
 | --- | --- | --- |
-| `postgres-projects` | `data-studio` | the Data Studio project databases. Without this profile there is **no 12th container** and Data Studio reports the backend as unavailable |
-| `sandbox-runner` | `local-sandbox` | Terminal, Live Preview, browser QA and store-preview runs |
+| `postgres-projects` | one **database + three roles per DataBackend + environment** | Data Studio project data; without it Data Studio reports the backend as unavailable. It is a single container for all projects, not one container per database |
+| `sandbox-runner` | generated sites/apps | Terminal, Live Preview, browser QA, mobile preview |
+| `postgres` | NPATI Core metadata only | never stores project rows |
 
 In Dokploy set the following environment variables on the application (Environment tab) and
 redeploy:
 
 ```dotenv
-# 1. Start the profile-gated services (comma separated, no spaces).
-COMPOSE_PROFILES=local-sandbox,data-studio
-
-# 2. Project cluster credentials — the SAME value is used by postgres-projects and agent-api.
+# 1. Project cluster credentials — the SAME value is used by postgres-projects and agent-api.
+#    Both services now require it, so the deploy fails fast instead of starting a broken cluster.
 NPATI_PROJECTS_POSTGRES_ADMIN_USER=npati_projects_admin
 NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD=<openssl rand -hex 32>
 
-# 3. Local sandbox runner on the same host (it is reachable as http://sandbox-runner:7865).
+# 2. Local sandbox runner on the same host (it is reachable as http://sandbox-runner:7865).
 NPATI_SANDBOX_RUNNER_MODE=local
 NPATI_SANDBOX_RUNNER_URL=http://sandbox-runner:7865
 NPATI_SANDBOX_RUNNER_SECRET=<openssl rand -hex 32>   # must be at least 32 characters
 NPATI_PREVIEW_SECRET=<openssl rand -hex 32>          # keeps preview links valid across restarts
 
-# 4. Public HTTPS base URL of the Project API (Data Studio gateway).
+# 3. Public HTTPS base URL of the Project API (Data Studio gateway).
 #    Point a domain/proxy at the agent-api (port 3001) and set it here: the sandbox then receives
-#    PROJECT_API_URL / PROJECT_PUBLISHABLE_KEY, the SDK is vendored, and the sandbox egress
-#    allowlist gets this host automatically.
+#    PROJECT_API_URL / PROJECT_PUBLISHABLE_KEY, the SDK is vendored into the Project workspace, and
+#    the sandbox egress allowlist gets this host automatically.
 NPATI_PROJECT_API_PUBLIC_URL=https://api.example.com
 ```
 
 After the redeploy verify:
 
 ```bash
-docker compose -p <project> ps                  # expect 12 services Up (postgres-projects included)
-docker compose -p <project> logs agent-api | grep -i "data studio" || true
-curl -fsS https://api.example.com/health        # Project API host reachable from outside
-
+docker compose -p <project> ps                  # expect 12 services Up, postgres-projects included
+curl -fsS https://api.example.com/health        # the Project API domain answers
 # Inside the app: Company → Data must offer "New DataBackend".
 ```
 
-If `postgres-projects` is still missing, the profile variable did not reach the deploy: check
-`docker compose -p <project> config --services` (it lists the active services) or pass
-`--profile data-studio` explicitly in the Dokploy command field.
+If `postgres-projects` is still missing after an upgrade from an older revision, the container may
+have been left out by the previous deploy. Force it once:
+
+```bash
+cd /etc/dokploy/compose/<project>/code
+grep -n 'COMPOSE_PROFILES' .env                 # remove the variable: it is obsolete in this file
+docker compose -p <project> --env-file .env -f ./docker-compose.dokploy.yml config --services
+docker compose -p <project> --env-file .env -f ./docker-compose.dokploy.yml up -d --remove-orphans
+docker ps -a --filter "name=postgres-projects" --format '{{.Names}} {{.Status}}'
+docker logs --tail 50 <project>-postgres-projects-1
+```
+
+Reading `docker ps -a`: the container exists but restarts → check the password variable and the
+`postgres-projects-data` volume; the container is absent → the running revision still has the old
+profile gating, pull the current `main` and redeploy.
 
 ## 1. Containers and volumes
 | Service | Purpose | Notes |

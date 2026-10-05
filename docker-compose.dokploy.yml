@@ -80,7 +80,7 @@ services:
       NPATI_PROJECTS_POSTGRES_HOST: postgres-projects
       NPATI_PROJECTS_POSTGRES_PORT: 5432
       NPATI_PROJECTS_POSTGRES_ADMIN_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:?NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD is required (Data Studio project databases)}
       NPATI_PROJECTS_POSTGRES_ADMIN_DB: postgres
       NPATI_PROJECTS_SNAPSHOT_DIR: /app/project-snapshots
       NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS: ${NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS:-30}
@@ -121,6 +121,8 @@ services:
       omniroute:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      postgres-projects:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -171,7 +173,6 @@ services:
     networks: [npati-agent, npati-sandbox-control]
 
   sandbox-runner:
-    profiles: [local-sandbox]
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
@@ -356,12 +357,11 @@ services:
     networks: [npati-agent]
 
   postgres-projects:
-    profiles: [data-studio]
     image: postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:?NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD is required (Data Studio project databases)}
       POSTGRES_DB: postgres
     volumes:
       - postgres-projects-data:/var/lib/postgresql/data
