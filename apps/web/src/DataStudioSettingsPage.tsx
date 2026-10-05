@@ -4,7 +4,6 @@ import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
-import { DataBackendSection } from "./DataBackendSection";
 import type { FieldDefinition, FieldType, SchemaOperation } from "./DataStudioPage";
 
 // --- Types ------------------------------------------------------------------
@@ -21,6 +20,31 @@ interface ProjectSummary {
   status?: string;
   framework?: string | null;
   dataBackendId?: string | null;
+}
+
+interface BackendSummary {
+  id: string;
+  name: string;
+  provider: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface BackendEnvironment {
+  environment: "dev" | "prod";
+  status: string;
+  syncStatus: string;
+  schemaFingerprint?: string | null;
+}
+
+interface QuotaReport {
+  environment: string;
+  usage: { bytes: number; connections: number };
+  limits: { maxDatabaseBytes: number; maxConnections?: number };
+  state: "ok" | "warning" | "exceeded";
+  databasePercent: number;
+  writesBlocked: boolean;
 }
 
 interface TableColumn {
@@ -84,6 +108,7 @@ interface AppliedMigration {
 }
 
 type Feedback = { message: string; type: "success" | "info" | "error" };
+type DatabaseFilter = "all" | "ready" | "attention";
 
 const FIELD_TYPES: FieldType[] = ["string", "text", "integer", "decimal", "boolean", "date", "datetime", "json", "uuid", "enum"];
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,62}$/;
@@ -113,6 +138,25 @@ function errorCode(error: unknown): string | undefined {
   return error instanceof Error ? (error as Error & { code?: string }).code : undefined;
 }
 
+function statusPillClass(status: string): string {
+  if (status === "ready") return "allowed";
+  if (status === "error" || status === "deleted") return "denied";
+  return "requires-approval";
+}
+
+function syncPillClass(syncStatus: string | undefined): string {
+  return syncStatus === "synced" ? "allowed" : "requires-approval";
+}
+
+function formatBytes(bytes: number | undefined): string {
+  if (!Number.isFinite(bytes) || bytes === undefined) return "—";
+  const value = bytes as number;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 // --- Page -------------------------------------------------------------------
 
 export function DataStudioSettingsPage() {
@@ -121,6 +165,7 @@ export function DataStudioSettingsPage() {
 
   const [companies, setCompanies] = useState<CompanySummary[]>(() => readCachedCompanies<CompanySummary>());
   const [companyId, setCompanyId] = useState<string>("");
+
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [environment, setEnvironment] = useState<"dev" | "prod">("dev");
@@ -128,12 +173,26 @@ export function DataStudioSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [view, setView] = useState<"tables" | "databases">("tables");
+
+  const [backends, setBackends] = useState<BackendSummary[]>([]);
+  const [environments, setEnvironments] = useState<Record<string, BackendEnvironment[]>>({});
+  const [backendsLoading, setBackendsLoading] = useState(false);
+  const [backendsError, setBackendsError] = useState<{ message: string; code?: string } | null>(null);
+  const [tableCounts, setTableCounts] = useState<Record<string, number | null>>({});
+  const [quotas, setQuotas] = useState<Record<string, QuotaReport | null>>({});
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [databaseFilter, setDatabaseFilter] = useState<DatabaseFilter>("all");
+
   const [rowCounts, setRowCounts] = useState<Record<string, number>>({});
   const [countingRows, setCountingRows] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [backendBusy, setBackendBusy] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editTable, setEditTable] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const notify = useCallback((message: string, type: Feedback["type"] = "success") => {
     setFeedback({ message, type });
@@ -143,6 +202,8 @@ export function DataStudioSettingsPage() {
   const project = useMemo(() => projects.find((item) => item.id === projectId) ?? null, [projects, projectId]);
   const tables = useMemo(() => [...(overview?.schema?.tables ?? [])].sort((left, right) => left.name.localeCompare(right.name)), [overview]);
   const readOnly = environment === "prod";
+  const detail = useMemo(() => backends.find((backend) => backend.id === detailId) ?? null, [backends, detailId]);
+  const detailProjects = useMemo(() => projects.filter((item) => item.dataBackendId === detailId), [projects, detailId]);
 
   // 1. Companies
   useEffect(() => {
@@ -158,23 +219,87 @@ export function DataStudioSettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // 2. Projects of the selected company
+  // 2. Databases + projects of the selected company
   useEffect(() => {
-    if (!companyId) { setProjects([]); setProjectId(""); return; }
+    if (!companyId) {
+      setProjects([]); setProjectId(""); setBackends([]); setEnvironments({}); setTableCounts({});
+      return;
+    }
     let cancelled = false;
-    void apiFetch<{ projects: ProjectSummary[] }>(`/companies/${encodeURIComponent(companyId)}/projects`)
-      .then((result) => {
+    setBackendsLoading(true);
+    setBackendsError(null);
+    void (async () => {
+      try {
+        const [projectResult, backendResult] = await Promise.all([
+          apiFetch<{ projects: ProjectSummary[] }>(`/companies/${encodeURIComponent(companyId)}/projects`),
+          apiFetch<{ backends: BackendSummary[] }>(`/companies/${encodeURIComponent(companyId)}/data-backends`),
+        ]);
         if (cancelled) return;
-        const list = result.projects ?? [];
-        setProjects(list);
+        const projectList = projectResult.projects ?? [];
+        const backendList = backendResult.backends ?? [];
+        setProjects(projectList);
         setProjectId((current) => {
-          if (current && list.some((item) => item.id === current)) return current;
-          return (list.find((item) => item.dataBackendId) ?? list[0])?.id ?? "";
+          if (current && projectList.some((item) => item.id === current)) return current;
+          return (projectList.find((item) => item.dataBackendId) ?? projectList[0])?.id ?? "";
         });
-      })
-      .catch((cause) => { if (!cancelled) setError({ message: cause instanceof Error ? cause.message : "Could not load projects" }); });
+        setBackends(backendList);
+        const details = await Promise.all(backendList.map((backend) => apiFetch<{ environments: BackendEnvironment[] }>(
+          `/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`,
+        ).catch(() => ({ environments: [] as BackendEnvironment[] }))));
+        if (cancelled) return;
+        setEnvironments(Object.fromEntries(backendList.map((backend, index) => [backend.id, details[index]?.environments ?? []])));
+
+        // Table counts are only used as a hint: silently ignore failures.
+        const withProjects = backendList
+          .map((backend) => ({ backend, attached: projectList.find((item) => item.dataBackendId === backend.id) }))
+          .filter((entry) => Boolean(entry.attached));
+        if (!withProjects.length) {
+          setTableCounts({});
+          return;
+        }
+        const counts = await Promise.all(withProjects.map(async ({ backend, attached }) => {
+          try {
+            const result = await apiFetch<{ schema: { tables: unknown[] } | null }>(
+              `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(attached!.id)}/data-studio/dev`,
+            );
+            return [backend.id, result.schema?.tables.length ?? 0] as const;
+          } catch {
+            return [backend.id, null] as const;
+          }
+        }));
+        if (!cancelled) setTableCounts(Object.fromEntries(counts));
+      } catch (cause) {
+        if (cancelled) return;
+        setBackends([]); setEnvironments({}); setTableCounts({});
+        setBackendsError({ message: cause instanceof Error ? cause.message : "Could not load Data Studio", code: errorCode(cause) });
+      } finally {
+        if (!cancelled) setBackendsLoading(false);
+      }
+    })();
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [companyId, reloadToken]);
+
+  // 3. Quotas of the opened database
+  useEffect(() => {
+    if (!companyId || !detailId) { setQuotas({}); return; }
+    let cancelled = false;
+    void Promise.all((["dev", "prod"] as const).map(async (env) => {
+      try {
+        const report = await apiFetch<QuotaReport>(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(detailId)}/quotas?environment=${env}`);
+        return [env, report] as const;
+      } catch {
+        return [env, null] as const;
+      }
+    })).then((entries) => { if (!cancelled) setQuotas(Object.fromEntries(entries)); });
+    return () => { cancelled = true; };
+  }, [companyId, detailId, reloadToken]);
+
+  // 4. Table area of the opened database
+  useEffect(() => {
+    if (!detailId) return;
+    const attached = projects.filter((item) => item.dataBackendId === detailId);
+    if (!attached.some((item) => item.id === projectId)) setProjectId(attached[0]?.id ?? "");
+  }, [detailId, projects, projectId]);
 
   const loadOverview = useCallback(async () => {
     if (!companyId || !projectId || !project?.dataBackendId) { setOverview(null); return; }
@@ -193,6 +318,140 @@ export function DataStudioSettingsPage() {
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
   useEffect(() => { setRowCounts({}); }, [projectId, environment]);
+
+  // --- Database actions -----------------------------------------------------
+
+  const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
+
+  const createDatabase = useCallback(async (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => {
+    setBackendBusy(true);
+    try {
+      const created = await apiFetch<BackendSummary>(`/companies/${encodeURIComponent(companyId)}/data-backends`, {
+        method: "POST",
+        body: JSON.stringify({ name: input.name, provider: input.provider, connectionString: input.connectionString || undefined }),
+      });
+      notify(isUk ? `Базу «${created.name}» створено` : `Database “${created.name}” created`);
+      setCreateOpen(false);
+      setDetailId(created.id);
+      setDatabaseFilter("all");
+      refresh();
+    } catch (cause) {
+      const code = errorCode(cause);
+      notify(
+        code === "DATABASE_EXISTS"
+          ? (isUk ? "База для цього середовища вже існує" : "A database already exists for this environment")
+          : code === "PROVISIONER_UNAVAILABLE"
+            ? (isUk ? "Провізіонер недоступний — перевірте контейнер postgres-projects" : "Provisioner unavailable — check the postgres-projects container")
+            : code === "INVALID_CONNECTION_STRING"
+              ? (isUk ? "Рядок підключення має бути у форматі postgres://…" : "The connection string must look like postgres://…")
+              : cause instanceof Error ? cause.message : "Could not create the database",
+        "error",
+      );
+      throw cause;
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [companyId, isUk, notify, refresh]);
+
+  const toggleArchive = useCallback(async (backend: BackendSummary) => {
+    const archiving = backend.status === "ready";
+    if (archiving) {
+      const confirmed = await confirmModal({
+        title: isUk ? "Архівувати базу" : "Archive database",
+        message: isUk
+          ? `Базу «${backend.name}» буде заархівовано: доступ проєктів до даних зупиниться, дані збережуться.`
+          : `“${backend.name}” will be archived: projects lose data access, the data itself is kept.`,
+        confirmText: isUk ? "Архівувати" : "Archive",
+        isDanger: true,
+      });
+      if (!confirmed) return;
+    }
+    setBackendBusy(true);
+    try {
+      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}/${archiving ? "archive" : "activate"}`, { method: "POST" });
+      notify(archiving ? (isUk ? "Базу заархівовано" : "Database archived") : (isUk ? "Базу активовано" : "Database activated"));
+      refresh();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Could not update the database", "error");
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [companyId, isUk, notify, refresh]);
+
+  const renameDatabase = useCallback(async (backend: BackendSummary) => {
+    const name = await promptModal({
+      title: isUk ? "Перейменувати базу" : "Rename database",
+      message: isUk ? "Нова назва бази даних" : "New database name",
+      placeholder: backend.name,
+      defaultValue: backend.name,
+    });
+    const clean = (name ?? "").trim();
+    if (!clean || clean === backend.name) return;
+    setBackendBusy(true);
+    try {
+      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: clean }),
+      });
+      notify(isUk ? "Назву оновлено" : "Name updated");
+      refresh();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Could not rename the database", "error");
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [companyId, isUk, notify, refresh]);
+
+  const deleteDatabase = useCallback(async (backend: BackendSummary) => {
+    const confirmed = await confirmModal({
+      title: isUk ? "Видалити базу" : "Delete database",
+      message: isUk
+        ? `Базу «${backend.name}» буде видалено. Проєкти втратят доступ до даних, а сама база зникне після вікна збереження бекапів.`
+        : `“${backend.name}” will be deleted. Projects lose their data and the database is removed after the backup retention window.`,
+      confirmText: isUk ? "Продовжити" : "Continue",
+      isDanger: true,
+    });
+    if (!confirmed) return;
+    const typed = await promptModal({
+      title: isUk ? "Підтвердіть видалення" : "Confirm deletion",
+      message: isUk ? `Введіть назву бази «${backend.name}», щоб підтвердити.` : `Type the database name “${backend.name}” to confirm.`,
+      placeholder: backend.name,
+    });
+    if (typed !== backend.name) {
+      if (typed !== null) notify(isUk ? "Назва не збігається — скасовано" : "Name does not match — cancelled", "error");
+      return;
+    }
+    setBackendBusy(true);
+    try {
+      await apiFetch(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirmName: backend.name }),
+      });
+      notify(isUk ? "Базу позначено на видалення" : "Database marked for deletion");
+      if (detailId === backend.id) setDetailId(null);
+      refresh();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Could not delete the database", "error");
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [companyId, detailId, isUk, notify, refresh]);
+
+  const attachProject = useCallback(async (targetProjectId: string, backendId: string | null) => {
+    setBackendBusy(true);
+    try {
+      await apiFetch(`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(targetProjectId)}/data-backend`, backendId
+        ? { method: "PUT", body: JSON.stringify({ dataBackendId: backendId }) }
+        : { method: "DELETE" });
+      notify(backendId ? (isUk ? "Проєкт прикріплено" : "Project attached") : (isUk ? "Проєкт відкріплено" : "Project detached"));
+      if (!backendId && projectId === targetProjectId) setOverview(null);
+      refresh();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Could not update the attachment", "error");
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [companyId, isUk, notify, projectId, refresh]);
 
   // --- Schema operations ----------------------------------------------------
 
@@ -216,6 +475,7 @@ export function DataStudioSettingsPage() {
       });
       notify(isUk ? "Зміну застосовано" : "Change applied");
       await loadOverview();
+      refresh();
     } catch (cause) {
       const code = errorCode(cause);
       if (code === "STALE_SCHEMA") {
@@ -228,7 +488,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setBusy(false);
     }
-  }, [basePath, overview?.environment.schemaFingerprint, notify, isUk, loadOverview]);
+  }, [basePath, overview?.environment.schemaFingerprint, notify, isUk, loadOverview, refresh]);
 
   const handleDeleteTable = useCallback(async (table: TableSummary) => {
     const confirmed = await confirmModal({
@@ -281,7 +541,35 @@ export function DataStudioSettingsPage() {
     }
   }, [basePath, tables]);
 
-  // --- Render ---------------------------------------------------------------
+  // --- Derived view data ----------------------------------------------------
+
+  const stats = useMemo(() => {
+    const readyEnvironments = backends.reduce((total, backend) => {
+      const list = environments[backend.id] ?? [];
+      return total + list.filter((env) => env.status === "ready").length;
+    }, 0);
+    const totalEnvironments = backends.reduce((total, backend) => total + Math.max((environments[backend.id] ?? []).length, 0), 0);
+    const known = Object.values(tableCounts).filter((count): count is number => typeof count === "number");
+    return {
+      total: backends.length,
+      ready: backends.filter((backend) => backend.status === "ready").length,
+      attention: backends.filter((backend) => backend.status !== "ready").length,
+      readyEnvironments,
+      totalEnvironments: totalEnvironments || backends.length * 2,
+      tables: known.length ? known.reduce((total, count) => total + count, 0) : null,
+      attachedProjects: projects.filter((item) => item.dataBackendId).length,
+    };
+  }, [backends, environments, projects, tableCounts]);
+
+  const filteredBackends = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return backends.filter((backend) => {
+      if (databaseFilter === "ready" && backend.status !== "ready") return false;
+      if (databaseFilter === "attention" && backend.status === "ready") return false;
+      if (!query) return true;
+      return backend.name.toLowerCase().includes(query) || backend.provider.toLowerCase().includes(query);
+    });
+  }, [backends, databaseFilter, searchQuery]);
 
   const lockRemaining = useMemo(() => {
     if (!overview?.lock?.held || !overview.lock.expiresAt) return null;
@@ -296,261 +584,644 @@ export function DataStudioSettingsPage() {
     ...overview.drift.tables.changed.map((name) => `${isUk ? "змінена" : "changed"}: ${name}`),
   ] : [];
 
-  const viewSwitcher = (
-    <div className="ds-segmented inline" role="tablist" aria-label={isUk ? "Розділ Data Studio" : "Data Studio view"}>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={view === "tables"}
-        className={view === "tables" ? "active" : ""}
-        onClick={() => setView("tables")}
-      >
-        {isUk ? "Таблиці" : "Tables"}
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={view === "databases"}
-        className={view === "databases" ? "active" : ""}
-        onClick={() => setView("databases")}
-      >
-        {isUk ? "Бази даних" : "Databases"}
-      </button>
+  const unattachedProjects = useMemo(() => projects.filter((item) => !item.dataBackendId), [projects]);
+
+  const backButton = (
+    <Link to="/settings" className="marketplace-back-button" aria-label={isUk ? "До налаштувань" : "Back to settings"} title={isUk ? "До налаштувань" : "Back to settings"}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 12H5M12 19l-7-7 7-7" />
+      </svg>
+    </Link>
+  );
+
+  const companySelect = companies.length > 1 && (
+    <select
+      aria-label={isUk ? "Компанія" : "Company"}
+      className="page-size-select"
+      value={companyId}
+      onChange={(event) => { setCompanyId(event.target.value); setDetailId(null); }}
+    >
+      {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+    </select>
+  );
+
+  const unavailableNotice = backendsError?.code === "DATA_STUDIO_UNAVAILABLE" && (
+    <div className="data-studio-alert error" role="alert">
+      {isUk
+        ? "Data Studio вимкнено на цій інсталяції (немає контейнера postgres-projects або provisioner)."
+        : "Data Studio is disabled on this installation (no postgres-projects container / provisioner)."}
     </div>
   );
 
-  const companyPicker = companies.length > 1 && (
-    <div className="ds-toolbar">
-      <label className="ds-toolbar-field">
-        <span>{isUk ? "Компанія" : "Company"}</span>
-        <select value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
-          {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-        </select>
-      </label>
-    </div>
-  );
+  // --- Detail view ----------------------------------------------------------
 
-  // The databases view manages the DataBackends of the selected company; the tables view works
-  // inside one project's DataBackend.
-  if (view === "databases") {
+  if (detail) {
+    const detailEnvironments = environments[detail.id] ?? [];
+    const envOrder: Array<"dev" | "prod"> = ["dev", "prod"];
+
     return (
-      <div className="data-studio-pane">
-        <div className="pane-header">
-          <div>
-            <h2>Data Studio</h2>
-            <p>{isUk ? "Бази даних проєктів цієї компанії" : "Project databases for this company"}</p>
+      <main className="automations-container">
+        <header className="inspector-header automations-header">
+          <div className="automations-header-top">
+            <div>
+              <p className="eyebrow">{isUk ? "Налаштування · Data Studio" : "Settings · Data Studio"}</p>
+              <h1>
+                <button type="button" className="marketplace-back-button" onClick={() => setDetailId(null)} aria-label={isUk ? "Усі бази даних" : "All databases"} title={isUk ? "Усі бази даних" : "All databases"}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <span>{detail.name}</span>
+              </h1>
+              <p className="hero-copy">
+                <span className={`status-pill ${statusPillClass(detail.status)}`}>{detail.status}</span>{" "}
+                <span className="data-studio-badge">{detail.provider === "external_postgres" ? (isUk ? "зовнішня" : "external") : "NPATI"}</span>{" "}
+                {detailEnvironments.map((env) => (
+                  <span key={env.environment} className={`status-pill ${syncPillClass(env.syncStatus)}`}>{env.environment}: {env.syncStatus}</span>
+                ))}
+              </p>
+            </div>
+            <div className="automations-header-actions">
+              <button type="button" className="button-secondary" onClick={() => { void loadOverview(); refresh(); }} disabled={loading || backendsLoading}>
+                {loading || backendsLoading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
+              </button>
+              <button type="button" className="button-secondary" onClick={() => void renameDatabase(detail)} disabled={backendBusy}>
+                {isUk ? "Перейменувати" : "Rename"}
+              </button>
+              <button type="button" className="button-secondary" onClick={() => void toggleArchive(detail)} disabled={backendBusy}>
+                {detail.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
+              </button>
+              <button type="button" className="button-secondary" onClick={() => void deleteDatabase(detail)} disabled={backendBusy}>
+                {isUk ? "Видалити" : "Delete"}
+              </button>
+            </div>
           </div>
-          <div className="pane-actions">{viewSwitcher}</div>
-        </div>
+        </header>
 
         {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
-        {companyPicker}
 
-        {companyId
-          ? <DataBackendSection companyId={companyId} />
-          : <div className="data-studio-alert info" role="status">{isUk ? "Створіть компанію, щоб працювати з базами даних." : "Create a company to manage project databases."}</div>}
-      </div>
+        <section className="overview-grid inspector-stats-grid automations-stats-grid" aria-label={isUk ? "Середовища" : "Environments"}>
+          {envOrder.map((envName) => {
+            const info = detailEnvironments.find((env) => env.environment === envName);
+            const quota = quotas[envName];
+            const showLock = overview?.environment.environment === envName && overview?.lock?.held;
+            return (
+              <div key={envName}>
+                <strong>{envName}</strong>
+                <span>{info ? `${info.status} · ${info.syncStatus}` : isUk ? "немає даних" : "no data"}</span>
+                <small>
+                  {quota
+                    ? `${formatBytes(quota.usage.bytes)} / ${formatBytes(quota.limits.maxDatabaseBytes)} · ${quota.state}`
+                    : isUk ? "квоти недоступні" : "quotas unavailable"}
+                </small>
+                {showLock && <small>{isUk ? "міграція виконується" : "migration running"}{lockRemaining !== null ? ` · ${lockRemaining}s` : ""}</small>}
+                {info?.schemaFingerprint && <small title={info.schemaFingerprint}>{info.schemaFingerprint.slice(0, 12)}…</small>}
+              </div>
+            );
+          })}
+        </section>
+
+        <div className="ds-section-title">
+          <h2>{isUk ? "Проєкти" : "Projects"}</h2>
+          <span className="ds-muted">{isUk ? "Одна база може обслуговувати кілька проєктів" : "One database can serve several projects"}</span>
+        </div>
+
+        {detailProjects.length === 0 && unattachedProjects.length === 0 && (
+          <div className="data-studio-alert info" role="status">
+            {isUk ? "У цій компанії ще немає проєктів." : "This company has no projects yet."}{" "}
+            <Link to="/settings/websites">{isUk ? "Створити сайт" : "Create a site"}</Link>
+          </div>
+        )}
+
+        {detailProjects.length > 0 && (
+          <div className="data-studio-attachments">
+            {detailProjects.map((item) => (
+              <div key={item.id} className="ds-attach-row">
+                <span className="data-studio-chip">{item.name}{item.type ? ` · ${item.type}` : ""}</span>
+                <Link className="automation-action-btn run-btn" to={`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(item.id)}/data`}>
+                  {isUk ? "Відкрити Data Studio" : "Open Data Studio"}
+                </Link>
+                <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void attachProject(item.id, null)}>
+                  {isUk ? "Відкріпити" : "Detach"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {unattachedProjects.length > 0 && (
+          <div className="data-studio-attachments">
+            <h3>{isUk ? "Прикріпити проєкт" : "Attach a project"}</h3>
+            {unattachedProjects.map((item) => (
+              <label key={item.id}>
+                <span>{item.name}</span>
+                <select
+                  aria-label={isUk ? `База для ${item.name}` : `Database for ${item.name}`}
+                  value=""
+                  disabled={backendBusy}
+                  onChange={(event) => { if (event.target.value) void attachProject(item.id, event.target.value); }}
+                >
+                  <option value="">{isUk ? "До цієї бази" : "To this database"}</option>
+                  {backends.filter((backend) => backend.status === "ready").map((backend) => (
+                    <option key={backend.id} value={backend.id}>{backend.name}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="ds-section-title">
+          <h2>{isUk ? "Таблиці" : "Tables"}</h2>
+          <span className="ds-muted">{isUk ? "Схема, RLS і політики проєкту" : "Schema, RLS and policies of the project"}</span>
+        </div>
+
+        <div className="ds-detail-toolbar">
+          <label>
+            <span>{isUk ? "Проєкт" : "Project"}</span>
+            <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={!detailProjects.length}>
+              {!detailProjects.length && <option value="">{isUk ? "Немає прикріплених проєктів" : "No attached projects"}</option>}
+              {detailProjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          <div className="ds-toolbar-field">
+            <span>{isUk ? "Середовище" : "Environment"}</span>
+            <div className="env-switcher" role="group" aria-label={isUk ? "Середовище" : "Environment"}>
+              <button type="button" className={`env-btn ${environment === "dev" ? "active" : ""}`} onClick={() => setEnvironment("dev")}>dev</button>
+              <button type="button" className={`env-btn ${environment === "prod" ? "active" : ""}`} onClick={() => setEnvironment("prod")}>prod</button>
+            </div>
+          </div>
+          <button type="button" className="button-secondary" onClick={() => void countRows()} disabled={countingRows || !tables.length}>
+            {countingRows ? (isUk ? "Рахуємо…" : "Counting…") : isUk ? "Порахувати рядки" : "Count rows"}
+          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="button-primary automations-action-primary"
+              onClick={() => { setEditTable(null); setDrawerOpen(true); }}
+              disabled={!overview || busy || !detailProjects.length}
+            >
+              ＋ {isUk ? "Нова таблиця" : "New table"}
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="data-studio-alert error" role="alert">
+            {error.code === "DATA_BACKEND_NOT_ATTACHED"
+              ? (isUk ? "До проєкту не прикріплено DataBackend." : "This project has no attached DataBackend.")
+              : error.message}
+          </div>
+        )}
+
+        {readOnly && (
+          <div className="data-studio-alert info" role="status">
+            {isUk
+              ? "Зміни схеми в prod доступні лише через Promote (Data Studio → проєкт → Promote та квоти). Тут — лише перегляд."
+              : "Schema changes in prod are only possible through Promote (Data Studio → project → Promote & Quotas). This view is read-only."}
+          </div>
+        )}
+
+        {driftRows.length > 0 && (
+          <div className="data-studio-alert warning" role="alert">
+            <strong>{isUk ? "Виявлено розбіжність схеми" : "Schema drift detected"}</strong>
+            <ul>{driftRows.map((row) => <li key={row}>{row}</li>)}</ul>
+          </div>
+        )}
+
+        {!loading && overview && tables.length === 0 && (
+          <div className="automations-empty-card">
+            <div className="automations-empty-icon">🗂️</div>
+            <h3>{isUk ? "У цьому проєкті ще немає таблиць" : "This project has no tables yet"}</h3>
+            <p>
+              {isUk
+                ? "Почніть із готової схеми (магазин, блог, CRM) або створіть таблицю вручну."
+                : "Start from a ready schema (shop, blog, CRM) or create a table manually."}
+            </p>
+            {!readOnly && (
+              <button type="button" className="button-primary automations-action-primary" onClick={() => { setEditTable(null); setDrawerOpen(true); }} disabled={!overview || busy}>
+                ＋ {isUk ? "Нова таблиця" : "New table"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {tables.length > 0 && (
+          <div className="automations-table-container">
+            <table className="automations-table">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: "220px" }}>{isUk ? "Таблиця" : "Table"}</th>
+                  <th style={{ minWidth: "160px" }}>{isUk ? "Поля" : "Fields"}</th>
+                  <th style={{ width: "150px" }}>RLS</th>
+                  <th style={{ width: "110px" }}>{isUk ? "Політики" : "Policies"}</th>
+                  <th style={{ width: "110px" }}>{isUk ? "Індекси" : "Indexes"}</th>
+                  <th style={{ width: "100px" }}>Rows</th>
+                  <th style={{ width: "260px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tables.map((table) => (
+                  <tr key={table.name}>
+                    <td className="automation-title-cell"><strong><code>{table.name}</code></strong></td>
+                    <td title={table.columns.map((column) => `${column.name}: ${column.type}`).join("\n")}>
+                      <strong>{table.columns.length}</strong>
+                      {table.columns.length > 0 && <span className="ds-muted"> · {table.columns.slice(0, 3).map((column) => column.name).join(", ")}{table.columns.length > 3 ? "…" : ""}</span>}
+                    </td>
+                    <td>
+                      <span className={`status-pill ${table.rlsEnabled ? "allowed" : "denied"}`}>{table.rlsEnabled ? "Enabled" : "Off"}</span>{" "}
+                      {table.rlsForced && <span className="status-pill allowed">Forced</span>}
+                    </td>
+                    <td title={table.policies.join("\n")}>{table.policies.length}</td>
+                    <td>{table.indexes.length}</td>
+                    <td>{rowCounts[table.name] === undefined ? "—" : Number.isNaN(rowCounts[table.name]!) ? (isUk ? "помилка" : "error") : rowCounts[table.name]}</td>
+                    <td>
+                      <div className="automation-actions-cell">
+                        {!readOnly && (
+                          <>
+                            <button type="button" className="automation-action-btn" onClick={() => { setEditTable(table.name); setDrawerOpen(true); }} disabled={busy}>
+                              {isUk ? "Редагувати" : "Edit"}
+                            </button>
+                            <button type="button" className="automation-action-btn danger" onClick={() => void handleDeleteTable(table)} disabled={busy}>
+                              {isUk ? "Видалити" : "Delete"}
+                            </button>
+                          </>
+                        )}
+                        <Link className="automation-action-btn" to={`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data`}>
+                          {isUk ? "У проєкті" : "In project"}
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {drawerOpen && (
+          <SchemaDrawer
+            isUk={isUk}
+            basePath={basePath}
+            readOnly={readOnly}
+            table={editTable ? tables.find((item) => item.name === editTable) ?? null : null}
+            busy={busy}
+            onClose={() => { setDrawerOpen(false); setEditTable(null); }}
+            onPreview={previewOperation}
+            onApply={applyOperation}
+            onNotify={notify}
+          />
+        )}
+      </main>
     );
   }
 
+  // --- Databases list -------------------------------------------------------
+
   return (
-    <div className="data-studio-pane">
-      <div className="pane-header">
-        <div>
-          <h2>Data Studio</h2>
-          <p>{isUk ? "Таблиці, схеми та дані ваших проєктів" : "Tables, schemas and data for your projects"}</p>
-        </div>
-        <div className="pane-actions">
-          {viewSwitcher}
-          <button type="button" className="button-secondary" onClick={() => void loadOverview()} disabled={loading || !project?.dataBackendId}>
-            {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
-          </button>
-        </div>
-      </div>
-
-      {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
-
-      <div className="ds-toolbar">
-        {companies.length > 1 && (
-          <label className="ds-toolbar-field">
-            <span>{isUk ? "Компанія" : "Company"}</span>
-            <select value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
-              {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-            </select>
-          </label>
-        )}
-        <label className="ds-toolbar-field">
-          <span>{isUk ? "Проєкт" : "Project"}</span>
-          <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={!projects.length}>
-            {!projects.length && <option value="">{isUk ? "Немає проєктів" : "No projects"}</option>}
-            {projects.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}{item.type ? ` · ${item.type}` : ""}{item.dataBackendId ? "" : isUk ? " (Data Studio не підключено)" : " (Data Studio not attached)"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="ds-toolbar-field">
-          <span>{isUk ? "Середовище" : "Environment"}</span>
-          <div className="env-switcher" role="group" aria-label={isUk ? "Середовище" : "Environment"}>
-            <button type="button" className={`env-btn ${environment === "dev" ? "active" : ""}`} onClick={() => setEnvironment("dev")}>dev</button>
-            <button type="button" className={`env-btn ${environment === "prod" ? "active" : ""}`} onClick={() => setEnvironment("prod")}>prod</button>
+    <main className="automations-container">
+      <header className="inspector-header automations-header">
+        <div className="automations-header-top">
+          <div>
+            <p className="eyebrow">{isUk ? "Налаштування · Data Studio" : "Settings · Data Studio"}</p>
+            <h1>
+              {backButton}
+              <span>Data Studio</span>
+            </h1>
+            <p className="hero-copy">
+              {isUk
+                ? "Бази даних вашої компанії: кожен новий сайт підключається до бази автоматично, а таблиці створюються тут або агентом."
+                : "Your company databases: every new site is attached automatically, and tables are created here or by an agent."}
+            </p>
+          </div>
+          <div className="automations-header-actions">
+            {companySelect}
+            <button type="button" className="button-primary automations-action-primary" onClick={() => setCreateOpen(true)} disabled={!companyId}>
+              ＋ {isUk ? "Нова база даних" : "New database"}
+            </button>
           </div>
         </div>
-        {!readOnly && (
-          <button
-            type="button"
-            className="button-primary"
-            onClick={() => { setEditTable(null); setDrawerOpen(true); }}
-            disabled={!overview || busy}
-          >
-            ＋ {isUk ? "Нова таблиця" : "New table"}
-          </button>
-        )}
-      </div>
+      </header>
 
-      {error && (
-        <div className="data-studio-alert error" role="alert">
-          {error.code === "DATA_STUDIO_UNAVAILABLE"
-            ? (isUk
-              ? "Data Studio вимкнено на цій інсталяції (немає підключення до postgres-projects або provisioner)."
-              : "Data Studio is disabled on this installation (no postgres-projects / provisioner configured).")
-            : error.code === "DATA_BACKEND_NOT_ATTACHED"
-              ? (isUk ? "До проєкту не прикріплено DataBackend." : "This project has no attached DataBackend.")
-              : error.message}
-          {error.code === "DATA_BACKEND_NOT_ATTACHED" && <> <Link to="/settings/company">{isUk ? "Прикріпити DataBackend" : "Attach a DataBackend"}</Link></>}
-        </div>
-      )}
+      {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
+      {unavailableNotice}
+      {backendsError && !unavailableNotice && <div className="data-studio-alert error" role="alert">{backendsError.message}</div>}
 
-      {!companies.length && !error && (
+      {!companies.length && (
         <div className="data-studio-alert info" role="status">
-          {isUk ? "Створіть компанію, щоб працювати з даними проєктів." : "Create a company to work with project data."}{" "}
+          {isUk ? "Створіть компанію, щоб працювати з базами даних." : "Create a company to work with databases."}{" "}
           <Link to="/settings/company">{isUk ? "Перейти" : "Open"}</Link>
         </div>
       )}
 
-      {Boolean(companies.length) && !projects.length && !error && (
-        <div className="data-studio-alert info" role="status">
-          {isUk ? "У цій компанії ще немає проєктів." : "This company has no projects yet."}{" "}
-          <Link to="/settings/websites">{isUk ? "Створити проєкт" : "Create a project"}</Link>
+      <section className="overview-grid inspector-stats-grid automations-stats-grid">
+        <div>
+          <strong>{stats.total}</strong>
+          <span>{isUk ? "Баз даних" : "Databases"}</span>
+          <small>{isUk ? "DataBackend у цій компанії" : "DataBackends in this company"}</small>
         </div>
-      )}
-
-      {project && !project.dataBackendId && (
-        <div className="data-studio-alert info" role="status">
-          {isUk
-            ? "До цього проєкту не прикріплено DataBackend, тому таблиць ще немає."
-            : "This project has no attached DataBackend yet, so it has no tables."}{" "}
-          <Link to="/settings/company">{isUk ? "Прикріпити DataBackend" : "Attach a DataBackend"}</Link>
+        <div>
+          <strong>{stats.readyEnvironments} / {stats.totalEnvironments}</strong>
+          <span>{isUk ? "Середовищ готово" : "Environments ready"}</span>
+          <small>{isUk ? "dev і prod по кожній базі" : "dev and prod per database"}</small>
         </div>
-      )}
-
-      {readOnly && (
-        <div className="data-studio-alert info" role="status">
-          {isUk
-            ? "Зміни схеми в prod доступні лише через Promote (Data Studio → проєкт → Promote та квоти). Тут — лише перегляд."
-            : "Schema changes in prod are only possible through Promote (Data Studio → project → Promote & Quotas). This view is read-only."}
+        <div>
+          <strong>{stats.tables === null ? "—" : stats.tables}</strong>
+          <span>{isUk ? "Таблиць" : "Tables"}</span>
+          <small>{isUk ? "у dev по прикріплених проєктах" : "in dev across attached projects"}</small>
         </div>
-      )}
+        <div>
+          <strong>{stats.attachedProjects}</strong>
+          <span>{isUk ? "Проєктів прикріплено" : "Attached projects"}</span>
+          <small>{isUk ? `з ${projects.length} у компанії` : `of ${projects.length} in the company`}</small>
+        </div>
+      </section>
 
-      {overview && (
-        <div className="ds-status-row">
-          <span className="ds-status-item"><strong>{overview.backend.name}</strong> · {overview.backend.provider} · {overview.backend.status}</span>
-          <span className={`status-pill ${overview.environment.syncStatus === "synced" ? "verified" : "requires-approval"}`}>
-            {overview.environment.syncStatus}
-          </span>
-          {overview.lock?.held && (
-            <span className="status-pill requires-approval" title={overview.lock.expiresAt}>
-              {isUk ? "міграція виконується" : "migration running"}{lockRemaining !== null ? ` · ${lockRemaining}s` : ""}
-            </span>
+      <div className="inspector-controls automations-controls">
+        <div className="inspector-search-box">
+          <span className="search-icon" aria-hidden="true">⌕</span>
+          <input
+            type="text"
+            role="searchbox"
+            className="inspector-search-input"
+            placeholder={isUk ? "Пошук за назвою або провайдером…" : "Search by name or provider…"}
+            aria-label={isUk ? "Пошук баз даних" : "Search databases"}
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          {searchQuery && (
+            <button type="button" className="search-clear-btn" onClick={() => setSearchQuery("")} aria-label={isUk ? "Очистити пошук" : "Clear search"} title={isUk ? "Очистити пошук" : "Clear search"}>
+              ×
+            </button>
           )}
-          <span className="ds-status-item">{isUk ? "Таблиць" : "Tables"}: <strong>{tables.length}</strong></span>
-          <button type="button" className="button-secondary" onClick={() => void countRows()} disabled={countingRows || !tables.length}>
-            {countingRows ? (isUk ? "Рахуємо…" : "Counting…") : isUk ? "Порахувати рядки" : "Count rows"}
+        </div>
+
+        <div className="inspector-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={databaseFilter === "all"} className={`inspector-tab ${databaseFilter === "all" ? "active" : ""}`} onClick={() => setDatabaseFilter("all")}>
+            <span>{isUk ? "Усі" : "All"}</span>
+            <small className="tab-count">{backends.length}</small>
+          </button>
+          <button type="button" role="tab" aria-selected={databaseFilter === "ready"} className={`inspector-tab ${databaseFilter === "ready" ? "active" : ""}`} onClick={() => setDatabaseFilter("ready")}>
+            <span>{isUk ? "Готові" : "Ready"}</span>
+            <small className="tab-count">{stats.ready}</small>
+          </button>
+          <button type="button" role="tab" aria-selected={databaseFilter === "attention"} className={`inspector-tab ${databaseFilter === "attention" ? "active" : ""}`} onClick={() => setDatabaseFilter("attention")}>
+            <span>{isUk ? "Потребують уваги" : "Needs attention"}</span>
+            <small className="tab-count">{stats.attention}</small>
           </button>
         </div>
-      )}
+      </div>
 
-      {driftRows.length > 0 && (
-        <div className="data-studio-alert warning" role="alert">
-          <strong>{isUk ? "Виявлено розбіжність схеми" : "Schema drift detected"}</strong>
-          <ul>{driftRows.map((row) => <li key={row}>{row}</li>)}</ul>
+      <div className="inspector-table-status">
+        <div className="status-left">
+          <span>
+            {isUk ? `Показано ${filteredBackends.length} з ${backends.length}` : `Showing ${filteredBackends.length} of ${backends.length}`}
+            {searchQuery ? (isUk ? ` за запитом «${searchQuery}»` : ` matching “${searchQuery}”`) : ""}
+          </span>
         </div>
-      )}
+      </div>
 
-      {overview && tables.length === 0 && (
-        <div className="data-studio-alert info" role="status">
-          {isUk ? "Таблиць ще немає. Створіть першу з готової схеми або вручну." : "No tables yet. Create the first one from a template or manually."}
-        </div>
-      )}
-
-      {overview && tables.length > 0 && (
-        <table className="data-studio-table">
-          <thead>
-            <tr>
-              <th>{isUk ? "Таблиця" : "Table"}</th>
-              <th>{isUk ? "Поля" : "Fields"}</th>
-              <th>RLS</th>
-              <th>{isUk ? "Політики" : "Policies"}</th>
-              <th>{isUk ? "Індекси" : "Indexes"}</th>
-              <th>Rows</th>
-              <th>{isUk ? "Дії" : "Actions"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tables.map((table) => (
-              <tr key={table.name}>
-                <td><code>{table.name}</code></td>
-                <td title={table.columns.map((column) => `${column.name}: ${column.type}`).join("\n")}>
-                  {table.columns.length}
-                  {table.columns.length > 0 && <small> · {table.columns.slice(0, 3).map((column) => column.name).join(", ")}{table.columns.length > 3 ? "…" : ""}</small>}
-                </td>
-                <td>
-                  <span className={`status-pill ${table.rlsEnabled ? "allowed" : "denied"}`}>{table.rlsEnabled ? "Enabled" : "Off"}</span>
-                  {table.rlsForced && <span className="status-pill allowed" title={isUk ? "FORCE ROW LEVEL SECURITY" : "FORCE ROW LEVEL SECURITY"}>Forced</span>}
-                </td>
-                <td title={table.policies.join("\n")}>{table.policies.length}</td>
-                <td>{table.indexes.length}</td>
-                <td>{rowCounts[table.name] === undefined ? "—" : Number.isNaN(rowCounts[table.name]!) ? (isUk ? "помилка" : "error") : rowCounts[table.name]}</td>
-                <td className="table-actions">
-                  {!readOnly && (
-                    <>
-                      <button type="button" className="button-secondary" onClick={() => { setEditTable(table.name); setDrawerOpen(true); }} disabled={busy}>
-                        {isUk ? "Редагувати" : "Edit"}
-                      </button>
-                      <button type="button" className="button-secondary" onClick={() => void handleDeleteTable(table)} disabled={busy}>
-                        {isUk ? "Видалити" : "Delete"}
-                      </button>
-                    </>
-                  )}
-                  <Link className="button-secondary" to={`/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data`}>
-                    {isUk ? "Відкрити в проєкті" : "Open in project"}
-                  </Link>
-                </td>
+      {backendsLoading && backends.length === 0 ? (
+        <div className="automations-table-container">
+          <table className="automations-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: "240px" }}>{isUk ? "Назва" : "Name"}</th>
+                <th style={{ width: "160px" }}>{isUk ? "Провайдер" : "Provider"}</th>
+                <th style={{ width: "140px" }}>{isUk ? "Статус" : "Status"}</th>
+                <th style={{ width: "240px" }}>dev / prod</th>
+                <th style={{ width: "110px" }}>{isUk ? "Таблиць" : "Tables"}</th>
+                <th style={{ width: "260px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <tr key={`skeleton-${index}`} style={{ opacity: 0.5 }}>
+                  <td><span style={{ display: "inline-block", width: "160px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "90px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "70px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "140px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "40px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "120px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : backends.length === 0 ? (
+        <div className="automations-empty-card">
+          <div className="automations-empty-icon">🗄️</div>
+          <h3>{isUk ? "Баз даних ще немає" : "No databases yet"}</h3>
+          <p>
+            {isUk
+              ? "Створіть базу — і кожен новий сайт підключатиметься до неї автоматично."
+              : "Create a database — every new site will be attached to it automatically."}
+          </p>
+          <button type="button" className="button-primary automations-action-primary" onClick={() => setCreateOpen(true)} disabled={!companyId}>
+            ＋ {isUk ? "Створити першу базу" : "Create the first database"}
+          </button>
+        </div>
+      ) : filteredBackends.length === 0 ? (
+        <div className="automations-empty-card">
+          <div className="automations-empty-icon">🔍</div>
+          <h3>{isUk ? "Нічого не знайдено" : "Nothing found"}</h3>
+          <p>{isUk ? "Змініть запит або фільтр." : "Change the query or the filter."}</p>
+          <button type="button" className="button-secondary" onClick={() => { setSearchQuery(""); setDatabaseFilter("all"); }}>
+            {isUk ? "Скинути фільтри" : "Clear filters"}
+          </button>
+        </div>
+      ) : (
+        <div className="automations-table-container">
+          <table className="automations-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: "240px" }}>{isUk ? "Назва" : "Name"}</th>
+                <th style={{ width: "160px" }}>{isUk ? "Провайдер" : "Provider"}</th>
+                <th style={{ width: "140px" }}>{isUk ? "Статус" : "Status"}</th>
+                <th style={{ minWidth: "220px" }}>dev / prod</th>
+                <th style={{ width: "110px" }}>{isUk ? "Таблиць" : "Tables"}</th>
+                <th style={{ width: "110px" }}>{isUk ? "Проєктів" : "Projects"}</th>
+                <th style={{ width: "300px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBackends.map((backend) => {
+                const list = environments[backend.id] ?? [];
+                const attached = projects.filter((item) => item.dataBackendId === backend.id).length;
+                return (
+                  <tr key={backend.id}>
+                    <td className="automation-title-cell">
+                      <button type="button" className="ds-name-link" onClick={() => setDetailId(backend.id)}>{backend.name}</button>
+                      <p>{isUk ? "Оновлено" : "Updated"}: {backend.updatedAt ? new Date(backend.updatedAt).toLocaleDateString(isUk ? "uk-UA" : "en-US") : "—"}</p>
+                    </td>
+                    <td>{backend.provider === "external_postgres" ? (isUk ? "Зовнішня" : "External") : "NPATI Postgres"}</td>
+                    <td><span className={`status-pill ${statusPillClass(backend.status)}`}>{backend.status}</span></td>
+                    <td>
+                      {list.length === 0 && <span className="ds-muted">—</span>}
+                      {list.map((env) => (
+                        <span key={env.environment} className={`status-pill ${syncPillClass(env.syncStatus)}`} title={`${env.environment}: ${env.status}`}>
+                          {env.environment}: {env.syncStatus}
+                        </span>
+                      ))}
+                    </td>
+                    <td>{tableCounts[backend.id] === undefined ? "—" : tableCounts[backend.id] === null ? (isUk ? "н/д" : "n/a") : tableCounts[backend.id]}</td>
+                    <td>{attached}</td>
+                    <td>
+                      <div className="automation-actions-cell">
+                        <button type="button" className="automation-action-btn run-btn" onClick={() => setDetailId(backend.id)}>
+                          {isUk ? "Відкрити" : "Open"}
+                        </button>
+                        <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void toggleArchive(backend)}>
+                          {backend.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
+                        </button>
+                        <button type="button" className="automation-action-btn danger" disabled={backendBusy} onClick={() => void deleteDatabase(backend)}>
+                          {isUk ? "Видалити" : "Delete"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {drawerOpen && (
-        <SchemaDrawer
+      {createOpen && (
+        <CreateDatabaseDrawer
           isUk={isUk}
-          basePath={basePath}
-          readOnly={readOnly}
-          table={editTable ? tables.find((item) => item.name === editTable) ?? null : null}
-          busy={busy}
-          onClose={() => { setDrawerOpen(false); setEditTable(null); }}
-          onPreview={previewOperation}
-          onApply={applyOperation}
-          onNotify={notify}
+          busy={backendBusy}
+          onClose={() => setCreateOpen(false)}
+          onCreate={createDatabase}
         />
       )}
+    </main>
+  );
+}
+
+// --- Create database drawer -------------------------------------------------
+
+interface CreateDatabaseDrawerProps {
+  isUk: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onCreate: (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => Promise<void>;
+}
+
+function CreateDatabaseDrawer({ isUk, busy, onClose, onCreate }: CreateDatabaseDrawerProps) {
+  const [name, setName] = useState("");
+  const [provider, setProvider] = useState<"shared_postgres" | "external_postgres">("shared_postgres");
+  const [connectionString, setConnectionString] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const nameRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => nameRef.current?.focus(), 30);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const connectionValid = provider === "shared_postgres" || /^postgres(ql)?:\/\/\S+/.test(connectionString.trim());
+  const canSubmit = name.trim().length > 0 && name.trim().length <= 200 && connectionValid;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setWorking(true);
+    setLocalError(null);
+    try {
+      await onCreate({ name: name.trim(), provider, connectionString: provider === "external_postgres" ? connectionString.trim() : undefined });
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : "Could not create the database");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="company-drawer-backdrop" onMouseDown={() => onClose()}>
+      <aside className="company-drawer automations-drawer" role="dialog" aria-modal="true" aria-label={isUk ? "Нова база даних" : "New database"} onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <span>{isUk ? "Data Studio" : "Data Studio"}</span>
+            <h2>{isUk ? "Нова база даних" : "New database"}</h2>
+          </div>
+          <button type="button" className="automations-drawer-close" aria-label={isUk ? "Закрити" : "Close"} onClick={onClose}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </header>
+
+        <form onSubmit={submit}>
+          <section>
+            <h3>{isUk ? "Параметри бази" : "Database settings"}</h3>
+            <label className="browser-form-field">
+              <span>{isUk ? "Назва" : "Name"} <i className="required-star">*</i></span>
+              <input
+                ref={nameRef}
+                value={name}
+                maxLength={200}
+                placeholder={isUk ? "Наприклад: Магазин — дані" : "For example: Shop data"}
+                onChange={(event) => { setName(event.target.value); setLocalError(null); }}
+              />
+            </label>
+            <label className="browser-form-field">
+              <span>{isUk ? "Провайдер" : "Provider"}</span>
+              <select
+                value={provider}
+                onChange={(event) => { setProvider(event.target.value as "shared_postgres" | "external_postgres"); setLocalError(null); }}
+              >
+                <option value="shared_postgres">{isUk ? "Керована NPATI (рекомендовано)" : "NPATI managed (recommended)"}</option>
+                <option value="external_postgres">{isUk ? "Зовнішня (Neon / Supabase / RDS)" : "External (Neon / Supabase / RDS)"}</option>
+              </select>
+            </label>
+            {provider === "external_postgres" && (
+              <label className="browser-form-field">
+                <span>Connection string <i className="required-star">*</i></span>
+                <input
+                  value={connectionString}
+                  placeholder="postgres://user:password@host:5432/database"
+                  onChange={(event) => { setConnectionString(event.target.value); setLocalError(null); }}
+                />
+                {connectionString.trim() && !connectionValid && (
+                  <small className="ds-hint-error">{isUk ? "Рядок має починатися з postgres://" : "The string must start with postgres://"}</small>
+                )}
+                <small>{isUk ? "Рядок шифрується й ніколи не повертається API." : "The string is encrypted and never returned by the API."}</small>
+              </label>
+            )}
+          </section>
+
+          {localError && <div className="data-studio-alert error" role="alert">{localError}</div>}
+
+          <div className="browser-form-footer">
+            <div className="browser-form-footer-hint">
+              {isUk
+                ? "Буде створено два середовища (dev і prod) з окремими ролями доступу."
+                : "Two environments (dev and prod) with separate access roles will be created."}
+            </div>
+            <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={!canSubmit || working || busy}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {working || busy ? (isUk ? "Створення…" : "Creating…") : isUk ? "Створити базу" : "Create database"}
+            </button>
+          </div>
+        </form>
+      </aside>
     </div>
   );
 }
 
-// --- Drawer -----------------------------------------------------------------
+// --- Schema drawer ----------------------------------------------------------
 
 interface SchemaDrawerProps {
   isUk: boolean;
