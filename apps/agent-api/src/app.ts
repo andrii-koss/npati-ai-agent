@@ -255,6 +255,9 @@ function applyChatTelemetryHeaders(reply: { header(name: string, value: string):
   for (const [name, value] of Object.entries(headers)) reply.header(name, value);
 }
 
+/** Workspace used by background jobs (chain verifier, anchors) when no user context exists. */
+const AUDIT_SYSTEM_WORKSPACE = process.env.NPATI_WORKSPACE_ID ?? "dev-workspace";
+
 export interface AppConfig {
   webOrigin?: string;
   omnirouteBaseUrl?: string;
@@ -954,13 +957,13 @@ export function buildApp(config: AppConfig = {}) {
   // detected; a failed verification logs a critical alert and (by configuration) blocks new
   // privileged audit writes for that company until an operator investigates.
   const auditVerifyTimer = auditLogService ? setInterval(() => {
-    void auditLogService.verifyAll({ workspaceId: config.workspaceId ?? "default", userId: "audit-verifier", permissions: ["workspace:read"] })
+    void auditLogService.verifyAll(AUDIT_SYSTEM_WORKSPACE)
       .then((failures) => { for (const failure of failures) app.log.error({ failure }, "audit_chain_verification_failed"); })
       .catch((error) => app.log.warn({ err: error }, "audit_chain_verification_error"));
   }, auditConfig.verifyIntervalMs) : undefined;
   auditVerifyTimer?.unref();
   const auditAnchorTimer = auditLogService ? setInterval(() => {
-    void auditLogService.writeDailyAnchors({ workspaceId: config.workspaceId ?? "default", userId: "audit-anchor", permissions: ["workspace:read"] })
+    void auditLogService.writeDailyAnchors(AUDIT_SYSTEM_WORKSPACE)
       .catch((error) => app.log.warn({ err: error }, "audit_anchor_write_failed"));
   }, auditConfig.anchorIntervalMs) : undefined;
   auditAnchorTimer?.unref();
