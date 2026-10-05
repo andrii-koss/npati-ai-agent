@@ -31,10 +31,13 @@ services:
       NODE_ENV: production
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
-      NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-remote}
-      NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-}
+      NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
+      NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
       NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:-}
+      # Public HTTPS base URL of the Project API (Data Studio). Without it generated sites and
+      # apps get no PROJECT_API_URL/PROJECT_PUBLISHABLE_KEY and the SDK is not vendored.
+      NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
       NPATI_AUTH_STRICT: "true"
       NPATI_ALLOW_LEGACY_PASSWORD_AUTH: "false"
       NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:?NPATI_BACKEND_URL is required}
@@ -187,6 +190,8 @@ services:
       NPATI_SANDBOX_SYNC_MAX_FILES: ${NPATI_SANDBOX_SYNC_MAX_FILES:-500}
       NPATI_SANDBOX_SYNC_MAX_BYTES: ${NPATI_SANDBOX_SYNC_MAX_BYTES:-20000000}
       NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
+      # The Project API host is appended to the allowlist automatically from this value.
+      NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
