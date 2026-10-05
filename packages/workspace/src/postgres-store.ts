@@ -951,6 +951,35 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows.map((row) => row.company_id);
   }
 
+  /** Background verifier path: no user context, workspace-scoped, hashes and counts only. */
+  async systemAuditChains(workspaceId: string) {
+    const companies = await this.pool.query<{ company_id: string }>(
+      "SELECT DISTINCT company_id FROM audit_log WHERE workspace_id=$1 ORDER BY company_id", [workspaceId]);
+    const result: Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification }> = [];
+    for (const row of companies.rows) {
+      const entries = await this.pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+        WHERE workspace_id=$1 AND company_id=$2 ORDER BY sequence ASC`, [workspaceId, row.company_id]);
+      const verification = verifyAuditEntries(entries.rows);
+      const last = entries.rows[entries.rows.length - 1];
+      result.push({
+        companyId: row.company_id,
+        state: { companyId: row.company_id, entryCount: entries.rows.length, headSequence: last?.sequence ?? 0, headHash: last?.entryHash ?? null },
+        verification: { ...verification, companyId: row.company_id },
+      });
+    }
+    return result;
+  }
+
+  async systemRecordAuditAnchor(workspaceId: string, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
+    const result = await this.pool.query<AuditAnchor>(`INSERT INTO audit_anchors
+      (id, workspace_id, company_id, day, sequence, entry_count, head_hash, anchor_path, signature)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (company_id, day) DO UPDATE SET sequence=$5, entry_count=$6, head_hash=$7, anchor_path=$8, signature=$9, created_at=now()
+      RETURNING ${auditAnchorColumns}`,
+      [randomUUID(), workspaceId, companyId, anchor.day, anchor.sequence, anchor.entryCount, anchor.headHash, anchor.anchorPath ?? null, anchor.signature ?? null]);
+    return result.rows[0]!;
+  }
+
   async health() {
     try { await this.pool.query("SELECT 1"); return "ok" as const; }
     catch { return "unavailable" as const; }

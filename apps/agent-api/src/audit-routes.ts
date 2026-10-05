@@ -87,8 +87,10 @@ export function registerAuditRoutes(
       try {
         const c = await auditReadContext(auth, r);
         if (!auditLog) return reply.code(503).send({ error: { code: "audit_unavailable", message: "Audit journal is unavailable" } });
-        await store.getCompany(c, r.params.companyId);
+        // Authorization first: the journal is owner/admin-only, so a plain member is refused before
+        // any lookup reveals whether the company exists.
         if (!isAdmin(c)) return reply.code(403).send({ error: { code: "audit_read_denied", message: "Reading the audit journal requires the owner/admin role" } });
+        await store.getCompany(c, r.params.companyId);
         const entries = await auditLog.list(c, r.params.companyId, {
           actor: r.query.actor, requestId: r.query.requestId, correlationId: r.query.correlationId, action: r.query.action,
           limit: r.query.limit ? Number.parseInt(r.query.limit, 10) : undefined,
@@ -105,8 +107,8 @@ export function registerAuditRoutes(
       try {
         const c = await auditReadContext(auth, r);
         if (!auditLog) return reply.code(503).send({ error: { code: "audit_unavailable", message: "Audit journal is unavailable" } });
-        await store.getCompany(c, r.params.companyId);
         if (!isAdmin(c)) return reply.code(403).send({ error: { code: "audit_read_denied", message: "Verifying the audit chain requires the owner/admin role" } });
+        await store.getCompany(c, r.params.companyId);
         const report = await auditLog.verify(c, r.params.companyId, {
           fromSequence: r.query.fromSequence ? Number.parseInt(r.query.fromSequence, 10) : undefined,
           toSequence: r.query.toSequence ? Number.parseInt(r.query.toSequence, 10) : undefined,
@@ -123,8 +125,8 @@ export function registerAuditRoutes(
       try {
         const c = await auditReadContext(auth, r);
         if (!auditLog) return reply.code(503).send({ error: { code: "audit_unavailable", message: "Audit journal is unavailable" } });
-        await store.getCompany(c, r.params.companyId);
         if (!isAdmin(c)) return reply.code(403).send({ error: { code: "audit_read_denied", message: "Reading anchors requires the owner/admin role" } });
+        await store.getCompany(c, r.params.companyId);
         return { anchors: await auditLog.anchors(c, r.params.companyId, r.query.limit ? Number.parseInt(r.query.limit, 10) : 90) };
       } catch (e) { return err(reply, e); }
     }
@@ -136,8 +138,8 @@ export function registerAuditRoutes(
       try {
         const c = await auditReadContext(auth, r);
         if (!auditLog) return reply.code(503).send({ error: { code: "audit_unavailable", message: "Audit journal is unavailable" } });
-        await store.getCompany(c, r.params.companyId);
         if (!isAdmin(c)) return reply.code(403).send({ error: { code: "audit_read_denied", message: "Exporting the audit journal requires the owner/admin role" } });
+        await store.getCompany(c, r.params.companyId);
         // The export itself is a privileged action and must be provable.
         await auditLog.record(c, {
           companyId: r.params.companyId, actor: c.userId, actorRole: isAdmin(c) ? "admin" : "user",

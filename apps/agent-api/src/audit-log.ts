@@ -144,30 +144,37 @@ export class AuditLogService {
    * also written as an HMAC-signed file outside the database, so a full-table rewrite is detectable.
    * Idempotent per (company, day).
    */
-  async writeDailyAnchors(context: AuthContext, now = new Date()): Promise<AuditAnchor[]> {
-    const companies = await this.store.auditCompanies(context);
+  async writeDailyAnchors(workspaceId: string, now = new Date()): Promise<AuditAnchor[]> {
+    const chains = await this.store.systemAuditChains(workspaceId);
     const day = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const written: AuditAnchor[] = [];
-    for (const companyId of companies) {
-      const state = await this.store.auditChainState(context, companyId);
+    for (const { companyId, state } of chains) {
       if (!state.headHash) continue;
       const payload = { companyId, day, sequence: state.headSequence, entryCount: state.entryCount, headHash: state.headHash };
       const signature = this.config.signingKey ? createHmac("sha256", this.config.signingKey).update(JSON.stringify(payload)).digest("hex") : null;
       const anchorPath = await this.writeAnchorFile(companyId, day, payload, signature);
-      written.push(await this.store.recordAuditAnchor(context, companyId, {
+      written.push(await this.store.systemRecordAuditAnchor(workspaceId, companyId, {
         day, sequence: state.headSequence, entryCount: state.entryCount, headHash: state.headHash, anchorPath, signature,
       }));
     }
     return written;
   }
 
-  /** Verifies every company's chain; returns only the failures (used by the background task). */
-  async verifyAll(context: AuthContext): Promise<AuditVerificationReport[]> {
-    const companies = await this.store.auditCompanies(context);
+  /** Verifies every company's chain in a workspace; returns only the failures (background task). */
+  async verifyAll(workspaceId: string): Promise<AuditVerificationReport[]> {
+    const chains = await this.store.systemAuditChains(workspaceId);
     const failures: AuditVerificationReport[] = [];
-    for (const companyId of companies) {
-      const report = await this.verify(context, companyId);
-      if (!report.ok) failures.push(report);
+    for (const chain of chains) {
+      const { companyId, verification, state } = chain;
+      if (verification.ok) { this.brokenCompanies.delete(companyId); continue; }
+      const report: AuditVerificationReport = {
+        companyId, ok: false, entryCount: state.entryCount, brokenAtSequence: verification.brokenAtSequence,
+        reason: verification.reason, headHash: state.headHash,
+        alert: `CRITICAL: audit chain verification failed for company ${companyId}`
+          + (verification.reason ? ` (${verification.reason} at sequence ${verification.brokenAtSequence})` : ""),
+      };
+      this.brokenCompanies.add(companyId);
+      failures.push(report);
     }
     return failures;
   }

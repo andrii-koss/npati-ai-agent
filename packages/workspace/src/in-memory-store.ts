@@ -517,6 +517,29 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort();
   }
 
+  /** Background verifier path: no user context, workspace-scoped, hashes and counts only. */
+  async systemAuditChains(workspaceId: string) {
+    return [...this.auditLog.entries()]
+      .filter(([, entries]) => entries.length > 0 && entries[0]!.workspaceId === workspaceId)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([companyId, entries]) => ({
+        companyId,
+        state: { companyId, entryCount: entries.length, headSequence: entries.length, headHash: entries[entries.length - 1]!.entryHash },
+        verification: { ...verifyAuditEntries(entries), companyId },
+      }));
+  }
+
+  async systemRecordAuditAnchor(workspaceId: string, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
+    const record: AuditAnchor = {
+      id: randomUUID(), workspaceId, companyId, day: anchor.day, sequence: anchor.sequence,
+      entryCount: anchor.entryCount, headHash: anchor.headHash, anchorPath: anchor.anchorPath ?? null,
+      signature: anchor.signature ?? null, createdAt: now(),
+    };
+    const existing = this.auditAnchors.get(companyId) ?? [];
+    this.auditAnchors.set(companyId, [...existing.filter((item) => item.day !== anchor.day), record]);
+    return structuredClone(record);
+  }
+
   async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
     if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, session.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
