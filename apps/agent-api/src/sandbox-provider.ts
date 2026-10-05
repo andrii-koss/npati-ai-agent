@@ -26,6 +26,21 @@ export interface SandboxCommandResult {
   processId?: string;
 }
 export interface SandboxCommandOptions { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string>; cwd?: string; }
+/**
+ * Variables a background sandbox process (for example the Live Preview dev server) may receive.
+ * Secret references stay unavailable to background processes; only the public Project API
+ * client configuration is allowed, because generated sites need it at runtime.
+ */
+export const SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST = ["PROJECT_API_URL", "PROJECT_PUBLISHABLE_KEY"] as const;
+/** Validates background process environment: allowlisted public variables only, never secrets. */
+export function sandboxProcessEnvironment(environment: Record<string, string> | undefined): Array<[string, string]> {
+  const entries = Object.entries(environment ?? {});
+  for (const [key, value] of entries) {
+    if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(key) || typeof value !== "string" || value.length > 4096) throw new SandboxProviderError("invalid_environment", "Invalid environment variable", 400);
+    if (!(SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST as readonly string[]).includes(key)) throw new SandboxProviderError("process_secrets_unsupported", "Background processes may only receive Project API client variables", 400);
+  }
+  return entries;
+}
 export interface SandboxProvider {
   proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;

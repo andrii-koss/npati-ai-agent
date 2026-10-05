@@ -18,6 +18,8 @@ COPY --from=build /app/node_modules ./node_modules
 # the workspace instead of hoisting them to the repository root.
 COPY --from=build /app/apps/agent-api/node_modules ./node_modules
 COPY --from=build /app/apps/agent-api/dist ./dist
+# The Project API client is vendored into Project workspaces (D5); ship its source for runtime use.
+COPY --from=build /app/packages/project-client/src/index.ts /opt/npati-project-sdk/index.ts
 
 FROM runtime-base AS sandbox-runner
 USER root

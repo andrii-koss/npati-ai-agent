@@ -66,4 +66,10 @@ export interface ProjectApiInspectResult {
   }>;
   endpoints: ProjectApiEndpointSummary[];
   authEnabled: boolean;
+  /** Generated Project API client vendored into the Project workspace for the sandbox. */
+  sdk: {
+    file: string;
+    importPath: string;
+    available: boolean;
+  };
 }

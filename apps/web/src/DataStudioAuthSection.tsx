@@ -25,7 +25,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!headers.has("Content-Type") && init?.body && typeof init.body === "string") {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch("/api" + path, { ...init, headers });
   if (!res.ok) {
     let errMessage = `Request failed: ${res.statusText}`;
     try {

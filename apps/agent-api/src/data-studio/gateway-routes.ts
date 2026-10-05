@@ -12,6 +12,13 @@ interface ProjectRouteParams {
 /** Maximum JSON body size for public Project API write routes. */
 export const PROJECT_API_BODY_LIMIT = 1024 * 1024;
 
+/**
+ * Public Project API routes enforce their own per-Project CORS allowlist, so the
+ * application-wide CORS plugin must not answer or decorate these requests.
+ */
+const PUBLIC_ROUTE = { config: { cors: false } } as const;
+const PUBLIC_WRITE_ROUTE = { ...PUBLIC_ROUTE, bodyLimit: PROJECT_API_BODY_LIMIT };
+
 export function registerProjectApiGatewayRoutes(
   app: FastifyInstance,
   gateway?: ProjectApiGatewayService,
@@ -89,7 +96,7 @@ export function registerProjectApiGatewayRoutes(
   // CORS Preflight Options
   // =========================================================================
 
-  app.options(`${base}/*`, async (request, reply) => {
+  app.options(`${base}/*`, PUBLIC_ROUTE, async (request, reply) => {
     const origin = request.headers.origin;
     if (!origin) return reply.code(204).send();
 
@@ -114,17 +121,18 @@ export function registerProjectApiGatewayRoutes(
   // =========================================================================
 
   // Schema documents require a valid Project API key; the environment comes from the key.
-  app.get<{ Params: ProjectRouteParams }>(`${base}/openapi.json`, (request, reply) =>
+  app.get<{ Params: ProjectRouteParams }>(`${base}/openapi.json`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, (auth) => gateway!.getOpenApiSpec(request.params.projectId, auth.environment)),
   );
 
-  app.get<{ Params: ProjectRouteParams }>(`${base}/types.ts`, (request, reply) =>
+  app.get<{ Params: ProjectRouteParams }>(`${base}/types.ts`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) =>
       reply.type("text/plain; charset=utf-8").send(await gateway!.getTypeScriptTypes(request.params.projectId, auth.environment)),
     ),
   );
   app.get<{ Params: ProjectRouteParams }>(
     `${base}/docs`,
+    PUBLIC_ROUTE,
     (request, reply) => runWithGateway(request, reply, async (auth) => {
       const projectId = request.params.projectId;
       const spec = await gateway!.getOpenApiSpec(projectId, auth.environment);
@@ -175,8 +183,8 @@ export function registerProjectApiGatewayRoutes(
       });
     });
 
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/register`, handleRegister);
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/signup`, handleRegister);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/register`, PUBLIC_WRITE_ROUTE, handleRegister);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string; name?: string } }>(`${base}/auth/signup`, PUBLIC_WRITE_ROUTE, handleRegister);
 
   const handleLogin = (request: FastifyRequest<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>, reply: FastifyReply) =>
     runWithGateway(request, reply, async (auth) => {
@@ -193,8 +201,8 @@ export function registerProjectApiGatewayRoutes(
       return { user: session.user, token: session.accessToken, refreshToken: session.refreshToken, expiresIn: session.expiresIn };
     });
 
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>(`${base}/auth/login`, handleLogin);
-  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>(`${base}/auth/signin`, handleLogin);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>(`${base}/auth/login`, PUBLIC_WRITE_ROUTE, handleLogin);
+  app.post<{ Params: ProjectRouteParams; Body: { email: string; password: string } }>(`${base}/auth/signin`, PUBLIC_WRITE_ROUTE, handleLogin);
 
   const handleLogout = (request: FastifyRequest<{ Params: ProjectRouteParams; Body: { refreshToken?: string } }>, reply: FastifyReply) =>
     runWithGateway(request, reply, async (auth) => {
@@ -212,10 +220,10 @@ export function registerProjectApiGatewayRoutes(
       return reply.code(200).send({ success: true });
     });
 
-  app.post<{ Params: ProjectRouteParams; Body: { refreshToken?: string } }>(`${base}/auth/logout`, handleLogout);
-  app.post<{ Params: ProjectRouteParams; Body: { refreshToken?: string } }>(`${base}/auth/signout`, handleLogout);
+  app.post<{ Params: ProjectRouteParams; Body: { refreshToken?: string } }>(`${base}/auth/logout`, PUBLIC_WRITE_ROUTE, handleLogout);
+  app.post<{ Params: ProjectRouteParams; Body: { refreshToken?: string } }>(`${base}/auth/signout`, PUBLIC_WRITE_ROUTE, handleLogout);
 
-  app.post<{ Params: ProjectRouteParams; Body: { refreshToken: string } }>(`${base}/auth/refresh`, (request, reply) =>
+  app.post<{ Params: ProjectRouteParams; Body: { refreshToken: string } }>(`${base}/auth/refresh`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -224,7 +232,7 @@ export function registerProjectApiGatewayRoutes(
     }),
   );
 
-  app.get<{ Params: ProjectRouteParams }>(`${base}/auth/me`, (request, reply) =>
+  app.get<{ Params: ProjectRouteParams }>(`${base}/auth/me`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!auth.userId) {
         throw new DataStudioError(401, "auth", "Unauthorized. Bearer token required.", false, "UNAUTHORIZED");
@@ -240,7 +248,7 @@ export function registerProjectApiGatewayRoutes(
     }),
   );
 
-  app.post<{ Params: ProjectRouteParams; Body: { token: string } }>(`${base}/auth/verify-email`, (request, reply) =>
+  app.post<{ Params: ProjectRouteParams; Body: { token: string } }>(`${base}/auth/verify-email`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -254,7 +262,7 @@ export function registerProjectApiGatewayRoutes(
     }),
   );
 
-  app.post<{ Params: ProjectRouteParams; Body: { email: string } }>(`${base}/auth/forgot-password`, (request, reply) =>
+  app.post<{ Params: ProjectRouteParams; Body: { email: string } }>(`${base}/auth/forgot-password`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -269,7 +277,7 @@ export function registerProjectApiGatewayRoutes(
     }),
   );
 
-  app.post<{ Params: ProjectRouteParams; Body: { token: string; newPassword: string } }>(`${base}/auth/reset-password`, (request, reply) =>
+  app.post<{ Params: ProjectRouteParams; Body: { token: string; newPassword: string } }>(`${base}/auth/reset-password`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       if (!authService) throw new DataStudioError(503, "auth", "Project Auth service unavailable", true, "AUTH_UNAVAILABLE");
       const ctx = { workspaceId: "client-auth", userId: "client-guest", permissions: [] };
@@ -300,7 +308,7 @@ export function registerProjectApiGatewayRoutes(
       filter?: string;
       [key: `filter[${string}]`]: string | undefined;
     };
-  }>(`${base}/data/:collection`, (request, reply) =>
+  }>(`${base}/data/:collection`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       const q = request.query;
       let filterObj: Record<string, unknown> | undefined;
@@ -340,7 +348,7 @@ export function registerProjectApiGatewayRoutes(
   app.get<{
     Params: ProjectRouteParams;
     Querystring: { fields?: string; include?: string };
-  }>(`${base}/data/:collection/:id`, (request, reply) =>
+  }>(`${base}/data/:collection/:id`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       const q = request.query;
       return gateway!.getRow(auth, request.params.collection!, request.params.id!, {
@@ -353,7 +361,7 @@ export function registerProjectApiGatewayRoutes(
   app.post<{
     Params: ProjectRouteParams;
     Body: Record<string, unknown>;
-  }>(`${base}/data/:collection`, { bodyLimit: PROJECT_API_BODY_LIMIT }, (request, reply) =>
+  }>(`${base}/data/:collection`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       const created = await gateway!.createRow(auth, request.params.collection!, request.body);
       return reply.code(201).send(created);
@@ -363,7 +371,7 @@ export function registerProjectApiGatewayRoutes(
   app.patch<{
     Params: ProjectRouteParams;
     Body: Record<string, unknown>;
-  }>(`${base}/data/:collection/:id`, { bodyLimit: PROJECT_API_BODY_LIMIT }, (request, reply) =>
+  }>(`${base}/data/:collection/:id`, PUBLIC_WRITE_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       return gateway!.updateRow(auth, request.params.collection!, request.params.id!, request.body);
     }),
@@ -371,7 +379,7 @@ export function registerProjectApiGatewayRoutes(
 
   app.delete<{
     Params: ProjectRouteParams;
-  }>(`${base}/data/:collection/:id`, (request, reply) =>
+  }>(`${base}/data/:collection/:id`, PUBLIC_ROUTE, (request, reply) =>
     runWithGateway(request, reply, async (auth) => {
       return gateway!.deleteRow(auth, request.params.collection!, request.params.id!);
     }),

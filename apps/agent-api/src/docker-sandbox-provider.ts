@@ -4,7 +4,7 @@ import { chmod, chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
-import { SandboxProviderError } from "./sandbox-provider";
+import { SandboxProviderError, sandboxProcessEnvironment } from "./sandbox-provider";
 import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
@@ -283,8 +283,8 @@ fi
     const names = await this.inspect(scope, id);
     const normalized = normalizeTerminalCommand({ command, cwd: options.cwd });
     classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
+    const environment = sandboxProcessEnvironment(options.environment);
     this.touch(id);
-    if (Object.keys(options.environment ?? {}).length) throw new SandboxProviderError("process_secrets_unsupported", "Background process secret references are unavailable", 400);
     const processId = randomUUID(), marker = `/tmp/npati-process-${processId}`;
     const command64 = Buffer.from(command).toString("base64");
     const ensureDepsScript = `if [ -f package.json ] && [ ! -d node_modules ]; then
@@ -296,7 +296,8 @@ fi
 fi
 `;
     const ensureDeps64 = Buffer.from(ensureDepsScript).toString("base64");
-    const script = `setsid sh -c 'printf %s ${ensureDeps64} | base64 -d | sh -s > ${marker}.log 2>&1 && printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s >> ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
+    const environmentScript = environment.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n");
+    const script = `${environmentScript ? environmentScript + "\n" : ""}setsid sh -c 'printf %s ${ensureDeps64} | base64 -d | sh -s > ${marker}.log 2>&1 && printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s >> ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
     await this.docker(["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "sh", "-s"], 15_000, script);
     return { status: "running", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "process", tool: "project.terminal.process", retryable: false, processId };
   }

@@ -60,4 +60,7 @@ export function registerDataStudioRoutes(app: FastifyInstance, auth: AuthProvide
 
   app.get<{ Params: Params }>(base + "/api/usage", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
     service!.getApiUsage(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
+
+  app.get<{ Params: Params }>(base + "/api/openapi.json", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
+    service!.getApiDocumentation(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
 }

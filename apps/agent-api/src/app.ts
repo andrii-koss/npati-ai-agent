@@ -866,13 +866,14 @@ export function buildApp(config: AppConfig = {}) {
         provisioner: sharedPostgresProvisioner,
       })
     : undefined;
+  const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
+  const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+  // The gateway vendors the Project API client into the Project workspace, so it needs the workspace handle.
   const projectApiGatewayService = dataBackendRepository && sharedPostgresProvisioner
-    ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, projectAuthService, dataProvider)
+    ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, projectAuthService, dataProvider, undefined, projectWorkspace)
     : undefined;
   const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
     ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectApiGatewayService) : undefined;
-  const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
-  const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const agentDataStudioService = dataBackendRepository && dataProvider && projectMigrationEngine
     ? new AgentDataStudioService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectWorkspace, projectAuthService)
     : undefined;

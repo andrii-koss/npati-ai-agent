@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
 import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
 import type { SandboxBrowserQaOptions, SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
-import { SandboxProviderError } from "./sandbox-provider";
+import { SandboxProviderError, SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST } from "./sandbox-provider";
 import { classifyTerminalCommand, normalizeTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { logTerminalPolicy } from "./terminal-policy-log";
@@ -23,7 +23,7 @@ const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === 
 const artifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".cache", "vendor", "__pycache__", ".venv"].includes(part));
 
 /** The only Project API variables a sandbox may receive (D5). */
-export const PROJECT_API_SANDBOX_VARIABLES = ["PROJECT_API_URL", "PROJECT_PUBLISHABLE_KEY"] as const;
+export const PROJECT_API_SANDBOX_VARIABLES = SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST;
 /** Server-side secrets and DB credentials never enter a sandbox; PROJECT_SECRET_KEY is deploy-only (D7). */
 export function isForbiddenSandboxVariable(name: string): boolean {
   const upper = name.toUpperCase();

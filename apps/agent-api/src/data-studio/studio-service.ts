@@ -315,8 +315,14 @@ export class DataStudioUiService {
     return { corsAllowedOrigins: sanitized };
   }
 
-  async getApiRequestLogs(
-    ctx: AuthContext,
+  /** OpenAPI document for the Data Studio UI (owner-authenticated, no public key needed). */
+  async getApiDocumentation(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName) {
+    await this.context(ctx, companyId, projectId, environment);
+    if (!this.gateway) throw new DataStudioError(503, "api", "Project API gateway is unavailable", true, "GATEWAY_UNAVAILABLE");
+    return this.gateway.getOpenApiSpec(projectId, environment);
+  }
+
+  async getApiRequestLogs(ctx: AuthContext,
     companyId: string,
     projectId: string,
     environment: DataEnvironmentName,
