@@ -8,6 +8,7 @@ services:
     environment:
       NPATI_SANDBOX_RUNNER_ISOLATED_HOST: "true"
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
+      NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
       NPATI_SANDBOX_IMAGE: npati/project-sandbox:local
       NPATI_SANDBOX_EGRESS_IMAGE: npati/sandbox-egress:local
       NPATI_BROWSER_QA_IMAGE: npati/browser-qa:local

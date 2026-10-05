@@ -20,6 +20,7 @@ import type { DeployTargetConfig } from "./deploy-provider";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { isDataCapabilityPermitted } from "@npati/shared";
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
+import type { ProjectApiGatewayService } from "./data-studio/gateway-service";
 
 export interface CompanyToolExecutor {
   canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
@@ -96,6 +97,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectDeploy?: ProjectDeployService,
     private readonly projectQa?: ProjectBrowserQaService,
     private readonly projectData?: AgentDataStudioService,
+    private readonly projectApi?: ProjectApiGatewayService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -171,7 +173,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     if (tool.startsWith("project.git.")) return this.projectGitTool(context, company, tool, input);
     if (tool.startsWith("project.deploy.")) return this.projectDeployTool(context, company, tool, input);
     if (tool.startsWith("project.qa.")) return this.projectQaTool(context, company, tool, input);
-    if (tool.startsWith("project.data.") || tool.startsWith("project.auth.")) return this.projectDataTool(context, company, tool, input);
+    if (tool.startsWith("project.data.") || tool.startsWith("project.auth.") || tool === "project.api.inspect") return this.projectDataTool(context, company, tool, input);
     if (tool === "files") return this.files(context, company, input);
     if (tool === "storage.company_memory") return this.companyMemory(context,company,input);
     if (tool === "exec") {
@@ -462,6 +464,9 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     const runId = typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined;
 
     switch (tool) {
+      case "project.api.inspect":
+        if (!this.projectApi) throw new Error("Project API service is not configured");
+        return this.projectApi.inspectApi(context, company.id, projectId, "dev");
       case "project.data.schema.inspect":
         return this.projectData.inspectSchema(context, company.id, projectId);
       case "project.data.schema.apply": {

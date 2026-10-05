@@ -968,6 +968,8 @@ export class ProjectAuthService {
         for (const statement of compiled.sql) {
           await client.query(statement);
         }
+        const runtimeUser = this.poolFactory ? "npati_runtime" : (await this.provisioner.getConnection(backend, environment, "runtime")).user;
+        await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoteIdentifier(col)} TO ${quoteIdentifier(runtimeUser)}`);
         await this.repository.setCollectionAccessPolicies(ctx, companyId, backend.id, environment, col, colPolicies);
       }
       await client.query("COMMIT");

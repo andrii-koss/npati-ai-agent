@@ -41,4 +41,23 @@ export function registerDataStudioRoutes(app: FastifyInstance, auth: AuthProvide
     service!.importRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.format, request.body.content)));
   app.post<{ Params: Params; Body: { format: "csv" | "json" } }>(base + "/collections/:collection/export", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
     service!.exportRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.format)));
+
+  // --- API & SDK Management Endpoints ---
+  app.get<{ Params: Params }>(base + "/api/keys", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
+    service!.getApiKeys(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
+
+  app.post<{ Params: Params }>(base + "/api/keys/reveal", (request, reply) => run(request, reply, "business:manage", (ctx) =>
+    service!.revealSecretKey(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
+
+  app.post<{ Params: Params; Body: { target?: "publishable" | "secret" | "both" } }>(base + "/api/keys/rotate", (request, reply) => run(request, reply, "business:manage", (ctx) =>
+    service!.rotateApiKeys(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.body?.target ?? "both")));
+
+  app.put<{ Params: Params; Body: { origins: string[] } }>(base + "/api/cors", (request, reply) => run(request, reply, "business:manage", (ctx) =>
+    service!.updateCorsOrigins(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.body.origins ?? [])));
+
+  app.get<{ Params: Params; Querystring: { limit?: string } }>(base + "/api/logs", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
+    service!.getApiRequestLogs(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.query.limit ? Number(request.query.limit) : 50)));
+
+  app.get<{ Params: Params }>(base + "/api/usage", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
+    service!.getApiUsage(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
 }

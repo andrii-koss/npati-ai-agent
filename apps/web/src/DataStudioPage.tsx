@@ -5,6 +5,7 @@ import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import type { Project } from "./ProjectSection";
 import { DataStudioAuthSection } from "./DataStudioAuthSection";
+import { DataStudioApiSection } from "./DataStudioApiSection";
 
 // --- Types ---
 export type FieldType =
@@ -126,7 +127,7 @@ export function DataStudioPage() {
 
   // Tab & collection selection
   const [selectedCollection, setSelectedCollection] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations" | "auth">("data");
+  const [activeTab, setActiveTab] = useState<"data" | "schema" | "migrations" | "auth" | "api">("data");
 
   // Data view state (rows)
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -912,6 +913,7 @@ export function DataStudioPage() {
           </div>
 
           <div className="sidebar-footer">
+            <button type="button" className={`sidebar-nav-item ${activeTab === "api" ? "active" : ""}`} onClick={() => setActiveTab("api")}>API & SDK</button>
             <button
               type="button"
               className={`sidebar-nav-item ${activeTab === "auth" ? "active" : ""}`}
@@ -931,7 +933,9 @@ export function DataStudioPage() {
 
         {/* Right Content Area */}
         <main className="data-studio-main">
-          {activeTab === "auth" ? (
+          {activeTab === "api" ? (
+            <DataStudioApiSection companyId={companyId} projectId={projectId} environment={environment} isUk={isUk} />
+          ) : activeTab === "auth" ? (
             <DataStudioAuthSection
               companyId={companyId}
               projectId={projectId}

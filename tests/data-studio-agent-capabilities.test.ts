@@ -210,7 +210,8 @@ describe("Data Studio Agent Capabilities & Templates (D3)", () => {
       mockRepo as DataBackendRepository,
       mockProvider as DataProvider,
       mockMigrationEngine as ProjectMigrationEngine,
-      mockProjectWorkspace
+      mockProjectWorkspace,
+      { applyAccessPolicies: async () => ({ compiled: 8, fingerprint: "test-policy" }) } as any,
     );
 
     return {
