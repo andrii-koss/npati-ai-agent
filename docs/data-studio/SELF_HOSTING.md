@@ -4,8 +4,55 @@ This document covers the operational side of the Data Studio module: the separat
 project data, environments, promote, backups, quotas and external databases. It assumes the
 standard `docker compose` installation described in the root `README.md`.
 
-## 1. Containers and volumes
+## 0. Dokploy / single-host production checklist
 
+`docker-compose.dokploy.yml` defines **12 services**. Two of them are gated behind compose
+profiles, so they only start when the profiles are enabled:
+
+| Service | Profile | Why it matters |
+| --- | --- | --- |
+| `postgres-projects` | `data-studio` | the Data Studio project databases. Without this profile there is **no 12th container** and Data Studio reports the backend as unavailable |
+| `sandbox-runner` | `local-sandbox` | Terminal, Live Preview, browser QA and store-preview runs |
+
+In Dokploy set the following environment variables on the application (Environment tab) and
+redeploy:
+
+```dotenv
+# 1. Start the profile-gated services (comma separated, no spaces).
+COMPOSE_PROFILES=local-sandbox,data-studio
+
+# 2. Project cluster credentials — the SAME value is used by postgres-projects and agent-api.
+NPATI_PROJECTS_POSTGRES_ADMIN_USER=npati_projects_admin
+NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD=<openssl rand -hex 32>
+
+# 3. Local sandbox runner on the same host (it is reachable as http://sandbox-runner:7865).
+NPATI_SANDBOX_RUNNER_MODE=local
+NPATI_SANDBOX_RUNNER_URL=http://sandbox-runner:7865
+NPATI_SANDBOX_RUNNER_SECRET=<openssl rand -hex 32>   # must be at least 32 characters
+NPATI_PREVIEW_SECRET=<openssl rand -hex 32>          # keeps preview links valid across restarts
+
+# 4. Public HTTPS base URL of the Project API (Data Studio gateway).
+#    Point a domain/proxy at the agent-api (port 3001) and set it here: the sandbox then receives
+#    PROJECT_API_URL / PROJECT_PUBLISHABLE_KEY, the SDK is vendored, and the sandbox egress
+#    allowlist gets this host automatically.
+NPATI_PROJECT_API_PUBLIC_URL=https://api.example.com
+```
+
+After the redeploy verify:
+
+```bash
+docker compose -p <project> ps                  # expect 12 services Up (postgres-projects included)
+docker compose -p <project> logs agent-api | grep -i "data studio" || true
+curl -fsS https://api.example.com/health        # Project API host reachable from outside
+
+# Inside the app: Company → Data must offer "New DataBackend".
+```
+
+If `postgres-projects` is still missing, the profile variable did not reach the deploy: check
+`docker compose -p <project> config --services` (it lists the active services) or pass
+`--profile data-studio` explicitly in the Dokploy command field.
+
+## 1. Containers and volumes
 | Service | Purpose | Notes |
 | --- | --- | --- |
 | `postgres` | NPATI Core DB (`pgvector/pgvector:pg17`) | metadata only: DataBackends, environments, secrets, access policies, logs |
