@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 
 type Keys = { apiUrl: string; publishableKey: string; secretKeyMasked: string; corsAllowedOrigins: string[]; rateLimit: { maxRequestsPerMinute: number } };
@@ -10,7 +10,10 @@ export function DataStudioApiSection({ companyId, projectId, environment, isUk }
   const [usage, setUsage] = useState<Usage | null>(null);
   const [logs, setLogs] = useState<ApiLog[]>([]);
   const [origins, setOrigins] = useState("");
+  const [revealedSecret, setRevealedSecret] = useState("");
+  const [newSecret, setNewSecret] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const base = `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/data-studio/${environment}/api`;
   const api = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -18,7 +21,7 @@ export function DataStudioApiSection({ companyId, projectId, environment, isUk }
     const token = getStoredAuthToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
     if (init?.body) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${base}${path}`, { ...init, headers });
+    const response = await fetch(`/api${base}${path}`, { ...init, headers });
     const body = await response.json();
     if (!response.ok) throw new Error(body?.error?.message || `HTTP ${response.status}`);
     return body as T;
@@ -40,23 +43,70 @@ export function DataStudioApiSection({ companyId, projectId, environment, isUk }
     setSaving(true);
     try {
       await api("/cors", { method: "PUT", body: JSON.stringify({ origins: origins.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) }) });
+      setNotice(isUk ? "Дозволені origins збережено" : "Allowed origins saved");
       await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save origins"); }
     finally { setSaving(false); }
   };
+  const revealSecret = async () => {
+    const confirmed = window.confirm(isUk
+      ? "Показати PROJECT_SECRET_KEY? Використовуйте його лише на сервері й ніколи не додавайте у frontend, мобільний бандл чи sandbox."
+      : "Reveal PROJECT_SECRET_KEY? Use it server-side only and never in frontend code, mobile bundles or sandboxes.");
+    if (!confirmed) return;
+    try {
+      setError(""); setNotice("");
+      const result = await api<{ secretKey: string }>("/keys/reveal", { method: "POST" });
+      setRevealedSecret(result.secretKey);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not reveal the secret key"); }
+  };
+  const rotateKeys = async () => {
+    const confirmed = window.confirm(isUk
+      ? `Ротувати ключі (${environment})? Старі ключі працюють ще кілька ротацій, але клієнти слід оновити.`
+      : `Rotate the ${environment} keys? Previous keys keep working for a few rotations, but clients should be updated.`);
+    if (!confirmed) return;
+    try {
+      setError(""); setNotice("");
+      const result = await api<{ newSecretKey?: string }>("/keys/rotate", { method: "POST", body: JSON.stringify({ target: "both" }) });
+      setRevealedSecret("");
+      setNewSecret(result.newSecretKey || "");
+      setNotice(isUk ? "Ключі ротовано. Новий секретний ключ показано один раз." : "Keys rotated. The new secret key is shown once.");
+      await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not rotate keys"); }
+  };
+  const openOpenApi = async () => {
+    try {
+      setError("");
+      const spec = await api<Record<string, unknown>>("/openapi.json");
+      const url = URL.createObjectURL(new Blob([JSON.stringify(spec, null, 2)], { type: "application/json" }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load the OpenAPI document"); }
+  };
   return <div className="data-studio-pane">
     <div className="pane-header"><h2>{isUk ? "Project API" : "Project API"}</h2></div>
     {error && <div className="data-studio-alert error" role="alert">{error}</div>}
+    {notice && <div className="data-studio-alert" role="status">{notice}</div>}
     {keys && <section>
       <p><strong>API URL:</strong> <code>{keys.apiUrl}</code></p>
       <p><strong>PROJECT_PUBLISHABLE_KEY:</strong> <code>{keys.publishableKey}</code></p>
-      <p><strong>PROJECT_SECRET_KEY:</strong> {keys.secretKeyMasked} ({isUk ? "лише для серверного середовища" : "server environment only"})</p>
-      <p><a href={`/v1/projects/${encodeURIComponent(projectId)}/openapi.json?env=${environment}`} target="_blank" rel="noreferrer">OpenAPI</a></p>
+      <p><strong>PROJECT_SECRET_KEY:</strong> {revealedSecret ? <code>{revealedSecret}</code> : keys.secretKeyMasked} ({isUk ? "лише для серверного середовища" : "server environment only"})</p>
+      {newSecret && <p><strong>{isUk ? "Новий секретний ключ" : "New secret key"}:</strong> <code>{newSecret}</code></p>}
+      <div className="pane-actions">
+        <button type="button" onClick={() => void revealSecret()}>{isUk ? "Показати секретний ключ" : "Reveal secret key"}</button>
+        <button type="button" onClick={() => void rotateKeys()}>{isUk ? "Ротувати ключі" : "Rotate keys"}</button>
+        <button type="button" onClick={() => void openOpenApi()}>OpenAPI</button>
+      </div>
       <label htmlFor="project-api-origins">{isUk ? "Дозволені origins (по одному на рядок)" : "Allowed origins (one per line)"}</label>
       <textarea id="project-api-origins" value={origins} onChange={(event) => setOrigins(event.target.value)} rows={4} />
       <button type="button" disabled={saving} onClick={() => void saveOrigins()}>{isUk ? "Зберегти origins" : "Save origins"}</button>
     </section>}
-    {usage && <section><h3>{isUk ? "Використання" : "Usage"}</h3><p>{usage.requestCount} requests · {usage.collectionsCount} collections · {usage.databaseBytes.toLocaleString()} bytes</p></section>}
+    {usage && <section>
+      <h3>{isUk ? "Використання" : "Usage"}</h3>
+      <p>
+        {usage.requestCount} requests · {usage.collectionsCount} collections · {usage.databaseBytes.toLocaleString()} / {usage.maxDatabaseBytes.toLocaleString()} bytes
+        {" · "}{usage.maxRequestsPerMinute} {isUk ? "запитів/хв на ключ" : "requests/min per key"}
+      </p>
+    </section>}
     <section><h3>{isUk ? "Останні запити" : "Recent requests"}</h3>
       <table className="data-studio-table"><thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th></tr></thead>
         <tbody>{logs.map((log) => <tr key={log.id}><td>{new Date(log.createdAt).toLocaleString()}</td><td>{log.method}</td><td>{log.path}</td><td>{log.statusCode}</td><td>{log.durationMs}</td></tr>)}</tbody></table>

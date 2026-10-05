@@ -85,8 +85,24 @@ function harness() {
       throw new Error("invalid token");
     },
   };
-  const gateway = new ProjectApiGatewayService(store as never, repository as never, {} as never, authService as never, undefined, poolFactory as never);
-  return { gateway, keys, statements, rateLimits, authService };
+  const workspaceFiles = new Map<string, string>();
+  const workspace = {
+    async readFile(_ctx: unknown, _companyId: string, _projectId: string, filePath: string) {
+      const content = workspaceFiles.get(filePath);
+      if (content === undefined) throw new Error("not found");
+      return { path: filePath, content, revision: "rev-1" };
+    },
+    async createFile(_ctx: unknown, _companyId: string, _projectId: string, filePath: string, content: string) {
+      workspaceFiles.set(filePath, content);
+      return { path: filePath, content, revision: "rev-1" };
+    },
+    async writeFile(_ctx: unknown, _companyId: string, _projectId: string, filePath: string, content: string) {
+      workspaceFiles.set(filePath, content);
+      return { path: filePath, content, revision: "rev-1" };
+    },
+  };
+  const gateway = new ProjectApiGatewayService(store as never, repository as never, {} as never, authService as never, undefined, poolFactory as never, workspace as never);
+  return { gateway, keys, statements, rateLimits, authService, workspaceFiles };
 }
 
 describe("Project API gateway over HTTP (D5)", () => {
@@ -239,6 +255,8 @@ describe("Website Builder sandbox integration (D5)", () => {
       expect(env.PROJECT_API_URL).toBe("https://api.npati.example.test/v1/projects/pA");
       expect(env.PROJECT_PUBLISHABLE_KEY).toBe(h.keys["bA:dev"]!.publishableKey);
       expect(JSON.stringify(env)).not.toContain(h.keys["bA:dev"]!.secretKey);
+      // The SDK is vendored into the Project workspace so the sandbox can import it locally.
+      expect(h.workspaceFiles.get("npati-client.ts")).toContain("export function createProjectClient");
       await expect(h.gateway.getSandboxEnvironment({ workspaceId: "w1", userId: "u1", permissions: ["*"] }, "c1", "pB")).rejects.toThrow();
     } finally {
       if (previous === undefined) delete process.env.NPATI_PROJECT_API_PUBLIC_URL; else process.env.NPATI_PROJECT_API_PUBLIC_URL = previous;

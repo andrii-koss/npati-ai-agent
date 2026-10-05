@@ -8,7 +8,9 @@ import type { DataBackend, DataBackendEnvironment, DataEnvironmentName } from ".
 import { ProjectApiKeyManager } from "./api-key-manager";
 import { ProjectApiRateLimiter } from "./rate-limiter";
 import { generateOpenApiSpec, generateProjectTypeScriptTypes } from "./openapi-generator";
+import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH, ensureProjectSdkFile } from "./project-sdk-file";
 import type { ProjectAuthService } from "./auth-service";
+import type { ProjectWorkspace } from "../project-workspace";
 import type { DataProvider, SchemaSnapshot } from "./data-provider";
 import type {
   ProjectApiKeyType,
@@ -38,9 +40,14 @@ export interface GatewayListOptions {
   include?: string[];
 }
 
+/** Query complexity bounds for public Project API requests. */
+const MAX_FILTER_CLAUSES = 10;
+const MAX_SORT_CLAUSES = 5;
+const MAX_SELECT_FIELDS = 50;
+const MAX_RELATION_INCLUDES = 5;
+
 export class ProjectApiGatewayService {
-  private readonly rateLimiter = new ProjectApiRateLimiter();
-  private readonly recentLogs: ProjectApiRequestLog[] = [];
+  private readonly rateLimiter = new ProjectApiRateLimiter();  private readonly recentLogs: ProjectApiRequestLog[] = [];
   private readonly requestCounts = new Map<string, number>();
   private readonly vault = new CryptoVault();
   private readonly runtimePools = new Map<string, Pool>();
@@ -52,6 +59,7 @@ export class ProjectApiGatewayService {
     private readonly authService?: ProjectAuthService,
     private readonly dataProvider?: DataProvider,
     private readonly poolFactory?: (backend: DataBackend, env: DataEnvironmentName) => Promise<Pool>,
+    private readonly workspace?: Pick<ProjectWorkspace, "readFile" | "createFile" | "writeFile">,
   ) {}
 
   /**
@@ -112,15 +120,17 @@ export class ProjectApiGatewayService {
    * Authenticates an incoming public Project API request.
    */
   async getSandboxEnvironment(ctx: AuthContext, companyId: string, projectId: string): Promise<Record<string, string>> {
+    const authorized = await this.store.getProject(ctx, companyId, projectId);
+    const { project, backend } = await this.resolveProject(projectId);
+    if (project.companyId !== companyId || authorized.dataBackendId !== backend.id) throw new DataStudioError(403, "gateway", "Project access denied", false, "PROJECT_FORBIDDEN");
     const publicBase = process.env.NPATI_PROJECT_API_PUBLIC_URL;
     if (!publicBase) return {};
     const parsed = new URL(publicBase);
     if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
       throw new DataStudioError(500, "gateway", "Invalid Project API public URL", false, "INVALID_API_URL");
     }
-    const authorized = await this.store.getProject(ctx, companyId, projectId);
-    const { project, backend } = await this.resolveProject(projectId);
-    if (project.companyId !== companyId || authorized.dataBackendId !== backend.id) throw new DataStudioError(403, "gateway", "Project access denied", false, "PROJECT_FORBIDDEN");
+    // The sandbox cannot install the private SDK package, so the Project workspace carries it.
+    await this.syncProjectSdkFile(ctx, companyId, projectId);
     const env = await this.repository.environment(ctx, companyId, backend.id, "dev");
     const keys = ProjectApiKeyManager.ensureKeys(env.providerConfig, "dev", this.vault);
     if (keys.secretKey) await this.repository.setEnvironment(ctx, companyId, backend.id, "dev", { providerConfig: keys.updatedConfig });
@@ -128,6 +138,15 @@ export class ProjectApiGatewayService {
       PROJECT_API_URL: `${publicBase.replace(/\/+$/, "")}/v1/projects/${encodeURIComponent(projectId)}`,
       PROJECT_PUBLISHABLE_KEY: keys.publishableKey,
     };
+  }
+  /** Vendors the Project API client into the Project workspace (idempotent). */
+  private async syncProjectSdkFile(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
+    try {
+      const result = await ensureProjectSdkFile(ctx, companyId, projectId, this.workspace);
+      return result === "unavailable" ? "unavailable" : "available";
+    } catch {
+      return "unavailable";
+    }
   }
   async authenticateRequest(
     projectId: string,
@@ -368,8 +387,18 @@ export class ProjectApiGatewayService {
     });
     if (!allowed) throw new DataStudioError(403, "gateway", "Collection action is not permitted", false, "POLICY_DENIED");
   }
+  private assertQueryBounds(options: { filter?: unknown; sort?: unknown; fields?: string[]; include?: string[] }): void {
+    const filters = Array.isArray(options.filter) ? options.filter.length : options.filter ? Object.keys(options.filter as Record<string, unknown>).length : 0;
+    if (filters > MAX_FILTER_CLAUSES) throw new DataStudioError(400, "gateway", `At most ${MAX_FILTER_CLAUSES} filters are allowed`, false, "INVALID_FILTER");
+    const sorts = Array.isArray(options.sort) ? options.sort.length : options.sort ? 1 : 0;
+    if (sorts > MAX_SORT_CLAUSES) throw new DataStudioError(400, "gateway", `At most ${MAX_SORT_CLAUSES} sort clauses are allowed`, false, "INVALID_QUERY");
+    if ((options.fields?.length ?? 0) > MAX_SELECT_FIELDS) throw new DataStudioError(400, "gateway", `At most ${MAX_SELECT_FIELDS} fields may be selected`, false, "INVALID_QUERY");
+    if ((options.include?.length ?? 0) > MAX_RELATION_INCLUDES) throw new DataStudioError(400, "gateway", `At most ${MAX_RELATION_INCLUDES} relations may be included`, false, "INVALID_QUERY");
+  }
+
   async listRows(auth: GatewayAuthResult, collection: string, options: GatewayListOptions = {}) {
     await this.authorizeCollection(auth, collection, "select");
+    this.assertQueryBounds(options);
 
     const values: unknown[] = [];
     const filterClauses: string[] = [];
@@ -467,6 +496,7 @@ export class ProjectApiGatewayService {
 
   async getRow(auth: GatewayAuthResult, collection: string, id: string, options: { fields?: string[]; include?: string[] } = {}) {
     await this.authorizeCollection(auth, collection, "select");
+    this.assertQueryBounds(options);
 
     let selectFields = "*";
     if (options.fields && options.fields.length) {
@@ -641,6 +671,7 @@ export class ProjectApiGatewayService {
     const authorizedProject = await this.store.getProject(ctx, companyId, projectId);
     const { project, backend } = await this.resolveProject(projectId);
     if (authorizedProject.dataBackendId !== backend.id || project.companyId !== companyId) throw new DataStudioError(403, "gateway", "Project access denied", false, "PROJECT_FORBIDDEN");
+    const sdkStatus = await this.syncProjectSdkFile(ctx, companyId, projectId);
     let schema: SchemaSnapshot = { tables: [] };
     if (this.dataProvider) {
       schema = await this.dataProvider.introspectSchema(backend, environment);
@@ -679,6 +710,7 @@ export class ProjectApiGatewayService {
       collections,
       endpoints,
       authEnabled: Boolean(this.authService),
+      sdk: { file: PROJECT_SDK_FILE_NAME, importPath: PROJECT_SDK_IMPORT_PATH, available: sdkStatus === "available" },
     };
   }
 

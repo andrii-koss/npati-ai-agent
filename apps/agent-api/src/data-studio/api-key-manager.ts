@@ -4,6 +4,9 @@ import type { DataEnvironmentName } from "./types";
 import type { ProjectApiKeysConfig, ProjectApiKeysInfo } from "@npati/shared";
 
 export class ProjectApiKeyManager {
+  /** Deprecated keys stay valid until they fall out of this window after repeated rotations. */
+  static readonly MAX_PREVIOUS_KEYS = 5;
+
   static generatePublishableKey(environment: DataEnvironmentName): string {
     return `npati_pk_${environment}_${randomBytes(16).toString("hex")}`;
   }
@@ -129,15 +132,13 @@ export class ProjectApiKeyManager {
       encryptedSecretKey = vault.encrypt(plainSecretKey);
     }
 
-    // Keep only last 5 previous keys
-    const prunedPrevious = previousKeys.slice(-5);
-
+    // Keep the most recent deprecated keys so clients can rotate without downtime.
     const updatedConfig: Record<string, unknown> = {
       ...config,
       publishableKey,
       secretKeyHash,
       encryptedSecretKey,
-      previousKeys: [],
+      previousKeys: previousKeys.slice(-ProjectApiKeyManager.MAX_PREVIOUS_KEYS),
     };
 
     return {
@@ -161,7 +162,7 @@ export class ProjectApiKeyManager {
   }
 
   /**
-   * Validates if a provided key matches active or recent previous keys.
+   * Validates if a provided key matches the active key or a recently rotated (deprecated) key.
    */
   static validateKey(
     providedKey: string,
@@ -177,23 +178,35 @@ export class ProjectApiKeyManager {
       return { valid: false, keyType: null };
     }
 
+    const previousKeys = Array.isArray(providerConfig.previousKeys)
+      ? (providerConfig.previousKeys as Array<{ keyType?: unknown; keyOrHash?: unknown }>)
+      : [];
+
     if (parsed.type === "publishable") {
       if (providedKey === providerConfig.publishableKey) {
         return { valid: true, keyType: "publishable", isDeprecated: false };
       }
-      return { valid: false, keyType: null };
+      const deprecated = previousKeys.some((entry) => entry?.keyType === "publishable" && entry.keyOrHash === providedKey);
+      return deprecated ? { valid: true, keyType: "publishable", isDeprecated: true } : { valid: false, keyType: null };
     }
 
     if (parsed.type === "secret") {
       const hash = Buffer.from(this.hashSecretKey(providedKey), "hex");
-      const stored = typeof providerConfig.secretKeyHash === "string" ? Buffer.from(providerConfig.secretKeyHash, "hex") : Buffer.alloc(0);
-      if (stored.length === hash.length && timingSafeEqual(hash, stored)) {
+      if (this.hashMatches(hash, providerConfig.secretKeyHash)) {
         return { valid: true, keyType: "secret", isDeprecated: false };
       }
-      return { valid: false, keyType: null };
+      const deprecated = previousKeys.some((entry) => entry?.keyType === "secret" && this.hashMatches(hash, entry.keyOrHash));
+      return deprecated ? { valid: true, keyType: "secret", isDeprecated: true } : { valid: false, keyType: null };
     }
 
     return { valid: false, keyType: null };
+  }
+
+  /** Constant-time comparison of a SHA-256 hash against a stored hex digest. */
+  private static hashMatches(hash: Buffer, stored: unknown): boolean {
+    if (typeof stored !== "string" || !/^[0-9a-f]{64}$/i.test(stored)) return false;
+    const expected = Buffer.from(stored, "hex");
+    return expected.length === hash.length && timingSafeEqual(hash, expected);
   }
 
   /**

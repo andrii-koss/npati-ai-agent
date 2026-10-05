@@ -4,6 +4,7 @@ import type { DataProvider, SchemaOperation, SchemaSnapshot } from "./data-provi
 import type { ProjectMigrationEngine } from "./migration-engine";
 import { DataStudioError, validateIdentifier } from "./identifier";
 import { validateOperation } from "./studio-service";
+import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH } from "./project-sdk-file";
 import { TEMPLATE_CATALOG, validateTemplate, type DataSchemaTemplate } from "@npati/shared";
 import type { ProjectWorkspace } from "../project-workspace";
 
@@ -32,8 +33,10 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     `- Synchronized: ${new Date().toISOString()}`,
     `- Collections (${schema.tables.length}):`,
     "- Project API: /v1/projects/<projectId> (use the configured PROJECT_API_URL and PROJECT_PUBLISHABLE_KEY).",
-    "- Client SDK: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
+    `- Client SDK: import { createProjectClient } from "${PROJECT_SDK_IMPORT_PATH}" — generated file ${PROJECT_SDK_FILE_NAME} sits in the project root, no package install is required.`,
+    "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
     "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; data: client.from(\"products\").list(), get(id), create(row), update(id, row), delete(id).",
+    "- Never put PROJECT_SECRET_KEY, DATABASE_URL or any database credential into generated client code.",
     "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
   ];
   for (const table of schema.tables) {
