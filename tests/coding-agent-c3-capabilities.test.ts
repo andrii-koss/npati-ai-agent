@@ -4,6 +4,7 @@ import {
   CAPABILITY_MATRIX,
   CODE_CAPABILITIES,
   CODE_READ_CAPABILITIES,
+  CODE_SHELL_CAPABILITIES,
   CODE_TOOL_FLAG_KEYS,
   CODE_WRITE_CAPABILITIES,
   defaultCapabilityRegistry,
@@ -15,9 +16,16 @@ import {
   KNOWN_TOOL_MANIFESTS,
   PUBLISHED_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V2_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V3_TOOL_SCHEMA_CHECKSUM,
   resolveManifestForSession,
   toolSchemaChecksum,
 } from "../apps/agent-api/src/code-tool-registry";
+
+/**
+ * Tools that must never run without an explicit approval through the existing approval system:
+ * deletion (C3) plus launching commands or background processes in the sandbox (C4).
+ */
+const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete"]);
 
 /**
  * C3: mutating Coding Agent tools.
@@ -65,14 +73,20 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
     expect(deleteCapability.risk).toBe("high");
     expect(deleteCapability.requiresConfirmation).toBe(true);
 
-    // Every other tool in the domain must be honest about not needing approval.
-    for (const capability of [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES]) {
-      if (capability.id === "code.fs.delete") continue;
+    // The approval-gated set is exactly the destructive/command-launch tools (C3 + C4), and every
+    // other code capability has to be honest about not needing approval.
+    for (const capability of [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES, ...CODE_SHELL_CAPABILITIES]) {
+      if (APPROVAL_REQUIRED_TOOLS.has(capability.id)) continue;
       expect(capability.requiresConfirmation, `${capability.id} must not claim approval is required`).toBe(false);
     }
-    // Exactly one destructive/approval-gated capability exists in the code domain today.
+    for (const id of APPROVAL_REQUIRED_TOOLS) {
+      const capability = CAPABILITY_CATALOG.find((c) => c.id === id);
+      expect(capability, `${id} must exist`).toBeTruthy();
+      expect(capability!.risk, `${id} risk`).toBe("high");
+      expect(capability!.requiresConfirmation, `${id} must require approval`).toBe(true);
+    }
     const approvalGated = CAPABILITY_CATALOG.filter((c) => c.domain === "code" && c.requiresConfirmation);
-    expect(approvalGated.map((c) => c.id)).toEqual(["code.fs.delete"]);
+    expect(approvalGated.map((c) => c.id).sort()).toEqual([...APPROVAL_REQUIRED_TOOLS].sort());
   });
 
   it("requires workspace:write for mutations and workspace:read for the diff", () => {
@@ -90,8 +104,8 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
   it("keeps the catalogue, the matrix and the registry resolvable and in sync", () => {
     const catalogCode = CAPABILITY_CATALOG.filter((c) => c.domain === "code");
     const matrixCode = CAPABILITY_MATRIX.filter((c) => c.domain === "code");
-    expect(catalogCode).toHaveLength(13);
-    expect(matrixCode).toHaveLength(13);
+    expect(catalogCode).toHaveLength(19);
+    expect(matrixCode).toHaveLength(19);
     expect(matrixCode.filter((entry) => WRITE_INVENTORY_IDS.includes(entry.id)).map((entry) => entry.id)).toEqual(WRITE_INVENTORY_IDS);
 
     for (const [index, id] of WRITE_IDS.entries()) {
@@ -102,19 +116,20 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
 
     const allInventoryIds = CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds);
     expect(new Set(allInventoryIds).size).toBe(allInventoryIds.length);
-    expect(Math.max(...allInventoryIds)).toBe(361);
+    expect(Math.max(...allInventoryIds)).toBe(367);
 
     const callable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
-    expect(CAPABILITY_CATALOG).toHaveLength(361);
-    expect(callable).toHaveLength(97);
+    expect(CAPABILITY_CATALOG).toHaveLength(367);
+    expect(callable).toHaveLength(103);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
   });
 });
 
 describe("security-gate: C3 tool manifest and flag gating", () => {
-  it("publishes manifest v3 while keeping v1 and v2 resolvable, and never rewrites the v2 set", () => {
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(3);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(13);
+  it("keeps manifest v3 frozen and resolvable while the current manifest publishes every tool", () => {
+    // C4 bumped the manifest to v4; v3 must keep resolving with exactly its 13 tools and frozen checksum.
+    expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
+    expect(CODE_TOOL_SCHEMAS.length).toBe(19);
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
 
     const v1 = resolveManifestForSession(1);
@@ -138,8 +153,8 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
     const v3 = resolveManifestForSession(3);
     expect(v3.version).toBe(3);
     expect(v3.tools).toHaveLength(13);
-    expect(v3.checksum).toBe(PUBLISHED_TOOL_SCHEMA_CHECKSUM);
-    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version)).toEqual([1, 2, 3]);
+    expect(v3.checksum).toBe(PUBLISHED_V3_TOOL_SCHEMA_CHECKSUM);
+    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version)).toEqual([1, 2, 3, CODE_TOOL_MANIFEST_VERSION]);
 
     // Every published version is unique and immutable-looking: one entry per `name@version`.
     const keys = CODE_TOOL_SCHEMAS.map((tool) => `${tool.name}@${tool.version}`);

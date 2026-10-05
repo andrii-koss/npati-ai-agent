@@ -29,9 +29,22 @@ const TOOL_NAMES = [
   "code.fs.delete",
   "code.fs.diff",
   "code.fs.undo_last_turn",
+  "code.shell.exec",
+  "code.shell.process.start",
+  "code.shell.process.list",
+  "code.shell.process.logs",
+  "code.shell.process.stop",
+  "code.verify.run",
 ] as const;
 
-/** C3 risk contract: reads are low, mutations medium, deletion high and approval-gated. */
+/**
+ * Tools that must never run without an explicit approval through the existing approval system:
+ * destructive changes (`code.fs.delete`) and launching commands in the sandbox (`code.shell.exec`,
+ * `code.shell.process.start`). Mirrored in the capability contract, so the test checks equality.
+ */
+const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete"]);
+
+/** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.fs.list": "low",
   "code.fs.read": "low",
@@ -46,6 +59,12 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.fs.delete": "high",
   "code.fs.diff": "low",
   "code.fs.undo_last_turn": "medium",
+  "code.shell.exec": "high",
+  "code.shell.process.start": "high",
+  "code.shell.process.list": "low",
+  "code.shell.process.logs": "low",
+  "code.shell.process.stop": "medium",
+  "code.verify.run": "medium",
 };
 
 const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
@@ -61,8 +80,8 @@ describe("security-gate: C2 tool schema parity", () => {
   it("describes exactly the same thirteen tools in the registry and in the capability catalogue", () => {
     expect([...toolByName.keys()].sort()).toEqual([...TOOL_NAMES].sort());
     expect([...capabilityById.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect(CODE_CAPABILITIES).toHaveLength(13);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(13);
+    expect(CODE_CAPABILITIES).toHaveLength(19);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(19);
   });
 
   it("keeps argument schemas identical field by field for every tool", () => {
@@ -106,7 +125,7 @@ describe("security-gate: C2 tool schema parity", () => {
       expect(capability.version, `${name} capability version must equal the tool version`).toBe(tool.version);
       expect(capability.domain).toBe("code");
       expect(capability.risk, `${name} risk`).toBe(EXPECTED_RISK[name]);
-      expect(capability.requiresConfirmation, `${name} approval requirement`).toBe(name === "code.fs.delete");
+      expect(capability.requiresConfirmation, `${name} approval requirement`).toBe(APPROVAL_REQUIRED_TOOLS.has(name));
       expect(capability.agentCallable).toBe(true);
       expect(CODE_TOOL_SCHEMA_MIRROR[name], `${name} must be present in the mirror`).toBeTruthy();
       expect(CODE_TOOL_SCHEMA_MIRROR[name]!.inputSchema).toEqual(tool.inputSchema);

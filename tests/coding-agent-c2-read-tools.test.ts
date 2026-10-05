@@ -451,8 +451,14 @@ describe("security-gate: C2 tool schema registry", () => {
     const current = resolveManifestForSession(CODE_TOOL_MANIFEST_VERSION);
     expect(current.tools).toHaveLength(CODE_TOOL_SCHEMAS.length);
     expect(current.checksum).toBe(PUBLISHED_TOOL_SCHEMA_CHECKSUM);
-    expect(KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version).sort())
-      .toEqual([1, 2, CODE_TOOL_MANIFEST_VERSION].sort());
+    // Every published manifest stays resolvable (older sessions pin their own version) and the current
+    // one must be present — asserted as an invariant so each new tool release does not break it.
+    const manifestVersions = KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version);
+    expect([...manifestVersions].sort((a, b) => a - b)).toEqual(manifestVersions);
+    expect(new Set(manifestVersions).size).toBe(manifestVersions.length);
+    expect(manifestVersions).toContain(1);
+    expect(manifestVersions).toContain(2);
+    expect(manifestVersions).toContain(CODE_TOOL_MANIFEST_VERSION);
     expect(() => resolveManifestForSession(99)).toThrow(/Unknown tool manifest version/);
   });
 

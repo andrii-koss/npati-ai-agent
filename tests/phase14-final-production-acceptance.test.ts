@@ -363,8 +363,8 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       const inspector = new CapabilityInspectorService();
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(361);
-      expect(report.counts.agentCallable).toBe(97);
+      expect(report.counts.all).toBe(367);
+      expect(report.counts.agentCallable).toBe(103);
       expect(report.counts.runtimeOnly).toBe(264);
 
       const mockRunForInspect: any = {

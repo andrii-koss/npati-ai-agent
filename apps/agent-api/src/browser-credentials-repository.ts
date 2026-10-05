@@ -2,11 +2,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
 import { BrowserSecurityGuard } from "./browser-security-guard";
+import { normalizeCredentialEnvironment, type CredentialEnvironment } from "./credential-environment";
 
 export interface BrowserCredentialSummary {
   id: string;
   label: string;
   fieldNames: string[];
+  /** C4 (owner decision): explicit environment marker; `unknown` is never treated as safe. */
+  environment: CredentialEnvironment;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,30 +80,46 @@ export class BrowserCredentialsRepository {
 
   async list(ctx: AuthContext, companyId: string): Promise<BrowserCredentialSummary[]> {
     const result = await this.pool.query<BrowserCredentialSummary>(`
-      SELECT id,label,field_names AS "fieldNames",created_at::text AS "createdAt",updated_at::text AS "updatedAt"
+      SELECT id,label,field_names AS "fieldNames",environment,created_at::text AS "createdAt",updated_at::text AS "updatedAt"
       FROM company_browser_credentials
       WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3
       ORDER BY label,id`, [ctx.workspaceId, companyId, ctx.userId]);
     return result.rows;
   }
 
-  async put(ctx: AuthContext, companyId: string, input: { id?: string; label: string; fields: Record<string, string> }) {
+  /**
+   * Authoritative environment lookup for the SecretLease policy. Callers must use this instead of
+   * trusting an environment marker that travelled with a tool call, which could be spoofed.
+   */
+  async describe(ctx: AuthContext, companyId: string, id: string): Promise<{ id: string; label: string; environment: CredentialEnvironment } | null> {
+    const result = await this.pool.query<{ id: string; label: string; environment: string }>(`
+      SELECT id,label,environment FROM company_browser_credentials
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4`,
+      [id, ctx.workspaceId, companyId, ctx.userId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    return { id: row.id, label: row.label, environment: normalizeCredentialEnvironment(row.environment) };
+  }
+
+  async put(ctx: AuthContext, companyId: string, input: { id?: string; label: string; fields: Record<string, string>; environment?: string }) {
     const id = input.id || randomUUID();
     const label = input.label.trim().slice(0, 120);
+    const environment = input.environment === undefined ? undefined : normalizeCredentialEnvironment(input.environment);
     const fields = Object.fromEntries(Object.entries(input.fields)
       .filter(([key, value]) => /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(key) && typeof value === "string" && value.length > 0)
       .map(([key, value]) => [key, value.slice(0, 20_000)]));
     if (!label) throw new Error("Credential label is required");
     if (!Object.keys(fields).length) throw new Error("At least one credential field is required");
     const result = await this.pool.query<BrowserCredentialSummary>(`
-      INSERT INTO company_browser_credentials(id,workspace_id,company_id,user_id,label,field_names,encrypted_fields)
-      VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)
+      INSERT INTO company_browser_credentials(id,workspace_id,company_id,user_id,label,field_names,encrypted_fields,environment)
+      VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,COALESCE($8,'unknown'))
       ON CONFLICT(id) DO UPDATE SET label=EXCLUDED.label,field_names=EXCLUDED.field_names,
-        encrypted_fields=EXCLUDED.encrypted_fields,updated_at=now()
+        encrypted_fields=EXCLUDED.encrypted_fields,
+        environment=COALESCE($8,company_browser_credentials.environment),updated_at=now()
       WHERE company_browser_credentials.workspace_id=$2 AND company_browser_credentials.company_id=$3
         AND company_browser_credentials.user_id=$4
-      RETURNING id,label,field_names AS "fieldNames",created_at::text AS "createdAt",updated_at::text AS "updatedAt"`,
-      [id, ctx.workspaceId, companyId, ctx.userId, label, JSON.stringify(Object.keys(fields).sort()), this.vault.encryptJson(fields)]);
+      RETURNING id,label,field_names AS "fieldNames",environment,created_at::text AS "createdAt",updated_at::text AS "updatedAt"`,
+      [id, ctx.workspaceId, companyId, ctx.userId, label, JSON.stringify(Object.keys(fields).sort()), this.vault.encryptJson(fields), environment ?? null]);
     if (!result.rowCount) throw Object.assign(new Error("Credential is not available in this tenant"), { status: 404 });
     return result.rows[0]!;
   }

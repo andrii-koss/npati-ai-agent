@@ -69,12 +69,18 @@ import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
-import { assertManifestConsistent, currentToolManifest } from "./code-tool-registry";
+import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
 import { CodeToolRuntime, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
 import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
+import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
+import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
+import { SecretLeaseProvider } from "./code-secret-lease";
+import { PolicyEngine } from "./code-policy-engine";
+import { classifyShellCommand } from "./code-shell-classifier";
+import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
@@ -1042,6 +1048,250 @@ export function buildApp(config: AppConfig = {}) {
       return { stdout: shaped?.stdout ?? shaped?.output ?? "", exitCode: shaped?.exitCode };
     },
   } : undefined;
+  /**
+   * C4: the sandbox transport lives here and nowhere else. `ProjectSandboxService.execute/process` is
+   * the only way a command or a process leaves the API; every rule on top of it — command
+   * classification, approvals, the persistent shell session, output limits, one-call secret leases,
+   * the process log ring buffer and verify parsing — comes from the canonical modules
+   * (`code-shell-runtime.ts`, `code-process-manager.ts`, `code-secret-lease.ts`,
+   * `code-verify-parser.ts`). There is exactly one implementation of each policy.
+   * Without a sandbox the ports stay absent and every shell tool fails closed (`tool_not_configured`).
+   */
+  const secretLeases = new SecretLeaseProvider({
+    audit: auditLogService,
+    /**
+     * Owner decision (C4): the credential's environment decides whether a lease may exist at all.
+     * `development`/`staging` are leasable, `unknown` needs an explicit admin override (allowlist +
+     * owner/admin + audit), and `production` is never leased. The repository is the authoritative
+     * source: its answer wins over any environment marker that arrives with the tool call, so a caller
+     * cannot downgrade a production credential by claiming it is a development one.
+     */
+    resolveCredential: browserCredentials
+      ? async (context, companyId, credentialId) => browserCredentials!.describe(context, companyId, credentialId)
+      : undefined,
+  });
+  /**
+   * C4 (owner decision): every code tool execution decision passes through this single server-side
+   * engine in a fixed phase order — feature flag, RBAC, capability, hard deny, session mode, project
+   * rules, risk classification, approval. A direct API or tool call cannot skip it: the shell runtime
+   * refuses to run anything when no policy engine is injected.
+   */
+  const policyEngine = new PolicyEngine({
+    flags: featureFlagService,
+    capabilities: {
+      get: (id) => {
+        const schema = CODE_TOOL_SCHEMAS.find((tool) => tool.name === id);
+        return schema ? { id: schema.name, status: schema.status, version: schema.version } : undefined;
+      },
+    },
+    classifier: (command) => classifyShellCommand(command),
+    approvals: approvalsRepo
+      ? {
+          // Thin adapter to the existing approval system; the policy engine never re-implements it.
+          requestApproval: async (ctx, companyId, input) => approvalsRepo!.requestApproval(ctx, companyId, input as never),
+          consumeApproved: async (ctx, companyId, id, params) => approvalsRepo!.consumeApproved(ctx, companyId, id, params as never),
+        }
+      : undefined,
+    sessionMode: async (ctx, companyId, sessionId) => {
+      const session = await workspaceStore.getCodeSession(ctx, companyId, sessionId).catch(() => null);
+      return session?.mode ?? null;
+    },
+    // Until C4b enforces the egress allowlist in the sandbox, network access fails closed here.
+    networkEnforcement: () => process.env.NPATI_SANDBOX_EGRESS_ENFORCED === "true",
+    logger: app.log,
+  });
+  const shellSandboxPort: CodeShellSandboxPort | undefined = projectSandbox ? {
+    execute: async (input) => {
+      const started = Date.now();
+      const result = await projectSandbox!.execute(input.context, input.companyId, {
+        projectId: input.projectId,
+        command: input.command,
+        agentId: input.agentId,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(input.approved ? { approved: true } : {}),
+        ...(input.environmentReferences ? { environmentReferences: input.environmentReferences } : {}),
+      }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number; durationMs?: number; status?: string; sandboxId?: string; riskLevel?: string };
+      return {
+        exitCode: typeof result?.exitCode === "number" ? result.exitCode : 1,
+        stdout: result?.stdout ?? result?.output ?? "",
+        stderr: result?.stderr ?? "",
+        durationMs: typeof result?.durationMs === "number" ? result.durationMs : Date.now() - started,
+        status: result?.status,
+        sandboxId: result?.sandboxId,
+        riskLevel: result?.riskLevel,
+      };
+    },
+  } : undefined;
+  const processSandboxPort: CodeProcessSandboxPort | undefined = projectSandbox ? {
+    start: async (input) => {
+      const result = await projectSandbox!.process(input.context, input.companyId, {
+        projectId: input.projectId, command: input.command, action: "start", agentId: input.agentId,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.approved ? { approved: true } : {}),
+      }) as { processId?: string; pid?: number; startedAt?: string | number };
+      const parsed = typeof result?.startedAt === "number" ? result.startedAt : result?.startedAt ? Date.parse(result.startedAt) : Date.now();
+      return { processId: String(result?.processId ?? ""), pid: result?.pid, startedAt: Number.isFinite(parsed) ? parsed : Date.now() };
+    },
+    logs: async (input) => {
+      const result = await projectSandbox!.process(input.context, input.companyId, {
+        projectId: input.projectId, processId: input.processId, action: "logs", agentId: "code-process-manager",
+      }) as { output?: string; stdout?: string; eof?: boolean };
+      return { output: String(result?.output ?? result?.stdout ?? ""), eof: result?.eof };
+    },
+    stop: async (input) => {
+      const started = Date.now();
+      await projectSandbox!.process(input.context, input.companyId, {
+        projectId: input.projectId, processId: input.processId, action: "stop", agentId: "code-process-manager",
+      });
+      return { exitCode: 0, durationMs: Date.now() - started };
+    },
+  } : undefined;
+  const codeShellRuntime = new CodeShellRuntime({
+    sandbox: shellSandboxPort, flags: featureFlagService, audit: auditLogService,
+    leases: secretLeases, limits: config.codeAgentLimits, policy: policyEngine,
+  });
+  const codeProcessManager = new CodeProcessManager({
+    sandbox: processSandboxPort, flags: featureFlagService, audit: auditLogService, leases: secretLeases,
+  });
+  /** Bookkeeping only: the process ports carry no session id, so the adapter remembers it per process. */
+  const codeProcessSessions = new Map<string, { sessionId: string; companyId: string; projectId: string }>();
+  /** Stable short id used to bind a secret lease when the executor port carries no tool-call id. */
+  const fnv1a = (value: string): string => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  };
+  const codeShellRuntimePort = projectSandbox ? {
+    exec: async (input: {
+      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; turnId?: string;
+      command: string; cwd?: string;
+      env?: Record<string, string>; timeoutMs: number; secretRefs?: string[]; approved: boolean;
+    }) => {
+      const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
+      // The port carries no tool-call id, so a stable id is derived from the call itself; the runtime
+      // idempotency window already guarantees the same call is not executed twice.
+      const toolCallId = `${sessionId}:${input.turnId ?? "no-turn"}:${fnv1a(`code.shell.exec:${input.command}`)}`;
+      // C4: every secret reference becomes its own one-call lease (issue -> deliver -> revoke). The
+      // value itself never reaches this process: the sandbox resolves the reference it is given.
+      const leaseIds: string[] = [];
+      try {
+        for (const [index, reference] of (input.secretRefs ?? []).entries()) {
+          const [id, field] = reference.split(":");
+          const lease = await secretLeases.issue(input.ctx, {
+            companyId: input.companyId, projectId: input.projectId, sessionId, purpose: "code.shell.exec",
+            toolCallId, variableName: `NPATI_SECRET_${index + 1}`, credentialId: id ?? reference, field: field || "value",
+          });
+          leaseIds.push(lease.leaseId);
+        }
+        const result = await codeShellRuntime.exec(input.ctx, {
+          companyId: input.companyId, projectId: input.projectId, sessionId, command: input.command,
+          cwd: input.cwd, env: input.env, timeoutMs: input.timeoutMs, secretLeaseIds: leaseIds,
+          toolCallId, approved: input.approved,
+        });
+        return {
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          durationMs: result.durationMs,
+          truncated: result.truncated,
+          risk: result.risk === "safe" ? "low" as const : result.risk === "hard_deny" || result.risk === "approval" ? "high" as const : "medium" as const,
+        };
+      } finally {
+        for (const leaseId of leaseIds) await secretLeases.revoke(leaseId, "call_finished").catch(() => undefined);
+      }
+    },
+    startProcess: async (input: {
+      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string;
+      command: string; cwd?: string; env?: Record<string, string>; approved: boolean;
+    }) => {
+      const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
+      const record = await codeProcessManager.start(input.ctx, {
+        companyId: input.companyId, projectId: input.projectId, sessionId,
+        command: input.command, cwd: input.cwd, agentId: "code-tool-runtime", approved: input.approved,
+      });
+      codeProcessSessions.set(record.processId, { sessionId, companyId: input.companyId, projectId: input.projectId });
+      return { processId: record.processId, startedAt: new Date(record.startedAt).toISOString() };
+    },
+    listProcesses: async (input: { ctx: AuthContext; companyId: string; projectId: string }) => {
+      const processes: Array<{ processId: string; command: string; status: "running" | "stopped" | "failed"; startedAt?: string | null; exitCode?: number | null }> = [];
+      const seen = new Set<string>();
+      for (const [, meta] of codeProcessSessions) {
+        if (meta.companyId !== input.companyId || meta.projectId !== input.projectId || seen.has(meta.sessionId)) continue;
+        seen.add(meta.sessionId);
+        for (const record of codeProcessManager.list(meta.sessionId)) {
+          processes.push({
+            processId: record.processId, command: record.commandDigest, status: record.state,
+            startedAt: new Date(record.startedAt).toISOString(), exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
+          });
+        }
+      }
+      return { processes };
+    },
+    processLogs: async (input: { ctx: AuthContext; companyId: string; projectId: string; processId: string; offset: number; limit: number }) => {
+      const sessionId = codeProcessSessions.get(input.processId)?.sessionId ?? `${input.companyId}:${input.projectId}`;
+      const result = await codeProcessManager.logs(sessionId, input.processId, { offset: input.offset, limit: input.limit });
+      return { lines: result.lines, nextOffset: result.nextOffset, eof: result.eof };
+    },
+    stopProcess: async (input: { ctx: AuthContext; companyId: string; projectId: string; processId: string }) => {
+      const sessionId = codeProcessSessions.get(input.processId)?.sessionId ?? `${input.companyId}:${input.projectId}`;
+      await codeProcessManager.stop(input.ctx, sessionId, input.processId);
+      codeProcessSessions.delete(input.processId);
+      return { processId: input.processId, stopped: true };
+    },
+  } : undefined;
+  /**
+   * C4: verification runner. Commands come from the project toolchain detected in C1 — the runner never
+   * invents a command, and a tool without one is reported as unavailable instead of failing the call.
+   * Output parsing is the canonical `code-verify-parser.ts` (tsc/eslint/pytest/jest/vitest/go/cargo),
+   * which degrades to a bounded raw excerpt for unknown formats.
+   */
+  const codeVerifyRunnerPort = projectSandbox ? {
+    run: async (input: {
+      ctx: AuthContext; companyId: string; projectId: string;
+      tools: Array<"lint" | "typecheck" | "test" | "build">; timeoutMs: number;
+    }) => {
+      const project = (await projectService.get(input.ctx, input.companyId, input.projectId)) as
+        { toolchain?: { verifyCommands?: Record<string, string | undefined> } | null } | null;
+      const commands = project?.toolchain?.verifyCommands ?? {};
+      const startedAll = Date.now();
+      const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string }> = [];
+      for (const tool of input.tools) {
+        const command = commands[tool];
+        if (!command) {
+          results.push({ tool, ok: false, summary: `No ${tool} command is configured for this project`, findings: [] });
+          continue;
+        }
+        const result = await projectSandbox!.execute(input.ctx, input.companyId, {
+          projectId: input.projectId, command, agentId: "code-tool-runtime",
+        }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number };
+        const output = `${result?.stdout ?? result?.output ?? ""}${result?.stderr ? `\n${result.stderr}` : ""}`.trim();
+        const exitCode = typeof result?.exitCode === "number" ? result.exitCode : 1;
+        const parsed = parseVerifyOutput(detectVerifyTool(output, command), output, exitCode);
+        const findings = parsed.findings
+          .slice(0, 50)
+          .map((finding) => `${finding.file ?? ""}${finding.line ? `:${finding.line}` : ""}${finding.column ? `:${finding.column}` : ""} ${finding.severity}: ${finding.message}`.trim());
+        const summary = parsed.ok
+          ? `${tool} passed${parsed.summary.tests ? ` (${parsed.summary.passed}/${parsed.summary.tests} tests)` : ""}`
+          : `${tool} failed with exit code ${exitCode}`
+            + (parsed.summary.errors ? ` — ${parsed.summary.errors} error(s)` : "")
+            + (parsed.summary.failed ? `, ${parsed.summary.failed} failing test(s)` : "");
+        results.push({ tool, ok: parsed.ok, summary, findings, raw: parsed.raw ?? output.slice(0, 4000) });
+      }
+      return {
+        results,
+        stats: {
+          tools: results.length,
+          passed: results.filter((entry) => entry.ok).length,
+          failed: results.filter((entry) => !entry.ok).length,
+          durationMs: Date.now() - startedAll,
+        },
+      };
+    },
+  } : undefined;
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
@@ -1055,6 +1305,9 @@ export function buildApp(config: AppConfig = {}) {
         const project = await projectService.get(ctx, companyId, projectId);
         return (project as { type?: string } | null)?.type === "code_project" ? project as never : null;
       },
+      // C4: shell/process/verify execution is injected; without these ports those tools fail closed.
+      shellRuntime: codeShellRuntimePort,
+      verifyRunner: codeVerifyRunnerPort,
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,
@@ -2938,6 +3191,9 @@ ${localized.next}`;
         flagStates = {
           [CODE_READ_FLAG]: await featureFlagService.isEnabled(auth, CODE_READ_FLAG, options),
           [CODE_WRITE_FLAG]: await featureFlagService.isEnabled(auth, CODE_WRITE_FLAG, options),
+          // C4: command execution hangs off its own sub-flag, so the Inspector reports the flag that
+          // actually governs `code.shell.*` instead of assuming the write flag.
+          ["code.shell"]: await featureFlagService.isEnabled(auth, "code.shell", options),
         };
         flagSourceAvailable = true;
       } catch {

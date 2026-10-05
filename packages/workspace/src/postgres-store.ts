@@ -865,6 +865,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const credentialEnvironmentMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='069_credential_environment'");
+    if (!credentialEnvironmentMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration069 } = await import("./migration-069");
+        await runMigration069(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('069_credential_environment')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   // --- C1b: sandbox image supply chain ------------------------------------------------------

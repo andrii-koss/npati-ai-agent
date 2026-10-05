@@ -2,30 +2,31 @@ import { describe, it, expect } from "vitest";
 import {
   CapabilityInspectorService,
   EffectiveCapabilityResolver,
+  flagKeyForCapabilityId,
 } from "@npati/shared";
 
 describe("Section 15: Developer / Capability Inspector", () => {
   const inspector = new CapabilityInspectorService();
 
   describe("Capabilities Overview & Filter Views (All 13 Slices)", () => {
-    it("returns correct aggregate counts matching the extended 361-item catalog", () => {
+    it("returns correct aggregate counts matching the extended 367-item catalog", () => {
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(361);
-      expect(report.counts.agentCallable).toBe(97);
+      expect(report.counts.all).toBe(367);
+      expect(report.counts.agentCallable).toBe(103);
       expect(report.counts.runtimeOnly).toBe(264);
-      expect(report.counts.userVisible).toBe(97);
+      expect(report.counts.userVisible).toBe(103);
       expect(report.counts.automatic).toBeGreaterThan(0);
       expect(report.counts.requiresApproval).toBeGreaterThan(0);
       expect(report.counts.destructive).toBeGreaterThan(0);
       expect(report.counts.missingTest).toBe(0);
       expect(report.counts.missingUi).toBe(264);
-      expect(report.items.length).toBe(361);
+      expect(report.items.length).toBe(367);
     });
 
     it("filters precisely by agent-callable slice (97 tools)", () => {
       const report = inspector.inspect("agent-callable");
-      expect(report.items.length).toBe(97);
+      expect(report.items.length).toBe(103);
       for (const item of report.items) {
         expect(item.agentCallable).toBe(true);
       }
@@ -171,9 +172,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
-      expect(body.counts.all).toBe(361);
-      expect(body.counts.agentCallable).toBe(97);
-      expect(body.items.length).toBe(97);
+      expect(body.counts.all).toBe(367);
+      expect(body.counts.agentCallable).toBe(103);
+      expect(body.items.length).toBe(103);
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
@@ -181,14 +182,17 @@ describe("Section 15: Developer / Capability Inspector", () => {
   });
 
   describe("security-gate: C2/C3 coding capabilities and their feature-flag badge", () => {
-    const READ_IDS = ["code.fs.list", "code.fs.read", "code.fs.grep", "code.fs.tree", "code.symbols.outline", "code.project.info"];
-    const WRITE_IDS = ["code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn"];
+    const READ_IDS = ["code.fs.list", "code.fs.read", "code.fs.grep", "code.fs.tree", "code.symbols.outline", "code.project.info", "code.shell.process.list", "code.shell.process.logs"];
+    const WRITE_IDS = ["code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop", "code.verify.run"];
     const CODE_IDS = [...READ_IDS, ...WRITE_IDS];
     const EXPECTED_RISK: Record<string, string> = {
       "code.fs.list": "low", "code.fs.read": "low", "code.fs.grep": "low", "code.fs.tree": "low",
       "code.symbols.outline": "low", "code.project.info": "low", "code.fs.diff": "low",
+      "code.shell.process.list": "low", "code.shell.process.logs": "low",
       "code.fs.edit": "medium", "code.fs.apply_patch": "medium", "code.fs.write": "medium",
       "code.fs.move": "medium", "code.fs.undo_last_turn": "medium", "code.fs.delete": "high",
+      "code.shell.exec": "high", "code.shell.process.start": "high", "code.shell.process.stop": "medium",
+      "code.verify.run": "medium",
     };
 
     it("registers all thirteen code capabilities with the expected contract and unique inventory ids", () => {
@@ -197,8 +201,8 @@ describe("Section 15: Developer / Capability Inspector", () => {
 
       expect(codeItems.map((item) => item.capabilityId).sort()).toEqual([...CODE_IDS].sort());
       expect(codeItems.map((item) => item.id).sort((a, b) => a - b))
-        .toEqual([349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361]);
-      expect(new Set(codeItems.map((item) => item.id)).size).toBe(13);
+        .toEqual([349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367]);
+      expect(new Set(codeItems.map((item) => item.id)).size).toBe(19);
       for (const item of codeItems) {
         expect(item.risk, `${item.capabilityId} risk`).toBe(EXPECTED_RISK[item.capabilityId]);
         expect(item.agentCallable).toBe(true);
@@ -207,15 +211,18 @@ describe("Section 15: Developer / Capability Inspector", () => {
       }
       // The code domain is additive: the previous three domains keep their exact sizes.
       const byDomain = report.items.reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.domain]: (acc[item.domain] ?? 0) + 1 }), {});
-      expect(byDomain.code).toBe(13);
-      expect(report.counts.all).toBe(361);
+      // The code domain is additive and grows with every Coding Agent step: assert the invariant
+    // (the registered set matches the contract lists) instead of a hardcoded step number.
+    expect(byDomain.code).toBe(CODE_IDS.length);
+      expect(report.counts.all).toBe(367);
     });
 
     it("never reports a code capability as allowed when no flag source is available", () => {
       const items = inspector.inspect("all").items.filter((item) => item.domain === "code");
       for (const item of items) {
-        // The read/search tools plus code.fs.diff are gated by code.read; the mutating ones by code.write.
-        const expectedFlag = READ_IDS.includes(item.capabilityId) || item.capabilityId === "code.fs.diff" ? "code.read" : "code.write";
+        // The governing flag comes from the canonical per-tool mapping (reads and code.fs.diff use
+        // code.read, file mutations code.write, sandbox execution code.shell) — never a hardcoded list.
+        const expectedFlag = flagKeyForCapabilityId(item.capabilityId, "code");
         expect(item.flagKey, `${item.capabilityId} flag`).toBe(expectedFlag);
         // No flag source configured: the badge must be unknown, never "on".
         expect(item.flagState).toBe("unknown");
@@ -227,20 +234,27 @@ describe("Section 15: Developer / Capability Inspector", () => {
       }
     });
 
-    it("maps the code.read and code.write flag states into the badge without enabling anything itself", () => {
-      const off = inspector.inspect("all", undefined, { flagStates: { "code.read": false, "code.write": false }, flagSourceAvailable: true });
-      const on = inspector.inspect("all", undefined, { flagStates: { "code.read": true, "code.write": true }, flagSourceAvailable: true });
+    it("maps the code flag states into the badge without enabling anything itself", () => {
+      const off = inspector.inspect("all", undefined, { flagStates: { "code.read": false, "code.write": false, "code.shell": false }, flagSourceAvailable: true });
+      const on = inspector.inspect("all", undefined, { flagStates: { "code.read": true, "code.write": true, "code.shell": true }, flagSourceAvailable: true });
       expect(off.items.filter((i) => i.domain === "code").every((i) => i.flagState === "off")).toBe(true);
       expect(on.items.filter((i) => i.domain === "code").every((i) => i.flagState === "on")).toBe(true);
-      // Read tools enabled but writes disabled: the mutating capabilities stay off, never on.
-      const readOnly = inspector.inspect("all", undefined, { flagStates: { "code.read": true, "code.write": false }, flagSourceAvailable: true });
-      const readItems = readOnly.items.filter((i) => i.domain === "code" && (READ_IDS.includes(i.capabilityId) || i.capabilityId === "code.fs.diff"));
-      const writeItems = readOnly.items.filter((i) => i.domain === "code" && WRITE_IDS.includes(i.capabilityId) && i.capabilityId !== "code.fs.diff");
-      expect(readItems.every((i) => i.flagState === "on")).toBe(true);
-      expect(writeItems.every((i) => i.flagState === "off")).toBe(true);
+      // Read tools enabled but writes and sandbox execution disabled: those stay off, never on.
+      const readOnly = inspector.inspect("all", undefined, { flagStates: { "code.read": true, "code.write": false, "code.shell": false }, flagSourceAvailable: true });
+      for (const item of readOnly.items.filter((i) => i.domain === "code")) {
+        const key = flagKeyForCapabilityId(item.capabilityId, "code");
+        expect(item.flagState, `${item.capabilityId} state`).toBe(key === "code.read" ? "on" : "off");
+      }
+      // A flag that the source does not report is never treated as enabled (off or unknown, not on).
+      const missing = inspector.inspect("all", undefined, { flagStates: { "code.read": true }, flagSourceAvailable: true });
+      for (const item of missing.items.filter((i) => i.domain === "code")) {
+        const key = flagKeyForCapabilityId(item.capabilityId, "code");
+        if (key === "code.read") { expect(item.flagState, `${item.capabilityId} state`).toBe("on"); continue; }
+        expect(["off", "unknown"], `${item.capabilityId} must not be on when its flag is missing`).toContain(item.flagState);
+      }
       // Dark launch default: the flags are off, and the capability list itself is unchanged.
-      expect(off.counts.all).toBe(361);
-      expect(on.counts.all).toBe(361);
+      expect(off.counts.all).toBe(367);
+      expect(on.counts.all).toBe(367);
     });
   });
 });

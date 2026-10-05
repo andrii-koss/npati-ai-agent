@@ -1,6 +1,6 @@
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 import { CAPABILITY_MATRIX, type CapabilityMatrixEntry } from "./capability-matrix";
-import { CODE_TOOL_FLAG_KEYS } from "./code-capabilities";
+import { CODE_TOOL_FLAG_KEYS_RESOLVED } from "./code-capabilities";
 import { EffectiveCapabilityResolver, type ResolutionContext } from "./effective-capabilities";
 import type { CapabilityDefinition } from "./capabilities";
 
@@ -76,7 +76,9 @@ export function flagKeyForCapability(domain: string): string | null {
  * reported as read-gated rather than ungated.
  */
 export function flagKeyForCapabilityId(capabilityId: string, domain?: string): string | null {
-  const direct = CODE_TOOL_FLAG_KEYS[capabilityId];
+  // Resolved map: it includes the per-tool overrides (for example every `code.shell.*` tool is gated
+  // by the `code.shell` flag rather than by the write flag derived from its permissions).
+  const direct = CODE_TOOL_FLAG_KEYS_RESOLVED[capabilityId];
   if (direct) return direct;
   return domain === undefined ? null : flagKeyForCapability(domain);
 }

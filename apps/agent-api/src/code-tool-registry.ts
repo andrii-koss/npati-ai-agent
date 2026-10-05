@@ -65,15 +65,39 @@ const C2_TOOL_NAMES: readonly string[] = [
 ];
 export const C2_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C2_TOOL_NAMES.includes(tool.name));
 
+/**
+ * The C3 published subset (reads plus the mutating file tools). Kept as a named constant for the same
+ * reason as the C2 subset: manifest v3 must keep resolving for sessions created before C4, and its
+ * checksum is frozen (see `PUBLISHED_V3_TOOL_SCHEMA_CHECKSUM`).
+ */
+const C3_TOOL_NAMES: readonly string[] = [
+  ...C2_TOOL_NAMES,
+  "code.fs.edit",
+  "code.fs.apply_patch",
+  "code.fs.write",
+  "code.fs.move",
+  "code.fs.delete",
+  "code.fs.diff",
+  "code.fs.undo_last_turn",
+];
+export const C3_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C3_TOOL_NAMES.includes(tool.name));
+
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 3;
+export const CODE_TOOL_MANIFEST_VERSION = 4;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
  * Regenerate with: `node scripts/code-tool-schemas-generate.mjs --manifest-version N`.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "677fb6f897cdf8b2684cd7f59ba574ea3a53897bb7eb9aff6aedec3280072125";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "2575b9535a0e2900a485e954fde3049ed5a751c0163becdf82937768802d425b";
+
+/**
+ * Checksum of the C3 published set (13 tools: the reads plus the mutating file tools). Frozen for the
+ * same reason as v2: manifest v3 must keep resolving for sessions created before C4, and editing one of
+ * those schemas without publishing a new version must fail the tests instead of rewriting history.
+ */
+export const PUBLISHED_V3_TOOL_SCHEMA_CHECKSUM = "677fb6f897cdf8b2684cd7f59ba574ea3a53897bb7eb9aff6aedec3280072125";
 
 /**
  * Checksum of the C2 published set (the six read/search tools). It is frozen here so that a session
@@ -187,6 +211,7 @@ export function resolveManifestForSession(manifestVersion: number, manifests: re
 export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest([], 1),
   toolManifest(C2_TOOL_SCHEMAS, 2),
+  toolManifest(C3_TOOL_SCHEMAS, 3),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

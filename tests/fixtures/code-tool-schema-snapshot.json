@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 3,
-  "checksum": "677fb6f897cdf8b2684cd7f59ba574ea3a53897bb7eb9aff6aedec3280072125",
+  "manifestVersion": 4,
+  "checksum": "2575b9535a0e2900a485e954fde3049ed5a751c0163becdf82937768802d425b",
   "tools": [
     {
       "key": "code.fs.apply_patch@1",
@@ -87,11 +87,53 @@
       "checksum": "ed977bbb00a2c40fefb024f0ac6d377cc5e884fac77cd03f5bc61e38f5816674"
     },
     {
+      "key": "code.shell.exec@1",
+      "name": "code.shell.exec",
+      "version": 1,
+      "status": "active",
+      "checksum": "0f8a03d1f31732fc9e4a72c34af44be01376121e8706bd0f10db308208c7ce17"
+    },
+    {
+      "key": "code.shell.process.list@1",
+      "name": "code.shell.process.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "4092c841adad624d5687170a9dadc5b111445f40b386628e976fbc24e0157bf6"
+    },
+    {
+      "key": "code.shell.process.logs@1",
+      "name": "code.shell.process.logs",
+      "version": 1,
+      "status": "active",
+      "checksum": "461e5cdd26baaab0a5705428249bdc404de4010724f1669f5a9596d7ac2d4b0c"
+    },
+    {
+      "key": "code.shell.process.start@1",
+      "name": "code.shell.process.start",
+      "version": 1,
+      "status": "active",
+      "checksum": "ad395fb5782517a37f569a5ed127ab6c84bb258ec32cbf3e9cb89ec716b7eae0"
+    },
+    {
+      "key": "code.shell.process.stop@1",
+      "name": "code.shell.process.stop",
+      "version": 1,
+      "status": "active",
+      "checksum": "4344685b2676fcfadf1cd14bbc71eaee33cb418d1eebcc2533deab26b589f7ac"
+    },
+    {
       "key": "code.symbols.outline@1",
       "name": "code.symbols.outline",
       "version": 1,
       "status": "active",
       "checksum": "65624898ceb405ec024aedb83e0e962729938c57d6dd85308619e5f1a7272abf"
+    },
+    {
+      "key": "code.verify.run@1",
+      "name": "code.verify.run",
+      "version": 1,
+      "status": "active",
+      "checksum": "d0f9ff32320c801617ad85edc217f4dd2517cef82ac6510825493843a639951d"
     }
   ]
 }
