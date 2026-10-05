@@ -1,5 +1,6 @@
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 import { CAPABILITY_MATRIX, type CapabilityMatrixEntry } from "./capability-matrix";
+import { CODE_TOOL_FLAG_KEYS } from "./code-capabilities";
 import { EffectiveCapabilityResolver, type ResolutionContext } from "./effective-capabilities";
 import type { CapabilityDefinition } from "./capabilities";
 
@@ -56,15 +57,28 @@ export interface InspectorReport {
 }
 
 /**
- * C2: Coding Agent capabilities are gated by the `code.read` sub-flag (C1a). The inspector only
- * reports the state; it never turns a flag on and it degrades to "unknown" when the server has no
- * flag source, so a missing flag service can never look like an enabled feature.
+ * C2/C3: Coding Agent capabilities are gated by a sub-flag (C1a): the read/search tools by `code.read`,
+ * the mutating tools by `code.write`. The inspector only reports the state; it never turns a flag on and
+ * it degrades to "unknown" when the server has no flag source, so a missing flag service can never look
+ * like an enabled feature.
  */
 export const CODE_CAPABILITY_DOMAIN = "code";
 export const CODE_READ_FLAG = "code.read";
+export const CODE_WRITE_FLAG = "code.write";
 
 export function flagKeyForCapability(domain: string): string | null {
   return domain === CODE_CAPABILITY_DOMAIN ? CODE_READ_FLAG : null;
+}
+
+/**
+ * The flag that governs one concrete capability: `code.read` for the read/search tools, `code.write` for
+ * the mutating ones. Unknown capabilities fall back to the domain default, so an unmapped tool is
+ * reported as read-gated rather than ungated.
+ */
+export function flagKeyForCapabilityId(capabilityId: string, domain?: string): string | null {
+  const direct = CODE_TOOL_FLAG_KEYS[capabilityId];
+  if (direct) return direct;
+  return domain === undefined ? null : flagKeyForCapability(domain);
 }
 
 export interface InspectOptions {
@@ -158,8 +172,8 @@ export class CapabilityInspectorService {
       evaluatedDetails = res.details;
     }
 
-    const flagStateFor = (domain: string): { flagKey: string | null; flagState: "on" | "off" | "unknown" | null } => {
-      const flagKey = flagKeyForCapability(domain);
+    const flagStateFor = (capabilityId: string, domain: string): { flagKey: string | null; flagState: "on" | "off" | "unknown" | null } => {
+      const flagKey = flagKeyForCapabilityId(capabilityId, domain);
       if (!flagKey) return { flagKey: null, flagState: null };
       const value = options.flagStates?.[flagKey];
       if (value === true) return { flagKey, flagState: "on" };
@@ -179,7 +193,7 @@ export class CapabilityInspectorService {
         status: m.status,
         risk: m.risk,
         reasonCode: detail?.reasonCode,
-        ...flagStateFor(m.domain),
+        ...flagStateFor(m.capabilityId, m.domain),
       };
     });
 

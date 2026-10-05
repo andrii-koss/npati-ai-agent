@@ -3,8 +3,127 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C2 — read and search tools** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain)
-- Next: **C3 — write/edit tools** (read-before-write, checkpoints), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+- Last completed: **C3 — edit tools, checkpoints and diff** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain, C2 read/search tools)
+- Next: **C4 — shell and dependency tools** (sandbox execution, allowlisted registries, SecretLease), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+
+## Implemented (C3, latest step)
+- **Seven new `code.*` capabilities** (inventoryIds **355–361**), so the registry is now **361 total /
+  97 agent-callable**: `code.fs.edit` (medium), `code.fs.apply_patch` (medium), `code.fs.write` (medium),
+  `code.fs.move` (medium), `code.fs.delete` (**high, `requiresConfirmation: true`**), `code.fs.diff`
+  (**low**, `workspace:read`) and `code.fs.undo_last_turn` (medium). Flag gating is derived from
+  `requiredPermissions`, not from the group, so `code.fs.diff` is gated by `code.read` while the
+  mutating tools require `code.write`. The Inspector now receives **both** flag states.
+- **Canonical tool schemas** extended to **13 tools**, manifest **v3**
+  (`checksum 677fb6f8…2125`); v1 (empty) and v2 (the six C2 tools, with a frozen checksum) remain
+  resolvable, so sessions pinned to an older manifest keep working. Artifacts were regenerated with
+  `scripts/code-tool-schemas-generate.mjs --manifest-version 3` and both guards are green.
+- **Write engine** (`code-tools-write.ts`, `code-tools-patch.ts`, `code-tools-diff.ts`):
+  `applyEdit` (exact replacement, uniqueness check, whitespace-tolerant nearest-match hint with line
+  number, `replace_all`, preserved encoding/BOM/EOL/tabs/file mode), `applyPatch` in the project's own
+  `*** Begin Patch` format with **atomicity** (every hunk validated and every new content computed before
+  the first write; a mid-write failure rolls back from before-copies; `dryRun` writes nothing),
+  `writeFileSafe` (`createDirectories`/`overwrite` honoured), `movePathSafe`, `deletePathSafe`, a
+  dependency-free unified diff with stats, size limits (`NPATI_CODE_MAX_EDIT_BYTES` 512 KiB,
+  `NPATI_CODE_MAX_PATCH_FILES` 50), a mass-operation threshold (`NPATI_CODE_MASS_OP_THRESHOLD` 10) that
+  demands approval, `.git/**` protection, sensitive-file protection (allowed only with an explicit
+  approval, and the result says so), and `preferredEditTool(profile)` so the edit strategy comes from
+  the model profile, never from a model name.
+- **Runtime** (`code-tool-runtime.ts`, `code-workspace-checkpoint.ts`, `code-edit-approval.ts`): the gate
+  order is now tenant isolation → master flag → tool/version resolution → **sub-flag (`code.write` for
+  writes, `code.read` otherwise)** → argument validation (`confirm: true` required for undo) →
+  idempotency → **read-before-write → approval → checkpoint → audit (strict, fail-closed)** → execution
+  by the canonical engine → turn log + refreshed read tracking + post-write warnings → data envelope +
+  Activity/AuditLog. Reused rather than rebuilt: `ProjectGitService.createCheckpoint/restoreCheckpoint`
+  for per-turn checkpoints (one per turn, created **before** the first write; no checkpoint port means
+  the write is refused with `checkpoint_unavailable`), `CompanyApprovalsRepository.requestApproval/
+  consumeApproved` for destructive and bulk operations (payload substitution between approval and
+  execution is rejected via `payload_hash`), and `ProjectWorkspace` revision control
+  (`expectedRevision` → `revision_conflict`, at most two retries per `(session, path)`).
+- **New error codes**: `read_before_write_required` (409, `details.reason: not_read|changed`),
+  `revision_conflict`/`revision_conflict_exhausted` (409), `checkpoint_unavailable` (503),
+  `checkpoint_not_found` (409), `approval_required` (403 with `details.approvalId`),
+  `approval_invalid` (409), `approval_unavailable` (503), `write_unavailable` (503),
+  `edit_no_match`/`edit_not_unique`/`patch_conflict` (409), `write_failed`/`delete_failed`/`move_failed`
+  (502), `edit_too_large`/`patch_too_large` (413), `git_dir_protected`/`sensitive_file_denied` (403).
+- **API**: the invoke harness now accepts `turnId`/`approvalId`/`runId`/`agentId` and returns `details`;
+  added `GET /companies/:companyId/projects/:projectId/code/diff?turnId=` and
+  `POST …/code/undo-last-turn` (owner/admin), all with `apiVersion`.
+- **Audit/Activity**: `code.fs.*` writes are audited **before** the change (strict, fail-closed) with
+  `path`, `sha256`, `linesAdded/Removed`, `checkpointId`, `turnId` — no file content and no secrets.
+  Post-write formatter/syntax hooks run only when `NPATI_CODE_FORMAT_COMMAND`/`NPATI_CODE_SYNTAX_COMMAND`
+  are configured and can only add warnings.
+
+## Files / migrations / capabilities changed (C3)
+- agent-api: **new** `code-tools-write.ts`, `code-tools-patch.ts`, `code-tools-diff.ts`,
+  `code-workspace-checkpoint.ts`, `code-edit-approval.ts`; changed `code-tool-runtime.ts`,
+  `code-tool-executors.ts`, `code-tool-routes.ts`, `code-tools-path.ts` (14 new error codes, additive),
+  `app.ts` (turn tracker, checkpoint/approval ports, write port, canonical executors, both flag states).
+- `packages/shared/src/code-capabilities.ts` (+7 capabilities), `capability-catalog.ts`,
+  `capability-matrix.ts`, `capability-inspector.ts` (`flagKeyForCapabilityId`).
+- `apps/agent-api/src/code-tool-schemas.json`, `code-tool-registry.ts` (v3 + frozen v2 checksum),
+  `code-tool-schemas.published.json`, `tests/fixtures/code-tool-schema-snapshot.json`.
+- Tests: **new** `coding-agent-c3-write-engine.test.ts` (30), `coding-agent-c3-runtime.test.ts` (16),
+  `coding-agent-c3-schema-executor-parity.test.ts` (6), `coding-agent-c3-capabilities.test.ts` (12);
+  counters migrated to invariants in eleven files (the C2 tool-count tests now assert subset +
+  artifact equality instead of a hardcoded six).
+- No migration in C3 (checkpoints reuse git; the turn log, read tracking and idempotency cache stay
+  in-process — persistence is C6a).
+
+## Verification (C3)
+- `npm run typecheck` → **0 errors**; `npm run build` for agent-api and web → **exit 0**;
+  `node scripts/verify-code-tool-schemas.mjs --check` → **exit 0** (13 tools, manifest v3);
+  `node scripts/sandbox-image-verify.mjs` → **exit 0**.
+- Definitive run: **21 test files, 282 tests, 0 failures** — all C3 suites plus every C1/C1a/C1b/C1c and
+  C2 security-gate suite, capability registry, full capability regression, Inspector, invariants,
+  agent-api and architecture.
+- Real defects found and fixed while closing the step (none by weakening a check): the executors had
+  been written before the canonical engines and had drifted from the schemas — `replace_all` was
+  ignored, `apply_patch` treated the canonical patch as a unified diff and **did not honour `dryRun`**
+  (a dry run could have written), `write` dropped `createDirectories`/`overwrite`, `move`/`delete`
+  dropped `overwrite`/`recursive`/`expectedRevision`; read-before-write wrongly refused a legitimate
+  overwrite after a read (fixed with an additive `readVerified` flag that only the runtime sets);
+  `stats.linesAdded/linesRemoved` were lost when the turn diff moved to the canonical shape (both forms
+  are now returned).
+
+## Real E2E status (C3)
+- Verified in-process with fake and real workspace ports: the full gate order, read-before-write,
+  revision conflicts and retries, per-turn checkpoint and undo, approval consumption with payload-hash
+  checking, atomic patches with dry-run, diffs and stats, and the acceptance path
+  (`read` → `edit` → `apply_patch` on several files → correct diff → undo restores the original state).
+- **Not verified here:** a real git-backed checkpoint and undo against a live project workspace (no
+  Docker/sandbox run in this environment), a live PostgreSQL (no migration in C3), the existing approval
+  system end to end through HTTP with a real approver, the LLM-driven tool loop (C6), and the Activity
+  run stream / `ExecutionSnapshot` (C6/C6b).
+
+## Known risks / open questions (C3)
+1. Without the approval port (for example a deployment without the database) every destructive change is
+   refused with `approval_unavailable` (503). That is the intended deny, but it means delete does not
+   work in such a deployment.
+2. `code.fs.edit` refuses an ambiguous match (>1) unless `replace_all` is set — a deliberate choice to
+   avoid editing the wrong occurrence; it can be relaxed if the product prefers a different tradeoff.
+3. The canonical patch format requires every hunk to match exactly; on any mismatch **no** file changes.
+   This is stricter than `patch(1)` and is deliberate.
+4. `code.fs.read` still denies every `.env*`, including `.env.example` (carried over from C2).
+5. Turn log, read tracking and idempotency are in-process: a restart forgets them, so after a restart
+   read-before-write will demand a fresh read (safe, but noisy) — persistence is C6a.
+6. The Inspector shows a real flag state for `code.*` only when the flag service is configured;
+   otherwise it reports `unknown`, never `on`.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (version 4, section C4), `docs/coding-agent/00-audit.md`
+  sections 6, 7 and 13, and this file.
+- Execute **only C4**: sandbox command execution (`code.shell.run`) with allowlisted commands,
+  environment sanitisation, output redaction, timeouts and output limits, plus the dependency/registry
+  rules of C4a (install without lifecycle scripts, lockfile-reproducible, allowlisted registries only)
+  and the SecretLease mechanism of C4 (secrets scoped to a single tool call, TTL, revoked after use, no
+  inheritance into later processes or tool calls, never written into a persistent shell environment).
+  Register the new capabilities, extend `code-tool-schemas.json`, bump
+  `CODE_TOOL_MANIFEST_VERSION`, regenerate the published artifact and snapshot with
+  `node scripts/code-tool-schemas-generate.mjs --manifest-version N`, keep the schema↔capability parity
+  test and the schema↔executor parity test green, and update the counter tests as invariants.
+- Privileged actions (secret issuance, allowlist changes) must be written through `AuditLogService`
+  (C1c) and fail closed, exactly like the C3 approvals and checkpoints.
+- Do not start C5 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C2, latest step)
 - **Six `code.*` capabilities** in the canonical registry, all `risk: low`, `type: tool`,

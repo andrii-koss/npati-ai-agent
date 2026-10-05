@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CODE_READ_CAPABILITIES, CODE_TOOL_SCHEMA_MIRROR } from "@npati/shared";
+import { CODE_CAPABILITIES, CODE_TOOL_SCHEMA_MIRROR } from "@npati/shared";
 import { CODE_TOOL_SCHEMAS } from "../apps/agent-api/src/code-tool-registry";
 
 /**
@@ -22,9 +22,33 @@ const TOOL_NAMES = [
   "code.fs.tree",
   "code.symbols.outline",
   "code.project.info",
+  "code.fs.edit",
+  "code.fs.apply_patch",
+  "code.fs.write",
+  "code.fs.move",
+  "code.fs.delete",
+  "code.fs.diff",
+  "code.fs.undo_last_turn",
 ] as const;
 
-const capabilityById = new Map(CODE_READ_CAPABILITIES.map((capability) => [capability.id, capability]));
+/** C3 risk contract: reads are low, mutations medium, deletion high and approval-gated. */
+const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
+  "code.fs.list": "low",
+  "code.fs.read": "low",
+  "code.fs.grep": "low",
+  "code.fs.tree": "low",
+  "code.symbols.outline": "low",
+  "code.project.info": "low",
+  "code.fs.edit": "medium",
+  "code.fs.apply_patch": "medium",
+  "code.fs.write": "medium",
+  "code.fs.move": "medium",
+  "code.fs.delete": "high",
+  "code.fs.diff": "low",
+  "code.fs.undo_last_turn": "medium",
+};
+
+const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
 const toolByName = new Map(CODE_TOOL_SCHEMAS.map((tool) => [tool.name, tool]));
 
 type JsonSchema = Record<string, unknown>;
@@ -34,11 +58,11 @@ const required = (schema: JsonSchema | undefined): string[] =>
   ((schema?.required ?? []) as string[]).slice().sort();
 
 describe("security-gate: C2 tool schema parity", () => {
-  it("describes exactly the same six tools in the registry and in the capability catalogue", () => {
+  it("describes exactly the same thirteen tools in the registry and in the capability catalogue", () => {
     expect([...toolByName.keys()].sort()).toEqual([...TOOL_NAMES].sort());
     expect([...capabilityById.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect(CODE_READ_CAPABILITIES).toHaveLength(6);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(6);
+    expect(CODE_CAPABILITIES).toHaveLength(13);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(13);
   });
 
   it("keeps argument schemas identical field by field for every tool", () => {
@@ -81,7 +105,8 @@ describe("security-gate: C2 tool schema parity", () => {
       expect(tool.status).toBe("active");
       expect(capability.version, `${name} capability version must equal the tool version`).toBe(tool.version);
       expect(capability.domain).toBe("code");
-      expect(capability.risk).toBe("low");
+      expect(capability.risk, `${name} risk`).toBe(EXPECTED_RISK[name]);
+      expect(capability.requiresConfirmation, `${name} approval requirement`).toBe(name === "code.fs.delete");
       expect(capability.agentCallable).toBe(true);
       expect(CODE_TOOL_SCHEMA_MIRROR[name], `${name} must be present in the mirror`).toBeTruthy();
       expect(CODE_TOOL_SCHEMA_MIRROR[name]!.inputSchema).toEqual(tool.inputSchema);

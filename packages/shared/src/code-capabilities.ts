@@ -2,11 +2,12 @@ import type { CapabilityDefinition } from "./capabilities";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
 
 /**
- * C2: read-only Coding Agent tools.
+ * C2/C3: Coding Agent tools.
  *
- * These are the first `code.*` capabilities. They are read-only by design (risk `low`, no approval),
- * and every one of them is gated server-side by the `code.read` feature flag plus the C1 workspace
- * boundary.
+ * C2 contributed the read-only tools (risk `low`, no approval): they are gated server-side by the
+ * `code.read` feature flag plus the C1 workspace boundary. C3 adds the mutating tools (`medium`, and
+ * `high` for delete), gated by `code.write` on top of the master `coding_agent.enabled` flag, always
+ * checkpointed and still confined to the admitted sandbox.
  *
  * SCHEMA CONTRACT (single source of truth)
  * ----------------------------------------
@@ -258,6 +259,189 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  "code.fs.edit": {
+    inputSchema: {
+      type: "object",
+      required: ["path", "old_string", "new_string"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "Workspace-relative file path that was read earlier in this session." },
+        old_string: { type: "string", minLength: 1, maxLength: 100000, description: "Exact text to replace; must match the current file content byte for byte." },
+        new_string: { type: "string", maxLength: 100000 },
+        replace_all: { type: "boolean", default: false, description: "Replace every occurrence instead of failing when the match is not unique." },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.edit", {
+      type: "object",
+      required: ["path", "replacements", "linesAdded", "linesRemoved", "diff", "sha256", "encoding", "eol"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        replacements: { type: "integer" },
+        linesAdded: { type: "integer" },
+        linesRemoved: { type: "integer" },
+        diff: { type: "string" },
+        sha256: { type: "string" },
+        encoding: { type: "string" },
+        eol: { type: "string" },
+      },
+    }),
+  },
+  "code.fs.apply_patch": {
+    inputSchema: {
+      type: "object",
+      required: ["patch"],
+      additionalProperties: false,
+      properties: {
+        patch: { type: "string", minLength: 1, maxLength: 1000000, description: "Unified diff (---/+++/@@ hunks) with workspace-relative paths." },
+        dryRun: { type: "boolean", default: false },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.apply_patch", {
+      type: "object",
+      required: ["applied", "dryRun", "diff"],
+      additionalProperties: false,
+      properties: {
+        applied: { type: "array", items: { type: "string" } },
+        dryRun: { type: "boolean" },
+        diff: { type: "string" },
+        failed: { type: ["array", "null"], items: { type: "object", additionalProperties: true } },
+      },
+    }),
+  },
+  "code.fs.write": {
+    inputSchema: {
+      type: "object",
+      required: ["path", "content"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "Workspace-relative file path." },
+        content: { type: "string", maxLength: 1000000 },
+        createDirectories: { type: "boolean", default: true },
+        overwrite: { type: "boolean", default: true, description: "When false, refuse to replace an existing file." },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.write", {
+      type: "object",
+      required: ["path", "created", "bytes", "sha256", "encoding", "eol", "diff"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        created: { type: "boolean" },
+        bytes: { type: "integer" },
+        sha256: { type: "string" },
+        encoding: { type: "string" },
+        eol: { type: "string" },
+        diff: { type: "string" },
+      },
+    }),
+  },
+  "code.fs.move": {
+    inputSchema: {
+      type: "object",
+      required: ["from", "to"],
+      additionalProperties: false,
+      properties: {
+        from: { type: "string", description: "Existing workspace-relative path." },
+        to: { type: "string", description: "Destination workspace-relative path." },
+        overwrite: { type: "boolean", default: false },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.move", {
+      type: "object",
+      required: ["from", "to", "moved"],
+      additionalProperties: false,
+      properties: {
+        from: { type: "string" },
+        to: { type: "string" },
+        moved: { type: "boolean" },
+      },
+    }),
+  },
+  "code.fs.delete": {
+    inputSchema: {
+      type: "object",
+      required: ["path"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "Workspace-relative path to delete." },
+        recursive: { type: "boolean", default: false, description: "Required to delete a non-empty directory." },
+        expectedRevision: { type: "string", description: "Optional sha256 the caller expects the target to still have; a mismatch refuses the delete." },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.delete", {
+      type: "object",
+      required: ["path", "deleted", "recursive"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        deleted: { type: "boolean" },
+        recursive: { type: "boolean" },
+      },
+    }),
+  },
+  "code.fs.diff": {
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "Optional workspace-relative path to limit the diff to." },
+        turnOnly: { type: "boolean", default: true, description: "Limit the diff to changes made in the current turn." },
+        maxFiles: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.diff", {
+      type: "object",
+      required: ["files", "stats"],
+      additionalProperties: false,
+      properties: {
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["path", "status", "additions", "deletions"],
+            additionalProperties: false,
+            properties: {
+              path: { type: "string" },
+              status: { enum: ["added", "modified", "deleted", "renamed"] },
+              additions: { type: "integer" },
+              deletions: { type: "integer" },
+              diff: { type: "string" },
+            },
+          },
+        },
+        stats: {
+          type: "object",
+          required: ["files", "additions", "deletions"],
+          additionalProperties: false,
+          properties: {
+            files: { type: "integer" },
+            additions: { type: "integer" },
+            deletions: { type: "integer" },
+          },
+        },
+      },
+    }),
+  },
+  "code.fs.undo_last_turn": {
+    inputSchema: {
+      type: "object",
+      required: ["confirm"],
+      additionalProperties: false,
+      properties: {
+        confirm: { type: "boolean", enum: [true], description: "Must be true: the caller confirms it wants the turn rolled back." },
+      },
+    },
+    outputSchema: resultEnvelope("code.fs.undo_last_turn", {
+      type: "object",
+      required: ["restored", "checkpointId"],
+      additionalProperties: false,
+      properties: {
+        restored: { type: "array", items: { type: "string" } },
+        checkpointId: { type: "string" },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -428,3 +612,236 @@ export const CODE_READ_MATRIX: CapabilityMatrixEntry[] = CODE_READ_CAPABILITIES.
   testFiles: ["tests/coding-agent-c2-schema-parity.test.ts", "tests/coding-agent-c2-tool-runtime.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
+
+/**
+ * C3: mutating Coding Agent tools.
+ *
+ * Every one of them is gated server-side by the `code.write` feature flag (on top of the master
+ * `coding_agent.enabled` flag), requires `workspace:write`, runs only in the admitted sandbox, and is
+ * checkpointed so a turn can be rolled back. `code.fs.delete` is the only `high` risk tool of the set
+ * and the only one that requires an explicit approval; `code.fs.diff` stays read-only (`low`).
+ *
+ * Inventory ids 355-361 continue the catalog (C2 ended at 354).
+ */
+const WRITE_PERMISSION = ["workspace:write"];
+
+export const CODE_WRITE_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.fs.edit",
+    inventoryIds: [355],
+    type: "tool",
+    domain: "code",
+    name: "Edit code file (exact replace)",
+    description: "Replace an exact string in one workspace file after the file was read in this session, returning the diff, the new sha256 and the line counts. Every edit is checkpointed.",
+    useWhen: [
+      "The agent knows the exact current text (from code.fs.read) and wants a minimal, reviewable change.",
+      "A small, surgical replacement is safer than rewriting the whole file.",
+    ],
+    doNotUseWhen: [
+      "The file was not read in this session: read-before-write is enforced and the edit will be refused.",
+      "The change spans several files or needs structural rewriting: use code.fs.apply_patch.",
+      "The file is a secret/credential file or a path outside the workspace.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.edit"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.edit"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.apply_patch",
+    inventoryIds: [356],
+    type: "tool",
+    domain: "code",
+    name: "Apply patch to workspace",
+    description: "Apply a unified diff patch to the workspace, optionally as a dry run that reports the changes without writing anything. Conflicts are returned as structured data.",
+    useWhen: [
+      "The agent must change several hunks or files in one reviewable operation.",
+      "The agent wants to preview a change set before writing it (dryRun).",
+    ],
+    doNotUseWhen: [
+      "A single exact replacement is enough: use code.fs.edit.",
+      "The patch paths leave the workspace or touch secret files: both are refused.",
+      "The change is a whole new file: use code.fs.write.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.apply_patch"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.apply_patch"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.write",
+    inventoryIds: [357],
+    type: "tool",
+    domain: "code",
+    name: "Write code file",
+    description: "Create or overwrite one workspace file with the given content, returning whether it was created, the byte count, the new sha256 and the diff. Every write is checkpointed.",
+    useWhen: [
+      "The agent creates a new file (a test, a module, a config) from scratch.",
+      "The agent rewrites a small file where a patch would be more fragile than the full text.",
+    ],
+    doNotUseWhen: [
+      "The change is a few lines inside a large file: prefer code.fs.edit so the diff stays reviewable.",
+      "The destination is a secret/credential file or outside the workspace.",
+      "The file exists and must not be replaced: pass overwrite=false or use code.fs.edit.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.write"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.write"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.move",
+    inventoryIds: [358],
+    type: "tool",
+    domain: "code",
+    name: "Move or rename path",
+    description: "Move or rename a file or directory inside the workspace, refusing to overwrite an existing destination unless explicitly allowed and refusing to leave the workspace.",
+    useWhen: [
+      "The agent reorganises files (rename a module, move a test next to its subject).",
+      "A path must change without changing its content.",
+    ],
+    doNotUseWhen: [
+      "The content also changes: move first, then edit, so both changes are separate checkpoints.",
+      "The destination already exists and must be kept: the move would be refused.",
+      "Either path leaves the workspace.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.move"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.move"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.delete",
+    inventoryIds: [359],
+    type: "tool",
+    domain: "code",
+    name: "Delete workspace path",
+    description: "Delete one file or directory inside the workspace. High risk: it always requires an explicit approval, refuses recursive deletion without the recursive flag and can be pinned to an expected sha256 revision.",
+    useWhen: [
+      "A file is genuinely obsolete and the owner approved the deletion.",
+      "A generated artefact must be removed before a clean rebuild.",
+    ],
+    doNotUseWhen: [
+      "The intent is to replace content: use code.fs.write or code.fs.edit instead of deleting.",
+      "The target is a directory with contents and recursive was not set.",
+      "The target is a secret file, a path outside the workspace, or anything under version control that should be restored instead.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.delete"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.delete"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.diff",
+    inventoryIds: [360],
+    type: "tool",
+    domain: "code",
+    name: "Workspace diff",
+    description: "Read-only diff of the current turn (or of one path) with per-file status and line statistics, so the agent and the user can review what changed before anything else happens.",
+    useWhen: [
+      "The agent wants to verify what its own edits changed before reporting success.",
+      "The user needs a summary of the turn (which files, how many lines).",
+    ],
+    doNotUseWhen: [
+      "The agent needs file contents rather than a diff: use code.fs.read.",
+      "The agent wants git history: this tool never touches git (that is C4 territory).",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.diff"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.diff"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.undo_last_turn",
+    inventoryIds: [361],
+    type: "tool",
+    domain: "code",
+    name: "Undo last turn",
+    description: "Restore the workspace to the checkpoint taken at the start of the current turn, returning the restored paths and the checkpoint id used.",
+    useWhen: [
+      "The agent's edits made things worse and the whole turn should be rolled back.",
+      "The user asks to undo the last change set as a unit.",
+    ],
+    doNotUseWhen: [
+      "Only one file should be reverted: edit that file back instead of dropping the whole turn.",
+      "The caller cannot pass confirm=true: the tool refuses without an explicit confirmation.",
+      "The turn is still running (checkpoints are closed when the turn ends).",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.undo_last_turn"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.undo_last_turn"]!.outputSchema,
+    version: 1,
+  },
+];
+
+/** Every `code.*` capability (reads first, then the mutating tools). */
+export const CODE_CAPABILITIES: CapabilityDefinition[] = [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES];
+
+export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c3-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/**
+ * Which feature flag gates which code tool. The read/search tools *and* `code.fs.diff` need `code.read`
+ * (they only read), every mutating tool needs `code.write`; both sit on top of the master
+ * `coding_agent.enabled` flag. The decision is made from the capability's own permission requirement so
+ * a read-only tool that happens to live in the write group (like `code.fs.diff`) cannot be reported as
+ * write-gated. Exported so the Capability Inspector can show the flag that actually governs each
+ * capability instead of assuming one flag for the whole `code` domain.
+ */
+export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(
+  CODE_CAPABILITIES.map((capability) => [
+    capability.id,
+    (capability.requiredPermissions ?? []).includes("workspace:write") ? "code.write" : "code.read",
+  ]),
+);
+
+export function flagKeyForCodeTool(capabilityId: string, domain?: string): string | null {
+  const direct = CODE_TOOL_FLAG_KEYS[capabilityId];
+  if (direct) return direct;
+  return domain === "code" ? "code.read" : null;
+}

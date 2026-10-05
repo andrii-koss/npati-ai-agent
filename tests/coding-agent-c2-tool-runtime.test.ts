@@ -368,13 +368,17 @@ describe("security-gate: C2 tool isolation and HTTP harness", () => {
 });
 
 describe("security-gate: C2 canonical executor wiring", () => {
-  it("publishes the six registry tools with the published manifest", async () => {
+  it("publishes the registry tools with the published manifest and keeps the C2 read subset", async () => {
     const { runtime } = await canonicalHarness();
     const tools = runtime.listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual([
-      "code.fs.grep", "code.fs.list", "code.fs.read", "code.fs.tree", "code.project.info", "code.symbols.outline",
-    ]);
-    expect(tools.every((tool) => tool.version === 1 && tool.status === "active")).toBe(true);
+    const names = tools.map((tool) => tool.name);
+    // The runtime serves exactly the published registry (not a hand-written list)…
+    expect([...names].sort()).toEqual(CODE_TOOL_SCHEMAS.map((tool) => tool.name).sort());
+    expect(new Set(names).size).toBe(names.length);
+    // …which must still contain every read-only tool C2 published, even though C3 added more.
+    const C2_READ_TOOLS = ["code.fs.grep", "code.fs.list", "code.fs.read", "code.fs.tree", "code.project.info", "code.symbols.outline"];
+    expect(C2_READ_TOOLS.every((name) => names.includes(name))).toBe(true);
+    expect(tools.every((tool) => tool.version >= 1 && tool.status === "active")).toBe(true);
   });
 
   it("runs every read tool through the canonical executors, including tree, outline and project info", async () => {

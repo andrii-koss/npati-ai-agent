@@ -37,6 +37,22 @@ const ERROR_STATUS: Record<string, number> = {
   limit_exceeded: 429,
   workspace_error: 502,
   tool_failed: 500,
+  // C3: write path
+  read_before_write_required: 409,
+  revision_conflict: 409,
+  revision_conflict_exhausted: 409,
+  edit_no_match: 409,
+  edit_ambiguous: 409,
+  patch_conflict: 409,
+  checkpoint_unavailable: 503,
+  checkpoint_not_found: 409,
+  approval_required: 403,
+  approval_invalid: 409,
+  approval_unavailable: 503,
+  write_unavailable: 503,
+  write_failed: 502,
+  delete_failed: 502,
+  move_failed: 502,
 };
 
 type CompanyParams = { companyId: string };
@@ -53,7 +69,7 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
   const { auth, runtime } = deps;
 
   const fail = (reply: FastifyReply, error: unknown, tool?: string) => {
-    const values = error as { code?: string; status?: number; message?: string; step?: string; retryable?: boolean; tool?: string };
+    const values = error as { code?: string; status?: number; message?: string; step?: string; retryable?: boolean; tool?: string; details?: Record<string, unknown> };
     if (error instanceof AuthenticationError) {
       return reply.code(error.status ?? 401).send({ error: { code: error.code ?? "UNAUTHORIZED", message: error.message, tool: null, step: "auth", retryable: false }, apiVersion: API_VERSION });
     }
@@ -69,6 +85,8 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
         tool: values?.tool ?? tool ?? null,
         step: values?.step ?? "execute",
         retryable: values?.retryable ?? false,
+        // Structured context only (revision, approval id, reason) - never file content or secrets.
+        ...(values?.details ? { details: values.details } : {}),
       },
       apiVersion: API_VERSION,
     });
@@ -105,7 +123,7 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
     } catch (error) { return fail(reply, error); }
   });
 
-  app.post<{ Params: ProjectParams; Body: { tool: string; toolVersion?: number; args?: Record<string, unknown>; sessionId?: string; toolCallId: string } }>(
+  app.post<{ Params: ProjectParams; Body: { tool: string; toolVersion?: number; args?: Record<string, unknown>; sessionId?: string; toolCallId: string; turnId?: string; approvalId?: string; runId?: string; agentId?: string } }>(
     "/companies/:companyId/projects/:projectId/code/tools/invoke",
     {
       schema: {
@@ -118,6 +136,11 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
             args: { type: "object" },
             sessionId: { type: "string", maxLength: 120 },
             toolCallId: { type: "string", maxLength: 120 },
+            // C3: turn scoping, the approval obtained for this exact payload, and the acting run.
+            turnId: { type: "string", maxLength: 120 },
+            approvalId: { type: "string", maxLength: 120 },
+            runId: { type: "string", maxLength: 120 },
+            agentId: { type: "string", maxLength: 120 },
           },
         },
       },
@@ -135,10 +158,59 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
           toolVersion: request.body.toolVersion,
           args: request.body.args,
           toolCallId: request.body.toolCallId,
+          turnId: request.body.turnId,
+          approvalId: request.body.approvalId,
+          runId: request.body.runId,
+          agentId: request.body.agentId,
         });
         if (!outcome.ok) return fail(reply, Object.assign(new Error(outcome.error.message), outcome.error), outcome.error.tool ?? request.body.tool);
         return reply.send({ ...outcome, apiVersion: API_VERSION });
       } catch (error) { return fail(reply, error, request.body?.tool); }
+    },
+  );
+
+  /**
+   * C3: the turn-scoped diff. It is read-only (the change log this process kept for the turn), so it
+   * needs `workspace:read`; the workspace-wide diff stays with `code.fs.diff` inside the sandbox toolset.
+   */
+  app.get<{ Params: ProjectParams; Querystring: { turnId: string; sessionId?: string } }>(
+    "/companies/:companyId/projects/:projectId/code/diff",
+    async (request, reply) => {
+      try {
+        const ctx = await authenticate(request, false);
+        await assertCompany(ctx, request.params.companyId);
+        if (!runtime) return reply.code(503).send({ error: { code: "feature_disabled", message: "Coding Agent is unavailable: tool runtime is not configured", tool: null, step: "flags", retryable: false }, apiVersion: API_VERSION });
+        const sessionId = request.query.sessionId ?? `project:${request.params.projectId}`;
+        const summary = runtime.turnSummary(sessionId, request.query.turnId);
+        return reply.send({
+          turnId: summary.turnId, sessionId: summary.sessionId, checkpointId: summary.checkpointId,
+          files: summary.changes.map((change) => ({ path: change.path, tool: change.tool, sha256: change.sha256, linesAdded: change.linesAdded, linesRemoved: change.linesRemoved })),
+          stats: { files: summary.files, linesAdded: summary.linesAdded, linesRemoved: summary.linesRemoved },
+          diff: summary.changes.map((change) => change.diff).filter(Boolean).join("\n"),
+          apiVersion: API_VERSION,
+        });
+      } catch (error) { return fail(reply, error); }
+    },
+  );
+
+  /** C3: undo the last turn for this session (owner/admin); restores the turn checkpoint. */
+  app.post<{ Params: ProjectParams; Body: { turnId?: string; sessionId?: string; runId?: string } }>(
+    "/companies/:companyId/projects/:projectId/code/undo-last-turn",
+    async (request, reply) => {
+      try {
+        const ctx = await authenticate(request, true);
+        await assertCompany(ctx, request.params.companyId);
+        if (!runtime) throw Object.assign(new Error("Coding Agent is unavailable"), { code: "feature_disabled", status: 503, step: "flags" });
+        const outcome = await runtime.undoTurn(ctx, {
+          companyId: request.params.companyId,
+          projectId: request.params.projectId,
+          sessionId: request.body?.sessionId,
+          turnId: request.body?.turnId,
+          runId: request.body?.runId,
+        });
+        if (!outcome.ok) return fail(reply, Object.assign(new Error(outcome.error.message), outcome.error), outcome.error.tool ?? "code.fs.undo_last_turn");
+        return reply.send({ ...outcome, apiVersion: API_VERSION });
+      } catch (error) { return fail(reply, error, "code.fs.undo_last_turn"); }
     },
   );
 }
