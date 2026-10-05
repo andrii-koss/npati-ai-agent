@@ -509,6 +509,12 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       }
       case "project.data.migrations.list":
         return this.projectData.listMigrations(context, company.id, projectId);
+      case "project.data.promote": {
+        // D7: promoting dev -> prod is a high-risk action and always needs human approval.
+        const withData = input.withData === true;
+        const dryRun = input.dryRun === true || !approved;
+        return this.projectData.promoteDevToProd(context, company.id, projectId, { withData, dryRun, approved, runId, agentId });
+      }
       case "project.data.templates.list":
         return this.projectData.listTemplates();
       case "project.data.templates.apply": {
@@ -519,6 +525,8 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
           runId,
           agentId,
           approved,
+          // D7: demo data is optional and only ever applied to dev.
+          seedDemoData: input.seedDemoData === true,
         });
       }
       case "project.auth.inspect":

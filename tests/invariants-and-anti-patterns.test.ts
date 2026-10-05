@@ -161,11 +161,11 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
       expect(decision.candidateTools.length).toBeLessThan(306);
     });
 
-    it("Anti-pattern 2: UI never shows 306 separate switches; only user-facing agent-callable tools (83)", () => {
+    it("Anti-pattern 2: UI never shows 306 separate switches; only user-facing agent-callable tools (84)", () => {
       const agentCallable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
       const runtimeOnly = CAPABILITY_CATALOG.filter((c) => !c.agentCallable);
 
-      expect(agentCallable.length).toBe(83);
+      expect(agentCallable.length).toBe(84);
       expect(runtimeOnly.length).toBe(264);
 
       // Verify safety gating prevents raw internal capabilities from appearing as agent-callable tools

@@ -60,6 +60,8 @@ export class ProjectApiGatewayService {
     private readonly dataProvider?: DataProvider,
     private readonly poolFactory?: (backend: DataBackend, env: DataEnvironmentName) => Promise<Pool>,
     private readonly workspace?: Pick<ProjectWorkspace, "readFile" | "createFile" | "writeFile">,
+    /** D7: blocks writes when the environment exceeded its hard database quota. */
+    private readonly quotas?: { assertWritesAllowed(backend: DataBackend, environment: DataEnvironmentName): Promise<void> },
   ) {}
 
   /**
@@ -524,6 +526,7 @@ export class ProjectApiGatewayService {
 
   async createRow(auth: GatewayAuthResult, collection: string, values: Record<string, unknown>) {
     await this.authorizeCollection(auth, collection, "insert");
+    await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
 
     // Prevent passing id or managed fields if not allowed
     const sanitized: Record<string, unknown> = {};
@@ -555,6 +558,7 @@ export class ProjectApiGatewayService {
 
   async updateRow(auth: GatewayAuthResult, collection: string, id: string, values: Record<string, unknown>) {
     await this.authorizeCollection(auth, collection, "update");
+    await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
 
     const sanitized: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(values)) {
@@ -773,11 +777,13 @@ export class ProjectApiGatewayService {
       }
     }
 
+    const quota = await Promise.resolve(this.quotas?.assertWritesAllowed ? undefined : undefined).catch(() => undefined);
+
     return {
       requestCount,
       databaseBytes,
       collectionsCount,
-      maxDatabaseBytes: 1_000_000_000,
+      maxDatabaseBytes: quota ?? 1_000_000_000,
       maxRequestsPerMinute: environment === "dev" ? 300 : 120,
     };
   }

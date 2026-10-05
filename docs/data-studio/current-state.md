@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current step: D6 completed at code and automated-test level (see D6 verification). Live PostgreSQL / Live Preview (Expo Web) acceptance remains unverified because the local Docker daemon is unavailable.
-- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR), D5 Project API gateway, keys, SDK and sandbox integration (including the D5 completion pass below), D6 mobile_app projects (Expo template, Expo Web preview, deep links, shared DataBackend).
-- Next step: D7 (promote dev → prod, real dump/restore, quotas, external provider, drift remediation). Not started.
+- Current step: D7 completed at code and automated-test level (see D7 verification). Live PostgreSQL acceptance (promote, pg_dump/pg_restore, external databases) remains unverified because the local Docker daemon is unavailable.
+- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR), D5 Project API gateway, keys, SDK and sandbox integration (including the D5 completion pass), D6 mobile_app projects, D7 dev/prod environments, promote, backups, quotas and external databases.
+- Next step: not started — no further step is defined beyond D7 in `docs/data-studio/PLAN.md`.
 - Source of truth: `docs/data-studio/PLAN.md`, `docs/data-studio/00-audit.md`, and repository code.
 
 ## Implemented in D1
@@ -311,3 +311,54 @@ D7 (promote, real dump/restore, quotas, external provider, drift remediation) ca
 2. Per-project registries that already carry environment scoping: `project_redirect_urls`, `project_api_request_logs`, access policies and provider config.
 3. `BuildProvider` as the seam for mobile build/publish work, with `ProjectRedirectRepository` and the SDK deep link helpers already in place.
 4. The `mobile_app` project type and `projects.app_scheme` for release metadata (bundle identifiers, store tracks) instead of new tables.
+
+## Implemented in D7
+
+Architecture decisions:
+- Promote is a **DataBackend-level** operation that replays the applied **dev** migrations onto **prod** through the existing migration engine, so prod keeps its own `_npati_migrations` history, Core mirror and fingerprint. It is never automatic: preview → explicit approval → snapshot → apply.
+- Backups are snapshots recorded in Core with a `kind` and retained by policy. The dump files stay on a dedicated volume; an external storage backend is a documented interface (`SnapshotStorage`), not a new dependency.
+- Quotas resolve per environment (environment override → platform default) and block **writes** with `507 QUOTA_EXCEEDED` once the hard database limit is reached.
+- External Postgres databases run in `managed` mode (NPATI creates migrator + runtime roles) or fall back to `restricted` mode (owner credentials, explicit warning) when the provider forbids role creation.
+- DataBackend removal is two-phase: detach → `deleting` + `remove_after` → purge after the snapshot retention window.
+
+Core DB (migration `064_promote_backups_quotas`, registered in `packages/workspace/src/postgres-store.ts`):
+- `data_backend_snapshots`: `kind` (manual/scheduled/pre_migration/pre_promote/pre_restore), `reason`, `size_bytes`, `created_by` + lookup index.
+- `data_backend_environments`: `limits jsonb` (quota overrides) and `backup_policy jsonb` (interval + keep).
+- `data_backends.remove_after` (retention deadline) and `data_backend_secrets.role` extended with `external_admin`/`external_owner`.
+- `data_backend_promotions` journal (status, diff, flags, snapshot ref, with_data, approved_by, error, applied_at).
+
+Services (`apps/agent-api/src/data-studio/`):
+- `promote-service.ts` — `preview` (drift gate, pending dev migrations, per-operation flags and SQL via `dryRun`, collection diff, optional data preview) and `apply` (approval, Core migration lock, mandatory prod `pre_promote` snapshot, ordered replay, optional bounded data copy, fingerprint refresh, promotion journal, `reject` for audit).
+- `backup-service.ts` — `list`/`create`/`restore` (approval + automatic `pre_restore` snapshot)/`policy`/`updatePolicy`/`prune`/`runScheduled` (due snapshots, `keep` pruning, expired pruning) and `purgeDueBackends` (two-phase removal purge).
+- `quota-service.ts` — limit resolution (env + per-environment override), usage with TTL cache, `report` (ok/warning/exceeded, percentage, `writesBlocked`) and `assertWritesAllowed` (507) wired into the Project API gateway create/update paths.
+- `external-provisioner.ts` — `ExternalPostgresProvisioner` for `external_postgres`: connection string from Core secrets, `inspectCapabilities` (server version, RLS, role creation, owner superuser/BYPASSRLS), managed vs restricted provisioning, usage, pg_dump/pg_restore, role rotation and suspend/resume in managed mode only.
+- `provisioner.ts` — `ProvisionerRouter` dispatches every provisioner call by `backend.provider`; `resumeRuntime` added to the interface + shared implementation (archived backends can be activated again, which previously failed with `DATABASE_EXISTS`).
+- `service.ts` — external backend creation with a `postgres://` connection string stored as a secret, per-environment limit updates, deferred removal with `removeAfter`, and `detachProjectArtifacts` (removes the project's CORS origins, redirect URLs and API logs when a Project is deleted).
+- `repository.ts` — snapshot CRUD/pruning, `allBackends`, `listAppliedMigrations`, `setRemovalDeadline`/`dueRemovals`, promotion journal and `deleteSecrets`/`deleteSnapshots` for the purge step.
+
+API (`apps/agent-api/src/data-studio/routes.ts`, backend-scoped):
+- `POST …/data-backends/:backendId/promote/preview`, `POST …/promote` (requires `approved: true`), `POST …/promote/reject`, `GET …/promotions`.
+- `GET/POST …/backups`, `POST …/backups/:snapshotId/restore` (requires `approved: true`), `PUT …/backup-policy`.
+- `GET/PUT …/quotas`.
+- `POST /companies/:companyId/data-backends` accepts `provider: external_postgres` + `connectionString`; `DELETE …/:backendId` accepts `immediate`.
+
+Capability and agent flow:
+- `project.data.promote` (inventory 348, risk `high`, `requiresConfirmation`, member of the `data.schema` group) registered in the canonical catalog; `CompanyToolRuntime` returns the preview and requires the existing approval flow before applying.
+- `project.data.templates.apply` accepts `seedDemoData` for dev-only demo data (`packages/shared/src/project-data-seeds.ts`, ecommerce/blog/crm, bounded by `MAX_SEED_ROWS_PER_COLLECTION`).
+
+Scheduler and UI:
+- A backup scheduler tick (`NPATI_DATA_BACKUP_TICK_SECONDS`, default 5 min, `NPATI_DATA_BACKUP_DISABLED` to stop) runs due snapshots, retention pruning and the purge of DataBackends whose deadline passed.
+- Data Studio gained the **Backups** tab (snapshot list, create, policy editor, approved restore with typed `prod` confirmation) and the **Promote & Quotas** tab (preview modal with operations/flags/diff, approve/reject, promote history, quota report with progress bar and limit editor).
+
+## D7 verification
+
+- `tests/data-studio-d7-promote-backups.test.ts` (17) covers: promote preview with pending migrations and flags; apply refused without approval (no snapshot, no writes); promote blocked on prod drift; concurrent promote blocked by the migration lock; approved promote takes a `pre_promote` snapshot, skips already-applied versions, replays the rest and refreshes the prod fingerprint; rejected promote recorded; manual backup creation/listing; restore refused without approval and performed with an automatic `pre_restore` snapshot; scheduled snapshot creation per policy + `keep` pruning; per-environment policy update; backend purge only after the deadline, cleaning databases and secrets; quota states ok/warning/exceeded with `507 QUOTA_EXCEEDED` write blocking; external connection-string validation and restricted-mode fallback; deferred DataBackend removal; project deletion cleaning CORS origins; per-environment quota isolation.
+- Previously covered and still green: dev keys rejected on prod, tenant isolation and RLS behaviour (`tests/data-studio-project-api*.test.ts`, `tests/data-studio-project-auth.test.ts`, `tests/data-studio-routes.test.ts`), capability counters (now 348 total / 84 agent-callable) and Website Builder / Deploy / Preview regressions.
+- Not verified automatically: real `pg_dump`/`pg_restore` against a live cluster, a real promote between two databases, an external Neon/Supabase database, and quota enforcement against live storage. These need Docker.
+
+## Operational documentation
+
+`docs/data-studio/SELF_HOSTING.md` documents the containers and volumes, every Data Studio
+environment variable, the promote workflow, backup/restore and retention (including the GDPR note
+that deleted rows survive inside snapshots until they expire), quotas, external databases,
+lifecycle and the troubleshooting codes.

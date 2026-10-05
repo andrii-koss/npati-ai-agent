@@ -5,7 +5,7 @@ import type { ProjectMigrationEngine } from "./migration-engine";
 import { DataStudioError, validateIdentifier } from "./identifier";
 import { validateOperation } from "./studio-service";
 import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH } from "./project-sdk-file";
-import { TEMPLATE_CATALOG, validateTemplate, type DataSchemaTemplate } from "@npati/shared";
+import { TEMPLATE_CATALOG, validateTemplate, getDataSeed, validateDataSeed, type DataSchemaTemplate } from "@npati/shared";
 import type { ProjectWorkspace } from "../project-workspace";
 
 const MAX_SCHEMA_OPS_PER_RUN = 50;
@@ -24,6 +24,8 @@ export interface AgentTemplateApplyOptions {
   runId?: string;
   agentId?: string;
   approved?: boolean;
+  /** D7: also insert optional demo rows (dev only). */
+  seedDemoData?: boolean;
 }
 
 export function formatSchemaForProjectContext(backendName: string, schema: SchemaSnapshot): string {
@@ -86,6 +88,7 @@ export async function syncProjectMdSchema(
 }
 
 import type { ProjectAuthService } from "./auth-service";
+import type { PromoteService } from "./promote-service";
 import type { ProjectAccessPolicy, ProjectAuthSettings } from "@npati/shared";
 
 export class AgentDataStudioService {
@@ -96,6 +99,8 @@ export class AgentDataStudioService {
     private readonly migrations: ProjectMigrationEngine,
     private readonly workspace?: ProjectWorkspace,
     private readonly authService?: ProjectAuthService,
+    /** D7: dev → prod promote (approval-gated). */
+    private readonly promote?: PromoteService,
   ) {}
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, requestedEnv?: string) {
@@ -257,8 +262,42 @@ export class AgentDataStudioService {
     return this.migrations.deleteOwnerRows(ctx, backend, "dev", collection, ids);
   }
 
-  async listMigrations(ctx: AuthContext, companyId: string, projectId: string) {
-    const { backend } = await this.context(ctx, companyId, projectId);
+  /**
+   * D7: agents may preview a dev → prod promote; applying it always requires human approval
+   * (the caller passes `approved` only after the existing approval flow).
+   */
+  async promoteDevToProd(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { withData?: boolean; dryRun?: boolean; approved?: boolean; runId?: string; agentId?: string } = {},
+  ) {
+    if (!this.promote) {
+      throw new DataStudioError(503, "promote", "Promote is unavailable on this installation", true, "PROMOTE_UNAVAILABLE");
+    }
+    const { project } = await this.context(ctx, companyId, projectId);
+    const backendId = project.dataBackendId;
+    if (!backendId) throw new DataStudioError(404, "promote", "Project has no attached DataBackend", false, "DATA_BACKEND_NOT_ATTACHED");
+    const preview = await this.promote.preview(ctx, companyId, backendId, { withData: options.withData, targetEnvironment: "prod" });
+    if (options.dryRun || !options.approved) {
+      return {
+        approvalRequired: true,
+        riskLevel: "high" as const,
+        reason: "Promoting dev to prod changes the production schema and requires human approval.",
+        preview,
+      };
+    }
+    const result = await this.promote.apply(ctx, companyId, backendId, {
+      approved: true,
+      withData: options.withData,
+      targetEnvironment: "prod",
+      runId: options.runId,
+      agentId: options.agentId,
+    });
+    return { applied: true, ...result, preview };
+  }
+
+  async listMigrations(ctx: AuthContext, companyId: string, projectId: string) {    const { backend } = await this.context(ctx, companyId, projectId);
     const history = await this.repository.pool.query(
       `SELECT id, version, operation, reversible, destructive, requires_snapshot AS "requiresSnapshot",
               author_id AS "authorId", run_id AS "runId", status, created_at AS "createdAt", applied_at AS "appliedAt"
@@ -392,11 +431,28 @@ export class AgentDataStudioService {
     const updatedSchema = await this.provider.introspectSchema(backend, "dev");
     await syncProjectMdSchema(ctx, companyId, projectId, backend.name, updatedSchema, this.workspace);
 
+    // D7: optional demo data, dev only (production never receives seeds implicitly).
+    let seededRows = 0;
+    if (options.seedDemoData) {
+      const seed = getDataSeed(templateId);
+      if (seed) {
+        const problems = validateDataSeed(seed, template.collections.map((collection) => collection.name));
+        if (problems.length) throw new DataStudioError(400, "template", `Seed data is invalid: ${problems.join("; ")}`, false, "INVALID_SEED");
+        for (const set of seed.sets) {
+          for (const row of set.rows) {
+            await this.migrations.createOwnerRow(ctx, backend, "dev", set.collection, row);
+            seededRows += 1;
+          }
+        }
+      }
+    }
+
     return {
       applied: true,
       templateId: template.id,
       collections: template.collections.map((c) => c.name),
       appliedMigrationsCount: appliedMigrations.length,
+      seededRows,
     };
   }
 
