@@ -1,4 +1,5 @@
 import { canonicalJson, sha256 } from "@npati/workspace";
+import authoredSchemas from "./code-tool-schemas.json";
 
 /**
  * C1a (part B): versioned tool schema registry for the Coding Agent.
@@ -42,17 +43,22 @@ export class CodeToolSchemaError extends Error {
   ) { super(message); }
 }
 
-/** Tools published so far. Empty by design in C1a: C2–C4 add entries here. */
-export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = [];
+/**
+ * Tools published so far. The authored schemas live in `code-tool-schemas.json` so that the plain-Node
+ * CI guard (`scripts/code-tool-schemas-generate.mjs` / `verify-code-tool-schemas.mjs`) reads exactly the
+ * same source as this registry — one artefact, no duplicated copy to drift.
+ */
+export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as unknown as readonly CodeToolSchema[];
 
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 1;
+export const CODE_TOOL_MANIFEST_VERSION = 2;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
+ * Regenerate with: `node scripts/code-tool-schemas-generate.mjs`.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = sha256("");
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "c1d027c28ade21131aa1b004192bf5350f9d4768c65d37a36f94bdb5f2e4066a";
 
 export function toolKey(tool: Pick<CodeToolSchema, "name" | "version">): string {
   return `${tool.name}@${tool.version}`;
@@ -151,8 +157,14 @@ export function resolveManifestForSession(manifestVersion: number, manifests: re
   return found;
 }
 
-/** Manifests this build can serve. C6/C10 extend the list when they keep older sessions. */
-export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION)];
+/**
+ * Manifests this build can serve. Version 1 (the empty C1a set) stays available so a session created
+ * before C2 still resolves, and C6/C10 extend the list when they keep older sessions.
+ */
+export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
+  toolManifest([], 1),
+  toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
+];
 
 /** Convenience for callers that need both the manifest and the consistency assertion. */
 export function currentToolManifest(): CodeToolManifest {

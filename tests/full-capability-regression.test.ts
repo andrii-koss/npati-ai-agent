@@ -6,14 +6,14 @@ import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime"
 
 describe("PHASE 11: Full Capability Regression Suite", () => {
   describe("Audit Matrix Coverage and Hygiene", () => {
-    it("verifies all 348 capabilities have test/evidence ownership and zero unknown/unmapped items", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(348);
-      expect(CAPABILITY_CATALOG.length).toBe(348);
+    it("verifies all 354 capabilities have test/evidence ownership and zero unknown/unmapped items", () => {
+      expect(CAPABILITY_MATRIX.length).toBe(354);
+      expect(CAPABILITY_CATALOG.length).toBe(354);
 
       const idSet = new Set<number>();
       for (const item of CAPABILITY_MATRIX) {
         expect(item.id).toBeGreaterThanOrEqual(1);
-        expect(item.id).toBeLessThanOrEqual(348);
+        expect(item.id).toBeLessThanOrEqual(354);
         expect(idSet.has(item.id)).toBe(false);
         idSet.add(item.id);
 
@@ -27,16 +27,16 @@ describe("PHASE 11: Full Capability Regression Suite", () => {
         );
       }
 
-      expect(idSet.size).toBe(348);
+      expect(idSet.size).toBe(354);
     });
 
-    it("verifies exact separation: 84 agent-callable tools vs 264 internal runtime/ops items", () => {
+    it("verifies exact separation: 90 agent-callable tools vs 264 internal runtime/ops items", () => {
       const callable = CAPABILITY_MATRIX.filter((c) => c.agentCallable);
       const internal = CAPABILITY_MATRIX.filter((c) => !c.agentCallable);
 
-      expect(callable.length).toBe(84);
+      expect(callable.length).toBe(90);
       expect(internal.length).toBe(264);
-      expect(callable.length + internal.length).toBe(348);
+      expect(callable.length + internal.length).toBe(354);
 
       // All agentCallable must have type tool
       for (const tool of callable) {

@@ -3,8 +3,118 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C1b — sandbox image supply chain** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning)
-- Next: **C2 — the `code.*` tools** (read/search first), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+- Last completed: **C2 — read and search tools** (after C0 audit, C1 foundation, C1c audit log, C1a flags/versioning, C1b image supply chain)
+- Next: **C3 — write/edit tools** (read-before-write, checkpoints), per the hard order in `docs/coding-agent/00-audit.md` section 13.
+
+## Implemented (C2, latest step)
+- **Six `code.*` capabilities** in the canonical registry, all `risk: low`, `type: tool`,
+  `domain: code` (a new domain member), `agentCallable`, `userVisible`, no confirmation,
+  `requiredPermissions: ["workspace:read"]`, version 1, inventoryIds **349–354**:
+  `code.fs.list`, `code.fs.read`, `code.fs.grep`, `code.fs.tree`, `code.symbols.outline`,
+  `code.project.info`. Counters moved from 348/84 to **354 total / 90 agent-callable** (updated in ten
+  test files; `scripts/verify-capability-matrix.mjs` still checks the literal 306 and needed no change
+  because pushed groups were never visible to it).
+- **Capability Inspector** shows a **Flag** column: `code.*` capabilities report `flagKey`/`flagState`
+  from the server-side `FeatureFlagService` (dark launch → `off`), and `unknown` when the flag source is
+  missing — never `on` by default.
+- **Single source of truth for tool schemas**: `apps/agent-api/src/code-tool-schemas.json` (six entries
+  with `name@version`, input/output JSON Schema, `additionalProperties: false`). The manifest was raised
+  to **v2**; `code-tool-schemas.published.json` and the frozen snapshot were regenerated, and
+  `assertManifestConsistent()` plus the CI guards (`verify-code-tool-schemas.mjs`,
+  `code-tool-schemas-generate.mjs --check`, `npm run audit:code-tools`) are green. `packages/shared`
+  mirrors the canonical schemas (it cannot import from `apps/`), and a new **parity test**
+  (`tests/coding-agent-c2-schema-parity.test.ts`) fails the build if they diverge again — including a
+  check that no tool argument can name `projectId`/`companyId`/`sessionId`/`workspaceId` (the project
+  comes from the authenticated call envelope, not the model).
+- **Tool implementations** (`code-tools-path.ts`, `code-tools-sensitive.ts`, `code-tools-fs.ts`,
+  `code-tools-project.ts`): path safety (traversal, absolute paths, `C:\`, UNC, `~`, null bytes, glob
+  metacharacters in plain paths, symlink escape with fail-closed handling of unknown targets), sensitive
+  file policy (`NPATI_CODE_SENSITIVE_POLICY=deny|redact`, default deny — the decision is taken **before**
+  reading, so `.env*`, keys, certificates, `.ssh/`, `.aws/`, `.gnupg/` and `.git/` never enter a result),
+  `list`/`read`/`grep`/`tree`/`outline`/`project.info` with `.gitignore` support, bounded output
+  (arrays trimmed first with a narrowing hint, then a head/tail preview with `[truncated N chars]`),
+  binary/image detection returning metadata plus `sha256` instead of content, and every result wrapped as
+  `{ kind: "code_tool_result", trust: "untrusted_data", … }` so file content is data, never instructions.
+- **Runtime** (`code-tool-runtime.ts`, `code-tool-executors.ts`, `code-read-tracker.ts`,
+  `code-tool-routes.ts`): a fixed ten-gate order — tenant isolation → feature flags (master +
+  `code.read`, deny-by-default) → tool/version resolution → JSON Schema argument validation → path and
+  sensitive-file policy → idempotency by `(sessionId, toolCallId)` → execution through the canonical
+  executors → data envelope → Activity/AuditLog → read tracking (`code.fs.read` records `{path, sha256}`
+  for C3 read-before-write). The only execution path is the C1 workspace and the sandbox port: `grep`
+  runs through the sandbox (`rg --line-number`) and refuses with `sandbox_unavailable` (503, retryable)
+  rather than falling back to the server. All logic comes from the canonical modules — a missing
+  executor yields `tool_not_configured` (503), never a look-alike implementation.
+- **Harness API**: `GET /companies/:companyId/code/tools` and
+  `POST /companies/:companyId/projects/:projectId/code/tools/invoke` (with `code.tool.invoke` /
+  `code.tool.denied` audit entries), used by the tests and by manual acceptance checks.
+- **Activity**: `CompanyAgentRunEventType` is lifecycle-only, so tool events are emitted as a structured
+  `CodeToolActivityEvent` (tool, versions, duration, bytes, truncated, ok, errorCode — no file content, no
+  secrets) and logged; the run-level event stream and `ExecutionSnapshot` linkage stay `TODO(C6)`.
+
+## Files / migrations / capabilities changed (C2)
+- `packages/shared/src/code-capabilities.ts` (new), `capabilities.ts` (domain `code`),
+  `capability-catalog.ts` / `capability-matrix.ts` (import + push), `index.ts`, `capability-inspector.ts`.
+- agent-api: **new** `code-tools-path.ts`, `code-tools-sensitive.ts`, `code-tools-fs.ts`,
+  `code-tools-project.ts`, `code-tool-executors.ts`, `code-tool-runtime.ts`, `code-tool-routes.ts`,
+  `code-read-tracker.ts`, `code-tool-schemas.json`; changed `code-tool-registry.ts` (v2, six tools),
+  `app.ts` (runtime + routes wiring), `code-tool-schemas.published.json`, snapshot fixture.
+- `scripts/code-tool-schemas-generate.mjs` (new).
+- web: `CapabilityInspectorPage.tsx` (Flag column).
+- Tests: **new** `tests/coding-agent-c2-read-tools.test.ts` (26), `coding-agent-c2-tool-runtime.test.ts`
+  (16), `coding-agent-c2-capabilities.test.ts` (6), `coding-agent-c2-schema-parity.test.ts` (5); counters
+  updated in ten existing files.
+- No migration in C2 (the read tracker and idempotency cache are in-process; persistence is C3/C6a).
+
+## Verification (C2)
+- `npm run typecheck` → **0 errors** (13 workspaces); `npm run build` for agent-api and web → **exit 0**.
+- `node scripts/verify-code-tool-schemas.mjs --check` → **exit 0** (6 tools, manifest v2, checksum
+  `c1d027c2…4066a`); `node scripts/code-tool-schemas-generate.mjs --check` → **exit 0**;
+  `node scripts/sandbox-image-verify.mjs` → **exit 0**.
+- Definitive run: **24 test files, 322 tests, 0 failures** — all C2 suites, the C1/C1a/C1b/C1c
+  security-gate suites, capability registry/full regression/Inspector, invariants, agent-api,
+  architecture, Website Builder, Data Studio, control plane, phase13/14 and the upgrade-compatibility
+  gate.
+- Real bugs found and fixed while closing the step (none by weakening a check): `enforceOutputBudget`
+  measured the payload before adding its own `truncation` metadata, so a barely-fitting array was
+  discarded in favour of a text preview; the tool routes returned 403 instead of 503 when the runtime
+  was absent; canonical port errors were masked (`sandbox_unavailable` surfaced as 400 `search_failed`);
+  the runtime duplicated path/sensitive/envelope logic instead of using the canonical modules; and the
+  capability and registry schemas disagreed on argument names (would have caused `invalid_arguments` in
+  production), now locked by the parity test.
+
+## Real E2E status (C2)
+- Verified in-process against fake ports and the real workspace port: the ten gates, argument
+  validation, path/sensitive policy, idempotency, read tracking, the data envelope, error contracts and
+  the acceptance path (`grep` finds a function, `read` returns its body).
+- **Not verified here:** a real sandbox executing `rg` (no Docker run in this environment),
+  a live PostgreSQL (no migration in C2), LLM-driven tool selection (the agent loop is C6), and the
+  Activity run stream (C6). The tool-schema guards were verified as scripts, not in GitHub CI.
+
+## Known risks / open questions (C2)
+1. `code.fs.read` denies **every** `.env*`, including `.env.example`. If the product wants the example
+   file readable, that is one pattern in `code-tools-sensitive.ts` — a decision for the owner.
+2. Read tracking and idempotency are **in-process**: they reset on restart and are not shared between
+   replicas. Persistence is C3/C6a; until then a restart forgets which files were read (read-before-write
+   in C3 must tolerate that).
+3. `grep` requires the sandbox port; without it the tool refuses (503). A deployment that wants search
+   must provide the sandbox.
+4. Tool events are logged, not yet part of the run Activity stream, and have no `ExecutionSnapshot`
+   reference (C6/C6b).
+5. The `Flag` column header in the Inspector is intentionally not translated yet (adding i18n keys would
+   touch `i18n/types.ts` and seven locales); the domain `code` shares the generic domain badge styling.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (version 4, section C3), `docs/coding-agent/00-audit.md`
+  sections 5, 6 and 13, and this file.
+- Execute **only C3**: write/edit tools with **read-before-write** enforced through the C2 read tracker
+  (refuse to edit a file that was not read, or whose `sha256` changed since it was read), checkpoints for
+  every mutating action (rule 14), the same ten-gate runtime order, one fixed version per tool, flags
+  (`code.write`), approvals where the existing approval system applies, and secret redaction in diffs.
+  Publish the new schemas (bump `CODE_TOOL_MANIFEST_VERSION`, regenerate
+  `code-tool-schemas.published.json` + the snapshot with `scripts/code-tool-schemas-generate.mjs
+  --manifest-version N`), extend `code-capabilities.ts` **and** keep the parity test green, and update
+  every counter test.
+- Do not start C4 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C1b, latest step)
 - **Declarative image catalog** `docker/sandbox/images.json` (schema v1, six variants: base, node, python,
@@ -335,22 +445,11 @@ Update this file after every completed step.
    provider). A multi-workspace deployment must iterate workspaces; the store's system path is already
    workspace-scoped for that reason.
 
-## Next-session handoff
-- Read `docs/coding-agent/PLAN.md` (version 4, section C2), `docs/coding-agent/00-audit.md`
-  sections 5, 6 and 13, and this file.
-- Execute **only C2**: register the first `code.*` capabilities and tools in the canonical capability
-  registry (domain/type/risk/agent-callable/approval/schema version, visible in the Capability
-  Inspector — remember to update the inventory counter contracts **and** the `code.*` domain, which does
-  not exist yet), starting with read-only tools (`code.fs.read`, `code.fs.list`, `code.search`) built on
-  the C1 workspace and the C1b sandbox: versioned argument/result JSON schemas, per-tool limits,
-  structured errors (`status`, `message`, `step`, `tool`, `retryable`), an Activity event, a feature-flag
-  check per call, `tool_call_id` idempotency, and secret redaction in output. Publish the tool manifest
-  (bump `CODE_TOOL_MANIFEST_VERSION`, refresh `apps/agent-api/src/code-tool-schemas.published.json` and
-  the snapshot fixture via `npm run audit:code-tools -- --update`) so sessions pin the new versions, and
-  add the Inspector badge that shows the flag state per `code.*` capability.
-- Every new tool must run **only** in the sandbox admitted by the C1b policy, must respect the C1a flags
-  (`code.read` for reads), and its privileged actions must go through `AuditLogService.record()`.
-- Do not start C3 in that session; the order in `00-audit.md` section 13 is binding.
+## Next-session handoff (superseded — see the C2 handoff above)
+- The C2 step described here is complete; the binding handoff for the next session is the
+  "Next-session handoff" section under the C2 block above (execute only **C3**).
+- Historical note for C2: capabilities were registered with the domain `code`, the tool-schema manifest
+  was raised to v2, and the counters are now **354 / 90**.
 - **`code_project` project type** on the existing `Project` entity (no new entity): the enum and CHECK
   constraint were extended additively, so Website Builder projects keep working unchanged.
 - **Classification and retention** exist on projects and sessions: `data_classification`

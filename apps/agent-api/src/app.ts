@@ -10,7 +10,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -73,6 +73,10 @@ import { assertManifestConsistent, currentToolManifest } from "./code-tool-regis
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
+import { CodeToolRuntime, createProjectWorkspaceReadPort } from "./code-tool-runtime";
+import { canonicalExecutors } from "./code-tool-executors";
+import { registerCodeToolRoutes } from "./code-tool-routes";
+import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
 import type { CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
@@ -1000,6 +1004,38 @@ export function buildApp(config: AppConfig = {}) {
     audit: auditLogService,
   });
   const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService, featureFlagService);
+  // C2: runtime for the read-only code.* tools. Reads go through the existing project workspace; text
+  // search requires the sandbox, so without it the tool refuses with `sandbox_unavailable` instead of
+  // touching the host. Activity is logged here; the run-event stream and ExecutionSnapshot links arrive
+  // with the runner in C6 (the run event enum is lifecycle-only by design).
+  const codeReadTracker = new ReadTracker(resolveReadTrackerOptions());
+  const codeToolRuntime = new CodeToolRuntime({
+    flags: featureFlagService,
+    store: workspaceStore,
+    audit: auditLogService,
+    tracker: codeReadTracker,
+    limits: config.codeAgentLimits,
+    // C2: the canonical implementations are the only executor path; path safety, the sensitive-file
+    // policy and the untrusted-data envelope come from `code-tools-*.ts` (no second policy exists).
+    executors: canonicalExecutors({
+      projectLoader: async ({ ctx, companyId, projectId }) => {
+        const project = await projectService.get(ctx, companyId, projectId);
+        return (project as { type?: string } | null)?.type === "code_project" ? project as never : null;
+      },
+    }),
+    toPort: () => createProjectWorkspaceReadPort(projectWorkspace, projectSandbox
+      ? {
+        execute: async (ctx, companyId, request) => {
+          // `agentId` identifies the caller in terminal policy logs; the runtime is not an agent identity,
+          // so it is named explicitly until C6 passes the real session agent id through.
+          const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "code-tool-runtime", ...(request.cwd ? { cwd: request.cwd } : {}) };
+          const result = await projectSandbox!.execute(ctx, companyId, terminalRequest);
+          return { stdout: (result as { stdout?: string; output?: string })?.stdout ?? (result as { output?: string })?.output ?? "", exitCode: (result as { exitCode?: number })?.exitCode };
+        },
+      }
+      : undefined),
+    activity: { record: async (event) => { app.log.info({ ...event, kind: "code.tool.activity" }, "code tool activity"); } },
+  });
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
   // published checksum), so a session can always be read with the exact tool versions it used.
   try {
@@ -2652,6 +2688,12 @@ ${localized.next}`;
   registerCodeRoutes(app, authProvider, codeService, featureFlagService);
   // C1b: the sandbox image admission port (list/allow/revoke/scan/verify for operators).
   registerSandboxImageRoutes(app, authProvider, sandboxImagePolicy, workspaceStore);
+  // C2: manual invocation harness for the read-only code.* tools (the runner calls the runtime directly).
+  registerCodeToolRoutes(app, {
+    auth: authProvider,
+    runtime: codeToolRuntime,
+    assertCompany: async (ctx, companyId) => { await workspaceStore.getCompany(ctx, companyId); },
+  });
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
@@ -2852,7 +2894,20 @@ ${localized.next}`;
         agent: request.query.agentId ? { id: request.query.agentId, revision: 1, tools: ["*"] } : undefined,
       };
     }
-    return capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext);
+    // C2: expose the Coding Agent feature-flag state per capability. A missing flag service (or a
+    // failed lookup) degrades to "unknown" instead of pretending the feature is enabled.
+    let flagStates: Record<string, boolean> | undefined;
+    let flagSourceAvailable = false;
+    if (featureFlagService) {
+      try {
+        flagStates = { [CODE_READ_FLAG]: await featureFlagService.isEnabled(auth, CODE_READ_FLAG, { companyId: request.query.companyId, userId: auth.userId }) };
+        flagSourceAvailable = true;
+      } catch {
+        flagStates = undefined;
+        flagSourceAvailable = false;
+      }
+    }
+    return capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
   });
 
   app.post<{ Body: { message: string; contextType?: string; companyId?: string; businessId?: string; projectId?: string } }>("/router/evaluate", async (request) => {

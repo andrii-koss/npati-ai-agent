@@ -27,7 +27,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
         expect(cap.domain).toBeDefined();
         expect(cap.type).toBeDefined();
         expect(["runtime", "tool", "orchestration", "security_ops", "configuration", "skill"]).toContain(cap.type);
-        expect(["ai", "research", "files", "browser", "communications", "storage", "security", "orchestration", "system", "business"]).toContain(cap.domain);
+        expect(["ai", "research", "files", "browser", "communications", "storage", "security", "orchestration", "system", "business", "code"]).toContain(cap.domain);
         expect(["low", "medium", "high", "critical"]).toContain(cap.risk);
         expect(cap.useWhen.length).toBeGreaterThan(0);
         expect(cap.doNotUseWhen.length).toBeGreaterThan(0);
@@ -38,7 +38,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("Coverage of 306 Inventory IDs", () => {
     it("covers 100% of the 306 inventory items without omissions", () => {
       const validation = defaultCapabilityRegistry.validate();
-      expect(validation.coveredInventoryCount).toBe(348);
+      expect(validation.coveredInventoryCount).toBe(354);
       expect(validation.missingInventoryIds).toEqual([]);
     });
 
@@ -63,7 +63,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       expect(validation.runtimeCallableViolations).toEqual([]);
 
       const callable = defaultCapabilityRegistry.listAgentCallable();
-      expect(callable.length).toBe(84);
+      expect(callable.length).toBe(90);
 
       for (const cap of callable) {
         expect(cap.type).toBe("tool");
@@ -84,7 +84,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("Registry API, Filtering and Startup Performance", () => {
     it("filters capabilities accurately by type, domain and risk", () => {
       const tools = defaultCapabilityRegistry.list({ type: "tool" });
-      expect(tools.length).toBe(84);
+      expect(tools.length).toBe(90);
 
       const runtimes = defaultCapabilityRegistry.list({ type: "runtime" });
       expect(runtimes.length).toBe(160);
@@ -107,8 +107,8 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const item306 = defaultCapabilityRegistry.getByInventoryId(306);
       const durationMs = performance.now() - start;
 
-      expect(all.length).toBe(348);
-      expect(callable.length).toBe(84);
+      expect(all.length).toBe(354);
+      expect(callable.length).toBe(90);
       expect(item100).toBeDefined();
       expect(item306).toBeDefined();
       expect(durationMs).toBeLessThan(50); // Well within sub-50ms bound
@@ -122,12 +122,12 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const res = await app.inject({ method: "GET", url: "/capabilities?type=tool" });
       expect(res.statusCode).toBe(200);
       const data = res.json();
-      expect(data.length).toBe(84);
+      expect(data.length).toBe(90);
       expect(data.every((c: any) => c.type === "tool")).toBe(true);
 
       const callableOnly = await app.inject({ method: "GET", url: "/capabilities?callable=true" });
       expect(callableOnly.statusCode).toBe(200);
-      expect(callableOnly.json().length).toBe(84);
+      expect(callableOnly.json().length).toBe(90);
 
       await app.close();
     }, 40_000);

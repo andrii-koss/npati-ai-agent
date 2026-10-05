@@ -6,6 +6,7 @@ import { registerCodeRoutes } from "../apps/agent-api/src/code-routes";
 import { AuthenticationError } from "../apps/agent-api/src/auth";
 import { detectToolchain } from "../apps/agent-api/src/code-toolchain-detector";
 import { DEFAULT_CODE_AGENT_LIMITS, CODE_AGENT_ENABLED_BY_DEFAULT, resolveCodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
+import { CODE_TOOL_MANIFEST_VERSION } from "../apps/agent-api/src/code-tool-registry";
 import { ProjectService } from "../apps/agent-api/src/project-service";
 import type { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
 import type { ProjectWorkspace } from "../apps/agent-api/src/project-workspace";
@@ -164,8 +165,9 @@ describe("C1 — code sessions", () => {
     const { service, company } = await harness();
     const project = await service.createProject(owner, company.id, { name: "Repo" });
     const session = await service.createSession(owner, company.id, project.id, { mode: "plan", summary: "initial" });
-    // C1a (rule 12): the session pins the tool-schema manifest version it was created with.
-    expect(session).toMatchObject({ projectId: project.id, mode: "plan", status: "active", dataClassification: "confidential", retentionClass: "standard", runId: null, toolManifestVersion: 1 });
+    // C1a (rule 12): the session pins the tool-schema manifest version it was created with, so the
+    // assertion follows the published manifest instead of hardcoding a number that C2 already bumped.
+    expect(session).toMatchObject({ projectId: project.id, mode: "plan", status: "active", dataClassification: "confidential", retentionClass: "standard", runId: null, toolManifestVersion: CODE_TOOL_MANIFEST_VERSION });
     expect((await service.getSession(owner, company.id, session.id)).id).toBe(session.id);
     const withProjects = await service.listSessionsWithProjects(owner, company.id);
     expect(withProjects[0]).toMatchObject({ id: session.id, projectName: "Repo" });

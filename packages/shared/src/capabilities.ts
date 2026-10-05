@@ -16,7 +16,8 @@ export type CapabilityDomain =
   | "security"
   | "orchestration"
   | "system"
-  | "business";
+  | "business"
+  | "code";
 
 export type CapabilityRisk = "low" | "medium" | "high" | "critical";
 
