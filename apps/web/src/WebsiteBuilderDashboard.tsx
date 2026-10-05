@@ -5,6 +5,9 @@ import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
   createDefaultWebsiteDocument,
+  createMobileAppScaffold,
+  defaultAppScheme,
+  slugifyProjectName,
   getWebsiteAdapter,
   type WebsiteDocument,
   type WebsiteDomainConfig,
@@ -20,7 +23,7 @@ export interface WebsiteProject {
   companyId: string;
   name: string;
   description?: string;
-  type: "website" | "web_app" | "landing_page";
+  type: "website" | "web_app" | "landing_page" | "mobile_app";
   status: string;
   framework?: string;
   repositoryBranch?: string;
@@ -185,6 +188,7 @@ const copy = {
     typeWebsite: "Multi-page Website",
     typeLanding: "Single-page Landing",
     typeWebApp: "Web Application",
+    typeMobileApp: "Mobile app (Expo / React Native)",
     cancel: "Cancel",
     createBtn: "Create Website & Open Builder →",
     creating: "Creating Project & Files...",
@@ -247,6 +251,7 @@ const copy = {
     typeWebsite: "Багатосторінковий сайт",
     typeLanding: "Односторінковий лендінг",
     typeWebApp: "Вебзастосунок",
+    typeMobileApp: "Мобільний застосунок (Expo / React Native)",
     cancel: "Скасувати",
     createBtn: "Створити сайт і відкрити конструктор →",
     creating: "Створення проєкту та файлів...",
@@ -278,6 +283,11 @@ export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
   const { language } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
+  const projectTypeLabel = (value: WebsiteProject["type"]) =>
+    value === "landing_page" ? t.typeLanding
+      : value === "web_app" ? t.typeWebApp
+        : value === "mobile_app" ? t.typeMobileApp
+          : t.typeWebsite;
 
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [companyId, setCompanyId] = useState<string>("");
@@ -296,7 +306,7 @@ export function WebsiteBuilderDashboard() {
   const [name, setName] = useState(TEMPLATES[0]?.defaultName ?? "CloudScale Hosting");
   const [description, setDescription] = useState(TEMPLATES[0]?.defaultDesc ?? "Modern cloud hosting company");
   const [framework, setFramework] = useState("Next.js");
-  const [type, setType] = useState<"website" | "landing_page" | "web_app">("website");
+  const [type, setType] = useState<"website" | "landing_page" | "web_app" | "mobile_app">("website");
   const [domain, setDomain] = useState("");
   const [internalPath, setInternalPath] = useState("/");
   const [stripPath, setStripPath] = useState(false);
@@ -369,12 +379,13 @@ export function WebsiteBuilderDashboard() {
     void loadWebsites();
   }, [companyId]);
 
-  // When template selection changes in drawer, update suggested values
+  // When template selection changes in drawer, update suggested values.
+  // Mobile app projects pick their own templates, so the page-count heuristic must not reset them.
   const handleSelectTemplate = (tpl: TemplateOption) => {
     setSelectedTemplate(tpl.id);
     setName(tpl.defaultName);
     setDescription(language === "uk" ? tpl.descUk : tpl.desc);
-    setType(tpl.pagesCount > 1 ? "website" : "landing_page");
+    setType((current) => current === "mobile_app" ? current : tpl.pagesCount > 1 ? "website" : "landing_page");
   };
 
   const filteredWebsites = useMemo(() => {
@@ -440,8 +451,10 @@ export function WebsiteBuilderDashboard() {
         }
       );
 
-      // Initialize website document using the selected template and domain configuration
+      // Initialize project files. Mobile projects get the Expo template (D6) so the workspace
+      // never mixes a Next.js/Vite scaffold into a React Native app.
       const isVite = framework.toLowerCase().includes("vite");
+      const isMobileApp = type === "mobile_app";
       const doc: WebsiteDocument = createDefaultWebsiteDocument(
         name.trim(),
         isVite ? "vite" : "nextjs",
@@ -452,24 +465,27 @@ export function WebsiteBuilderDashboard() {
         }
       );
 
-      const adapter = getWebsiteAdapter(doc.framework);
-      const files = adapter.scaffoldProject(doc);
+      const files: Record<string, string> = isMobileApp
+        ? createMobileAppScaffold({ name: name.trim(), slug: slugifyProjectName(name.trim()), scheme: defaultAppScheme(name.trim()) }).files
+        : getWebsiteAdapter(doc.framework).scaffoldProject(doc);
 
       // Save domain and deployment configuration file in project files
-      files["deployment.json"] = JSON.stringify(
-        {
-          domain: finalDomain,
-          isTechnicalDomain: isTechnical,
-          path: domainConfig.path,
-          stripPath: domainConfig.stripPath,
-          port: domainConfig.port,
-          entrypoints: domainConfig.entrypoints,
-          ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
-          createdAt: new Date().toISOString(),
-        },
-        null,
-        2
-      );
+      if (!isMobileApp) {
+        files["deployment.json"] = JSON.stringify(
+          {
+            domain: finalDomain,
+            isTechnicalDomain: isTechnical,
+            path: domainConfig.path,
+            stripPath: domainConfig.stripPath,
+            port: domainConfig.port,
+            entrypoints: domainConfig.entrypoints,
+            ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
+            createdAt: new Date().toISOString(),
+          },
+          null,
+          2
+        );
+      }
 
       // Write initial scaffold files into the workspace
       for (const [filePath, content] of Object.entries(files)) {
@@ -885,7 +901,7 @@ export function WebsiteBuilderDashboard() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "12px", color: "#71717a", borderTop: "1px solid #f4f4f5", paddingTop: "12px", marginBottom: "16px" }}>
                     <span>{t.updated}: {new Date(site.updatedAt).toLocaleDateString(language)}</span>
                     <span style={{ fontWeight: 600, color: "#3f3f46" }}>
-                      {site.type === "landing_page" ? t.typeLanding : t.typeWebsite}
+                      {projectTypeLabel(site.type)}
                     </span>
                   </div>
                 </div>
@@ -1133,6 +1149,7 @@ export function WebsiteBuilderDashboard() {
                       <option value="website">{t.typeWebsite}</option>
                       <option value="landing_page">{t.typeLanding}</option>
                       <option value="web_app">{t.typeWebApp}</option>
+                      <option value="mobile_app">{t.typeMobileApp}</option>
                     </select>
                   </label>
                 </div>

@@ -27,7 +27,7 @@ export const PROJECT_API_SANDBOX_VARIABLES = SANDBOX_PROCESS_ENVIRONMENT_ALLOWLI
 /** Server-side secrets and DB credentials never enter a sandbox; PROJECT_SECRET_KEY is deploy-only (D7). */
 export function isForbiddenSandboxVariable(name: string): boolean {
   const upper = name.toUpperCase();
-  return upper === "PROJECT_SECRET_KEY" || upper === "DATABASE_URL" || upper.startsWith("PG") || upper.startsWith("POSTGRES") || upper.startsWith("NPATI_PROJECTS_POSTGRES") || /(^|_)DB_(URL|PASSWORD|USER|HOST)$/.test(upper);
+  return upper === "PROJECT_SECRET_KEY" || upper === "EXPO_TOKEN" || upper === "DATABASE_URL" || upper.startsWith("PG") || upper.startsWith("POSTGRES") || upper.startsWith("NPATI_PROJECTS_POSTGRES") || /(^|_)DB_(URL|PASSWORD|USER|HOST)$/.test(upper);
 }
 
 export class ProjectSandboxService {

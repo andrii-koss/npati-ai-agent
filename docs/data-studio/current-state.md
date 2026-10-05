@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current step: D5 completed at code and automated-test level (see D5 verification). Live PostgreSQL / Live Preview acceptance remains unverified because the local Docker daemon is unavailable.
-- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR), D5 Project API gateway, keys, SDK and sandbox integration (including the D5 completion pass below).
-- Next step: D6 (mobile_app projects). Not started.
+- Current step: D6 completed at code and automated-test level (see D6 verification). Live PostgreSQL / Live Preview (Expo Web) acceptance remains unverified because the local Docker daemon is unavailable.
+- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR), D5 Project API gateway, keys, SDK and sandbox integration (including the D5 completion pass below), D6 mobile_app projects (Expo template, Expo Web preview, deep links, shared DataBackend).
+- Next step: D7 (promote dev → prod, real dump/restore, quotas, external provider, drift remediation). Not started.
 - Source of truth: `docs/data-studio/PLAN.md`, `docs/data-studio/00-audit.md`, and repository code.
 
 ## Implemented in D1
@@ -254,3 +254,60 @@ D6 can rely on:
 3. `getSandboxEnvironment` / `isForbiddenSandboxVariable` for injecting only publishable config into the mobile_app sandbox, plus `SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST` / `sandboxProcessEnvironment` for background processes (Expo/Metro dev server).
 4. `project.api.inspect` (now reporting `sdk: { file, importPath, available }`) and the PROJECT.md SDK section for agent code generation.
 5. `ensureProjectSdkFile` / `PROJECT_SDK_IMPORT_PATH` when a mobile app should be generated against the vendored client; a React Native build outside the sandbox should still consume the `@npati/project-client` package.
+
+## Implemented in D6
+
+Architecture decisions:
+- A mobile app is a **Project of type `mobile_app`** attached to the **same DataBackend** as the website: same collections, same end users, same access policies and RLS. No database copy, no second Auth installation.
+- Preview is an **Expo Web export served statically** through the existing preview proxy (port 3000). Metro's dev server is intentionally not the default because the proxy has no WebSocket support and caps responses at 8 MB; a static export keeps Live Preview inside the current limits. Store builds stay out of scope.
+- Deep links are covered by a **per-project redirect URL allowlist** in Core (`project_redirect_urls`); the gateway never trusts a client-supplied redirect.
+
+Core DB (migration `063_mobile_app_projects`, registered in `packages/workspace/src/postgres-store.ts`):
+- `projects.type` CHECK extended with `mobile_app` (new project types still need a migration).
+- `projects.app_scheme` (deep link scheme of the generated app).
+- `project_redirect_urls` (id, workspace, company, project, environment, url, created_at) with a unique index per (project, environment, url).
+- Store contract: `ProjectType` + `PROJECT_TYPES`, `Project.appScheme`, `ProjectInput.dataBackendId`/`appScheme`; `createProject` now persists `data_backend_id` and `app_scheme` (the composite FK keeps the backend inside the same Company).
+
+Generated app template (`packages/shared/src/mobile-app-template.ts`):
+- `createMobileAppScaffold()` writes an Expo (SDK 51) + TypeScript app: `package.json`, `app.config.js`, `tsconfig.json`, `App.tsx`, `src/config.ts`, `src/api.ts` (SDK client with `expo-secure-store`), `src/validation.ts`, `src/schema.ts`, auth / list / detail / form screens and a `README.md` with the D6 rules.
+- `app.config.js` reads `PROJECT_API_URL` / `PROJECT_PUBLISHABLE_KEY` from the sandbox environment into Expo `extra`, so the sandbox environment contract stays at exactly those two variables.
+- Helpers: `slugifyProjectName`, `defaultAppScheme`, `isValidAppScheme`, `normalizeAuthRedirectUrl`, `isAuthRedirectAllowed`, `MOBILE_APP_FRAMEWORK`, `MOBILE_APP_PREVIEW_PORT`.
+
+SDK (`packages/project-client`):
+- `createSecureStoreStorage(secureStore)` maps the session (including the refresh token) onto `expo-secure-store` (Keychain / Keystore), never plain AsyncStorage.
+- `buildAuthRedirectUrl(scheme)` and `parseAuthDeepLink(url)` for verification / reset deep links (`kit` inferred from `kind` or the path).
+- `forgotPassword(email, { redirectTo })` and `signUp({ ..., redirectTo })` request a deep link; `createProjectClient` now refuses a secret key in a browser **or** a React Native runtime.
+
+Project Auth redirect allowlist:
+- `ProjectRedirectRepository` (Core) normalizes targets (absolute URL, no query, no fragment, no credentials, custom schemes allowed), dedupes, caps at 20 per project + environment and rejects unknown targets with `REDIRECT_NOT_ALLOWED`.
+- `ProjectAuthService` validates `redirectTo` before issuing any token, builds `<redirect>?token=...` and passes it to the email provider (`ProjectEmailOptions.link`; `MockEmailProvider` records it). Admin routes: `GET/PUT /companies/:companyId/projects/:projectId/data-studio/:environment/auth/redirects`.
+- Data Studio → Authentication → Settings has a "Redirect URLs (deep links)" editor; the generated app README points at it.
+
+Project creation and orchestration:
+- `POST /companies/:companyId/projects` accepts `mobile_app`, `dataBackendId` and `appScheme`; `ProjectService.create` validates the scheme (`mobile_app` only) and passes the backend through.
+- Intent Router: mobile requests (`isMobileAppRequest`, "створи мобільний додаток", "react native", "expo", "android/ios app") are recognized inside `CREATE_PROJECT` and carry `targetDetails.projectType = "mobile_app"` + `framework: "Expo"`; `extractFramework` also knows Expo.
+- `ProjectOrchestrator` branches on the type: it resolves the shared DataBackend (single ready backend → use it; one named in the prompt → use it; several → `DATA_BACKEND_CHOICE_REQUIRED` asking the owner which one; none → `DATA_BACKEND_REQUIRED`), creates the project with that backend, sets `framework: "Expo"` / `runtime: "expo"`, scaffolds the Expo template, registers `<scheme>://auth/callback` for dev and prod, writes a mobile-specific `PROJECT.md` (shared DataBackend, publishable key only, `./npati-client`, secure storage) and uses a "Mobile App Builder" agent (`canBuildMobileApp`).
+- Preview stack detection: `detectProjectStack` recognizes Expo (`expo` dependency or `react-native` + `app.json`/`app.config.js`) and returns framework `expo`, port 3000 and `expo export --platform web` + static serve. `expo` was added to the terminal policy framework CLI, and `expo export` is classified as an install/build command.
+- Web UI: `mobile_app` is selectable in Projects and in the Website Builder dashboard (which now scaffolds the Expo template instead of a Next.js/Vite one); type labels are localized in all seven locales.
+
+Build boundary (`apps/agent-api/src/build-provider.ts`, new):
+- `BuildProvider` / `BuildError` / `BuildResult` with `MobilePlatform = "ios" | "android"`, plus `UnconfiguredBuildProvider` that fails with `BUILD_PROVIDER_UNCONFIGURED` (503) and a documented `EasBuildProvider` TODO. Nothing wires it to a capability yet: store builds need Apple/Google accounts, signing keys and approval, and are a later step.
+
+## Explicitly outside D6
+
+- iOS/Android store builds, signing credentials, TestFlight/Play submission and push notifications (later step as a high-risk action with approval).
+- Physical device / simulator runs: Live Preview is Expo Web in the sandbox only.
+- Real email delivery: only `UnconfiguredEmailProvider` (fails explicitly) and `MockEmailProvider` exist, so deep links can be validated and recorded but not yet delivered to a mailbox.
+
+## D6 verification
+
+- `tests/data-studio-mobile-app.test.ts` (11) covers: the Expo template and its preview script, absence of `PROJECT_SECRET_KEY`/`npati_sk_*`/`DATABASE_URL`/`postgres://` in generated files, scheme derivation and rejection of reserved schemes, redirect normalization (query/fragment/credentials rejected), exact-match allowlist behaviour, repository dedupe/cap/`REDIRECT_NOT_ALLOWED`, `ProjectAuthService` redirect enforcement before token issuance plus the admin list/update round trip, React Native secure storage mapping, deep link parsing, the secret-key guard in an RN runtime, `mobile_app` creation with a shared `dataBackendId` and default scheme, scheme/type validation, mobile intent classification (3 languages), Expo stack detection, and the unchanged sandbox environment contract.
+- Regression suites for Project Auth, gateway, Data Studio routes/UI/capabilities, project foundation, intent router, preview, terminal policy, website builder, capability counters and the capability inspector are expected green (see the run log referenced from the step report).
+
+## D7 handoff
+
+D7 (promote, real dump/restore, quotas, external provider, drift remediation) can rely on:
+1. `DataBackendService`/`DatabaseProvisioner` snapshots and `ProjectMigrationEngine` drift detection as the promote/demote seam between dev and prod.
+2. Per-project registries that already carry environment scoping: `project_redirect_urls`, `project_api_request_logs`, access policies and provider config.
+3. `BuildProvider` as the seam for mobile build/publish work, with `ProjectRedirectRepository` and the SDK deep link helpers already in place.
+4. The `mobile_app` project type and `projects.app_scheme` for release metadata (bundle identifiers, store tracks) instead of new tables.

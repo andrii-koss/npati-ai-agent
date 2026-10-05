@@ -18,6 +18,14 @@ export const SUPPORTED_LANGUAGES: LanguageInfo[] = [
 ];
 
 export interface TranslationSchema {
+  projectSection: {
+    types: {
+      website: string;
+      webApp: string;
+      landingPage: string;
+      mobileApp: string;
+    };
+  };
   common: {
     save: string;
     cancel: string;

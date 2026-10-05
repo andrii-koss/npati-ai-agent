@@ -47,6 +47,7 @@ import { ProjectMigrationEngine } from "./data-studio/migration-engine";
 import { DataStudioUiService } from "./data-studio/studio-service";
 import { registerDataStudioRoutes } from "./data-studio/studio-routes";
 import { ProjectAuthService } from "./data-studio/auth-service";
+import { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { ProjectApiGatewayService } from "./data-studio/gateway-service";
 import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
@@ -859,11 +860,13 @@ export function buildApp(config: AppConfig = {}) {
   const projectMigrationEngine = dataBackendRepository && sharedPostgresProvisioner && dataProvider
     ? new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)
     : undefined;
+  const projectRedirectRepository = new ProjectRedirectRepository({ get: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId) }, config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const projectAuthService = dataBackendRepository && sharedPostgresProvisioner
     ? new ProjectAuthService({
         store: workspaceStore,
         repository: dataBackendRepository,
         provisioner: sharedPostgresProvisioner,
+        redirects: projectRedirectRepository,
       })
     : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
@@ -941,6 +944,8 @@ export function buildApp(config: AppConfig = {}) {
     projectGitService,
     projectDeployService,
     projectBrowserQaService,
+    dataBackendService,
+    projectRedirectRepository,
   );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {

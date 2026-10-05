@@ -44,12 +44,26 @@ export interface ProjectIntentDecision {
     framework?: string;
     actionDescription?: string;
     entityName?: string;
+    /** D6: a mobile app project shares an existing DataBackend with the website. */
+    projectType?: "website" | "mobile_app";
+    dataBackendId?: string;
   };
+}
+
+/** Requests that ask for a mobile app (Expo / React Native) rather than a website. */
+const MOBILE_APP_REGEX = /(?:мобільн\p{L}*|мобильн\p{L}*|mobile|android|ios|expo|react\s*native|react-native|смартфон\p{L}*|застосун\p{L}*|апп|додаток для (?:телефон|смартфон)|native app)/iu;
+
+export function isMobileAppRequest(message: string): boolean {
+  if (!message) return false;
+  const text = message.toLowerCase();
+  if (!MOBILE_APP_REGEX.test(text)) return false;
+  // "мобільний" alone may describe a responsive website; require an app/Expo signal.
+  return /(?:додаток|застосун\p{L}*|app|expo|react\s*native|android|ios)/iu.test(text);
 }
 
 const EXPLANATION_REGEX = /^(?:що таке|як працює|поясни|розкажи про|різниця між|чому|what is|how does|how do|explain|tell me about|difference between|why is)\b/i;
 
-const CREATE_PROJECT_REGEX = /(?:створи|зроби|розроби|створити|запусти|згенеруй|create|build|make|generate|start|new)(?:\s+[\p{L}\d_-]+){0,5}\s+(?:сайт|веб-?сайт|лендінг|проєкт|проект|додаток|сторінк[уа]|website|web\s*site|landing(?:\s*page)?|project|app|web\s*app)/iu;
+const CREATE_PROJECT_REGEX = /(?:створи|зроби|розроби|створити|запусти|згенеруй|create|build|make|generate|start|new)(?:\s+[\p{L}\d_-]+){0,5}\s+(?:сайт|веб-?сайт|лендінг|проєкт|проект|додаток|застосун\p{L}*|апп|сторінк[уа]|website|web\s*site|landing(?:\s*page)?|project|app|web\s*app)/iu;
 
 const EDIT_ACTION_REGEX = /(?:зроби|зміни|додай|видали|поправ|онови|перепиши|пофарбуй|розмісти|збільш|зменш|налаштуй|make|change|add|update|edit|modify|fix|move|enlarge|shrink|customize|color|style|darker|lighter|bigger|smaller)\s+(?:кнопк|хедер|футер|текст|шрифт|колір|секці|банер|форму|дизайн|стил|меню|лого|button|header|footer|text|font|color|section|banner|form|design|style|menu|hero|logo)/i;
 
@@ -88,6 +102,7 @@ function extractEntityName(message: string): string | undefined {
 
 export function extractFramework(message: string): string | undefined {
   const lower = message.toLowerCase();
+  if (lower.includes("expo") || lower.includes("react native") || lower.includes("react-native")) return "Expo";
   if (lower.includes("next.js") || lower.includes("nextjs") || lower.includes("next")) return "Next.js";
   if (lower.includes("vite")) return "Vite";
   if (lower.includes("astro")) return "Astro";
@@ -275,9 +290,10 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
     });
   }
 
-  // 11. Create Project / Create Website
+  // 11. Create Project / Create Website / Create Mobile App (D6)
   if (CREATE_PROJECT_REGEX.test(text)) {
-    const isWebsite = /сайт|веб-?сайт|лендінг|website|web\s*site|landing/i.test(text);
+    const isMobileApp = isMobileAppRequest(text);
+    const isWebsite = !isMobileApp && /сайт|веб-?сайт|лендінг|website|web\s*site|landing/i.test(text);
     return buildDecision({
       intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
       confidence: 0.92,
@@ -285,8 +301,9 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: extractFramework(text),
+        framework: isMobileApp ? "Expo" : extractFramework(text),
         entityName: extractEntityName(text),
+        projectType: isMobileApp ? "mobile_app" : "website",
       },
     });
   }

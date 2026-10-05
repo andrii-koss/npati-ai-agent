@@ -61,6 +61,8 @@ export const DataStudioAuthSection: React.FC<Props> = ({
   const [settings, setSettings] = useState<ProjectAuthSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [redirectUrls, setRedirectUrls] = useState("");
+  const [savingRedirects, setSavingRedirects] = useState(false);
   const [rotatingKeys, setRotatingKeys] = useState(false);
 
   // Policies State
@@ -106,6 +108,15 @@ export const DataStudioAuthSection: React.FC<Props> = ({
     }
   }, [basePath, notify]);
 
+  const loadRedirectUrls = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ redirectUrls: string[] }>(`${basePath}/redirects`);
+      setRedirectUrls((res.redirectUrls ?? []).join("\n"));
+    } catch {
+      setRedirectUrls("");
+    }
+  }, [basePath]);
+
   const loadPolicies = useCallback(async () => {
     setPoliciesLoading(true);
     try {
@@ -132,9 +143,9 @@ export const DataStudioAuthSection: React.FC<Props> = ({
 
   useEffect(() => {
     if (subTab === "users") void loadUsers();
-    else if (subTab === "settings") void loadSettings();
+    else if (subTab === "settings") { void loadSettings(); void loadRedirectUrls(); }
     else if (subTab === "permissions") void loadPolicies();
-  }, [subTab, loadUsers, loadSettings, loadPolicies]);
+  }, [subTab, loadUsers, loadSettings, loadRedirectUrls, loadPolicies]);
 
   // --- User Handlers ---
   const handleToggleStatus = async (user: ProjectAuthUser) => {
@@ -246,6 +257,22 @@ export const DataStudioAuthSection: React.FC<Props> = ({
   };
 
   // --- Settings Handlers ---
+  const handleSaveRedirectUrls = async () => {
+    setSavingRedirects(true);
+    try {
+      await apiFetch(`${basePath}/redirects`, {
+        method: "PUT",
+        body: JSON.stringify({ redirectUrls: redirectUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) }),
+      });
+      notify(isUk ? "Redirect URLs збережено" : "Redirect URLs saved");
+      await loadRedirectUrls();
+    } catch (err: any) {
+      notify(err.message || "Failed to save redirect URLs", "error");
+    } finally {
+      setSavingRedirects(false);
+    }
+  };
+
   const handleSaveSettings = async () => {
     if (!settings) return;
     setSavingSettings(true);
@@ -584,6 +611,29 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                   onClick={() => void handleRotateSigningKey()}
                 >
                   {rotatingKeys ? (isUk ? "Ротація…" : "Rotating…") : isUk ? "🔄 Ротувати ключі підпису" : "🔄 Rotate Signing Keys"}
+                </button>
+              </div>
+
+              <div className="settings-card">
+                <h3>{isUk ? "Redirect URLs (deep links)" : "Redirect URLs (deep links)"}</h3>
+                <p>
+                  {isUk
+                    ? "Лише ці адреси можуть отримувати посилання підтвердження email і скидання пароля. Для мобільного застосунку додайте його deep link, наприклад npati-shop://auth/callback (по одному на рядок)."
+                    : "Only these targets may receive email verification and password reset links. For a mobile app add its deep link, for example npati-shop://auth/callback (one per line)."}
+                </p>
+                <textarea
+                  rows={4}
+                  value={redirectUrls}
+                  onChange={(event) => setRedirectUrls(event.target.value)}
+                  placeholder={"https://shop.example.com/auth/callback\nnpati-shop://auth/callback"}
+                />
+                <button
+                  type="button"
+                  className="button-secondary"
+                  disabled={savingRedirects}
+                  onClick={() => void handleSaveRedirectUrls()}
+                >
+                  {savingRedirects ? (isUk ? "Збереження…" : "Saving…") : isUk ? "Зберегти redirect URLs" : "Save redirect URLs"}
                 </button>
               </div>
 

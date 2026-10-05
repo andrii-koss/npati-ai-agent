@@ -32,7 +32,8 @@ export interface Company {
 export type CompanyInput = Partial<Omit<Company, "id" | "workspaceId" | "userId" | "mainAgentId" | "revision" | "createdAt" | "updatedAt">> & { name: string };
 export interface CompanyPage { items: Company[]; nextCursor: string | null; }
 
-export type ProjectType = "website" | "web_app" | "landing_page";
+export type ProjectType = "website" | "web_app" | "landing_page" | "mobile_app";
+export const PROJECT_TYPES: readonly ProjectType[] = ["website", "web_app", "landing_page", "mobile_app"] as const;
 export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived";
 export interface Project {
   id: string; companyId: string; workspaceId: string; createdBy: string;
@@ -41,9 +42,11 @@ export interface Project {
   sandboxId?: string; previewUrl?: string; previewPort?: number; lastRunId?: string; lastBuildStatus?: string;
   deploymentUrl?: string; deploymentStatus?: string; lastDeployedAt?: string;
   dataBackendId?: string;
+  /** Deep link scheme of a generated mobile app (mobile_app projects). */
+  appScheme?: string;
   revision: number; createdAt: string; updatedAt: string;
 }
-export interface ProjectInput { name: string; description?: string; type: ProjectType; dataBackendId?: string; }
+export interface ProjectInput { name: string; description?: string; type: ProjectType; dataBackendId?: string; appScheme?: string; }
 
 export type CheckpointTrigger = "manual" | "pre_run" | "post_run" | "pre_restore";
 

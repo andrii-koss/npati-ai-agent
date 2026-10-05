@@ -6,7 +6,7 @@ import { useTranslation } from "./i18n";
 
 export type Project = {
   id: string; companyId: string; name: string; description?: string;
-  type: "website" | "web_app" | "landing_page"; status: string;
+  type: "website" | "web_app" | "landing_page" | "mobile_app"; status: string;
   framework?: string; repositoryBranch?: string; sandboxId?: string;
   previewUrl?: string; previewPort?: number; lastBuildStatus?: string;
   deploymentStatus?: string; deploymentUrl?: string; lastDeployedAt?: string;
@@ -19,7 +19,6 @@ const copy = {
     createWithAi: "Create with AI", recordOnly: "Website generation is coming soon. This creates the project record.",
     importRepository: "Import repository", uploadProject: "Upload project", comingSoon: "Coming soon",
     name: "Project name", description: "Description", type: "Type",
-    website: "Website", webApp: "Web app", landingPage: "Landing page",
     create: "Create Project", cancel: "Cancel", open: "Open", rename: "Rename",
     archive: "Archive", delete: "Delete", includeArchived: "Show archived",
     updated: "Updated", framework: "Framework", notSet: "Not set",
@@ -31,7 +30,6 @@ const copy = {
     createWithAi: "Створити з AI", recordOnly: "Генерація сайту з’явиться пізніше. Зараз створюється запис проєкту.",
     importRepository: "Імпортувати репозиторій", uploadProject: "Завантажити проєкт", comingSoon: "Незабаром",
     name: "Назва проєкту", description: "Опис", type: "Тип",
-    website: "Сайт", webApp: "Вебзастосунок", landingPage: "Лендінг",
     create: "Створити проєкт", cancel: "Скасувати", open: "Відкрити", rename: "Перейменувати",
     archive: "Архівувати", delete: "Видалити", includeArchived: "Показати архівні",
     updated: "Оновлено", framework: "Фреймворк", notSet: "Не вказано",
@@ -53,8 +51,14 @@ async function projectApi<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function ProjectSection({ companyId }: { companyId: string }) {
-  const { language } = useTranslation();
+  const { language, t: tr } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
+  const typeLabels: Record<Project["type"], string> = {
+    website: tr("projectSection.types.website"),
+    web_app: tr("projectSection.types.webApp"),
+    landing_page: tr("projectSection.types.landingPage"),
+    mobile_app: tr("projectSection.types.mobileApp"),
+  };
   const [projects, setProjects] = useState<Project[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -130,7 +134,7 @@ export function ProjectSection({ companyId }: { companyId: string }) {
     {projects.length === 0 ? <p>{t.empty}</p> : <div className="project-card-grid">{projects.map((project) => <article className="project-card" key={project.id}>
       <h3>{project.name}</h3>
       <div className="project-card-meta">
-        <span>{project.type === "web_app" ? t.webApp : project.type === "landing_page" ? t.landingPage : t.website}</span>
+        <span>{typeLabels[project.type] ?? project.type}</span>
         <span>{project.status}</span>
         {project.dataBackendId ? (
           <span className="data-studio-badge" title="DataBackend attached">🗄️ Data</span>
@@ -159,7 +163,7 @@ export function ProjectSection({ companyId }: { companyId: string }) {
         <section><label><span>{t.name}</span><input required maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label><span>{t.description}</span><textarea maxLength={5000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
           <label><span>{t.type}</span><select value={type} onChange={(event) => setType(event.target.value as Project["type"])}>
-            <option value="website">{t.website}</option><option value="web_app">{t.webApp}</option><option value="landing_page">{t.landingPage}</option>
+            <option value="website">{typeLabels.website}</option><option value="web_app">{typeLabels.web_app}</option><option value="landing_page">{typeLabels.landing_page}</option><option value="mobile_app">{typeLabels.mobile_app}</option>
           </select></label></section>
         <footer><button type="button" className="button-secondary" onClick={() => setDialogOpen(false)}>{t.cancel}</button><button className="button-primary" disabled={busy}>{t.create}</button></footer>
       </form>
