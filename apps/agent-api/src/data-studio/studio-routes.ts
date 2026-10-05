@@ -1,15 +1,22 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError } from "@npati/workspace";
+import { TEMPLATE_CATALOG } from "@npati/shared";
 import type { AuthProvider } from "../auth";
 import { DataStudioError } from "./identifier";
 import type { DataStudioUiService } from "./studio-service";
+import type { AgentDataStudioService } from "./agent-data-service";
 import type { DataEnvironmentName } from "./types";
 import type { SchemaOperation } from "./data-provider";
 import { fail } from "./routes";
 
 type Params = { companyId: string; projectId: string; environment: DataEnvironmentName; collection?: string; id?: string };
 
-export function registerDataStudioRoutes(app: FastifyInstance, auth: AuthProvider, service?: DataStudioUiService) {
+export function registerDataStudioRoutes(
+  app: FastifyInstance,
+  auth: AuthProvider,
+  service?: DataStudioUiService,
+  agentService?: AgentDataStudioService,
+) {
   const base = "/companies/:companyId/projects/:projectId/data-studio/:environment";
   const run = async (request: FastifyRequest, reply: FastifyReply, permission: "workspace:read" | "business:manage",
     action: (ctx: Awaited<ReturnType<AuthProvider["authenticate"]>>) => Promise<unknown>) => {
@@ -41,6 +48,42 @@ export function registerDataStudioRoutes(app: FastifyInstance, auth: AuthProvide
     service!.importRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.format, request.body.content)));
   app.post<{ Params: Params; Body: { format: "csv" | "json" } }>(base + "/collections/:collection/export", (request, reply) => run(request, reply, "workspace:read", (ctx) =>
     service!.exportRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.format)));
+
+  // --- Schema templates (used by the Data Studio settings section) ---
+  app.get<{ Params: Params }>(base + "/templates", (request, reply) => run(request, reply, "workspace:read", async () => ({
+    templates: TEMPLATE_CATALOG.map((template) => ({
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      collections: template.collections.map((collection) => ({
+        name: collection.name,
+        fields: collection.fields.length,
+        fieldNames: collection.fields.map((field) => field.name),
+      })),
+    })),
+  })));
+
+  app.post<{ Params: Params; Body: { templateId: string; seedDemoData?: boolean; approved?: boolean } }>(
+    base + "/templates/apply",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["templateId"], properties: {
+      templateId: { type: "string", minLength: 1, maxLength: 100 },
+      seedDemoData: { type: "boolean" },
+      approved: { type: "boolean" },
+    } } } },
+    (request, reply) => run(request, reply, "business:manage", async (ctx) => {
+      if (request.params.environment !== "dev") {
+        throw new DataStudioError(409, "template", "Templates are applied to dev; promote the schema to prod afterwards", false, "PROMOTE_REQUIRED");
+      }
+      if (!agentService) throw new DataStudioError(503, "template", "Schema templates are unavailable", true, "DATA_STUDIO_UNAVAILABLE");
+      if (request.body.approved !== true) {
+        throw new DataStudioError(409, "template", "APPROVAL_REQUIRED: applying a schema template changes the project database", false, "APPROVAL_REQUIRED");
+      }
+      return agentService.applyTemplate(ctx, request.params.companyId, request.params.projectId, request.body.templateId, {
+        approved: true,
+        seedDemoData: request.body.seedDemoData === true,
+      });
+    }),
+  );
 
   // --- API & SDK Management Endpoints ---
   app.get<{ Params: Params }>(base + "/api/keys", (request, reply) => run(request, reply, "workspace:read", (ctx) =>

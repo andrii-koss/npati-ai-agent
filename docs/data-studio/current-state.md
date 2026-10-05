@@ -349,6 +349,8 @@ Capability and agent flow:
 Scheduler and UI:
 - A backup scheduler tick (`NPATI_DATA_BACKUP_TICK_SECONDS`, default 5 min, `NPATI_DATA_BACKUP_DISABLED` to stop) runs due snapshots, retention pruning and the purge of DataBackends whose deadline passed.
 - Data Studio gained the **Backups** tab (snapshot list, create, policy editor, approved restore with typed `prod` confirmation) and the **Promote & Quotas** tab (preview modal with operations/flags/diff, approve/reject, promote history, quota report with progress bar and limit editor).
+- A **Data Studio** section on the settings page (`/settings/data-studio`, `apps/web/src/DataStudioSettingsPage.tsx`) gives owners a schema workbench across projects: company/project/environment selectors, the live table list (fields, RLS badges, policies, indexes, lazily counted rows), a "new table" **left drawer** with schema templates and a manual table builder (name + typed fields), table editing (add/alter/drop field, rename) and deletion (typed collection name, automatic snapshot), all through the existing preview → apply flow with the SQL diff. Production is read-only there and points at Promote.
+- Schema templates over HTTP (used by that section): `GET /companies/:companyId/projects/:projectId/data-studio/:environment/templates` (catalog summary) and `POST …/templates/apply` (`{ templateId, seedDemoData?, approved: true }`, dev only — prod answers `PROMOTE_REQUIRED`, missing approval answers `APPROVAL_REQUIRED`).
 
 ## D7 verification
 

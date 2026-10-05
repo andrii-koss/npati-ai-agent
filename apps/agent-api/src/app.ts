@@ -2539,7 +2539,7 @@ ${localized.next}`;
   });
   registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
   registerDataBackendRoutes(app, authProvider, dataBackendService, { promote: promoteService, backups: backupService, quotas: quotaService });
-  registerDataStudioRoutes(app, authProvider, dataStudioService);
+  registerDataStudioRoutes(app, authProvider, dataStudioService, agentDataStudioService);
   registerProjectAuthRoutes(app, authProvider, projectAuthService);
   registerProjectApiGatewayRoutes(app, projectApiGatewayService, projectAuthService);
   app.addHook("onClose", async () => {

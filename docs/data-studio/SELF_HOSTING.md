@@ -109,8 +109,27 @@ own database, three roles (provisioner/admin, migrator, runtime), Project API ke
 signing keys. The runtime role is never a table owner, has no `SUPERUSER`/`CREATEDB`/
 `CREATEROLE`/`BYPASSRLS`, and only receives explicit `GRANT`s.
 
-## 3. Promote dev → prod
+## 2b. Managing tables from the UI
 
+Settings → **Data Studio** (`/settings/data-studio`) is the owner-facing schema workbench:
+
+- pick Company → Project → environment (`dev` / `prod`); the header shows the DataBackend, its
+  sync status, any held migration lock and the live table list (fields, RLS state, policies,
+  indexes);
+- **New table** opens a left drawer: *From a schema* lists the built-in templates
+  (e-commerce, blog, CRM, SaaS) with the collections and fields they create, plus an optional
+  "add demo data" switch that only affects `dev`; *Manually* builds a table from a name and typed
+  fields;
+- editing a table (rename, add/change/drop a field) and deleting it go through the same
+  preview → apply flow: the UI shows the generated SQL, the flags (`reversible`, `destructive`,
+  `requiresSnapshot`) and requires a typed confirmation for deletion. A snapshot is taken
+  automatically for destructive operations;
+- `prod` is intentionally read-only there: promote the schema from **Promote & Quotas** instead.
+
+The same operations are available to agents through the `project.data.schema.*` and
+`project.data.templates.apply` capabilities (approval required).
+
+## 3. Promote dev → prod
 Promote is a DataBackend-level operation: `dev` is the environment agents and Live Preview write
 to, `prod` is what the generated site/app serves. Promote replays the applied dev migrations onto
 prod.

@@ -482,3 +482,40 @@ describe("D7 — lifecycle", () => {
     expect(quotas.resolveLimits("dev", { maxDatabaseBytes: 5 }).maxDatabaseBytes).toBe(5);
   });
 });
+
+describe("D7 — schema template routes (settings page)", () => {
+  it("lists templates, refuses prod and requires explicit approval before applying", async () => {
+    const Fastify = (await import("fastify")).default;
+    const { registerDataStudioRoutes } = await import("../apps/agent-api/src/data-studio/studio-routes");
+    const app = Fastify();
+    const calls: Array<{ templateId: string; seedDemoData: boolean }> = [];
+    const agentService = {
+      async applyTemplate(_ctx: AuthContext, _companyId: string, _projectId: string, templateId: string, options: { seedDemoData?: boolean }) {
+        calls.push({ templateId, seedDemoData: options.seedDemoData === true });
+        return { applied: true, templateId, collections: ["products"], appliedMigrationsCount: 1, seededRows: options.seedDemoData ? 4 : 0 };
+      },
+    };
+    registerDataStudioRoutes(app, { authenticate: async () => owner } as never, {} as never, agentService as never);
+
+    const list = await app.inject({ method: "GET", url: "/companies/c1/projects/p1/data-studio/dev/templates" });
+    expect(list.statusCode).toBe(200);
+    const templates = list.json().templates as Array<{ id: string; collections: unknown[] }>;
+    expect(templates.length).toBeGreaterThan(0);
+    expect(templates.some((template) => template.id === "ecommerce")).toBe(true);
+
+    const prod = await app.inject({ method: "POST", url: "/companies/c1/projects/p1/data-studio/prod/templates/apply", payload: { templateId: "ecommerce", approved: true } });
+    expect(prod.statusCode).toBe(409);
+    expect(prod.json().error.code).toBe("PROMOTE_REQUIRED");
+
+    const unapproved = await app.inject({ method: "POST", url: "/companies/c1/projects/p1/data-studio/dev/templates/apply", payload: { templateId: "ecommerce" } });
+    expect(unapproved.statusCode).toBe(409);
+    expect(unapproved.json().error.code).toBe("APPROVAL_REQUIRED");
+    expect(calls).toHaveLength(0);
+
+    const applied = await app.inject({ method: "POST", url: "/companies/c1/projects/p1/data-studio/dev/templates/apply", payload: { templateId: "ecommerce", approved: true, seedDemoData: true } });
+    expect(applied.statusCode).toBe(200);
+    expect(applied.json()).toMatchObject({ applied: true, templateId: "ecommerce", seededRows: 4 });
+    expect(calls).toEqual([{ templateId: "ecommerce", seedDemoData: true }]);
+    await app.close();
+  });
+});
