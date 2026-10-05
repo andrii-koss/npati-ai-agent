@@ -48,6 +48,8 @@ import { DataStudioUiService } from "./data-studio/studio-service";
 import { registerDataStudioRoutes } from "./data-studio/studio-routes";
 import { ProjectAuthService } from "./data-studio/auth-service";
 import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
+import { ProjectApiGatewayService } from "./data-studio/gateway-service";
+import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
 import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { LocalProjectWorkspace } from "./project-workspace";
 import { registerProjectFileRoutes } from "./project-file-routes";
@@ -857,8 +859,6 @@ export function buildApp(config: AppConfig = {}) {
   const projectMigrationEngine = dataBackendRepository && sharedPostgresProvisioner && dataProvider
     ? new ProjectMigrationEngine(sharedPostgresProvisioner, dataProvider, dataBackendRepository)
     : undefined;
-  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
-    ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine) : undefined;
   const projectAuthService = dataBackendRepository && sharedPostgresProvisioner
     ? new ProjectAuthService({
         store: workspaceStore,
@@ -866,6 +866,11 @@ export function buildApp(config: AppConfig = {}) {
         provisioner: sharedPostgresProvisioner,
       })
     : undefined;
+  const projectApiGatewayService = dataBackendRepository && sharedPostgresProvisioner
+    ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, sharedPostgresProvisioner, projectAuthService, dataProvider)
+    : undefined;
+  const dataStudioService = dataBackendRepository && sharedPostgresProvisioner && dataProvider && projectMigrationEngine
+    ? new DataStudioUiService(workspaceStore, dataBackendRepository, dataProvider, projectMigrationEngine, projectApiGatewayService) : undefined;
   const projectService = new ProjectService(workspaceStore, async (context, project) => { if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project"); await projectSandbox?.destroy(context, project); });
   const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   const agentDataStudioService = dataBackendRepository && dataProvider && projectMigrationEngine
@@ -881,7 +886,7 @@ export function buildApp(config: AppConfig = {}) {
     inactivityMs: Number(process.env.NPATI_SANDBOX_IDLE_MS) || undefined,
     syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
     syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
-  });
+  }, projectApiGatewayService ? (ctx, companyId, projectId) => projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : undefined);
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
@@ -902,7 +907,7 @@ export function buildApp(config: AppConfig = {}) {
     projectPreviewService,
     projectSandbox,
   );
-  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService, projectBrowserQaService, agentDataStudioService);
+  const companyToolRuntime = new CompanyToolRuntime(aiEngine, researchBundle?.provider, attachmentDirectory, chatFiles,knowledgeRepo,new WasmExecSandbox(), emailAgentTools, browserTool, projectWorkspace, workspaceStore, projectSandbox, projectPreviewService, projectGitService, projectFileLeaseManager, projectDeployService, projectBrowserQaService, agentDataStudioService, projectApiGatewayService);
   const knowledgeProcessor = knowledgeRepo && objectStorage ? new CompanyKnowledgeProcessor(knowledgeRepo,fileRepository,objectStorage,aiEngine,memoryEngines) : undefined;
   const companyRuntime = new CompanyDelegationRuntime(workspaceStore, aiEngine, config.companyRunTimeoutMs, companyToolRuntime,
     knowledgeProcessor ? async (ctx,companyId,query,scope)=>{
@@ -2502,7 +2507,9 @@ ${localized.next}`;
   registerDataBackendRoutes(app, authProvider, dataBackendService);
   registerDataStudioRoutes(app, authProvider, dataStudioService);
   registerProjectAuthRoutes(app, authProvider, projectAuthService);
+  registerProjectApiGatewayRoutes(app, projectApiGatewayService, projectAuthService);
   app.addHook("onClose", async () => {
+    await projectApiGatewayService?.close();
     await projectAuthService?.close();
     await dataProvider?.close();
     await sharedPostgresProvisioner?.close();

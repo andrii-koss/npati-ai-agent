@@ -31,6 +31,10 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     `- Backend: ${backendName} (dev)`,
     `- Synchronized: ${new Date().toISOString()}`,
     `- Collections (${schema.tables.length}):`,
+    "- Project API: /v1/projects/<projectId> (use the configured PROJECT_API_URL and PROJECT_PUBLISHABLE_KEY).",
+    "- Client SDK: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
+    "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; data: client.from(\"products\").list(), get(id), create(row), update(id, row), delete(id).",
+    "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
   ];
   for (const table of schema.tables) {
     const cols = table.columns.map((c) => `${c.name} (${c.type}${c.nullable ? "" : ", required"})`).join(", ");
@@ -370,6 +374,8 @@ export class AgentDataStudioService {
         });
         appliedMigrations.push(mig);
       }
+      if (!this.authService) throw new DataStudioError(503, "template", "Project Auth service is required to apply template policies", true, "AUTH_UNAVAILABLE");
+      await this.authService.applyAccessPolicies(ctx, companyId, projectId, "dev", template.accessPolicies);
     } catch (error) {
       // Rollback applied migrations in reverse order if any operation fails
       for (let i = appliedMigrations.length - 1; i >= 0; i--) {

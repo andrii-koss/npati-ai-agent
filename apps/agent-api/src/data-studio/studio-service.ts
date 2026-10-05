@@ -1,9 +1,11 @@
-import type { AuthContext, WorkspaceStore } from "@npati/workspace";
+import { CryptoVault, type AuthContext, type WorkspaceStore } from "@npati/workspace";
 import type { DataBackendRepository } from "./repository";
 import type { DataProvider, SchemaOperation, SchemaSnapshot } from "./data-provider";
 import type { ProjectMigrationEngine } from "./migration-engine";
 import type { DataEnvironmentName } from "./types";
 import { DataStudioError, validateIdentifier } from "./identifier";
+import { ProjectApiKeyManager } from "./api-key-manager";
+import type { ProjectApiGatewayService } from "./gateway-service";
 
 const maxImportBytes = 1_000_000;
 const maxImportRows = 500;
@@ -112,11 +114,14 @@ export function validateOperation(operation: SchemaOperation): void {
 }
 
 export class DataStudioUiService {
+  private readonly vault = new CryptoVault();
+
   constructor(
     private readonly store: Pick<WorkspaceStore, "getProject">,
     private readonly repository: DataBackendRepository,
     private readonly provider: DataProvider,
     private readonly migrations: ProjectMigrationEngine,
+    private readonly gateway?: ProjectApiGatewayService,
   ) {}
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName) {
@@ -233,6 +238,114 @@ export class DataStudioUiService {
     if (format !== "csv") throw new DataStudioError(400, "export", "Invalid format", false, "INVALID_FORMAT");
     const header = rows.length ? Object.keys(rows[0]!) : [];
     return { filename: collection + ".csv", mimeType: "text/csv", content: [header.map(safeCsvCell).join(","), ...rows.map((row) => header.map((key) => safeCsvCell(row[key])).join(","))].join("\r\n") };
+  }
+
+  async getApiKeys(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName) {
+    const { backend, env } = await this.context(ctx, companyId, projectId, environment);
+    const ensured = ProjectApiKeyManager.ensureKeys(env.providerConfig, environment, this.vault);
+    if (ensured.secretKey) {
+      await this.repository.setEnvironment(ctx, companyId, backend.id, environment, {
+        providerConfig: ensured.updatedConfig,
+      });
+      env.providerConfig = ensured.updatedConfig;
+    }
+    const apiUrl = `/v1/projects/${projectId}`;
+    return ProjectApiKeyManager.getPublicInfo({ ...env.providerConfig, corsAllowedOrigins: (env.providerConfig.corsOriginsByProject as Record<string, string[]> | undefined)?.[projectId] ?? [] }, apiUrl, environment);
+  }
+
+  async revealSecretKey(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName) {
+    if (!ctx.permissions.includes("business:manage") && !ctx.permissions.includes("*") && !ctx.permissions.includes("owner")) {
+      throw new DataStudioError(403, "keys", "Requires business:manage permission to view secret key", false, "PERMISSION_DENIED");
+    }
+    const { env } = await this.context(ctx, companyId, projectId, environment);
+    const secretKey = ProjectApiKeyManager.revealSecretKey(env.providerConfig, this.vault);
+    if (!secretKey) {
+      throw new DataStudioError(404, "keys", "Secret key not found or not stored", false, "SECRET_KEY_NOT_FOUND");
+    }
+    return { secretKey };
+  }
+
+  async rotateApiKeys(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    target: "publishable" | "secret" | "both" = "both",
+  ) {
+    if (!ctx.permissions.includes("business:manage") && !ctx.permissions.includes("*") && !ctx.permissions.includes("owner")) {
+      throw new DataStudioError(403, "keys", "Requires business:manage permission to rotate API keys", false, "PERMISSION_DENIED");
+    }
+    const { backend, env } = await this.context(ctx, companyId, projectId, environment);
+    const rotated = ProjectApiKeyManager.rotateKeys(env.providerConfig, environment, target, this.vault);
+    await this.repository.setEnvironment(ctx, companyId, backend.id, environment, {
+      providerConfig: rotated.updatedConfig,
+    });
+    const apiUrl = `/v1/projects/${projectId}`;
+    const info = ProjectApiKeyManager.getPublicInfo({ ...rotated.updatedConfig, corsAllowedOrigins: (rotated.updatedConfig.corsOriginsByProject as Record<string, string[]> | undefined)?.[projectId] ?? [] }, apiUrl, environment);
+    return {
+      ...info,
+      newSecretKey: rotated.secretKey,
+    };
+  }
+
+  async updateCorsOrigins(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    origins: string[],
+  ) {
+    if (!ctx.permissions.includes("business:manage") && !ctx.permissions.includes("*") && !ctx.permissions.includes("owner")) {
+      throw new DataStudioError(403, "cors", "Requires business:manage permission to update CORS origins", false, "PERMISSION_DENIED");
+    }
+    const { backend, env } = await this.context(ctx, companyId, projectId, environment);
+    const sanitized = origins.map((o) => o.trim()).filter(Boolean);
+    if (sanitized.length > 50 || sanitized.some((origin) => {
+      try { const url = new URL(origin); return !["http:", "https:"].includes(url.protocol) || url.origin !== origin; }
+      catch { return true; }
+    })) throw new DataStudioError(400, "cors", "Origins must be exact HTTP(S) origins", false, "INVALID_ORIGIN");
+    const byProject = (env.providerConfig.corsOriginsByProject ?? {}) as Record<string, string[]>;
+    const updatedConfig = {
+      ...env.providerConfig,
+      corsOriginsByProject: { ...byProject, [projectId]: sanitized },
+    };
+    await this.repository.setEnvironment(ctx, companyId, backend.id, environment, {
+      providerConfig: updatedConfig,
+    });
+    return { corsAllowedOrigins: sanitized };
+  }
+
+  async getApiRequestLogs(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    limit = 50,
+  ) {
+    await this.context(ctx, companyId, projectId, environment);
+    if (this.gateway) {
+      return this.gateway.getLogs(projectId, environment, limit);
+    }
+    return [];
+  }
+
+  async getApiUsage(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+  ) {
+    await this.context(ctx, companyId, projectId, environment);
+    if (this.gateway) {
+      return this.gateway.getUsage(projectId, environment);
+    }
+    return {
+      requestCount: 0,
+      databaseBytes: 0,
+      collectionsCount: 0,
+      maxDatabaseBytes: 1_000_000_000,
+      maxRequestsPerMinute: 120,
+    };
   }
 }
 

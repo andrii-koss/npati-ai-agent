@@ -22,6 +22,14 @@ const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspa
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
 const artifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".cache", "vendor", "__pycache__", ".venv"].includes(part));
 
+/** The only Project API variables a sandbox may receive (D5). */
+export const PROJECT_API_SANDBOX_VARIABLES = ["PROJECT_API_URL", "PROJECT_PUBLISHABLE_KEY"] as const;
+/** Server-side secrets and DB credentials never enter a sandbox; PROJECT_SECRET_KEY is deploy-only (D7). */
+export function isForbiddenSandboxVariable(name: string): boolean {
+  const upper = name.toUpperCase();
+  return upper === "PROJECT_SECRET_KEY" || upper === "DATABASE_URL" || upper.startsWith("PG") || upper.startsWith("POSTGRES") || upper.startsWith("NPATI_PROJECTS_POSTGRES") || /(^|_)DB_(URL|PASSWORD|USER|HOST)$/.test(upper);
+}
+
 export class ProjectSandboxService {
   private readonly limits: TerminalLimits;
   private readonly lastUse = new Map<string, { ctx: AuthContext; project: Project; at: number }>();
@@ -33,6 +41,7 @@ export class ProjectSandboxService {
     private readonly events: ProjectTerminalEventsRepository,
     private readonly secretResolver?: { resolve(ctx: AuthContext, companyId: string, id: string): Promise<Record<string, string>> },
     limits: Partial<TerminalLimits> = {},
+    private readonly projectApiEnvironment?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<Record<string, string>>,
   ) {
     const configured = Object.fromEntries(Object.entries(limits).filter(([, value]) => Number.isSafeInteger(value) && Number(value) > 0));
     this.limits = { ...defaultTerminalLimits, ...configured };
@@ -71,8 +80,10 @@ export class ProjectSandboxService {
     const values: Record<string, string> = {};
     for (const [key, reference] of entries) {
       if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(key) || !reference || !uuid(reference.id) || !/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(reference.field)) throw new SandboxProviderError("invalid_environment", "Invalid environment reference", 400);
+      if (/(?:DATABASE_URL|PROJECT_SECRET_KEY|POSTGRES|PGPASSWORD|DB_PASSWORD|MIGRATOR|PROVISIONER|RUNTIME.*PASSWORD)/i.test(key) || /(?:DATABASE_URL|PROJECT_SECRET_KEY|POSTGRES|PGPASSWORD|DB_PASSWORD|MIGRATOR|PROVISIONER|RUNTIME.*PASSWORD)/i.test(reference.field)) throw new SandboxProviderError("protected_environment", "Database credentials and Project API secret keys are unavailable in sandbox", 403);
       const fields = await this.secretResolver!.resolve(ctx, companyId, reference.id);
       if (typeof fields[reference.field] !== "string") throw new SandboxProviderError("secret_not_found", "Secret reference was not found", 404);
+      if (/^npati_sk_(?:dev|prod)_/i.test(fields[reference.field]!) || /^postgres(?:ql)?:\/\//i.test(fields[reference.field]!)) throw new SandboxProviderError("protected_environment", "Database credentials and Project API secret keys are unavailable in sandbox", 403);
       values[key] = fields[reference.field]!;
     }
     return values;
@@ -159,6 +170,12 @@ export class ProjectSandboxService {
     }
     const environment = await this.environment(ctx, companyId, request.environmentReferences);
     const secrets = Object.values(environment);
+    if (this.projectApiEnvironment) {
+      const apiEnvironment = await this.projectApiEnvironment(ctx, companyId, project.id);
+      for (const name of PROJECT_API_SANDBOX_VARIABLES) if (apiEnvironment[name]) environment[name] = apiEnvironment[name];
+    }
+    for (const name of Object.keys(environment)) if (isForbiddenSandboxVariable(name)) delete environment[name];
+
     const timeoutMs = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
     let sandboxId = project.sandboxId ?? "";
     try {

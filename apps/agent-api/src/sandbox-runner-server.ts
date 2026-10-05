@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
-import { DockerSandboxProvider } from "./docker-sandbox-provider";
+import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure } from "./sandbox-runner-diagnostics";
 import { SandboxProviderError, type SandboxScope } from "./sandbox-provider";
 
@@ -19,7 +19,7 @@ const provider = new DockerSandboxProvider({
   pids: Number(process.env.NPATI_SANDBOX_PIDS) || 128,
   maxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || 500,
   maxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || 20_000_000,
-  allowedHosts: process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com",
+  allowedHosts: sandboxAllowedHostsWithProjectApi(process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com", process.env.NPATI_PROJECT_API_PUBLIC_URL),
 });
 const dockerExec = promisify(execFile);
 async function runnerPreflight(): Promise<void> {

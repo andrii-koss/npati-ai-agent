@@ -2,9 +2,9 @@
 
 ## Status
 
-- Current step: D4 completed. All unit, API, schema, UI, agent capability, template, intent router, project auth, and capability inspector tests pass (58 tests passing across test suites). Typecheck clean across all workspace packages. Web production build passes. Live PostgreSQL acceptance remains unverified because the local Docker daemon is unavailable.
-- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR).
-- Next step: D5 (Project API Gateway: public endpoints, CORS, API keys, client requests).
+- Current step: D5 completed at code and automated-test level (see Verification). Live PostgreSQL / Live Preview acceptance remains unverified because the local Docker daemon is unavailable.
+- Completed steps: D0 audit, D1 core backend engine & provisioning, D2 Data Studio UI & management API, D3 Agent capabilities, approval, and schema templates, D4 Project Auth (end-user auth, sessions, tokens, RLS compiler, GDPR), D5 Project API gateway, keys, SDK and sandbox integration.
+- Next step: D6 (mobile_app projects). Not started.
 - Source of truth: `docs/data-studio/PLAN.md`, `docs/data-studio/00-audit.md`, and repository code.
 
 ## Implemented in D1
@@ -177,3 +177,68 @@ D5 (Project API Gateway) can build upon:
 2. `_npati_auth_users` and RLS `set_config('npati.auth.user_id', ...)` session binding.
 3. Pre-existing `DataBackendRepository` storing project publishable and secret keys.
 4. Fastify public route patterns established in `auth-routes.ts`.
+
+## Implemented in D5
+
+Architecture decision (from audit): the Project API gateway is a module inside the existing Fastify `agent-api`, with its own public routes, runtime-only pools, CORS and rate limiting. The external URL (`/v1/projects/:projectId/...`) allows extracting it into a separate service later.
+
+- Gateway (`apps/agent-api/src/data-studio/gateway-service.ts`, `gateway-routes.ts`):
+  - `/v1/projects/:projectId/data/:collection[/:id]`: list/get/create/update/delete with filters (`filter[field]=` or JSON object), sorting, pagination (max 100 rows), field selection and relation `include`.
+  - Auth routes over D4 `ProjectAuthService`: register/signup, login/signin, logout/signout, refresh, me, verify-email, forgot-password, reset-password.
+  - Unified error envelope `{ error: { code, message, status } }`.
+  - Per-project OpenAPI (`openapi.json`), generated TS types (`types.ts`) and Swagger `docs`, generated from the live schema (`openapi-generator.ts`). These require a valid Project API key; the environment is taken from the key.
+  - Write routes have a 1 MB body limit (`PROJECT_API_BODY_LIMIT`). Invalid `filter` JSON returns `400 INVALID_FILTER`.
+- Request execution: runtime-role pool only (`provisioner.getConnection(..., "runtime")`); every request runs `BEGIN` → `set_config(name, $1, true)` for `npati.auth.user_id`, `npati.auth.user_role`, `npati.project_id`, `npati.user_id` → query → `COMMIT/ROLLBACK`. Claims are transaction-local, so they are pooling-safe. Identifiers are validated against `information_schema` and quoted; values are always bound. Migrator/provisioner credentials are never used by the gateway.
+  - Fixed in D5 completion: the previous code used `$2`/`$3` placeholders with a single value, which real Postgres rejects.
+- Keys (`api-key-manager.ts`): `npati_pk_<env>_*` / `npati_sk_<env>_*` per DataBackend + environment, stored in Core `providerConfig` (secret only as SHA-256 hash + `CryptoVault`-encrypted copy), rotation, constant-time secret comparison. The environment is encoded in the key and validated, so dev keys never work on prod.
+  - Secret key is rejected when an `Origin` header is present (`SECRET_KEY_IN_BROWSER`). It runs as the runtime role with `npati.auth.user_role = service_role`; it is NOT BYPASSRLS. Service access works only where policies explicitly grant `role = service_role`.
+- Protection: CORS allowlist `providerConfig.corsOriginsByProject[projectId]` (exact origin match, per Project, per environment) for preflight and requests; rate limits per key and per IP (`rate-limiter.ts`, 429 `RATE_LIMIT_EXCEEDED`); access-policy check before every query (`POLICY_DENIED`), then RLS in the DB.
+- SDK: `packages/project-client` (`createProjectClient({ apiUrl, publishableKey })`): `auth.signUp/signIn/signOut/getUser/getSession/refreshToken/verifyEmail/forgotPassword/resetPassword/onAuthStateChange` and `from(collection).list/get/create/update/delete`. Plain `fetch`, works in browser, Node and React Native; token storage is pluggable (`ProjectClientStorage`). `createProjectClient` throws if a secret key is passed in a browser. Typed via the generated `types.ts`.
+- Website Builder integration:
+  - `ProjectSandboxService` injects only `PROJECT_API_URL` and `PROJECT_PUBLISHABLE_KEY` (from `getSandboxEnvironment`, dev only, derived from `NPATI_PROJECT_API_PUBLIC_URL`).
+  - `isForbiddenSandboxVariable` removes `PROJECT_SECRET_KEY`, `DATABASE_URL`, `PG*`, `POSTGRES*`, `NPATI_PROJECTS_POSTGRES*`, `*_DB_URL/PASSWORD/USER/HOST` even if requested via `environmentReferences`.
+  - Sandbox egress: `sandboxAllowedHostsWithProjectApi` adds only the Project API host to the existing egress proxy allowlist; database-like hosts are never added. Sandboxes still have no network route to `postgres-projects`.
+  - SSR/server actions in dev/preview use the user JWT + RLS; `PROJECT_SECRET_KEY` is deploy-only (D7/DeployProvider after approval) and is never written into sandbox or Project Context.
+  - Compact SDK/API documentation is added to `PROJECT.md` (`agent-data-service.ts`).
+- Capability: `project.api.inspect` (low risk, endpoints/schema, no keys) in `project-data-capabilities.ts`, handled by `CompanyToolRuntime`. Client code generation uses the existing `project.files.*` capabilities.
+- Logging & usage: Core migration `062` adds `project_api_request_logs` (method, path without query string, status, duration, key type, IP; no bodies, keys or tokens). Usage = request counts + DB size (`provisioner.getUsage`) + collections count. Shown in Data Studio → API tab (`apps/web/src/DataStudioApiSection.tsx`).
+
+## Explicitly outside D5
+
+- Promote dev → prod, deploy-time secret key injection (D7).
+- Hard quota enforcement / blocking writes at limit (D7). D5 only counts and displays usage.
+- Rate limiter is in-memory per API process. Multi-instance deployments need a shared store.
+- mobile_app projects, secure token storage in React Native (D6).
+
+## D5 verification
+
+- `tests/data-studio-project-api.test.ts` (5) and `tests/data-studio-project-api-http.test.ts` (14), all passing. They cover:
+  - publishable CRUD under policies;
+  - owner collection denied to anonymous users, with the user id bound for authenticated users;
+  - the unified error envelope;
+  - secret key rejected with an Origin and running as `service_role` without `SET ROLE`/BYPASSRLS;
+  - foreign origin and preflight rejected;
+  - Project A's origin rejected on DataBackend B;
+  - A keys rejected on B and dev keys rejected on prod;
+  - 429 on the per-key limit;
+  - SQL injection via sort, fields, filter keys, collection name and invalid filter JSON;
+  - docs/OpenAPI/types require a key;
+  - logs without keys, tokens or query values;
+  - sandbox env limited to the two variables, with forbidden variables stripped;
+  - the egress allowlist adds only the API host.
+- Not verified automatically: live Postgres RLS with the gateway, the generated shop running in Live Preview, and the end-to-end chat acceptance scenario. These need Docker (`postgres-projects` + sandbox runner).
+
+## Manual acceptance check (requires Docker)
+
+1. `docker compose --profile data-studio up -d`; set `NPATI_PROJECT_API_PUBLIC_URL`.
+2. In chat: "Створи інтернет-магазин". Expect the agent to apply the ecommerce template → configure auth/policies → generate a frontend using `createProjectClient`.
+3. Add the Project preview origin to the CORS allowlist in Data Studio → API.
+4. In Live Preview: register, browse products, add to cart, create an order. In Data Studio → Data → orders, the owner sees the order. Data Studio → API shows request logs.
+
+## D6 handoff
+
+D6 can rely on:
+1. `packages/project-client` SDK (fetch-based, RN compatible; token storage is pluggable and must use secure storage in D6).
+2. The same `/v1/projects/:projectId` gateway, keys and CORS allowlist per Project. Mobile clients send no Origin header, so key + JWT + rate limits are the controls there.
+3. `getSandboxEnvironment` / `isForbiddenSandboxVariable` for injecting only publishable config into the mobile_app sandbox.
+4. `project.api.inspect` and the PROJECT.md SDK section for agent code generation.

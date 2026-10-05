@@ -16,6 +16,21 @@ const defaults: RunnerLimits = {
   cpu: "1", memory: "1536m", diskBytes: 1536 * 1024 * 1024, pids: 128,
   image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com",
 };
+const DATABASE_HOST_PATTERN = /(^|[.-])(postgres|postgresql|pg|db|database)([.-]|$)/;
+
+/**
+ * Appends the Project API host (from NPATI_PROJECT_API_PUBLIC_URL) to the sandbox egress allowlist.
+ * Only the Project API host is added; database hosts are rejected so sandboxes never reach Postgres.
+ */
+export function sandboxAllowedHostsWithProjectApi(baseHosts: string, projectApiPublicUrl?: string): string {
+  const hosts = baseHosts.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean);
+  if (projectApiPublicUrl) {
+    let host: string | undefined;
+    try { host = new URL(projectApiPublicUrl).hostname.toLowerCase(); } catch { host = undefined; }
+    if (host && /^[a-z0-9.-]+$/.test(host) && !host.startsWith(".") && !host.endsWith(".") && !DATABASE_HOST_PATTERN.test(host) && !hosts.includes(host)) hosts.push(host);
+  }
+  return hosts.join(",");
+}
 const uuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const label = (scope: SandboxScope) => createHash("sha256").update([scope.workspaceId, scope.userId, scope.companyId, scope.projectId].join(":")).digest("hex");
 function args(cmd: string, values: string[], timeoutMs = 30_000, stdin?: string | Buffer, outputLimit = 128_000): Promise<{ code: number; stdout: Buffer; stderr: Buffer; timedOut: boolean }> {
