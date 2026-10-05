@@ -333,14 +333,14 @@ Services (`apps/agent-api/src/data-studio/`):
 - `quota-service.ts` — limit resolution (env + per-environment override), usage with TTL cache, `report` (ok/warning/exceeded, percentage, `writesBlocked`) and `assertWritesAllowed` (507) wired into the Project API gateway create/update paths.
 - `external-provisioner.ts` — `ExternalPostgresProvisioner` for `external_postgres`: connection string from Core secrets, `inspectCapabilities` (server version, RLS, role creation, owner superuser/BYPASSRLS), managed vs restricted provisioning, usage, pg_dump/pg_restore, role rotation and suspend/resume in managed mode only.
 - `provisioner.ts` — `ProvisionerRouter` dispatches every provisioner call by `backend.provider`; `resumeRuntime` added to the interface + shared implementation (archived backends can be activated again, which previously failed with `DATABASE_EXISTS`).
-- `service.ts` — external backend creation with a `postgres://` connection string stored as a secret, per-environment limit updates, deferred removal with `removeAfter`, and `detachProjectArtifacts` (removes the project's CORS origins, redirect URLs and API logs when a Project is deleted).
+- `service.ts` — external backend creation with a `postgres://` connection string stored as a secret, per-environment limit updates, deferred removal with `removeAfter`, `transfer` of a DataBackend to another company of the same workspace (Core `company_id` metadata moves together with environments and the promote journal; the previous company's Projects are detached; the physical databases, roles, keys and rows never move) and `detachProjectArtifacts` (removes the project's CORS origins, redirect URLs and API logs when a Project is deleted).
 - `repository.ts` — snapshot CRUD/pruning, `allBackends`, `listAppliedMigrations`, `setRemovalDeadline`/`dueRemovals`, promotion journal and `deleteSecrets`/`deleteSnapshots` for the purge step.
 
 API (`apps/agent-api/src/data-studio/routes.ts`, backend-scoped):
 - `POST …/data-backends/:backendId/promote/preview`, `POST …/promote` (requires `approved: true`), `POST …/promote/reject`, `GET …/promotions`.
 - `GET/POST …/backups`, `POST …/backups/:snapshotId/restore` (requires `approved: true`), `PUT …/backup-policy`.
 - `GET/PUT …/quotas`.
-- `POST /companies/:companyId/data-backends` accepts `provider: external_postgres` + `connectionString`; `DELETE …/:backendId` accepts `immediate`.
+- `POST /companies/:companyId/data-backends` accepts `provider: external_postgres` + `connectionString`; `DELETE …/:backendId` accepts `immediate`; `POST …/:backendId/transfer` moves the database to another company (typed name confirmation) and deleting a company that still owns databases is refused with an actionable message.
 
 Capability and agent flow:
 - `project.data.promote` (inventory 348, risk `high`, `requiresConfirmation`, member of the `data.schema` group) registered in the canonical catalog; `CompanyToolRuntime` returns the preview and requires the existing approval flow before applying.

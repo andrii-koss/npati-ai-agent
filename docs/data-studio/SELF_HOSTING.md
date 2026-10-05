@@ -191,6 +191,16 @@ Core, not in the project database).
 
 - Archiving a Project only changes its status; other Projects of the same DataBackend keep working.
   Deleting a Project detaches it and removes its CORS origins, redirect URLs and API logs.
+- A DataBackend can be **transferred to another company** of the same workspace
+  (Data Studio → open the database → *Transfer to another company*). Only Core metadata changes
+  owner: the databases, roles and every row stay in place, so keys, Auth settings, access policies,
+  backups and the promote journal move with it. Projects of the previous company are detached
+  first, because a Project can never leave its company; attach the transferred database to the new
+  company's Projects afterwards. Typical flow: create the new company → transfer the database →
+  attach it to the new site/app → delete the old company.
+- A company that still owns DataBackends cannot be deleted: the API answers
+  `Company cannot be deleted while it owns N DataBackend(s)` (the foreign key is `ON DELETE
+  RESTRICT`, so this is enforced by the database as well). Transfer or delete the databases first.
 - Deleting a DataBackend is refused while active Projects are attached. Afterwards the backend is
   marked `deleting`, its runtime roles are suspended, and databases, roles, keys and secrets are
   purged after the snapshot retention window (`remove_after`). Use `immediate: true` in the API to

@@ -20,6 +20,8 @@ interface ProjectSummary {
   status?: string;
   framework?: string | null;
   dataBackendId?: string | null;
+  /** Tagged on load: the Project list merges every company of the workspace. */
+  companyId?: string;
 }
 
 interface BackendSummary {
@@ -29,6 +31,19 @@ interface BackendSummary {
   status: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Tagged on load: the database list merges every company of the workspace. */
+  companyId: string;
+  companyName: string;
+}
+
+interface TransferResult {
+  transferred: boolean;
+  backendId: string;
+  backendName: string;
+  targetCompanyId: string;
+  targetCompanyName: string;
+  detachedProjects: number;
+  environments: number;
 }
 
 interface BackendEnvironment {
@@ -113,6 +128,11 @@ type DatabaseFilter = "all" | "ready" | "attention";
 const FIELD_TYPES: FieldType[] = ["string", "text", "integer", "decimal", "boolean", "date", "datetime", "json", "uuid", "enum"];
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,62}$/;
 const MAX_ROW_COUNT_TABLES = 50;
+/** The list merges every company: table counts are only fetched for the visible slice. */
+const MAX_TABLE_COUNT_BACKENDS = 10;
+/** Environment badges are one request per database, so very large workspaces skip the tail. */
+const MAX_ENVIRONMENT_BACKENDS = 30;
+const ALL_COMPANIES = "all";
 
 // --- API --------------------------------------------------------------------
 
@@ -136,6 +156,22 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 function errorCode(error: unknown): string | undefined {
   return error instanceof Error ? (error as Error & { code?: string }).code : undefined;
+}
+
+/** Shared copy for the installation-level failure of the Data Studio module. */
+function dataStudioUnavailableMessage(isUk: boolean): string {
+  return isUk
+    ? "Data Studio вимкнено на цій інсталяції (немає контейнера postgres-projects або provisioner)."
+    : "Data Studio is disabled on this installation (no postgres-projects container / provisioner).";
+}
+
+/** Copy for the transfer drawer errors returned by the backend. */
+function transferErrorMessage(isUk: boolean, code: string | undefined, fallback: string): string {
+  if (code === "CONFIRMATION_REQUIRED") return isUk ? "Назва не збігається" : "Name does not match";
+  if (code === "INVALID_TARGET_COMPANY") return isUk ? "Оберіть іншу компанію" : "Choose another company";
+  if (code === "TARGET_COMPANY_NOT_OWNED") return isUk ? "Немає доступу до цієї компанії" : "No access to that company";
+  if (code === "DATA_BACKEND_NOT_FOUND") return isUk ? "Базу не знайдено" : "Database not found";
+  return fallback;
 }
 
 function statusPillClass(status: string): string {
@@ -178,6 +214,7 @@ export function DataStudioSettingsPage() {
   const [environments, setEnvironments] = useState<Record<string, BackendEnvironment[]>>({});
   const [backendsLoading, setBackendsLoading] = useState(false);
   const [backendsError, setBackendsError] = useState<{ message: string; code?: string } | null>(null);
+  const [backendsWarning, setBackendsWarning] = useState<string | null>(null);
   const [tableCounts, setTableCounts] = useState<Record<string, number | null>>({});
   const [quotas, setQuotas] = useState<Record<string, QuotaReport | null>>({});
   const [reloadToken, setReloadToken] = useState(0);
@@ -185,6 +222,9 @@ export function DataStudioSettingsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [databaseFilter, setDatabaseFilter] = useState<DatabaseFilter>("all");
+  /** Company filter of the list: `all` or a company id. */
+  const [companyFilter, setCompanyFilter] = useState<string>(ALL_COMPANIES);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   const [rowCounts, setRowCounts] = useState<Record<string, number>>({});
   const [countingRows, setCountingRows] = useState(false);
@@ -203,7 +243,12 @@ export function DataStudioSettingsPage() {
   const tables = useMemo(() => [...(overview?.schema?.tables ?? [])].sort((left, right) => left.name.localeCompare(right.name)), [overview]);
   const readOnly = environment === "prod";
   const detail = useMemo(() => backends.find((backend) => backend.id === detailId) ?? null, [backends, detailId]);
+  /** Databases and tables are company-scoped: the opened database dictates the active company. */
+  const activeCompanyId = detail?.companyId ?? companyId;
   const detailProjects = useMemo(() => projects.filter((item) => item.dataBackendId === detailId), [projects, detailId]);
+  const companyKey = useMemo(() => companies.map((company) => company.id).join(","), [companies]);
+  /** Company the "New database" button creates in. */
+  const createTargetCompanyId = companyFilter !== ALL_COMPANIES ? companyFilter : companyId;
 
   // 1. Companies
   useEffect(() => {
@@ -219,80 +264,95 @@ export function DataStudioSettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // 2. Databases + projects of the selected company
+  // 2. Databases + projects of every company (the list is merged and tagged with its company)
   useEffect(() => {
-    if (!companyId) {
+    if (!companies.length) {
       setProjects([]); setProjectId(""); setBackends([]); setEnvironments({}); setTableCounts({});
       return;
     }
     let cancelled = false;
     setBackendsLoading(true);
     setBackendsError(null);
+    setBackendsWarning(null);
     void (async () => {
       try {
-        const [projectResult, backendResult] = await Promise.all([
-          apiFetch<{ projects: ProjectSummary[] }>(`/companies/${encodeURIComponent(companyId)}/projects`),
-          apiFetch<{ backends: BackendSummary[] }>(`/companies/${encodeURIComponent(companyId)}/data-backends`),
-        ]);
+        const failures: Array<string | undefined> = [];
+        const perCompany = await Promise.all(companies.map(async (company) => {
+          const base = `/companies/${encodeURIComponent(company.id)}`;
+          const [projectResult, backendResult] = await Promise.all([
+            apiFetch<{ projects: ProjectSummary[] }>(`${base}/projects`)
+              .catch(() => ({ projects: [] as ProjectSummary[] })),
+            apiFetch<{ backends: BackendSummary[] }>(`${base}/data-backends`)
+              .catch((cause) => { failures.push(errorCode(cause)); return { backends: [] as BackendSummary[] }; }),
+          ]);
+          return {
+            company,
+            projects: (projectResult.projects ?? []).map((item) => ({ ...item, companyId: company.id })),
+            backends: (backendResult.backends ?? []).map((item) => ({ ...item, companyId: company.id, companyName: company.name })),
+          };
+        }));
         if (cancelled) return;
-        const projectList = projectResult.projects ?? [];
-        const backendList = backendResult.backends ?? [];
+
+        const projectList = perCompany.flatMap((entry) => entry.projects);
+        const backendList = perCompany.flatMap((entry) => entry.backends);
+
+        if (!backendList.length && failures.length === perCompany.length && failures.some(Boolean)) {
+          setProjects(projectList);
+          setBackends([]); setEnvironments({}); setTableCounts({});
+          setBackendsWarning(null);
+          setBackendsError({
+            message: failures[0] === "DATA_STUDIO_UNAVAILABLE"
+              ? dataStudioUnavailableMessage(isUk)
+              : (isUk ? "Не вдалося завантажити бази даних" : "Could not load the databases"),
+            code: failures[0],
+          });
+          return;
+        }
+
+        setBackendsWarning(failures.some(Boolean)
+          ? (isUk
+            ? "Частину компаній не вдалося завантажити — показано доступні бази."
+            : "Some companies could not be loaded — showing the available databases.")
+          : null);
         setProjects(projectList);
         setProjectId((current) => {
           if (current && projectList.some((item) => item.id === current)) return current;
           return (projectList.find((item) => item.dataBackendId) ?? projectList[0])?.id ?? "";
         });
         setBackends(backendList);
-        const details = await Promise.all(backendList.map((backend) => apiFetch<{ environments: BackendEnvironment[] }>(
-          `/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(backend.id)}`,
+
+        const detailed = backendList.slice(0, MAX_ENVIRONMENT_BACKENDS);
+        const details = await Promise.all(detailed.map((backend) => apiFetch<{ environments: BackendEnvironment[] }>(
+          `/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`,
         ).catch(() => ({ environments: [] as BackendEnvironment[] }))));
         if (cancelled) return;
-        setEnvironments(Object.fromEntries(backendList.map((backend, index) => [backend.id, details[index]?.environments ?? []])));
-
-        // Table counts are only used as a hint: silently ignore failures.
-        const withProjects = backendList
-          .map((backend) => ({ backend, attached: projectList.find((item) => item.dataBackendId === backend.id) }))
-          .filter((entry) => Boolean(entry.attached));
-        if (!withProjects.length) {
-          setTableCounts({});
-          return;
-        }
-        const counts = await Promise.all(withProjects.map(async ({ backend, attached }) => {
-          try {
-            const result = await apiFetch<{ schema: { tables: unknown[] } | null }>(
-              `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(attached!.id)}/data-studio/dev`,
-            );
-            return [backend.id, result.schema?.tables.length ?? 0] as const;
-          } catch {
-            return [backend.id, null] as const;
-          }
-        }));
-        if (!cancelled) setTableCounts(Object.fromEntries(counts));
+        setEnvironments(Object.fromEntries(detailed.map((backend, index) => [backend.id, details[index]?.environments ?? []])));
+        setTableCounts({});
       } catch (cause) {
         if (cancelled) return;
-        setBackends([]); setEnvironments({}); setTableCounts({});
+        setProjects([]); setBackends([]); setEnvironments({}); setTableCounts({});
         setBackendsError({ message: cause instanceof Error ? cause.message : "Could not load Data Studio", code: errorCode(cause) });
       } finally {
         if (!cancelled) setBackendsLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [companyId, reloadToken]);
+  }, [companyKey, companies, isUk, reloadToken]);
 
-  // 3. Quotas of the opened database
+  // 3. Quotas of the opened database (the database carries its own company)
   useEffect(() => {
-    if (!companyId || !detailId) { setQuotas({}); return; }
+    if (!activeCompanyId || !detailId) { setQuotas({}); return; }
     let cancelled = false;
     void Promise.all((["dev", "prod"] as const).map(async (env) => {
       try {
-        const report = await apiFetch<QuotaReport>(`/companies/${encodeURIComponent(companyId)}/data-backends/${encodeURIComponent(detailId)}/quotas?environment=${env}`);
+        const report = await apiFetch<QuotaReport>(`/companies/${encodeURIComponent(activeCompanyId)}/data-backends/${encodeURIComponent(detailId)}/quotas?environment=${env}`);
         return [env, report] as const;
       } catch {
         return [env, null] as const;
       }
     })).then((entries) => { if (!cancelled) setQuotas(Object.fromEntries(entries)); });
     return () => { cancelled = true; };
-  }, [companyId, detailId, reloadToken]);
+  }, [activeCompanyId, detailId, reloadToken]);
 
   // 4. Table area of the opened database
   useEffect(() => {
@@ -300,7 +360,6 @@ export function DataStudioSettingsPage() {
     const attached = projects.filter((item) => item.dataBackendId === detailId);
     if (!attached.some((item) => item.id === projectId)) setProjectId(attached[0]?.id ?? "");
   }, [detailId, projects, projectId]);
-
   const loadOverview = useCallback(async () => {
     if (!companyId || !projectId || !project?.dataBackendId) { setOverview(null); return; }
     setLoading(true);
@@ -543,33 +602,80 @@ export function DataStudioSettingsPage() {
 
   // --- Derived view data ----------------------------------------------------
 
+  /** Everything below the company filter: statistics, tabs and the list all use this slice. */
+  const companyBackends = useMemo(
+    () => (companyFilter === ALL_COMPANIES ? backends : backends.filter((backend) => backend.companyId === companyFilter)),
+    [backends, companyFilter],
+  );
+  const companyProjects = useMemo(
+    () => (companyFilter === ALL_COMPANIES ? projects : projects.filter((item) => item.companyId === companyFilter)),
+    [companyFilter, projects],
+  );
+
   const stats = useMemo(() => {
-    const readyEnvironments = backends.reduce((total, backend) => {
+    const readyEnvironments = companyBackends.reduce((total, backend) => {
       const list = environments[backend.id] ?? [];
       return total + list.filter((env) => env.status === "ready").length;
     }, 0);
-    const totalEnvironments = backends.reduce((total, backend) => total + Math.max((environments[backend.id] ?? []).length, 0), 0);
-    const known = Object.values(tableCounts).filter((count): count is number => typeof count === "number");
+    const totalEnvironments = companyBackends.reduce((total, backend) => total + Math.max((environments[backend.id] ?? []).length, 0), 0);
+    const known = companyBackends
+      .map((backend) => tableCounts[backend.id])
+      .filter((count): count is number => typeof count === "number");
     return {
-      total: backends.length,
-      ready: backends.filter((backend) => backend.status === "ready").length,
-      attention: backends.filter((backend) => backend.status !== "ready").length,
+      total: companyBackends.length,
+      ready: companyBackends.filter((backend) => backend.status === "ready").length,
+      attention: companyBackends.filter((backend) => backend.status !== "ready").length,
       readyEnvironments,
-      totalEnvironments: totalEnvironments || backends.length * 2,
+      totalEnvironments: totalEnvironments || companyBackends.length * 2,
       tables: known.length ? known.reduce((total, count) => total + count, 0) : null,
-      attachedProjects: projects.filter((item) => item.dataBackendId).length,
+      attachedProjects: companyProjects.filter((item) => item.dataBackendId).length,
     };
-  }, [backends, environments, projects, tableCounts]);
+  }, [companyBackends, companyProjects, environments, tableCounts]);
 
   const filteredBackends = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return backends.filter((backend) => {
+    return companyBackends.filter((backend) => {
       if (databaseFilter === "ready" && backend.status !== "ready") return false;
       if (databaseFilter === "attention" && backend.status === "ready") return false;
       if (!query) return true;
-      return backend.name.toLowerCase().includes(query) || backend.provider.toLowerCase().includes(query);
+      return backend.name.toLowerCase().includes(query)
+        || backend.provider.toLowerCase().includes(query)
+        || backend.companyName.toLowerCase().includes(query);
     });
-  }, [backends, databaseFilter, searchQuery]);
+  }, [companyBackends, databaseFilter, searchQuery]);
+
+  // Table counts are a hint: only the visible slice is fetched, the rest stays unknown ("—").
+  const tableCountKey = useMemo(
+    () => filteredBackends.slice(0, MAX_TABLE_COUNT_BACKENDS).map((backend) => {
+      const attached = projects.find((item) => item.dataBackendId === backend.id);
+      return `${backend.companyId}:${backend.id}:${attached?.id ?? ""}`;
+    }).join("|"),
+    [filteredBackends, projects],
+  );
+
+  useEffect(() => {
+    if (!tableCountKey) return;
+    const targets = tableCountKey.split("|").map((entry) => {
+      const [companyOfBackend, backendId, attachedProjectId] = entry.split(":");
+      return { companyOfBackend, backendId, attachedProjectId };
+    }).filter((entry) => entry.attachedProjectId);
+    if (!targets.length) return;
+    let cancelled = false;
+    void Promise.all(targets.map(async (target) => {
+      try {
+        const result = await apiFetch<{ schema: { tables: unknown[] } | null }>(
+          `/companies/${encodeURIComponent(target.companyOfBackend)}/projects/${encodeURIComponent(target.attachedProjectId)}/data-studio/dev`,
+        );
+        return [target.backendId, result.schema?.tables.length ?? 0] as const;
+      } catch {
+        return [target.backendId, null] as const;
+      }
+    })).then((counts) => {
+      if (cancelled) return;
+      setTableCounts((current) => ({ ...current, ...Object.fromEntries(counts) }));
+    });
+    return () => { cancelled = true; };
+  }, [tableCountKey, reloadToken]);
 
   const lockRemaining = useMemo(() => {
     if (!overview?.lock?.held || !overview.lock.expiresAt) return null;
@@ -584,7 +690,23 @@ export function DataStudioSettingsPage() {
     ...overview.drift.tables.changed.map((name) => `${isUk ? "змінена" : "changed"}: ${name}`),
   ] : [];
 
-  const unattachedProjects = useMemo(() => projects.filter((item) => !item.dataBackendId), [projects]);
+  /** Projects of the company that owns the opened database. */
+  const detailCompanyProjects = useMemo(
+    () => (detail ? projects.filter((item) => item.companyId === detail.companyId) : []),
+    [detail, projects],
+  );
+  const unattachedProjects = useMemo(
+    () => detailCompanyProjects.filter((item) => !item.dataBackendId),
+    [detailCompanyProjects],
+  );
+  const detailCompanyBackends = useMemo(
+    () => (detail ? backends.filter((backend) => backend.companyId === detail.companyId && backend.status === "ready") : []),
+    [backends, detail],
+  );
+  const detailCompanies = useMemo(
+    () => (detail ? companies.filter((company) => company.id !== detail.companyId) : []),
+    [companies, detail],
+  );
 
   const backButton = (
     <Link to="/settings" className="marketplace-back-button" aria-label={isUk ? "До налаштувань" : "Back to settings"} title={isUk ? "До налаштувань" : "Back to settings"}>
@@ -594,22 +716,28 @@ export function DataStudioSettingsPage() {
     </Link>
   );
 
-  const companySelect = companies.length > 1 && (
+  // The company selector filters the merged list instead of switching a single company.
+  const companySelect = companies.length > 0 && (
     <select
       aria-label={isUk ? "Компанія" : "Company"}
       className="page-size-select"
-      value={companyId}
-      onChange={(event) => { setCompanyId(event.target.value); setDetailId(null); }}
+      value={companyFilter}
+      onChange={(event) => {
+        const next = event.target.value;
+        setCompanyFilter(next);
+        setDetailId(null);
+        if (next !== ALL_COMPANIES) setCompanyId(next);
+      }}
     >
+      <option value={ALL_COMPANIES}>{isUk ? "Усі компанії" : "All companies"}</option>
       {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
     </select>
   );
 
+  /** Company the "New database" button creates in. */
   const unavailableNotice = backendsError?.code === "DATA_STUDIO_UNAVAILABLE" && (
     <div className="data-studio-alert error" role="alert">
-      {isUk
-        ? "Data Studio вимкнено на цій інсталяції (немає контейнера postgres-projects або provisioner)."
-        : "Data Studio is disabled on this installation (no postgres-projects container / provisioner)."}
+      {dataStudioUnavailableMessage(isUk)}
     </div>
   );
 

@@ -405,6 +405,35 @@ export class DataBackendRepository {
     return result.rows;
   }
 
+  /**
+   * Moves a DataBackend (its environments, keys, secrets, migrations, snapshots and promote
+   * journal) to another company of the same workspace. The physical databases and roles are
+   * untouched, so the data survives; Projects of the previous company are detached first, because
+   * a Project can never leave its company. Parent and child rows change in a single statement so
+   * the composite foreign keys are satisfied when the statement ends.
+   */
+  async transferToCompany(workspaceId: string, fromCompanyId: string, toCompanyId: string, backendId: string, createdBy: string) {
+    const result = await this.pool.query<{ moved: number; environments: number; detachedProjects: number; promotions: number }>(
+      "WITH detached AS (" +
+      "  UPDATE projects SET data_backend_id=NULL, revision=revision+1, updated_at=now()" +
+      "  WHERE workspace_id=$1 AND company_id=$2 AND data_backend_id=$3 RETURNING id" +
+      "), environments AS (" +
+      "  UPDATE data_backend_environments SET company_id=$4, updated_at=now()" +
+      "  WHERE workspace_id=$1 AND company_id=$2 AND backend_id=$3 RETURNING id" +
+      "), promotions AS (" +
+      "  UPDATE data_backend_promotions SET company_id=$4" +
+      "  WHERE workspace_id=$1 AND company_id=$2 AND backend_id=$3 RETURNING id" +
+      "), moved AS (" +
+      "  UPDATE data_backends SET company_id=$4, updated_at=now()" +
+      "  WHERE workspace_id=$1 AND company_id=$2 AND id=$3 AND created_by=$5 RETURNING id" +
+      ") " +
+      "SELECT (SELECT count(*) FROM moved)::int AS moved, (SELECT count(*) FROM environments)::int AS environments, " +
+      "(SELECT count(*) FROM detached)::int AS \"detachedProjects\", (SELECT count(*) FROM promotions)::int AS promotions",
+      [workspaceId, fromCompanyId, toCompanyId, backendId, createdBy],
+    );
+    return result.rows[0] ?? { moved: 0, environments: 0, detachedProjects: 0, promotions: 0 };
+  }
+
   /** Removes every secret (roles and signing keys) of a backend, used by the purge step. */
   async deleteSecrets(backendId: string): Promise<void> {
     await this.pool.query("DELETE FROM data_backend_secrets WHERE backend_id=$1", [backendId]);
