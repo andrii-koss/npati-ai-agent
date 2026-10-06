@@ -14,7 +14,8 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
   CreateSnapshotConfigVersionInput, CodeActivityEventKind, CodeActivityEventRecord,
   CreateCodeActivityEventInput, ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord,
-  ReplayMode, ReplayStepKind, CreateReplayBundleInput, ListReplayBundlesInput } from "./types";
+  ReplayMode, ReplayStepKind, CreateReplayBundleInput, ListReplayBundlesInput,
+  CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput } from "./types";
 import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
@@ -66,6 +67,12 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   project_id AS "projectId", session_id AS "sessionId", run_id AS "runId", snapshot_id AS "snapshotId",
   kind, payload, data_classification AS "dataClassification", retention_class AS "retentionClass",
   created_at AS "createdAt"`;
+  // C8: no workspace_id column on purpose — a context summary is addressed by company/project/session/run,
+  // which is what every reader and the UI hold; adding a fourth scope would only create a value to get wrong.
+  const codeContextSummaryColumns = `id, company_id AS "companyId", project_id AS "projectId",
+  session_id AS "sessionId", run_id AS "runId", snapshot_id AS "snapshotId", turn_index AS "turnIndex",
+  schema_version AS "schemaVersion", summary, summary_text AS "summaryText", content_hash AS "contentHash",
+  data_classification AS "dataClassification", retention_class AS "retentionClass", created_at AS "createdAt"`;
   const replayBundleColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", session_id AS "sessionId", run_id AS "runId",
   execution_snapshot_id AS "executionSnapshotId", bundle_version AS "bundleVersion",
@@ -1077,6 +1084,20 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration078 } = await import("./migration-078");
         await runMigration078(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('078_replay_bundles')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C8: durable context summaries (append-only session artifacts produced by conversation compaction).
+    // Additive: 079 creates its own table, four indexes and its append-only trigger; no existing table is touched.
+    const contextSummariesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='079_code_context_summaries'");
+    if (!contextSummariesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration079 } = await import("./migration-079");
+        await runMigration079(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('079_code_context_summaries')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -3648,6 +3669,61 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
       kind: String(row.kind) as CodeActivityEventKind,
       payload: (row.payload ?? {}) as Record<string, unknown>,
+      dataClassification: String(row.dataClassification) as DataClassification,
+      retentionClass: String(row.retentionClass) as RetentionClass,
+      createdAt: new Date(row.createdAt as string | Date),
+    };
+  }
+
+  /**
+   * C8: a context summary is a derived session artifact, stored append-only (migration 079 refuses UPDATE and
+   * DELETE at the database level). `content_hash` is the hash of the exact compacted message list, so the
+   * stored row can be tied to reproducible replay input. Defaults are conservative: `confidential` data with a
+   * `short` retention, because a summary is derived and outliving its transcript buys nothing.
+   */
+  async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
+    const result = await this.pool.query(
+      `INSERT INTO code_context_summaries
+        (id, company_id, project_id, session_id, run_id, snapshot_id, turn_index, schema_version, summary,
+         summary_text, content_hash, data_classification, retention_class, created_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING ${codeContextSummaryColumns}`,
+      [input.id ?? randomUUID(), input.companyId, input.projectId, input.sessionId ?? null,
+        input.runId ?? null, input.snapshotId ?? null, input.turnIndex ?? 0, input.schemaVersion,
+        JSON.stringify(input.summary), input.summaryText, input.contentHash,
+        input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+        input.retentionClass ?? "short",
+        input.now ?? new Date()],
+    );
+    return this.mapCodeContextSummaryRow(result.rows[0]!);
+  }
+
+  async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+    const result = await this.pool.query(
+      `SELECT ${codeContextSummaryColumns} FROM code_context_summaries
+        WHERE company_id=$1
+          AND ($2::text IS NULL OR session_id=$2)
+          AND ($3::text IS NULL OR run_id=$3)
+        ORDER BY created_at DESC, id DESC LIMIT $4`,
+      [input.companyId, input.sessionId ?? null, input.runId ?? null, limit],
+    );
+    return result.rows.map((row) => this.mapCodeContextSummaryRow(row));
+  }
+
+  private mapCodeContextSummaryRow(row: Record<string, unknown>): CodeContextSummaryRecord {
+    return {
+      id: String(row.id),
+      companyId: String(row.companyId),
+      projectId: String(row.projectId),
+      sessionId: row.sessionId === null || row.sessionId === undefined ? null : String(row.sessionId),
+      runId: row.runId === null || row.runId === undefined ? null : String(row.runId),
+      snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
+      turnIndex: Number(row.turnIndex ?? 0),
+      schemaVersion: Number(row.schemaVersion ?? 0),
+      summary: (row.summary ?? {}) as Record<string, unknown>,
+      summaryText: String(row.summaryText ?? ""),
+      contentHash: String(row.contentHash ?? ""),
       dataClassification: String(row.dataClassification) as DataClassification,
       retentionClass: String(row.retentionClass) as RetentionClass,
       createdAt: new Date(row.createdAt as string | Date),

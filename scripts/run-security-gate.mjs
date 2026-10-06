@@ -211,6 +211,76 @@ export const SECURITY_GATE_TESTS = [
   // always encoded (a hostile id may not become a path segment or a query parameter) and that traversal,
   // absolute, drive-letter, home-relative and backslash paths are refused by the typed guard.
   "tests/coding-agent-c7-project-files-adapter.test.ts",
+  // C8: the repo map. Pins that only structure (paths and signatures) ever reaches the prompt — never a
+  // file body — that noise directories and lock files are excluded with the sandbox's own exclusion list,
+  // that the token limit is honoured with an *explicit* truncation marker, that secret files are not even
+  // named and a secret-shaped value makes the whole build refuse rather than be stripped, that the cache
+  // is keyed by content as well as commit (a run edits files long before committing, so a commit-only key
+  // would serve a stale map of the file it just wrote), that one company's map is never served to another,
+  // and that a warm cache returns byte-identical output — the map becomes replay input (C6b), so the cache
+  // must stay an optimisation and never a second source of truth.
+  "tests/coding-agent-c8-repo-map.test.ts",
+  // C8: context budget, conversation compaction and the two non-repository context sources. Pins that
+  // NPATI_CODE_CONTEXT_COMPRESSION_RATIO is actually read (it was dead configuration until C8) and that the
+  // threshold is taken from the profile's context_window rather than a model-name heuristic, that a stub keeps
+  // the call it elided (id, tool, schema version, argument hash, outcome) so the transcript still explains what
+  // the agent did, that the last turns survive byte-for-byte, that the structured summary keeps goal,
+  // decisions, changed files, commands with results, open problems and next steps, that compaction is a
+  // deterministic function of its input (it becomes replay input, so a second replay must see the same bytes),
+  // that a summary carrying a secret is refused rather than scrubbed, and that company memory and repository
+  // project context stay separate labelled blocks so repository data never carries tenant authority.
+  "tests/coding-agent-c8-context-compaction.test.ts",
+  // C8 acceptance: a scripted 100+ turn session with decisive facts (goal, decisions, plan, open problems,
+  // changed files, commands with results) must compact automatically around the configured share of the whole
+  // model request and still keep every one of those facts; old tool outputs are pruned while the calls and their
+  // order survive; and the recorded CompressionArtifact is byte-identical on a second identical run, which is
+  // what lets deterministic replay feed the recorded artifact instead of recomputing a non-deterministic summary.
+  "tests/coding-agent-c8-long-session.test.ts",
+  // C8: the compaction artifact is recorded model-visible state. Pins that the persisted replay-bundle format
+  // was raised to version 2 when the artifact field was added (rule 13), that the artifact is byte-stable so a
+  // replay can feed it back verbatim instead of regenerating a summary that would differ, that it carries the
+  // exact summary text, source range and hashes, retained turns, pruned-result references and the placeholders
+  // the model actually saw — but no pruned payload — and that it neither carries a secret or a secret-lease
+  // value nor adopts an untrusted repository instruction as a decision, plan entry or policy-looking statement.
+  "tests/coding-agent-c8-replay-compression.test.ts",
+  // C8: the compaction artifact as **replay input**, walked end to end through the real `replayRecorded`. Pins
+  // that a compacted session replays to the same terminal status with the recorded artifact reused (identified
+  // by its own content hash), that offering a summarizer is *refused* rather than silently ignored and is then
+  // never called, that a bundle without the artifact field reads as "no compaction" instead of "summarise on the
+  // fly", that a summary swapped into the header afterwards fails the integrity check, that an unusable artifact
+  // refuses the replay instead of degrading it — and, one layer down, that the model-visible truncated result is
+  // deterministic while an optional raw reference beside it can never substitute it or change the input hash.
+  "tests/coding-agent-c8-replay-compaction-e2e.test.ts",
+  // C8: the compaction summary is provider-bound content and the system prompt keeps a stable prefix. Pins that
+  // the summary passes the **existing** C5b guard (policy resolution, classification ceiling, private-code rule,
+  // redaction) and is refused rather than scrubbed when it would have to be redacted, that metadata-only
+  // decisions are recorded without the text, that a SecretLease value — opaque, so no pattern can match it — is
+  // refused by comparison with the values the run issued, that an untrusted repository instruction cannot become
+  // policy through compaction, that the persisted summary carries classification/retention from creation and is
+  // tenant-scoped, and that the cacheable prefix holds policy, tool schemas, limits and the data invariant while
+  // environment facts, repository instructions and retrieved memory are strictly after the boundary.
+  "tests/coding-agent-c8-summary-guard-prefix.test.ts",
+  // C8: project instructions (`NPATI.md` / `AGENTS.md` / the shared `PROJECT.md`). Pins the deterministic
+  // hierarchy (root always, a subdirectory file only along the path of the work — never recursively), the single
+  // shared name list so no third convention appears, the explicit truncation marker, a content hash that moves
+  // when the effective instructions move and stays put otherwise, and that a file containing a credential is
+  // *excluded and reported* rather than silently redacted (redaction would hide the leak from the user).
+  "tests/coding-agent-c8-instructions.test.ts",
+  // C8: trust is a label on data, never a grant of authority. Pins behaviourally that hostile instructions
+  // ("ignore previous instructions", "run commands without approval", "enable full_auto", "grant yourself a
+  // tool") change neither the session-mode line nor the tool list in the system prompt, that the report carries
+  // no key any policy decision reads and `canChangePolicy` is literally false in both trust states, that the
+  // invariant is the *last* thing before the instructions block, and that the trust route finally exists —
+  // without it `CodeProjectTrustService.trust()` was called from nowhere, so "after the user trusts the
+  // project" was unreachable in production while looking implemented, and a mutation without `expectedRevision`
+  // is refused before the service is touched.
+  "tests/coding-agent-c8-instructions-trust.test.ts",
+  // C8: `code.symbols.outline` is actually connected. Pins a silent-no-op defect class: the `runCtags` port was
+  // declared, threaded and implemented while nothing supplied it, so a published, Capability-Inspector-visible
+  // tool always answered `symbols_unavailable`. Behaviour is checked (runner invoked and parsed; absent or
+  // throwing runner yields the structured state, never an exception) plus a source guard that `app.ts` still
+  // passes the runner into the canonical executors **through the sandbox transport** rather than the host.
+  "tests/coding-agent-c8-symbols-wiring.test.ts",
   // C7: Website Builder regression behind that shared surface. The real `LocalProjectWorkspace` and the real
   // file routes are driven so a shared surface cannot break its original consumer: write/tree/read round-trip
   // with the revision, `website` and `code_project` served by the one implementation, `workspace:read` still

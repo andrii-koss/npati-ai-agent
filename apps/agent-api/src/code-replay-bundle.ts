@@ -22,7 +22,23 @@ import { scanTextForSecrets } from "./code-secret-scanner";
  * without a bump is unreadable evidence.
  */
 
-export const REPLAY_BUNDLE_FORMAT_VERSION = 1;
+export const REPLAY_BUNDLE_FORMAT_VERSION = 3;
+/**
+ * Version 2 (C8) added the recorded compression artifacts to the header.
+ *
+ * Why that is a format change and not a step: an artifact is **model-visible state**, not another exchange.
+ * Replay must feed the exact recorded summary and context selection rather than recompute them, because a
+ * summarizer would not produce the same text twice and the replay would then diverge at the first compaction
+ * for a reason that has nothing to do with the agent. A version-1 bundle simply has no artifacts, which reads
+ * as "this run did not compact", and that is the honest interpretation rather than a silent recomputation.
+ *
+ * Version 3 (C8, same shape, stronger meaning) makes the artifacts part of the **replay input** and not merely
+ * of the header: `replayInputHash` now covers them, so a swapped or edited summary is caught by the same
+ * integrity check that already protects the steps. The exact compressed context therefore travels as replay
+ * input, which is what the owner asked for. The field is included **only when the run actually compacted**, so
+ * a version-1/2 bundle — whose stored hash was derived from the steps alone — still verifies unchanged: the
+ * hash semantics changed, and the bump is what makes that visible instead of silent.
+ */
 
 /** Raised instead of persisting a bundle whose recording contains a credential. */
 export class ReplayBundleSecretDetectedError extends Error {
@@ -152,8 +168,24 @@ export function replayInputSteps(steps: ReplayBundleStepPayload[]): ReplayBundle
   });
 }
 
-export function replayInputHash(steps: ReplayBundleStepPayload[]): string {
-  return bundleHash({ steps: replayInputSteps(steps) });
+/**
+ * The **replay input hash**.
+ *
+ * It covers the ordered steps with every `rawArtifact` removed, plus — when the run actually compacted — the
+ * recorded compression artifacts. Both halves matter for the same reason: a replay must consume exactly what
+ * the model saw. The artifacts are added **only when present**, so the hash of a run that never compacted is
+ * byte-identical to the version-1/2 derivation and old bundles keep verifying; a run that did compact gets a
+ * hash that a swapped or edited summary cannot satisfy.
+ */
+export function replayInputHash(
+  steps: ReplayBundleStepPayload[],
+  compressionArtifacts?: readonly Record<string, unknown>[],
+): string {
+  const artifacts = compressionArtifacts ?? [];
+  const input = replayInputSteps(steps);
+  return artifacts.length > 0
+    ? bundleHash({ steps: input, compressionArtifacts: [...artifacts] })
+    : bundleHash({ steps: input });
 }
 
 /** Refuse a bundle whose serialised recording contains a credential (scanned, not trusted by field list). */
@@ -296,7 +328,15 @@ export class ReplayBundleRecorder {
    * turn into a failed run. A secret, however, is not a write failure — it refuses the bundle loudly so nobody
    * mistakes a redacted-away leak for a clean recording.
    */
-  async finalize(input: { terminalStatus: string; terminalReason: string }): Promise<{ written: boolean; bundleId?: string; errorCode?: string }> {
+  async finalize(input: {
+    terminalStatus: string;
+    terminalReason: string;
+    /**
+     * C8: the compaction artifacts produced during the run, in order. They are recorded as part of the replay
+     * input so a replay replays the *model-visible* compacted context instead of recomputing a summary.
+     */
+    compressionArtifacts?: readonly Record<string, unknown>[];
+  }): Promise<{ written: boolean; bundleId?: string; errorCode?: string }> {
     if (this.written) return { written: false, errorCode: "already_written" };
     const now = this.input.now?.() ?? new Date();
     const steps = this.orderedSteps();
@@ -319,9 +359,13 @@ export class ReplayBundleRecorder {
       stepCount: steps.length,
       modelStepCount: steps.filter((step) => step.kind === "model_step").length,
       toolCallCount: steps.filter((step) => step.kind === "tool_call").length,
+      // C8: the compaction artifacts are part of the header, therefore part of `payloadHash`: a rewritten
+      // summary changes the bundle's own hash, so tampering is detectable rather than merely unlikely.
+      compressionArtifacts: [...(input.compressionArtifacts ?? [])],
+      compressionArtifactCount: input.compressionArtifacts?.length ?? 0,
       createdAt: now.toISOString(),
     };
-    const replayInput = replayInputSteps(steps);
+    const compressionArtifacts = [...(input.compressionArtifacts ?? [])];
     try {
       // Scan the whole recording, not the header: a secret can arrive through a provider answer or a tool
       // result, and "we did not put one there" is not a guarantee.
@@ -331,7 +375,7 @@ export class ReplayBundleRecorder {
       throw error;
     }
     const payloadHash = bundleHash(header);
-    const inputHash = bundleHash({ steps: replayInput });
+    const inputHash = replayInputHash(steps, compressionArtifacts);
     try {
       const record = await this.input.store.createReplayBundle({
         workspaceId: this.input.context.workspaceId,
@@ -441,6 +485,12 @@ export interface ReplayBundleReadResult {
   integrityFailure?: boolean;
   /** True when the header claims more steps than were stored (a partially written bundle). */
   truncated?: boolean;
+  /**
+   * C8: the recorded compression artifacts, in order. When this is non-empty the run compacted its context and
+   * a replay must reuse these exact artifacts; an empty list means the run did not compact (or predates C8),
+   * which reads as "no compaction to reproduce" rather than as a licence to recompute a summary.
+   */
+  compressionArtifacts?: Record<string, unknown>[];
 }
 
 /** One assembly path for every read (by run and by id), so the two can never answer differently. */
@@ -455,6 +505,11 @@ async function assembleBundleRead(
   const steps = rows.map((row) => row.payload as ReplayBundleStepPayload);
   const replayInput = replayInputSteps(steps);
   const storedCount = Number(bundle.payload?.stepCount ?? steps.length);
+  // C8: read straight from the persisted header. A version-1 bundle has no field here, and the honest reading
+  // of that is "no recorded compaction", never "recompute one".
+  const compressionArtifacts = Array.isArray(bundle.payload?.compressionArtifacts)
+    ? (bundle.payload?.compressionArtifacts as Record<string, unknown>[])
+    : [];
   return {
     kind: "bundle",
     runId: bundle.runId,
@@ -465,8 +520,11 @@ async function assembleBundleRead(
     steps,
     replayInput,
     replayInputHash: bundle.replayInputHash,
-    integrityFailure: bundle.replayInputHash !== bundleHash({ steps: replayInput }),
+    // The same derivation the writer used, artifacts included: a summary that was swapped after the fact can
+    // no longer pass, because it is now part of the value the stored hash covers.
+    integrityFailure: bundle.replayInputHash !== replayInputHash(steps, compressionArtifacts),
     truncated: steps.length < storedCount,
+    compressionArtifacts,
   };
 }
 

@@ -366,6 +366,12 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.changes.read": "workspace:read",
   "code.session.usage.read": "workspace:read",
   "code.active_context.read": "workspace:read",
+  // C8: reading project instructions and drafting one are read surfaces. **Drafting writes nothing**: the
+  // draft is returned, and persisting it goes through `code.fs.write`, which carries its own authorisation,
+  // classification and approval. Granting/revoking project trust stays on `business:manage` (above) and is
+  // additionally restricted to owner/admin inside the trust service.
+  "code.instructions.read": "workspace:read",
+  "code.instructions.init": "workspace:read",
   "code.project.create": "workspace:write",
   "code.project.rename": "workspace:write",
   "code.project.unarchive": "workspace:write",

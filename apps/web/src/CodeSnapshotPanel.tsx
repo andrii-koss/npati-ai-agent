@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getStoredAuthToken } from "./AuthContext";
+import { CodeTrustPanel } from "./CodeTrustPanel";
 
 /**
  * C6b: read-only "why did the agent act this way".
@@ -299,6 +300,16 @@ export function CodeSnapshotPanel({ companyId, runId, isUk }: { companyId: strin
           <span className="ds-muted">—</span>
         )}
       </div>
+
+      {/*
+        C8: the trust control sits with the trust *fact* the snapshot already shows. It is mounted only when the
+        snapshot names a project, because `expectedRevision` is read from the trust endpoint per project — and
+        without a project there is nothing to grant trust to. Without this control `trust()` was unreachable, so
+        the trust-gated behaviour could never have been exercised in production.
+      */}
+      {snapshot?.projectId ? (
+        <CodeTrustPanel companyId={companyId} projectId={snapshot.projectId} isUk={isUk} />
+      ) : null}
     </section>
   );
 }

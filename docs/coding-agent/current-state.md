@@ -3,19 +3,28 @@
 Update this file after every completed step.
 
 ## Current step
-- **C7 COMPLETE / FEATURE COMPLETE.** All eleven owner requirements are implemented and every one of the seven
-  completion conditions holds: chat integration with a **persisted** active project/session; the Website Builder
-  "Open in Code Workspace" link; project deletion that really removes workspace **and** sandbox; path-scoped
-  `Revert file` with checkpoint semantics; usage that distinguishes measured from estimated; Website Builder and
-  Chat regressions green; and the main UI covered by route-level integration and interaction tests.
-- **Browser E2E = required in G1, not completed yet.** The owner chose to accept C7's current coverage
-  (route-level integration tests on the real `LocalProjectWorkspace`, Chat/Website Builder regressions, the XSS
-  source-scan invariant as a security-gate member, isolation tests) rather than add a new test stack for C7.
-  A dedicated CI-web/browser job with the browser test infrastructure is **mandatory in G1**.
-- **Production ready = NO.** Release checks remain outstanding (see below), and G1/R1 have not been passed.
-- Next: **C8**, per `00-audit.md` section 13 (order is binding).
-- Carried forward (mandatory before production-ready/G1-R1 rollout, but **not** blockers for C8): migrations
-  **070–078** have never run against a live PostgreSQL, and the C4b live Docker egress E2E has not been executed.
+- **C8 COMPLETE — context management.** All eight of the owner's decisions are implemented and proven: the
+  `CompressionArtifact` is model-visible state recorded into `ReplayBundle.replayInput` (format v3) and reused
+  by replay, never recomputed; `contextCompressionRatio` (default 0.75) is revived and pressure is measured from
+  the **full** model request; pinning replaced the absolute "never compress code" ban; truncation is
+  deterministic with a separate raw ref; memory/context/instructions stay separate typed sections with their own
+  trust; the cache prefix is stable and the data part follows a boundary marker; the summary passes
+  `ProviderDataGuard`, classification and a shorter retention; and the 120-turn long-session acceptance test
+  proves goal/decisions/open problems survive compaction while tool calls and their order do not.
+- **The step's most valuable finding: the gate caught a real fail-closed regression.** A `let lastBudget` /
+  `let compactionCount` declared below the early `return finish(...)` statements put every refusal path
+  (flag → RBAC → admission gate → image admission) into the temporal dead zone, so with the feature flag off the
+  runner **threw instead of refusing**. Fixed by hoisting the declarations; no test was weakened.
+- **Browser E2E = required in G1, not completed yet.** Unchanged from C7.
+- **Production ready = NO.** Migrations **070–079** have never run against a live PostgreSQL, the C4b live Docker
+  egress E2E has not been executed, and G1/R1 have not been passed.
+- **Open item for the owner (deliberate, not hidden):** the `secretLeaseValues` port is **not wired**. The lease
+  module is metadata-only by design (a value exists only inside a single `consume`/`resolveField`), so no source
+  of active lease values exists, and inventing one would break the boundary C4 was written for. The guarantee
+  therefore rests on the value never entering the transcript at creation time (the shell path already redacts via
+  `redactLeaseValues`), plus the pattern scanner and the guard on the summary. If a value source is wanted, it
+  must be an explicit injectable accessor on `SecretLeaseProvider`.
+- Next: **C9**, per `00-audit.md` section 13 (order is binding).
 
 ## Implemented (C6b, partial — green but incomplete)
 - **Immutable snapshot storage** (migration `076_execution_snapshots`): `execution_snapshots` and
