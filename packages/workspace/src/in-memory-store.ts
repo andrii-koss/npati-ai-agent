@@ -10,6 +10,7 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
   CreateSnapshotConfigVersionInput, CodeActivityEventRecord, CreateCodeActivityEventInput,
   ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord, CreateReplayBundleInput,
+  CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput,
   ListReplayBundlesInput } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, ExecutionSnapshotImmutableError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
@@ -74,6 +75,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly snapshotConfigVersions = new Map<string, SnapshotConfigVersionRecord>();
   // C6b: durable Activity events. Append-only, keyed by id; reads sort newest first like the postgres index.
   private readonly codeActivityEvents = new Map<string, CodeActivityEventRecord>();
+  // C8: durable context summaries. Append-only, keyed by id; reads sort newest first like the postgres index.
+  private readonly codeContextSummaries = new Map<string, CodeContextSummaryRecord>();
   private readonly replayBundles = new Map<string, ReplayBundleRecord>();
   private readonly replayBundleSteps = new Map<string, ReplayBundleStepRecord[]>();
 
@@ -2287,6 +2290,41 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return [...this.snapshotConfigVersions.values()]
       .filter((record) => record.companyId === companyId && record.kind === kind)
       .sort((a, b) => b.version - a.version);
+  }
+
+  /**
+   * C8: append-only context summaries. Mirrors the postgres ordering (`created_at DESC, id DESC`) so a read
+   * written against one store behaves identically on the other; there is deliberately no update or delete.
+   */
+  async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
+    const record: CodeContextSummaryRecord = {
+      id: input.id ?? randomUUID(),
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null,
+      runId: input.runId ?? null,
+      snapshotId: input.snapshotId ?? null,
+      turnIndex: input.turnIndex ?? 0,
+      schemaVersion: input.schemaVersion,
+      summary: input.summary,
+      summaryText: input.summaryText,
+      contentHash: input.contentHash,
+      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+      retentionClass: input.retentionClass ?? "short",
+      createdAt: input.now ?? new Date(),
+    };
+    this.codeContextSummaries.set(record.id, record);
+    return record;
+  }
+
+  async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+    return [...this.codeContextSummaries.values()]
+      .filter((record) => record.companyId === input.companyId)
+      .filter((record) => !input.sessionId || record.sessionId === input.sessionId)
+      .filter((record) => !input.runId || record.runId === input.runId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit);
   }
 
   /**

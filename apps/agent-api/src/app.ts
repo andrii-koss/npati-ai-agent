@@ -110,11 +110,15 @@ import { getReplayBundleById, readReplayBundle, type ReplayBundleReadPort } from
 // C6b: the read-only "why did the agent act this way" surface (snapshot for a run, snapshot diff, Activity
 // events of a run, replay metadata). Reads only, so it cannot widen what an agent may do.
 import { registerCodeSnapshotRoutes } from "./code-snapshot-routes";
-import { registerCodeRunStreamRoutes } from "./code-run-stream-routes";
+import { buildCompanyMemoryBlock, buildProjectContextBlock } from "./code-context-memory";import { registerCodeRunStreamRoutes } from "./code-run-stream-routes";
 import { registerCodeProjectLifecycleRoutes } from "./code-project-lifecycle-routes";
 import { registerCodeSessionControlRoutes } from "./code-session-control-routes";
 import { collectCodeSessionUsage } from "./code-session-usage";
 import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-context-store";
+import { createCodeInstructionsLoader } from "./code-instructions-loader";
+import { registerCodeProjectInstructionsRoutes } from "./code-project-instructions-routes";
+import { registerCodeProjectTrustRoutes } from "./code-project-trust-routes";
+import { isRepositoryInstructionsTrusted } from "./code-project-trust";
 import { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
@@ -1959,6 +1963,26 @@ export function buildApp(config: AppConfig = {}) {
       return (result as { content?: string } | null)?.content ?? null;
     } catch { return null; }
   };
+  // C8: one loader owns "which instruction files apply". It reuses `readWorkspaceText` (the same read path the
+  // dependency scanner uses) and asks the trust service on every load — trust is never cached, so a decision
+  // cannot outlive the content it was made about.
+  const codeInstructionsLoader = createCodeInstructionsLoader({
+    readFile: async ({ ctx, companyId, projectId, path }) => readWorkspaceText(ctx, companyId, projectId, path),
+    isTrusted: async ({ ctx, companyId, projectId }) =>
+      isRepositoryInstructionsTrusted(codeProjectTrust, ctx, companyId, projectId),
+    draftFacts: async ({ ctx, companyId, projectId }) => {
+      try {
+        const project = await projectService.get(ctx, companyId, projectId);
+        const toolchain = (project as { toolchain?: { languages?: string[]; packageManagers?: string[]; verifyCommands?: Record<string, string> } } | null)?.toolchain;
+        return {
+          projectName: String((project as { name?: unknown } | null)?.name ?? projectId),
+          ...(toolchain === undefined ? {} : { toolchain }),
+        };
+      } catch {
+        return { projectName: projectId };
+      }
+    },
+  });
   const parseDeclaredDependencies = (manager: string, text: string): Array<{ name: string; version: string | null; scope: string }> => {
     if (manager === "npm" || manager === "pnpm" || manager === "yarn" || manager === "composer") {
       try {
@@ -2101,6 +2125,40 @@ export function buildApp(config: AppConfig = {}) {
       // C4a: dependency inspection/audit/install go through the dependency port, which itself runs the
       // audit and the install through the shell runtime above (so the PolicyEngine still decides).
       deps: codeDepsPort,
+      /**
+       * C8: `code.symbols.outline` runs `ctags` **inside the sandbox**, through the same single transport every
+       * other command uses (`codeSandboxExecPort`) — never on the host, because the rule is that code AI executes
+       * only in the sandbox, and a host-side `ctags` would read the repository outside every confinement.
+       *
+       * Until this wiring existed the port was declared, threaded and implemented, but connected to nothing, so
+       * the tool always answered `symbols_unavailable`: it was in the registry, visible in the Capability
+       * Inspector, and could never work — the same defect class as an unreaped lease.
+       *
+       * A missing `ctags` in the image is a **normal** state, not a failure: both command forms are attempted and
+       * an absent tool returns `null`, which the executor already reports as the structured
+       * `symbols_unavailable` so the model simply continues without an outline.
+       */
+      runCtags: async (input, path) => {
+        if (!codeSandboxExecPort) return null;
+        const quoted = `'${String(path).replace(/'/g, "'\\''")}'`;
+        const attempts = [
+          // Universal-ctags JSON form first; the classic form is the fallback for older builds.
+          `ctags -f - --output-format=json --fields=+n --sort=no -- ${quoted}`,
+          `ctags -f - --fields=+n -n -- ${quoted}`,
+        ];
+        for (const command of attempts) {
+          try {
+            const result = await codeSandboxExecPort.execute(input.ctx, input.companyId, {
+              projectId: input.projectId,
+              command,
+            });
+            if (result.exitCode === 0 && result.stdout.trim().length > 0) return result.stdout;
+          } catch {
+            // Try the next form; if both fail the caller reports structured unavailability.
+          }
+        }
+        return null;
+      },
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,
@@ -3841,7 +3899,8 @@ ${localized.next}`;
       baseCommit: async () => codeRunEnvironment.baseCommit(),
       // C8 owns project instructions: until it lands the hash is genuinely unknown (`null`), and the trust
       // status is the conservative default rather than a claim that the project was trusted.
-      projectInstructions: async () => ({ contentHash: null, trustStatus: "untrusted" }),
+      projectInstructions: async () =>
+        codeRunEnvironment.projectInstructions() ?? { contentHash: null, trustStatus: "untrusted" as const },
       toolchain: async () => codeRunEnvironment.toolchain(),
     },
     resolveRole: async () => null,
@@ -3860,6 +3919,62 @@ ${localized.next}`;
     // next to it — a fabricated value would make "policy changed" a lie.
     snapshot: codeSnapshotProvider,
     environment: codeRunEnvironment,
+    // C8: the compaction summary is a durable session artifact (migration 079, append-only). The store call is
+    // the existing one; the runner treats a failure as non-fatal, because losing the artifact must not abort a
+    // run that is otherwise progressing.
+    contextSummaryStore: {
+      persist: async (input) => workspaceStore.createCodeContextSummary({
+        companyId: input.companyId,
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        runId: input.runId,
+        snapshotId: input.snapshotId,
+        turnIndex: input.turnIndex,
+        schemaVersion: input.schemaVersion,
+        summary: input.summary as unknown as Record<string, unknown>,
+        summaryText: input.summaryText,
+        contentHash: input.contentHash,
+        dataClassification: input.dataClassification,
+        retentionClass: input.retentionClass,
+      }),
+    },
+    // C8: company memory and Website Builder project context, rendered as separate labelled blocks. Both are
+    // optional and fail-soft; the labelling is what keeps repository data from looking like tenant rules.
+    ...(providerDataGuardInstance
+      ? {
+          // C8: the compaction summary becomes part of the transcript and therefore provider-bound content, so it
+          // goes through the **same** guard instance the chat path uses — same policy resolution, same
+          // classification ceiling, same redaction list, same decision recording. A second scanner here would be
+          // a second answer to "may this leave NPATI", which is exactly what C5b exists to prevent.
+          providerDataGuard: providerDataGuardInstance.providerDataGuard,
+        }
+      : {}),
+    contextBlocks: {
+      load: async ({ ctx, companyId, projectId, query }) => {
+        let companyMemory: string | null = null;
+        try {
+          const memories = await workspaceStore.listMemory(ctx, companyId, query, 25);
+          companyMemory = buildCompanyMemoryBlock(
+            memories.map((memory) => ({
+              ...(memory.title ? { title: memory.title } : {}),
+              content: memory.content,
+              ...(memory.type ? { type: memory.type } : {}),
+            })),
+          )?.body ?? null;
+        } catch {
+          companyMemory = null;
+        }
+        let projectContext: string | null = null;
+        try {
+          const raw = await projectWorkspace.readFile(ctx, companyId, projectId, "PROJECT.md");
+          projectContext = buildProjectContextBlock(raw.content)?.body ?? null;
+        } catch {
+          projectContext = null;
+        }
+        if (!companyMemory && !projectContext) return null;
+        return { companyMemory, projectContext };
+      },
+    },
     // C6b: the prompt/profile versions come from the existing content-addressed registries, so two runs with
     // identical configuration share a version and any change mints a new one.
     snapshotConfigVersions: {
@@ -3888,6 +4003,17 @@ ${localized.next}`;
             content: { profile },
           });
           return ref.version;
+        } catch {
+          return null;
+        }
+      },
+    },
+    // C8: project instructions (NPATI.md / AGENTS.md / the shared PROJECT.md). Loading is fail-soft: an
+    // unreadable instruction file yields no block, never an empty "trusted" one.
+    projectInstructions: {
+      load: async ({ ctx, companyId, projectId }) => {
+        try {
+          return await codeInstructionsLoader.loadForRun({ ctx, companyId, projectId });
         } catch {
           return null;
         }
@@ -4360,6 +4486,52 @@ ${localized.next}`;
     // may read a run's diff may read its stream and no new permission is invented for the same data.
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeRunStreamContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  /**
+   * C8: project instructions (`NPATI.md` / `AGENTS.md` / the shared `PROJECT.md`) and project trust.
+   *
+   * Two facts decided this shape. First, `CodeProjectTrustService.trust()`/`.revoke()` were implemented but
+   * **called from nowhere**, and the RBAC actions were already mapped, so trust was impossible to grant: a
+   * trust-gated feature with no way to grant trust is a dead path, not a dark-launched one. Second, the
+   * instructions read must ask that service on every request, so the route and the loader share one instance
+   * created above.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
+   * there is no second auth path.
+   */
+  const codeInstructionsContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/(?:instructions(?:\/init)?|trust(?:\/revoke)?)$/.test(path)) return;
+    codeInstructionsContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeProjectInstructionsRoutes(app, {
+    loadInstructions: async ({ ctx, companyId, projectId, targetPaths }) =>
+      codeInstructionsLoader.load({
+        ctx,
+        companyId,
+        projectId,
+        ...(targetPaths === undefined ? {} : { targetPaths }),
+      }),
+    buildDraft: async ({ ctx, companyId, projectId }) =>
+      codeInstructionsLoader.buildDraft({ ctx, companyId, projectId }),
+    // Read surfaces: `code.instructions.read` and `code.instructions.init` both carry `workspace:read`, because
+    // drafting writes nothing — persisting the draft goes through `code.fs.write` and its own authorisation.
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  registerCodeProjectTrustRoutes(app, {
+    trust: {
+      get: async (ctx, companyId, projectId) => codeProjectTrust.get(ctx, companyId, projectId),
+      // The service still performs the owner/admin check and writes the audit entry *before* the store write;
+      // the route adds transport only, so the fail-closed ordering cannot be lost in a wrapper.
+      trust: async (ctx, companyId, projectId, input) => codeProjectTrust.trust(ctx, companyId, projectId, input),
+      revoke: async (ctx, companyId, projectId, input) => codeProjectTrust.revoke(ctx, companyId, projectId, input),
+    },
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
     logger: app.log,
   });
   // C5: scoped approval rules are visible and revocable; every change is audited before it applies.

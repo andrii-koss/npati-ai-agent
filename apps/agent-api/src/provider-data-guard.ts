@@ -373,6 +373,54 @@ export interface ProviderDataGuard {
   guardRequest<T extends { model?: string }>(request: T, policyContext?: ProviderPolicyContext): Promise<T>;
   resolvePolicy(input: PolicyResolveInput): Promise<EffectiveDataPolicy>;
   isModelEligible(model: string, policyContext?: ProviderPolicyContext): Promise<{ eligible: boolean; reason?: string }>;
+  /**
+   * C8: guard one **text field** that is about to become provider-bound content (the compaction summary of a
+   * long code run). It runs through the very same `prepare` path as `chat` — policy resolution, classification
+   * gate, content-type rules, private-code detection, redaction and decision recording — so there is no second
+   * scanner, no second policy lookup and no second vocabulary anywhere in the codebase.
+   */
+  guardProviderBoundText(text: string, input: GuardProviderBoundTextInput): Promise<GuardedTextResult>;
+}
+
+export interface GuardProviderBoundTextInput {
+  model?: string;
+  policyContext: ProviderPolicyContext;
+  /**
+   * The field name under which the text is presented. It decides content-type classification exactly as it
+   * would in a real request (`content`/`text` → code), which is why the default is `content` and not a neutral
+   * label that would classify as nothing.
+   */
+  field?: "content" | "text" | "output";
+}
+
+export interface GuardedTextResult {
+  text: string;
+  /** Always false on a successful result: a redacted text is refused, never returned (see below). */
+  changed: boolean;
+  bytes: number;
+}
+
+/**
+ * Raised when the guard would have to redact the text to let it through.
+ *
+ * Why refuse instead of returning the redacted text: the summary is persisted as a session artifact and
+ * recorded as model-visible state, and a redacted summary would carry a `REDACTED:<kind>_N` placeholder into
+ * both. `assertNoPlaceholderInWrite` exists precisely because placeholders are references that must not reach
+ * disk, and the same reasoning that makes the C4a scanner refuse a summary applies here — the underlying value
+ * is still one message away, so silently sanitising the summary would hide the leak from the caller who has to
+ * fix it.
+ */
+export class ProviderBoundTextRejectedError extends Error {
+  readonly code = "provider_bound_text_requires_redaction";
+  readonly httpStatus = 403;
+  readonly retryable = false;
+  readonly details: Record<string, unknown>;
+
+  constructor(details: Record<string, unknown>) {
+    super("Refusing text that would have to be redacted before it may reach a provider.");
+    this.name = "ProviderBoundTextRejectedError";
+    this.details = details;
+  }
 }
 
 export function createProviderDataGuard(base: AIEngine, options: ProviderDataGuardOptions): AIEngine & { providerDataGuard: ProviderDataGuard } {
@@ -531,6 +579,32 @@ export function createProviderDataGuard(base: AIEngine, options: ProviderDataGua
       return (await prepare("chat", request as unknown as ChatRequest, policyContext)) as unknown as T;
     },
     resolvePolicy: policyFor,
+    async guardProviderBoundText(
+      text: string,
+      input: GuardProviderBoundTextInput,
+    ): Promise<GuardedTextResult> {
+      const field = input.field ?? "content";
+      // A minimal request, not a bypass: `prepare` walks every string leaf, so wrapping the text in the field
+      // name it would really travel under makes the classification, the private-code rule and the redaction
+      // behave exactly as they would on the real call.
+      const probe = {
+        ...(input.model ? { model: input.model } : {}),
+        messages: [{ role: "system", [field]: text }],
+      } as unknown as ChatRequest;
+      const sanitized = await prepare("chat", probe, input.policyContext);
+      const messages = (sanitized as unknown as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+      const value = messages[0]?.[field];
+      const guarded = typeof value === "string" ? value : "";
+      if (guarded !== text) {
+        throw new ProviderBoundTextRejectedError({
+          reason: "provider_bound_text_requires_redaction",
+          field,
+          model: input.model ?? null,
+          bytes: Buffer.byteLength(text, "utf8"),
+        });
+      }
+      return { text: guarded, changed: false, bytes: Buffer.byteLength(guarded, "utf8") };
+    },
     async isModelEligible(model: string, policyContext?: ProviderPolicyContext) {
       try {
         const policy = await policyFor({ model, policyContext });

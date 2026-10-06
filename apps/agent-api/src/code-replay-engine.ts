@@ -27,6 +27,7 @@ import {
   type ReplayBundleReadResult,
   type ReplayBundleStepPayload,
 } from "./code-replay-bundle";
+import { COMPACTION_SCHEMA_VERSION } from "./code-conversation-compaction";
 
 /** Shape version of the payloads this engine writes. Bumped when the meaning changes. */
 export const CODE_REPLAY_SCHEMA_VERSION = 1;
@@ -69,6 +70,15 @@ export const CODE_REPLAY_CODES = Object.freeze({
   liveUnavailable: "replay_live_unavailable",
   notFound: "replay_not_found",
   invalidMode: "replay_invalid_mode",
+  /**
+   * C8: a caller tried to hand the recorded engine a compaction/summarizer callback. Compaction is **reused,
+   * never recomputed**: the recorded artifact is model-visible state, and a regenerated summary would differ
+   * between two replays of the same run. Refusing loudly is the only honest answer, because "we ignored your
+   * summarizer" and "we never needed one" are indistinguishable from the outside.
+   */
+  compactionRecomputeForbidden: "replay_compaction_recompute_forbidden",
+  /** C8: a recorded compression artifact is present but unusable (wrong schema, no hash, not an object). */
+  compressionArtifactInvalid: "replay_compression_artifact_invalid",
 });
 
 export type ReplayDivergenceReason =
@@ -135,6 +145,13 @@ export interface RecordedReplayResult {
    */
   providerCalls: number;
   toolExecutions: number;
+  /**
+   * C8: whether the recorded compaction was reused. `recomputed` is a structural zero — a caller that supplies
+   * a summarizer is refused outright, and the only source of compaction state is the recorded bundle — while
+   * `none_recorded` is the honest reading of a run that never compacted (or of a bundle written before the
+   * compression artifact existed).
+   */
+  compression: ReplayCompressionState;
   /** How many recorded steps the verification walk actually inspected. */
   stepsVerified: number;
   durationMs: number;
@@ -154,8 +171,91 @@ export interface RecordedReplayDeps {
    */
   bundleVersion?: number | null;
   recordedTerminalStatus?: string | null;
+  /**
+   * C8: a channel through which a **compaction/summarizer** could be handed in. The recorded engine has no
+   * compaction step at all and must never gain one implicitly, so supplying this is refused with
+   * `replay_compaction_recompute_forbidden` *before* it can be invoked — the callback is never called, which is
+   * what a test asserts. The parameter exists precisely so the refusal is testable rather than a comment.
+   */
+  compaction?: () => unknown;
   onActivity?(event: Record<string, unknown> & { kind: string }): void | Promise<void>;
   now?(): number;
+}
+
+/**
+ * C8: the recorded compaction, validated but never regenerated.
+ *
+ * Validation is structural — supported `schemaVersion`, a well-formed `contentHash`, an object shape — plus the
+ * `replayInputHash` check the caller already performs, which now covers the artifacts themselves (format
+ * version 3). The hash is deliberately **not** recomputed from the artifact's JSON here: the artifact is stored
+ * as `jsonb`, and a database is free to reorder object keys, so a JSON-stringify-based recomputation would fail
+ * on a perfectly intact artifact read back from Postgres. Canonical, order-independent hashing lives in the
+ * replay-input hash, which is the check that actually detects an edited summary.
+ */
+export interface ReplayCompressionState {
+  recorded: number;
+  reused: number;
+  verified: number;
+  recomputed: 0;
+  status: "reused_recorded_artifacts" | "none_recorded";
+  schemaVersions: number[];
+  artifactHashes: string[];
+}
+
+export function inspectRecordedCompression(
+  artifacts: readonly Record<string, unknown>[] | undefined,
+): ReplayCompressionState {
+  const list = artifacts ?? [];
+  const schemaVersions: number[] = [];
+  const artifactHashes: string[] = [];
+  list.forEach((artifact, index) => {
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+      throw new CodeReplayError(
+        CODE_REPLAY_CODES.compressionArtifactInvalid,
+        "A recorded compression artifact is not an object",
+        409,
+        { reason: "replay_compression_artifact_invalid", index, field: "artifact" },
+      );
+    }
+    const schemaVersion = numberOrNull((artifact as { schemaVersion?: unknown }).schemaVersion);
+    if (schemaVersion === null || schemaVersion > COMPACTION_SCHEMA_VERSION || schemaVersion < 1) {
+      throw new CodeReplayError(
+        CODE_REPLAY_CODES.compressionArtifactInvalid,
+        "A recorded compression artifact declares an unsupported schema version",
+        409,
+        {
+          reason: "replay_compression_artifact_invalid",
+          index,
+          field: "schemaVersion",
+          expected: COMPACTION_SCHEMA_VERSION,
+          actual: schemaVersion,
+        },
+      );
+    }
+    const contentHash = (artifact as { contentHash?: unknown }).contentHash;
+    if (typeof contentHash !== "string" || !/^sha256:[0-9a-f]{64}$/.test(contentHash)) {
+      throw new CodeReplayError(
+        CODE_REPLAY_CODES.compressionArtifactInvalid,
+        "A recorded compression artifact has no usable content hash",
+        409,
+        { reason: "replay_compression_artifact_invalid", index, field: "contentHash" },
+      );
+    }
+    schemaVersions.push(schemaVersion);
+    artifactHashes.push(contentHash);
+  });
+
+  return {
+    recorded: list.length,
+    reused: list.length,
+    verified: list.length,
+    // The recorded engine recomputes nothing. Reported as a number so a caller can assert it rather than
+    // believe it, exactly like `providerCalls`/`toolExecutions`.
+    recomputed: 0,
+    status: list.length > 0 ? "reused_recorded_artifacts" : "none_recorded",
+    schemaVersions,
+    artifactHashes,
+  };
 }
 
 interface PendingCall {
@@ -226,6 +326,24 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
   }
 
   const steps = recording.replayInput;
+  /**
+   * C8: compaction is **reused, never recomputed**.
+   *
+   * Two things make that structural instead of promised. First, a caller that tries to supply a
+   * compaction/summarizer callback is refused here — before the callback could run — because a silently ignored
+   * summarizer and a summarizer that was never needed are indistinguishable from the outside. Second, the only
+   * source of compaction state is the recorded bundle, and it is validated (schema version, hash shape) but
+   * never regenerated.
+   */
+  if (deps.compaction) {
+    throw new CodeReplayError(
+      CODE_REPLAY_CODES.compactionRecomputeForbidden,
+      "Recorded replay reuses the recorded compaction artifact and never recomputes a summary",
+      409,
+      { reason: "replay_compaction_recompute_forbidden", runId: recording.runId },
+    );
+  }
+  const compression = inspectRecordedCompression(recording.compressionArtifacts);
   const modelStepCount = replayModelSteps(steps).length;
   const toolStepCount = replayToolResults(steps).length;
 
@@ -352,8 +470,7 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
     runId: recording.runId,
     terminalStatus,
     recordedTerminalStatus: recordedTerminalStatus ?? headerStatus,
-    divergences,
-    comparison: {
+    divergences,    comparison: {
       modelSteps: { matched: modelMatched, expected: modelStepCount },
       toolCalls: { matched: toolMatched, expected: toolStepCount },
       terminalStatus: { matched: terminalMatched, expected: headerStatus, actual: terminalStatus },
@@ -362,6 +479,16 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
     // Structurally zero: no provider is called and no tool runs in the recorded mode.
     providerCalls: 0,
     toolExecutions: 0,
+    /**
+     * C8: compaction is **reused, never recomputed**. `recorded`/`reused`/`verified` count the artifacts the
+     * recorded run produced and that this replay fed back verbatim; `recomputed` is a hard zero, and
+     * `none_recorded` is the honest reading of a bundle written before this format version (or of a run that
+     * never compacted) — never a licence to summarise on the fly. The artifact hashes travel with the result so
+     * a caller can compare them with what the recorded run persisted, which is how "the same artifact" is
+     * checked without recomputing it (a `jsonb` column may reorder keys, so re-hashing the JSON would be a
+     * false alarm rather than a check).
+     */
+    compression,
     stepsVerified,
     durationMs: (deps.now ?? Date.now)() - started,
   };

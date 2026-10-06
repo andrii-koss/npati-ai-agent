@@ -1458,6 +1458,17 @@ export interface WorkspaceStore {
   /** Newest first. Tenant-scoped; filters by session, run or snapshot when given. */
   listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]>;
 
+  // --- C8: durable context summaries --------------------------------------------------------------------
+  /**
+   * Append-only: there is no update or delete method, and migration 079 refuses both at the database level.
+   * A summary that could be rewritten would misrepresent what the model was actually given during the run it
+   * describes. `contentHash` is the hash of the exact compacted message list, which is what ties the stored
+   * artifact to reproducible replay input (C6b).
+   */
+  createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord>;
+  /** Newest first, tenant-scoped; filters by session or run when given. */
+  listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]>;
+
   // --- C6b: versioned replay bundles -------------------------------------------------------------------
   /**
    * Writes a bundle header together with its ordered steps. Both tables are append-only, so there is no
@@ -1631,6 +1642,49 @@ export interface ListCodeActivityEventsInput {
   snapshotId?: string;
   limit?: number;
   cursor?: string;
+}
+
+/** C8: the structured summary produced by conversation compaction (see `code-conversation-compaction.ts`). */
+export interface CodeContextSummaryRecord {
+  id: string;
+  companyId: string;
+  projectId: string;
+  sessionId: string | null;
+  runId: string | null;
+  snapshotId: string | null;
+  turnIndex: number;
+  schemaVersion: number;
+  summary: Record<string, unknown>;
+  summaryText: string;
+  contentHash: string;
+  dataClassification: DataClassification;
+  /** Deliberately shorter than the transcript: a summary is derived, so outliving its source buys nothing. */
+  retentionClass: RetentionClass;
+  createdAt: Date;
+}
+
+export interface CreateCodeContextSummaryInput {
+  companyId: string;
+  projectId: string;
+  sessionId?: string | null;
+  runId?: string | null;
+  snapshotId?: string | null;
+  turnIndex?: number;
+  schemaVersion: number;
+  summary: Record<string, unknown>;
+  summaryText: string;
+  contentHash: string;
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  now?: Date;
+  id?: string;
+}
+
+export interface ListCodeContextSummariesInput {
+  companyId: string;
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
 }
 
 /**
