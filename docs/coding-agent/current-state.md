@@ -3,11 +3,275 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C4b — egress enforcement** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a)
-- Status: **implementation complete — production validation pending**. Do **not** set
-  `NPATI_SANDBOX_EGRESS_ENFORCED=true` in production on the strength of unit/security tests alone; the live
-  Docker E2E checklist below must pass first (owner decision).
-- Next: **C5 — policy engine, RBAC and project rules** (then C5a/C5b), per `00-audit.md` section 13.
+- Last completed: **C5a — RBAC** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5)
+- Next: **C5b — ProviderDataPolicy**, per `00-audit.md` section 13.
+- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–073** and the
+  C4b live Docker egress E2E. They do not block starting C5b, but **production-ready status is forbidden
+  without them**.
+
+## Implemented (C5a, latest step)
+- **One server-side authorization point** (`code-rbac.ts`), deny by default. The role matrix is
+  **injected data** (`createRoleRegistry(matrix)`; `DEFAULT_CODE_ROLE_MATRIX` is a separate exported
+  constant whose human roles are spread from `DEFAULT_COMPANY_ROLE_MATRIX`), so the owner's role model is
+  configuration, not code. `authorizeCodeAction` returns a decision or throws `CodeRbacError`
+  (`code`, `httpStatus: 403`, `details.reason`, `retryable: false`).
+- **Privileged permissions cannot leak through a wildcard**: `code.prod.operate`,
+  `code.git.protected_write`, `code.policy.manage`, `code.trust.manage`, `code.rbac.manage` are granted
+  only when a role names them explicitly; `*`/`admin:all`/`owner` expand only the ordinary vocabulary, and
+  `code.prod.operate` is in **no** default role (tested across every role). `permissionsForRole` now really
+  strips the privileged half of a `*` expansion (it was a tautology before — and `code-step-up.ts` trusted
+  its output).
+- **Principal invariants**: an agent is never an approver and never changes policy (even with
+  `owner` + `admin:all`); a service identity never approves and never performs production operations;
+  `CODE_NEVER_GRANTED` actions are refused for every role and wildcard; `classifyPrincipal` now lives in a
+  leaf module (`code-principal.ts`) with exact `agent:`/`service:` prefixes, so `u-agent-manager` is a human
+  (the old substring match treated it as an agent).
+- **The required permission is derived from the action** (`CODE_ACTION_PERMISSIONS` +
+  `requiredPermissionForAction`), evaluated after the principal invariants and before production/grant:
+  an unknown action is `action_not_mapped` (deny by default) and a mismatched label is
+  `permission_action_mismatch` (with `details.expected`/`details.provided`) instead of silently authorizing
+  by the caller's label. All existing call sites already passed a consistent pair; no route needed fixing.
+- **Company membership is real authorization** (migration `072_code_company_membership_and_invites`):
+  `company_members` (`owner|admin|developer|reviewer`, status, revision) and `company_invites`
+  (sha256 token, TTL, single use). `CodeMembershipService` + `code-membership-routes.ts` (7 `apiVersion`
+  routes) with audit **before** applying and fail closed; no membership → role `null` → deny (never "owner
+  by default"); `last_owner_protected`; a stale revision is `membership_revision_conflict` 409 with
+  `details.actualRevision`. Backfill is deliberately conservative: only a **single** workspace owner per
+  company becomes `owner`, otherwise nothing is inserted (`TODO`).
+  **An admin can no longer grant the `owner` role** (`owner_role_requires_owner`,
+  `admin_role_requires_owner`) — that was a real admin→owner escalation.
+- **Protected branches** (`code-protected-branches.ts`, migration `073_company_protected_branches`): the
+  policy is company-scoped and is now **read by enforcement** (`code-policy-engine.ts:431`, phase 4b,
+  port wired at `app.ts:1348`, sharing `detectGitWriteAttempts()` with the classifier). Phase 4b runs
+  **before** session mode, project rules, the network gate and approval, and reads neither permissions nor
+  role nor `approved`/`approvalId` nor standing rules — so an **agent push into a protected branch is a hard
+  deny for everyone including owner** (`protected_branch_write_denied`), force push is `force_push_denied`,
+  and a push to an unprotected branch stays `approval` and is never automatic. Proof that the company list
+  is what is read: with the policy saved as `["production","release"]`, `git push origin production` is
+  denied while `git push origin main` is `require_approval`. Only `owner` may change the policy, only
+  outside an agent session (`agent_cannot_change_protected_branches`), any body field outside
+  `branches`/`expectedRevision`/`challengeId` is `protected_branch_policy_input_rejected`, the module reads
+  no files, and the audit records `repositoryContentConsulted: false`. Store unavailable → conservative
+  default (`main`/`master`/`release`) for decisions and 503 for changes.
+- **Session modes** accept the canonical `plan`/`ask`/`auto_edit`/`full_auto_sandbox` (legacy C1 spellings
+  normalized, `full_auto` → `full_auto_sandbox`), and authorization comes from
+  `DEFAULT_CODE_SESSION_MODE_MATRIX`: owner/admin get all four, **developer gets `plan`/`ask`/`auto_edit`**
+  (the plan's intent, previously unreachable), others `session_mode_not_permitted`. Persistence keeps the C1
+  spelling (the `code_sessions.mode` CHECK was not altered).
+- **Denials are audited** in the people-side modules (`code.membership.*.denied`,
+  `code.session.mode_change.denied`, `code.project.trust.denied`, each with `decision: "deny"`); the audit is
+  best effort for denials so a failing journal cannot change the refusal, while fail-closed remains for the
+  mutations themselves.
+- **`code.prod.operate`** (`code-prod-operations.ts`, `code-step-up.ts`): not in any default role and not
+  reachable by wildcard; agents and service identities are always refused; execution goes only through a
+  `ProductionExecutor` whose default is a `Null` executor (`production_executor_unavailable`, 503); payloads
+  carrying secrets (`production_credentials_not_allowed`) or sandbox/shell keys
+  (`production_operation_cannot_use_sandbox`) are rejected. **Step-up is the default** (request → confirm →
+  require → consume, both steps audited with the same `payload_hash`, cooldown, grant consumed before
+  execution), **two-person is configuration** (different confirmer, same payload hash, TTL, no replay) and on
+  a single-owner instance it fails explicitly with `two_person_confirmer_required`.
+- **Automations run as a service identity**: the inventory in `docs/coding-agent/c5a-automations-inventory.md`
+  produced an explicit permission allowlist (5 permissions); configuration can only narrow it; production,
+  privileged and wildcard entries are rejected; a permission outside the allowlist is
+  `automation_permission_not_allowed`. A verified finding shaped the design: `assertCompany` resolves the
+  company by `workspace_id + user_id`, so replacing `userId` would have broken every automation — the owner
+  therefore stays in `userId` for tenancy while `externalSubject = service:automation:<id>` carries the
+  principal, which grants **no** permission beyond the allowlist.
+- **Approval decisions are now written to AuditLog** before being applied (the C5 audit finding), and
+  `approvals-repository.ts` gained an additive `audience: "self" | "role"` path (default `self`, so existing
+  self-only behaviour is unchanged) with self-approval forbidden for the two-person path; the audience
+  metadata is excluded from `payload_hash`, so existing approval suites are unaffected.
+- **Scoped approval rules are restricted to allow-listed actions at both scopes** (per the owner's decision,
+  extended to `session` because the risk does not depend on the scope): allowed are `code.fs.edit/write/move`,
+  `code.verify.run` and shell commands free of network, credential, dependency and git-write markers; denied
+  are `code.fs.delete`, `code.deps.add/install/update`, `code.git.push`, `code.secret_lease`,
+  `code.network.allowlist.add`, `code.migrations.run`, `code.deploy.release`, `code.project.trust`,
+  `code.session.mode` and every matching pattern. A refused scope **creates no row** (checked before audit and
+  before insert); `once` still works for every privileged action; hard deny is unreachable through any scope.
+- **SG-2** (`tests/coding-agent-c5-approval-bypass.test.ts`) plus the new C5a suites pin reason code and phase:
+  hard deny under all modes with a rule and `approved: true`, the approval class never automatic, `plan`
+  read-only even with a rule, the network gate not bypassable by approval, an agent never an approver,
+  `payload_hash` substitution → `approval_invalid`, foreign rules inert, **role downgrade mid-run stops the
+  actions** (the role is re-read on every tool call — no per-run cache), reviewer read-only, developer
+  escalations via API / file content / project rules, and the `code.prod.operate`/wildcard/membership
+  invariants above.
+
+## Verification (C5a)
+- `npm run typecheck` → **exit 0** (all workspaces); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=614 failed=0 skipped=0 todo=0`** with **42** security-gate
+  suites (`suite files: present=42 missing=0`) and all four steps green; the gate now also verifies that
+  every configured suite file exists.
+- Real defects found and fixed while closing the step (none by weakening a check):
+  1. missing audit journal **did not block** authorization for ordinary actions — a call could be
+     authorized with no audit at all (now `audit_unavailable` 503 for every decision);
+  2. **admin could grant the `owner` role** (admin→owner escalation);
+  3. the **privileged filter in `permissionsForRole` was a tautology**, so the documented "wildcards never
+     reach the privileged space" did not hold there while `code-step-up.ts` trusted that output;
+  4. **authorization used the caller-supplied permission label** and never derived it from the action, so an
+     inconsistent pair was allowed (now `permission_action_mismatch`, unknown action `action_not_mapped`) —
+     and a test had been **pinning that very hole** as `allowed: true`;
+  5. **a plain `git push` into a protected branch was `approval`**, not hard deny: the policy module existed
+     but enforcement never read it (now phase 4b reads the company policy);
+  6. `isAgentActor` matched the **substring** `agent-`, so a user like `u-agent-manager` was treated as an
+     agent; `isProjectTrusted`/membership role lookups had the same class of assumption;
+  7. a real SQL bug in migration 072 (backfill read a non-existent `company_id` column from
+     `workspace_members`, which would have failed `initialize()` on any database);
+  8. `isForbiddenIp`-style ambiguity in the SSRF layer (C4b) and, in C5/C5a, several test-side
+     over-specifications that would have made CI pass or fail for the wrong reason (a `toEqual` on a full
+     audit record; a loop iteration that could never pass; a case pinning the label-vs-action hole).
+
+## Real E2E status (C5a)
+- Verified in-process against the real stores (in-memory), services, engine and route handlers (the routes
+  via an injected store and a fake Fastify instance).
+- **Not verified here:** migrations **070–073** against a live PostgreSQL (no database in this environment —
+  compile-time and in-memory semantics only), the C4b live Docker egress E2E, any real Fastify HTTP server,
+  and the GitHub CI job (still never executed).
+
+## Known risks / open questions (C5a)
+1. **Standing rules for the four allow-listed file actions are inert at the policy level** (confirmed twice,
+   by code and probe): `findRule` is called only from `requireApproval`, and the only approval-gated
+   capabilities are `code.fs.delete` and `code.deps.add`, both on the deny list. The only observable effect
+   of `approve for project/session` today is **shell commands**. Either those file actions become
+   approval-gated later or the allow list should be treated as declarative — a decision for the owner.
+2. **`agent-api` is fail-closed for network-dependent work** until the runner reports `overall_ready: true`
+   (C4b readiness is remote); the first network command of a session is refused until the first successful
+   probe.
+3. **Messenger approvals remain notification-only** (`TODO(C5a)`): no proof of identity for the decision, no
+   AuditLog entry per decision, no replay protection, stale permission snapshots — see
+   `docs/coding-agent/c5-messenger-approvals.md`.
+4. **Non-code modules still use ad-hoc admin checks** (`["*","owner","admin:all"]`): a2a, automations,
+   browser-automation, integrations, messaging-integrations, multimodal, data-studio, project-*, memory,
+   api-keys, ai-routes, content-library, scoped-memory, company-* — out of C5a scope, explicitly listed.
+5. **`code-approval-scope.ts:470`** still contains one ad-hoc admin check the RBAC sweep did not reach.
+6. `ProjectCapabilityRules` remains a boundary adapter (`{ allow?, deny? }`); C5a did not find a conflicting
+   project/company rules interface, so no separate persistent policy system was created.
+7. `notifyAutomation` still uses `ownerUserId` for its messaging lookup (notification targeting, not
+   authority); moving it needs a company+agent repository method.
+8. `code-membership-routes.ts`'s documented code list and `ROUTE_ERROR_STATUS` do not yet mention
+   `owner_role_requires_owner`/`admin_role_requires_owner`/`session_mode_not_permitted` (the HTTP status is
+   still correct because the errors carry `httpStatus`).
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C5b), `docs/coding-agent/00-audit.md` sections 10 and 13, and this
+  file.
+- Execute **only C5b**: ProviderDataPolicy — nothing reaches a provider outside `ProviderDataGuard`, fallback
+  and subagents do not bypass the policy, and each stored entity carries `data_classification` and
+  `retention_class` from creation (R1 defines the classes; C5b wires the guard).
+- Keep the C4/C4a/C4b/C5/C5a guarantees intact: commands only through the sandbox port, the PolicyEngine
+  decides (hard deny > session mode > project rules > network gate > approval; the required permission is
+  derived from the action), one-shot SecretLease with revocation, no lifecycle scripts without approval,
+  sensitive changes always require approval, agents never approve and never change policy, and every new
+  suite goes into `scripts/run-security-gate.mjs`.
+- **Before any production promotion:** run migrations 070–073 against a live PostgreSQL and execute the C4b
+  live Docker E2E checklist; without them the release is not production-ready.
+- The owner's open decisions from C5a: whether the four file actions in the standing-rule allow list should
+  become approval-gated, and whether to replace the remaining ad-hoc admin checks in non-code modules.
+- Do not start C6 in that session; the order in `00-audit.md` section 13 is binding.
+
+## Implemented (C5, latest step)
+- **Session modes and the decision pipeline** build on the C4 PolicyEngine instead of replacing it: two new
+  phases were added — `capability_groups` (**3b**, before risk and approval, so an agent without the
+  capability group never reaches an approval prompt) and `trust` (**3c**). Hard deny, the mode × risk
+  matrix, the separate `network_enforcement` gate and the order of the existing phases are unchanged.
+- **Approval scopes**: additive migration `070_code_approval_rules` (`scope CHECK (session|project)`,
+  `decision CHECK (allow)`, CHECK anchors tying a rule to its session/project, unique index for upsert plus
+  lookup indexes). `once` (default) creates no rule and keeps the approval bound to one `payload_hash`;
+  `session`/`project` create a rule with priority `session → project`, expired rules never match, and a
+  session rule now requires **both** session and project to match (found by a probe: the same session id
+  could otherwise leak into another project). Rules are consulted **only** inside the approval phase, i.e.
+  **after** hard deny, session mode, project rules and the network gate; a rule for a hard-deny action
+  cannot be created (`hard_deny_not_approvable`) and an existing row is ignored. `deny` with a comment
+  returns the comment to the **model** (`approval_denied`, `details.comment`, `CredentialMasker` redaction,
+  500-char cap, `trust: "untrusted_data"`). Approval timeout (`NPATI_CODE_APPROVAL_TIMEOUT_MS`, default
+  15 min, clamp 60 min) **stops** the action with `approval_timeout` (504, `retryable: false`). Routes
+  `GET/POST/DELETE /companies/:companyId/code/approval-rules` (`apiVersion`, owner/admin, audit **before**
+  applying, fail closed).
+- **Project trust and prompt injection**: trust lives in its own additive table `project_code_trust`
+  (`071_code_project_trust`, plus an additive `code_sessions.revision`) so no existing `projects` query or
+  type changed; `trust`/`revoke` are owner/admin only, audited **before** applying and fail closed without
+  the journal. Repository instructions (`NPATI.md`, `AGENTS.md`, `CLAUDE.md`, any file) are **data** and
+  change no state; they are usable as *work content* only after explicit trust, and even then cannot change
+  mode, rules, allowlist, tools or approvals. `code-prompt-injection-guard.ts` has 15 rules and pure
+  functions: `appliedPolicyChanges` is always `[]` and `repositoryContentCanChangePolicy()` is always
+  `false` (three `tool_change` patterns were added when a probe proved "grant yourself the code.shell tool"
+  was **not** detected).
+- **Only the user changes the mode**: `PUT …/code/sessions/:sessionId/mode` (owner/admin, audit, revision
+  check, `mode_revision_conflict` 409); the model gets `agent_cannot_change_policy` and can only
+  `POST …/mode/suggest`, which records a proposal without changing anything. Because the route contract
+  needs a synchronous auth context while authentication is asynchronous, `app.ts` installs a
+  path-scoped `preHandler` writing into a `WeakMap` (no second authentication on other routes).
+- **Capability groups via the existing mechanism**: `code.read`/`code.write`/`code.shell` (and a reserved
+  `code.git`) map onto the 22 `code.*` capabilities; `effectivePermissions` is the **intersection** of the
+  agent's groups, the user's permissions and the project rules, and `assertCapabilityGranted`
+  (`capability_not_granted`, 403) runs in phase 3b. A probe found a real hole: empty user permissions were
+  treated as "no narrowing", so an agent with `code.write` gained rights the user never granted — now fail
+  closed (only `code.*` is a wildcard, and it does not create a group the agent lacks).
+- **Decision activity**: `policy-decision-activity.ts` records `{ kind: "policy_decision", … }` with **who**
+  (actor/actorKind/agentId/approvedBy), **what** (tool/action), **which mode**, **which rule**
+  (`ruleRef`), **which result** (decision/code/phase) — no commands, file content, headers or URLs, with a
+  throwing `assertNoSensitivePolicyDecision` and per-phase/per-code/per-rule counters. The engine records
+  through an additive wrapper (`evaluate()` → `evaluateInternal()` with the phase order untouched, then the
+  recorder in `try/catch`): a failing recorder **never** changes the decision. The real run-Activity stream
+  and `ExecutionSnapshot` remain `TODO(C6)`.
+- **SG-2** (`tests/coding-agent-c5-approval-bypass.test.ts`) asserts reason code **and** phase so a
+  regression cannot pass as "still denied, but for another reason": hard deny under all four modes with an
+  allow rule and `approved: true`, path traversal and `.git`, the approval class never auto-running,
+  `plan` staying read-only even with a rule, the network gate not bypassable by approval (503), an agent
+  principal never being an approver, `payload_hash` substitution → `approval_invalid`, foreign rules not
+  applying, and untrusted content creating no rules.
+- **Messenger approvals** (owner-optional item): audited in `docs/coding-agent/c5-messenger-approvals.md`
+  and **deliberately not implemented**. Adapters, pairing and `/approve` commands exist and email enforces
+  authenticated senders, but there is no proof of identity **for the decision itself**, no AuditLog entry
+  with `request_id`/`payload_hash`, no replay protection, and permission snapshots go stale — so messengers
+  stay notification-only behind `TODO(C5a)`.
+
+## Verification (C5)
+- `npm run typecheck` → **0 errors** (all workspaces); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=450 failed=0 skipped=0 todo=0`** with **35** security-gate
+  suites and all four steps green (vitest, tool schemas, sandbox images, typosquat datasets); every path in
+  the gate list exists (`missing_count = 0`).
+- Existing NPATI approval suites (`human-approvals`, `production-durable-approvals`,
+  `production-security-guardrails`) do not construct `PolicyEngine` at all, and the C4 suites that do are
+  compatible by construction (the new dependency is optional) — confirmed by reading, not by a run.
+- Real defects found and fixed (none by weakening a check): empty user permissions granting rights the user
+  never gave; a session-scoped rule matching on session alone; the `tool_change` detection gap for "grant
+  yourself the <id> tool" / "you may now use …"; and two probe-only expectation bugs (a closed network gate
+  in approval-class cases, and the actual `CredentialMasker` label) that would have made CI pass or fail for
+  the wrong reason.
+
+## Real E2E status (C5)
+- Verified in-process against the real store implementations, services, engine and routes' contracts.
+- **Not verified here:** migration `070`/`071` against a live PostgreSQL (no database in this environment —
+  compile- and in-memory-semantics only), real Fastify request context for the session-mode routes, and any
+  real messenger round trip (deliberately out of scope).
+
+## Known risks / open questions (C5)
+1. **`requiresProjectTrust`/`repositoryInstructions` plumbing is ready but no caller fills them yet** — the
+   signal comes from the C6 agent read loop, so trust currently gates nothing in practice; this is a
+   deliberate `TODO(C6)`, not an imitation of enforcement.
+2. `ProjectCapabilityRules` is the adapter type `{ allow?, deny? }`; if another project-rules interface
+   exists, it must be reduced to this shape (isolation is guaranteed by passing rules per request together
+   with `companyId`/`projectId`, not by storing them in the module).
+3. The `code.git` capability group is reserved and empty until a later step.
+4. Messenger approvals stay disabled until RBAC with a live role, an AuditLog entry per decision and a
+   challenge bound to the decision exist (`TODO(C5a)`).
+5. Which actions may be granted by default through `approve for project` is an **open owner decision**; today
+   `project` scope grants exactly the action it was approved for and never a hard-deny action.
+6. Migrations `070`/`071` have never run against a real database here, so their SQL is not yet proven.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C5a), `docs/coding-agent/00-audit.md` sections 9 and 13, and this
+  file.
+- Execute **only C5a**: RBAC enforced server-side for every action (effective rights = agent capability
+  groups ∩ user role ∩ project rules), the agent and its token can never be an approver, and RBAC becomes
+  the gate for allowlist/policy changes — which closes the two `TODO(C5a)` items from C4b (proxy-side audit
+  into the real AuditLog and allowlist routes behind approval + RBAC).
+- Keep C4/C4a/C4b/C5 guarantees intact: commands only through the sandbox port, the PolicyEngine decides
+  (with the network gate driven by the runner readiness probe), one-shot SecretLease with revocation, no
+  lifecycle scripts without approval, sensitive changes always require approval, hard deny is unbypassable,
+  and every new suite is added to `scripts/run-security-gate.mjs`.
+- Still pending from C4b: the live Docker E2E checklist before enabling egress enforcement in production.
+- Do not start C5b in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Owner decisions applied to C4b (second pass)
 - **Webhook transport is its own destination policy**, never the web-fetch allowlist: the allowed

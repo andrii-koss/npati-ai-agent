@@ -1,3 +1,4 @@
+import { hasAdminPermission } from "./code-rbac";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   WorkspaceAccessError, WorkspaceNotFoundError,
@@ -125,11 +126,11 @@ function isIsoTimestamp(value: unknown): value is string {
  * operator or the UI can verify the policy before a run.
  */
 export function registerSandboxImageRoutes(app: FastifyInstance, auth: AuthProvider, policy?: SandboxImageAdmin, store?: SandboxImageLister) {
-  const isAdmin = (ctx: AuthContext) => ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value));
+  const isAdmin = (ctx: AuthContext) => hasAdminPermission(ctx.permissions);
 
   const authorize = async (request: FastifyRequest, permission: "workspace:read" | "business:manage") => {
     const ctx = await auth.authenticate(request);
-    if (!ctx.permissions.includes(permission) && !ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+    if (!ctx.permissions.includes(permission) && !hasAdminPermission(ctx.permissions)) {
       throw new WorkspaceAccessError("Missing permission: " + permission);
     }
     if (!policy) throw Object.assign(new Error("Sandbox image policy is not configured"), { code: "image_unavailable", status: 503, retryable: true });

@@ -1,3 +1,4 @@
+import { hasAdminPermission } from "./code-rbac";
 import {
   SANDBOX_IMAGE_REFERENCE_PATTERN,
   type AuthContext,
@@ -99,10 +100,9 @@ export interface AuditRecorder {
   }): Promise<unknown>;
 }
 
-const ADMIN_PERMISSIONS = ["*", "owner", "admin:all"];
-
+// C5a: the admin vocabulary has exactly one definition, in `code-rbac.ts`.
 function isAdmin(context: AuthContext): boolean {
-  return context.permissions.some((permission) => ADMIN_PERMISSIONS.includes(permission));
+  return hasAdminPermission(context.permissions);
 }
 
 function digestOf(reference: string): string {

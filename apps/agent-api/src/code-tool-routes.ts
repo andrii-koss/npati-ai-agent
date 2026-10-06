@@ -4,6 +4,7 @@ import { AuthenticationError, type AuthProvider } from "./auth";
 import { currentToolManifest } from "./code-tool-registry";
 import { API_VERSION, resolveApiVersion } from "./api-versioning";
 import type { CodeToolInvokeFailure, CodeToolInvokeResult, CodeToolRuntime } from "./code-tool-runtime";
+import { hasAdminPermission } from "./code-rbac";
 
 /**
  * C2: the manual invocation harness for `code.*` tools.
@@ -125,7 +126,7 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
   const authenticate = async (request: FastifyRequest, write: boolean) => {
     resolveApiVersion(request.headers);
     const ctx = await auth.authenticate(request);
-    const allowed = ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission))
+    const allowed = hasAdminPermission(ctx.permissions)
       || ctx.permissions.includes(write ? "business:manage" : "workspace:read");
     if (!allowed) throw new AuthenticationError("Permission denied", 403, "FORBIDDEN");
     return ctx;

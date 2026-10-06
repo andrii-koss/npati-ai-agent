@@ -1,3 +1,4 @@
+import { hasAdminPermission } from "./code-rbac";
 import type {
   AuthContext, CodeSession, FeatureFlag, FeatureFlagHistoryEntry, FeatureFlagInput, FeatureFlagScope, FeatureFlagStage, WorkspaceStore,
 } from "@npati/workspace";
@@ -122,7 +123,7 @@ export class FeatureFlagService {
     const subject = options.userId ?? ctx.userId;
     switch (flag.stage) {
       case "off": return false;
-      case "internal": return ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission));
+      case "internal": return hasAdminPermission(ctx.permissions);
       case "allowlist": return flag.allowlist.includes(subject) || (options.companyId ? flag.allowlist.includes(options.companyId) : false);
       case "percent": {
         if (flag.rolloutPercent <= 0) return false;
@@ -231,7 +232,7 @@ export class FeatureFlagService {
   }
 
   private assertAdmin(ctx: AuthContext, action: string): void {
-    if (!ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission))) {
+    if (!hasAdminPermission(ctx.permissions)) {
       throw new FeatureFlagError("flag_admin_required", `${action} requires the owner/admin role`, 403);
     }
   }
@@ -355,7 +356,7 @@ export class FeatureFlagService {
   }
 
   private auditRole(ctx: AuthContext): string {
-    return ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission)) ? "admin" : "user";
+    return hasAdminPermission(ctx.permissions) ? "admin" : "user";
   }
 }
 

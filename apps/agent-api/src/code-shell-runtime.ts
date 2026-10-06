@@ -222,12 +222,20 @@ export class CodeShellRuntime {
     const extended = input as {
       projectId?: string; sessionMode?: "plan" | "edit" | "auto" | "full_auto";
       approvalId?: string; networkEnforcementGuaranteed?: boolean;
+      // C5: optional policy inputs the caller (agent loop / routes) may supply. They are forwarded
+      // verbatim; the engine stays the only place that decides what they mean, and absent fields
+      // simply leave the corresponding phase without data (never an implicit allow).
+      runId?: string; agentId?: string; policyChange?: "session_mode" | "project_rules" | "trust" | "allowlist" | "tool_policy";
+      requiresProjectTrust?: boolean; projectTrusted?: boolean;
+      repositoryInstructions?: { policyMutationAttempts?: number; notes?: string[] } | null;
     };
     const decision = await policy.evaluate({
       ctx: context,
       companyId: input.companyId,
       projectId: extended.projectId,
       sessionId: input.sessionId,
+      runId: extended.runId,
+      agentId: extended.agentId,
       tool: "code.shell.exec",
       command: input.command,
       sessionMode: extended.sessionMode,
@@ -235,6 +243,10 @@ export class CodeShellRuntime {
       approvalId: extended.approvalId,
       toolCallId: input.toolCallId,
       networkEnforcementGuaranteed: extended.networkEnforcementGuaranteed,
+      policyChange: extended.policyChange,
+      requiresProjectTrust: extended.requiresProjectTrust,
+      projectTrusted: extended.projectTrusted,
+      repositoryInstructions: extended.repositoryInstructions,
     });
     if (decision.decision !== "allow") {
       const risk = decision.risk ?? classification.risk;

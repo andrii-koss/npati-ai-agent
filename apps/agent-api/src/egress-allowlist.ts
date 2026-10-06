@@ -1,4 +1,5 @@
 import type { NetworkPhase } from "./network-activity";
+import { hasAdminPermission } from "./code-rbac";
 
 /**
  * C4b: the single source of truth for the sandbox egress hostname allowlist.
@@ -272,7 +273,7 @@ export interface EgressAllowlistManagerOptions {
 }
 
 function isAdmin(actor: EgressAllowlistActor): boolean {
-  return actor.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission));
+  return hasAdminPermission(actor.permissions);
 }
 
 /**

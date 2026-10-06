@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AuthContext } from "@npati/workspace";
+import { hasAdminPermission } from "./code-rbac";
 import { CredentialMasker } from "./security-guardrails";
 import { isLeasableEnvironment, normalizeCredentialEnvironment, type CredentialEnvironment } from "./credential-environment";
 
@@ -139,8 +140,9 @@ export interface CredentialLeaseDecision {
 }
 
 function isAdminContext(context: AuthContext): boolean {
-  return (context.permissions ?? []).some((permission) => ["*", "owner", "admin:all", "business:manage"].includes(permission))
-    && (context.permissions ?? []).some((permission) => ["*", "owner", "admin:all"].includes(permission));
+  // Equivalent to the previous two-clause check (the wildcard clause already required an admin
+  // permission, which implies `business:manage`) but now shares the single admin vocabulary (C5a).
+  return hasAdminPermission(context.permissions);
 }
 
 /**

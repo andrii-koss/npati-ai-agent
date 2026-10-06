@@ -3,6 +3,7 @@ import { WorkspaceAccessError, type WorkspaceStore } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { API_VERSION, resolveApiVersion } from "./api-versioning";
 import type { NetworkActivityRecorder } from "./network-activity";
+import { hasAdminPermission } from "./code-rbac";
 import {
   resolveAllowlistForPhase, toProxyAllowedHosts, type EgressAllowlistConfig,
 } from "./egress-allowlist";
@@ -33,7 +34,7 @@ export interface NetworkRoutesDeps {
 }
 
 function isAdmin(permissions: string[]): boolean {
-  return permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission));
+  return hasAdminPermission(permissions);
 }
 
 export function registerNetworkRoutes(app: FastifyInstance, deps: NetworkRoutesDeps) {

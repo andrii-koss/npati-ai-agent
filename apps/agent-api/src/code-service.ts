@@ -5,6 +5,7 @@ import type { ProjectWorkspace } from "./project-workspace";
 import { TOOLCHAIN_MANIFEST_FILES, detectToolchain } from "./code-toolchain-detector";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { currentToolManifest } from "./code-tool-registry";
+import { hasAdminPermission } from "./code-rbac";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError } from "./feature-flags";
 
 /** Structured error so every code entry point fails predictably (rule 9). */
@@ -93,7 +94,7 @@ export class CodeService {
 
   /** Lowering the classification of a project or session needs an administrative role (C5a refines this). */
   private canLowerClassification(ctx: AuthContext): boolean {
-    return ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission));
+    return hasAdminPermission(ctx.permissions);
   }
 
   private assertWrite(ctx: AuthContext) {

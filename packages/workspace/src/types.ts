@@ -101,6 +101,37 @@ export interface ProjectInput {
   toolchain?: CodeToolchain;
 }
 
+/** C5: scoped approval rules. `once` is the default and deliberately has no rule representation. */
+export type CodeApprovalRuleScope = "session" | "project";
+export const CODE_APPROVAL_RULE_SCOPES: readonly CodeApprovalRuleScope[] = ["session", "project"] as const;
+export type CodeApprovalScope = "once" | CodeApprovalRuleScope;
+export const CODE_APPROVAL_SCOPES: readonly CodeApprovalScope[] = ["once", "session", "project"] as const;
+
+export interface CodeApprovalRule {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string | null;
+  sessionId: string | null;
+  createdBy: string;
+  scope: CodeApprovalRuleScope;
+  action: string;
+  decision: "allow";
+  reason?: string | null;
+  expiresAt?: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CodeApprovalRuleInput {
+  scope: CodeApprovalRuleScope;
+  action: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+  reason?: string | null;
+  expiresAt?: string | null;
+}
+
 /** C1c: tamper-evident audit log types. */
 export type AuditDecision = "allowed" | "denied" | "approved" | "rejected";
 export interface AuditEntryInput {
@@ -282,8 +313,39 @@ export interface CodeSession {
   retentionClass: RetentionClass;
   /** C1a fills this with the set of code.* tool versions the session was created with. */
   toolManifestVersion?: number | null;
+  /** C5: bumped on every update; the optimistic token for user-driven mode changes. */
+  revision: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * C5: explicit trust for a project's own instructions (README/NPATI.md/AGENTS.md and any workspace
+ * file). Trust is granted only by an owner/admin, is audited, and never widens policy: it only allows
+ * the repository's own instructions to guide the *content* of the work. Hard deny, session mode,
+ * approvals, the tool list and the network allowlist stay outside its reach.
+ */
+export interface ProjectCodeTrust {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  trusted: boolean;
+  trustedBy?: string | null;
+  trustedAt?: string | null;
+  revokedBy?: string | null;
+  revokedAt?: string | null;
+  reason?: string | null;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface ProjectCodeTrustInput {
+  trusted: boolean;
+  actor: string;
+  reason?: string;
+  /** Optimistic concurrency token: must match the current record revision (0 for a first write). */
+  expectedRevision: number;
 }
 
 export interface CodeSessionInput {
@@ -547,13 +609,131 @@ export interface BusinessOnboardingSession {
 }
 
 export class WorkspaceAccessError extends Error {
-  readonly status = 403;
-  readonly code = "BUSINESS_ACCESS_DENIED";
+  // Declared as `number`/`string` rather than as literals so a more specific refusal can extend this
+  // class (see `CompanyMembershipError`) and still be caught by every existing route mapper that tests
+  // `instanceof WorkspaceAccessError`, while reporting its own code and status. The runtime defaults are
+  // unchanged.
+  readonly status: number = 403;
+  readonly code: string = "BUSINESS_ACCESS_DENIED";
 }
 
 export class WorkspaceNotFoundError extends Error {
   readonly status = 404;
   readonly code = "WORKSPACE_NOT_FOUND";
+}
+
+/**
+ * C5a: company membership. Membership is the authorisation anchor of the coding agent
+ * (user -> company -> project -> workspace -> session -> sandbox), so a row is the **only** source of a
+ * role: no row means no role, and nothing may assume "owner by default".
+ *
+ * These record types are **structurally identical** to `CompanyMember` / `CompanyInvite` in
+ * `apps/agent-api/src/code-membership.ts`, whose `CodeMembershipStore` port is the contract other agents
+ * are written against. Field names, optionality and types must stay in sync with that port; timestamps
+ * are `Date` because the port compares them with `Date#getTime()` for invite expiry. `WorkspaceStore`
+ * implements the port directly, so `CodeMembershipService` needs no adapter.
+ */
+export type CompanyRole = "owner" | "admin" | "developer" | "reviewer";
+export const COMPANY_ROLES: readonly CompanyRole[] = ["owner", "admin", "developer", "reviewer"] as const;
+/** Mirrors the `company_members.status` CHECK constraint in migration 072. */
+export type CompanyMemberStatus = "active" | "invited" | "suspended";
+export const COMPANY_MEMBER_STATUSES: readonly CompanyMemberStatus[] = ["active", "invited", "suspended"] as const;
+
+/** Runtime guard for data that did not come from TypeScript (a raw column, a request body). */
+export function isCompanyRole(value: unknown): value is CompanyRole {
+  return typeof value === "string" && (COMPANY_ROLES as readonly string[]).includes(value);
+}
+
+export interface CompanyMember {
+  id: string;
+  companyId: string;
+  userId: string;
+  /** The role actually recorded for this (company, user); never inferred, never defaulted. */
+  role: CompanyRole;
+  status: CompanyMemberStatus;
+  invitedBy?: string | null;
+  invitedAt?: Date | null;
+  acceptedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  /** Optimistic concurrency token, bumped on every accepted write. */
+  revision: number;
+}
+
+export interface CompanyInvite {
+  id: string;
+  companyId: string;
+  email: string;
+  role: CompanyRole;
+  /** SHA-256 of the invite token; the token itself is never stored. */
+  tokenHash: string;
+  expiresAt: Date;
+  createdBy: string;
+  acceptedAt?: Date | null;
+  createdAt: Date;
+}
+
+/** The port's `createCompanyInvite` argument: the caller may stamp `createdAt`, otherwise the store does. */
+export type CompanyInviteInput = Omit<CompanyInvite, "createdAt"> & { createdAt?: Date };
+
+/** The port's `acceptCompanyInvite` argument (arguments are named records so the port stays readable). */
+export interface AcceptCompanyInviteInput {
+  invite: CompanyInvite;
+  userId: string;
+  acceptedAt: Date;
+}
+
+/** The port's `updateCompanyMemberRole` argument. `expectedRevision` is mandatory: no blind writes. */
+export interface UpdateCompanyMemberRoleInput {
+  companyId: string;
+  userId: string;
+  role: CompanyRole;
+  expectedRevision: number;
+  updatedAt: Date;
+}
+
+/** The port's `removeCompanyMember` argument. */
+export interface RemoveCompanyMemberInput {
+  companyId: string;
+  userId: string;
+}
+
+/**
+ * Membership refusal raised by a **store** (the service raises `CodeMembershipError` instead).
+ *
+ * The shape mirrors `CodeMembershipError` in `apps/agent-api/src/code-membership.ts`
+ * (`code`, `httpStatus`, `retryable`, `details`) so a route layer can map both through one switch, and it
+ * carries the codes the port contract names: `membership_not_found` (404) and
+ * `membership_revision_conflict` (409, `details: { expectedRevision, actualRevision }`) — the same values
+ * `CodeMembershipService` sees from an injected store.
+ *
+ * It extends `WorkspaceAccessError` on purpose: the tree-wide route mappers already recognise that class
+ * (and map a "changed by another request" message to 409), so the precise refusal is never reported as an
+ * unexpected 500. It is used for the store-side safety refusals as well: an expired or already-used invite
+ * reaching the store, the only owner being demoted or removed, a duplicate invite token hash and an
+ * unknown role.
+ */
+export class CompanyMembershipError extends WorkspaceAccessError {
+  override readonly code: string;
+  override readonly status: number;
+  readonly httpStatus: number;
+  readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
+
+  constructor(
+    code: string,
+    message: string,
+    options: { httpStatus?: number; retryable?: boolean; details?: Record<string, unknown> } = {},
+  ) {
+    super(message);
+    this.name = "CompanyMembershipError";
+    this.code = code;
+    // Same default as `CodeMembershipError`: a refusal denies access unless it says otherwise.
+    this.httpStatus = options.httpStatus ?? 403;
+    this.status = this.httpStatus;
+    this.retryable = options.retryable ?? false;
+    this.details = options.details;
+  }
 }
 
 export interface WorkspaceStore {
@@ -605,6 +785,16 @@ export interface WorkspaceStore {
   revokeSandboxImage(context: AuthContext, reference: string, input: { actor: string; reason: string }): Promise<SandboxImage>;
   latestVerifiedSandboxImage(context: AuthContext, variant: SandboxImageVariant): Promise<SandboxImage | null>;
 
+  /**
+   * C5: scoped approval rules (`session` | `project`). A rule widens an approval inside a bounded
+   * scope; it can never widen a prohibition, because hard deny, the network gate and the session-mode
+   * denial are decided in earlier policy phases than the approval phase that consults these rules.
+   */
+  createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule>;
+  listCodeApprovalRules(context: AuthContext, companyId: string, filters?: { projectId?: string; sessionId?: string; scope?: CodeApprovalRuleScope }): Promise<CodeApprovalRule[]>;
+  deleteCodeApprovalRule(context: AuthContext, companyId: string, ruleId: string): Promise<void>;
+  findMatchingCodeApprovalRule(context: AuthContext, query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string }): Promise<CodeApprovalRule | null>;
+
 
   /** C1c: append-only audit journal. `appendAuditEntry` fails closed and is never idempotent-silent. */  appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry>;
   listAuditEntries(context: AuthContext, companyId: string, filters?: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number }): Promise<AuditEntry[]>;
@@ -626,7 +816,11 @@ export interface WorkspaceStore {
   /** C1: code sessions. Scoped by workspace + company + project + owner. */  createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession>;
   getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession>;
   listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options?: { includeArchived?: boolean; limit?: number }): Promise<CodeSession[]>;
-  updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession>;
+  updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession>;
+
+  /** C5: project trust. Owner/admin only at the API layer; the store is the single writer. */
+  getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null>;
+  setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust>;
   createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint>;
   listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
   getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint>;
@@ -691,4 +885,28 @@ export interface WorkspaceStore {
   advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }): Promise<BusinessOnboardingSession>;
   setOnboardingStatus(context: AuthContext, sessionId: string, status: "active" | "paused"): Promise<BusinessOnboardingSession>;
   completeOnboarding(context: AuthContext, sessionId: string): Promise<BusinessOnboardingSession>;
+
+  /**
+   * C5a: company membership and invites — the `CodeMembershipStore` port from
+   * `apps/agent-api/src/code-membership.ts`, mirrored verbatim so a `WorkspaceStore` can be injected into
+   * `CodeMembershipService` without an adapter. These methods are company-scoped (not workspace/user
+   * scoped) and deliberately take no `AuthContext`: membership **is** the authorisation anchor, and the
+   * service has already resolved the acting principal and the company.
+   *
+   * Invariants every implementation must keep:
+   * - No row means `null` — never a default role and never "owner by default".
+   * - `getCompanyMembership` / `listCompanyMembers` return the **actual** stored role and status.
+   * - `acceptCompanyInvite` re-reads the invite and refuses one that is expired or already accepted.
+   * - `updateCompanyMemberRole` refuses a stale `expectedRevision` and any change that would leave the
+   *   company without an active owner; `removeCompanyMember` refuses the same for the last active owner.
+   */
+  getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null>;
+  listCompanyMembers(companyId: string): Promise<CompanyMember[]>;
+  /** Active owners only: a suspended owner cannot administer anything, so it cannot be the protection. */
+  countCompanyOwners(companyId: string): Promise<number>;
+  createCompanyInvite(input: CompanyInviteInput): Promise<CompanyInvite>;
+  findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null>;
+  acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember>;
+  updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember>;
+  removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void>;
 }

@@ -70,6 +70,22 @@ import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
 import { NetworkActivityRecorder } from "./network-activity";
+import { PolicyDecisionRecorder } from "./policy-decision-activity";
+import { CodeProjectTrustService } from "./code-project-trust";
+import { CodeSessionModeService, registerCodeSessionModeRoutes } from "./code-session-mode-routes";
+import { CodeMembershipService } from "./code-membership";
+import { registerCodeMembershipRoutes } from "./code-membership-routes";
+import {
+  CodeProtectedBranchRepository,
+  CodeProtectedBranchService,
+  resolveProtectedBranchGuardConfig,
+} from "./code-protected-branches";
+import { CodeStepUp, resolveStepUpConfig, type CodePrivilegedAuditPort } from "./code-step-up";
+import { CodeProductionOperations, NullProductionExecutor, registerCodeProductionRoutes } from "./code-prod-operations";
+import { resolveAutomationAllowedPermissions, serviceIdentityForAutomation } from "./code-service-identity";
+import { CodeRbac } from "./code-rbac";
+import type { ApprovalDecisionAuditPort } from "./approvals-repository";
+import { groupForCapability } from "./code-capability-groups";
 import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
 import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
@@ -86,12 +102,14 @@ import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-exec
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
 import { SecretLeaseProvider } from "./code-secret-lease";
-import { PolicyEngine } from "./code-policy-engine";
+import { isAgentPrincipal, matrixModeFor, PolicyEngine } from "./code-policy-engine";
 import { classifyShellCommand } from "./code-shell-classifier";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
+import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-approval-scope";
+import { registerCodeApprovalRoutes } from "./code-approval-routes";
 import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
 import type { CodeAgentLimits } from "./code-agent-config";
@@ -869,11 +887,36 @@ export function buildApp(config: AppConfig = {}) {
   ]);
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl) : undefined;
   const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
   // C1c: tamper-evident journal for privileged decisions (append-only, hash-chained, anchored daily).
   const auditConfig = resolveAuditConfig(process.env, config.dataDirectory);
   const auditLogService = config.databaseUrl ? new AuditLogService(workspaceStore, auditConfig) : undefined;
+  /**
+   * C5a: approval decisions are journalled **before** they are applied, closing the C5 audit finding that
+   * decisions never reached `company_audit_logs`. When the journal is absent the port is absent too and the
+   * repository keeps its previous behaviour (the port is what makes the journal mandatory in production).
+   */
+  const approvalDecisionAudit: ApprovalDecisionAuditPort | undefined = auditLogService
+    ? {
+        record: async (input) => {
+          await auditLogService.record(
+            { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+            {
+              companyId: input.companyId,
+              actor: input.actor,
+              actorRole: "owner",
+              action: input.action,
+              resourceType: input.resourceType,
+              resourceId: input.resourceId,
+              decision: input.decision === "allow" ? "approved" : "rejected",
+              ...(input.payloadHash ? { payload: { payload_hash: input.payloadHash } } : {}),
+              metadata: input.metadata ?? {},
+            },
+          );
+        },
+      }
+    : undefined;
+  const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl, approvalDecisionAudit) : undefined;
   const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
   const emailAgentTools = new EmailAgentTools(emailInboxRepo);
   const browserCredentials = config.databaseUrl ? new BrowserCredentialsRepository(config.databaseUrl) : undefined;
@@ -1117,6 +1160,127 @@ export function buildApp(config: AppConfig = {}) {
   });
   const egressAllowlist = resolveEgressAllowlist();
   app.log.info({ proxyHosts: toProxyAllowedHosts(egressAllowlist) }, "egress_allowlist_configured");
+  /**
+   * C5: scoped approval rules. Every change is audited **before** it is applied (fail closed), so the
+   * adapter below is deliberately synchronous with the audit call: no journal, no rule.
+   */
+  const codeApprovalScope = new CodeApprovalScopeService({
+    store: workspaceStore,
+    audit: auditLogService
+      ? {
+          record: async (input) => {
+            await auditLogService.record(
+              { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+              {
+                companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
+                resourceType: "code_approval_rule", resourceId: input.target, decision: "allowed",
+                payload: { action: input.action, target: input.target },
+                metadata: input.metadata ?? {},
+              },
+            );
+          },
+        }
+      : undefined,
+    logger: app.log,
+  });
+  // C5: structured Activity events for policy decisions (the run-level stream and its
+  // ExecutionSnapshot arrive with C6/C6b; until then the sink is the structured log, exactly like the
+  // C4 tool activity and the C4b network decision events).
+  const policyDecisionActivity = new PolicyDecisionRecorder({
+    sink: { record: (event) => { app.log.info(event, "policy_decision"); } },
+  });
+  /**
+   * C5a: production operations. `code.prod.operate` is named by no default role, agents and service
+   * identities are refused outright, step-up is required by default (two-person is configuration), and the
+   * platform executor is the `Null` implementation until the real deploy/promote provider is wired — so a
+   * production operation today ends in `production_executor_unavailable` (503) instead of a half-executed
+   * deploy. Every step is audited before it is applied.
+   */
+  const codePrivilegedAudit: CodePrivilegedAuditPort | undefined = auditLogService
+    ? {
+        record: async (input) => {
+          await auditLogService.record(
+            { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+            {
+              companyId: input.companyId,
+              actor: input.actor,
+              actorRole: "owner",
+              action: input.action,
+              resourceType: input.resourceType,
+              resourceId: input.resourceId,
+              decision: input.decision === "deny" ? "denied" : "allowed",
+              ...(input.payloadHash ? { payload: { payload_hash: input.payloadHash } } : {}),
+              metadata: input.metadata ?? {},
+            },
+          );
+        },
+      }
+    : undefined;
+  const codeStepUp = new CodeStepUp({
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    config: resolveStepUpConfig(process.env),
+    logger: app.log,
+  });
+  const codeProductionOperations = new CodeProductionOperations({
+    rbac: new CodeRbac({ ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}), logger: app.log }),
+    stepUp: codeStepUp,
+    executor: new NullProductionExecutor(),
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    logger: app.log,
+  });
+  /**
+   * The production routes take a synchronous context accessor while authentication is async, so the context
+   * is resolved once in a path-scoped preHandler (same pattern as the session-mode routes) and read back
+   * synchronously: no other route authenticates twice or changes behaviour.
+   */
+  const codeProductionContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    if (!/\/code\/production-operations(\/request|\/confirm)?$/.test(request.url.split("?")[0] ?? "")) return;
+    codeProductionContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeProductionRoutes(app, {
+    service: codeProductionOperations,
+    getAuthContext: (request) => codeProductionContexts.get(request as object) ?? null,
+  });
+  /**
+   * C5a (owner decision): unattended automations run as a **service identity** limited to the permission
+   * inventory in `code-service-identity.ts`, not as the owner with a fixed wide permission set. The
+   * allowlist can only be narrowed by configuration; production permissions are rejected and reported.
+   */
+  const automationAllowedPermissions = resolveAutomationAllowedPermissions(process.env);
+  if (automationAllowedPermissions.rejected.length) {
+    app.log.warn({ rejected: automationAllowedPermissions.rejected }, "code_automation_permissions_rejected");
+  }
+  /**
+   * C5a: company membership is the authorisation anchor (user -> company -> project -> session). The store
+   * implements the `CodeMembershipStore` port directly, so no adapter is needed; the membership audit
+   * entries go to the same journal as the other C5a privileged writes (and without that journal a
+   * membership change refuses rather than happening unaudited).
+   *
+   * Constructed here (rather than next to `registerCodeMembershipRoutes` below) because the protected
+   * branch policy needs the company role resolver, and the PolicyEngine needs that policy: the order is
+   * membership -> protected branches -> policy engine, so the engine is built with the real port and no
+   * late wiring is involved.
+   */
+  const codeMembership = new CodeMembershipService({
+    store: workspaceStore,
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    logger: app.log,
+  });
+  /**
+   * C5a: the protected-branch policy is company policy stored through its own port (not in
+   * `Company.memory`, which the generic company PATCH route can rewrite without an owner check or an
+   * audit entry). `codeStepUp` is only consulted when the step-up hook is configured; the confirmation
+   * flow itself stays in `code-step-up.ts`.
+   */
+  const codeProtectedBranches = new CodeProtectedBranchService({
+    store: new CodeProtectedBranchRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined),
+    resolveRole: (context, companyId) => codeMembership.resolveRoleForUser(context, companyId),
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    stepUp: codeStepUp,
+    guard: resolveProtectedBranchGuardConfig(process.env),
+    logger: app.log,
+  });
   const policyEngine = new PolicyEngine({
     flags: featureFlagService,
     capabilities: {
@@ -1133,16 +1297,183 @@ export function buildApp(config: AppConfig = {}) {
           consumeApproved: async (ctx, companyId, id, params) => approvalsRepo!.consumeApproved(ctx, companyId, id, params as never),
         }
       : undefined,
+    // C5: scoped approval rules. Consulted only in the approval phase, which runs after hard deny, the
+    // session-mode check, project rules and the network gate — so a rule can never bypass any of them.
+    approvalRules: {
+      findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query),
+    },
+    // C5: read-only lookup so a rejection can carry the reviewer's (redacted) comment back to the model.
+    getApproval: approvalsRepo
+      ? async (ctx, companyId, id) => {
+          const approval = await approvalsRepo!.get(ctx, companyId, id).catch(() => null);
+          return approval ? { status: approval.status, notes: approval.decisionNotes ?? null, comment: approval.decisionNotes ?? null } : null;
+        }
+      : undefined,
     sessionMode: async (ctx, companyId, sessionId) => {
       const session = await workspaceStore.getCodeSession(ctx, companyId, sessionId).catch(() => null);
       return session?.mode ?? null;
+    },
+    // C5: every decision (allow, deny, require_approval) is recorded as a structured Activity event
+    // answering who/what/mode/rule/outcome. Recording is observability only: the engine calls it after
+    // the verdict and ignores failures, so it can never change, delay or weaken a decision.
+    decisionRecorder: async (request, result) => {
+      await policyDecisionActivity.record({
+        companyId: request.companyId,
+        projectId: request.projectId,
+        sessionId: request.sessionId,
+        runId: request.runId,
+        tool: request.tool,
+        action: request.tool,
+        mode: matrixModeFor(request.sessionMode),
+        phase: result.phase,
+        decision: result.decision,
+        code: result.code,
+        ruleRef: request.ruleRef ?? null,
+        actor: request.ctx.userId ?? request.agentId ?? "unknown",
+        actorKind: isAgentPrincipal(request.ctx) ? "agent" : "user",
+        agentId: request.agentId,
+        approvedBy: result.decision === "allow" && request.approved === true ? request.ctx.userId : undefined,
+        approvalId: result.approvalId ?? request.approvalId,
+      });
     },
     // C4b: a verified runner readiness report is the only proof of enforcement. The flag is advisory and
     // can only disable; a missing runner, a failed request or a non-ready report all fail closed.
     networkEnforcement: () => runnerReadiness
       ? runnerReadiness.isReadySync()
       : egressEnforcement.lastReport()?.enforced === true,
+    // C5a (D9): the company protected-branch policy. The engine consults it in the hard-deny phase, so a
+    // `git push` into a protected branch is `protected_branch_write_denied` (and a force push
+    // `force_push_denied`) for every principal — owner, `admin:all`, a session rule and `approved: true`
+    // included — while a push into an unprotected branch keeps its `approval` class.
+    protectedBranches: codeProtectedBranches,
     logger: app.log,
+  });
+  /**
+   * C5: project trust. Repository content can never mark a project trusted — only an owner/admin can,
+   * and the change is audited before it is applied (fail closed, same journal as the other C5 writes).
+   */
+  const codeProjectTrust = new CodeProjectTrustService({
+    store: workspaceStore,
+    audit: auditLogService
+      ? {
+          record: async (input) => {
+            await auditLogService.record(
+              { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+              {
+                companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
+                resourceType: "code_project_trust", resourceId: input.resourceId,
+                // C5a (D7): a refused trust change is journalled as a denied decision, not as an allow.
+                decision: input.decision === "deny" ? "denied" : "allowed",
+                payload: { action: input.action, target: input.resourceId },
+                metadata: input.metadata ?? {},
+              },
+            );
+          },
+        }
+      : undefined,
+  });
+  /** C5: session modes are a policy surface, so every change goes through the audited service. */
+  const codeSessionModes = new CodeSessionModeService({
+    store: workspaceStore,
+    audit: auditLogService
+      ? {
+          record: async (input) => {
+            await auditLogService.record(
+              { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+              {
+                companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
+                resourceType: "code_session", resourceId: input.resourceId,
+                // C5a (D7): a refused mode change is journalled as a denied decision.
+                decision: input.decision === "deny" ? "denied" : "allowed",
+                payload: { action: input.action, target: input.resourceId },
+                metadata: input.metadata ?? {},
+              },
+            );
+          },
+        }
+      : undefined,
+    suggestionSink: async (suggestion) => { app.log.info(suggestion, "code_session_mode_suggestion"); },
+    logger: app.log,
+  });
+  /**
+   * The session-mode routes take a synchronous context accessor while authentication is async, so the
+   * context is resolved once in a path-scoped preHandler and read back synchronously. Scoped to the
+   * mode endpoints on purpose: no other route authenticates twice or changes behaviour.
+   */
+  const codeSessionModeContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    if (!/\/code\/sessions\/[^/]+\/mode(\/suggest)?$/.test(request.url.split("?")[0] ?? "")) return;
+    codeSessionModeContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeSessionModeRoutes(app, {
+    // `SessionModeRouteDeps` requires the store for the route-level reads; the service holds its own.
+    store: workspaceStore,
+    service: codeSessionModes,
+    getAuthContext: (request) => codeSessionModeContexts.get(request as object) ?? null,
+  });
+  /**
+   * The membership and protected-branch routes take a synchronous context accessor while authentication is
+   * async, so the context is resolved once in a path-scoped preHandler and read back synchronously (the
+   * same mechanism as the session-mode and production routes — no second auth path). The services
+   * themselves are constructed above, together with the policy engine that consults them.
+   */
+  const codeMembershipContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    if (!/\/code\/(?:members(?:\/|$)|protected-branches(?:\/|$))/.test(request.url.split("?")[0] ?? "")) return;
+    codeMembershipContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeMembershipRoutes(app, {
+    service: codeMembership,
+    protectedBranches: codeProtectedBranches,
+    getAuthContext: (request) => codeMembershipContexts.get(request as object) ?? null,
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    // An invite token names its company: a token posted to another company's path is refused before use.
+    findInviteCompanyId: async (tokenHash) =>
+      (await workspaceStore.findCompanyInviteByTokenHash(tokenHash))?.companyId ?? null,
+    logger: app.log,
+  });
+  /**
+   * C5: the effective capability groups of an agent are derived from the code tools it was granted
+   * (`CompanyAgent.tools`), which is the only capability grant that exists in the data model today.
+   * When no agent record is resolvable the field stays absent, so the phase simply has no data (it is
+   * an extra narrowing layer — RBAC, feature flags and the capability registry always apply).
+   * TODO(C5a): store the granted capability groups on the agent record instead of deriving them.
+   */
+  const codeGroupsForAgent = (tools: readonly string[] | undefined): string[] => {
+    const groups = new Set<string>();
+    for (const tool of tools ?? []) {
+      const group = groupForCapability(tool);
+      if (group) groups.add(group);
+    }
+    return [...groups];
+  };
+  /**
+   * C5: enriches a tool-call policy request with the facts the caller cannot know: the agent's
+   * capability groups, whether the project is trusted, and (when the caller supplies them) the
+   * repository-instruction review and the policy-change marker. Enrichment only *adds* restrictions —
+   * the engine still decides, and an unresolvable agent or project leaves the field absent.
+   */
+  const enrichedPolicyEngine: PolicyEngine = Object.assign(Object.create(Object.getPrototypeOf(policyEngine)) as PolicyEngine, {
+    evaluate: async (request: Parameters<PolicyEngine["evaluate"]>[0]) => {
+      const enriched = { ...request } as typeof request;
+      if (enriched.agentId) {
+        const agent = await workspaceStore.getCompanyAgent(request.ctx, request.companyId, enriched.agentId).catch(() => null);
+        const groups = codeGroupsForAgent((agent as { tools?: string[] } | null)?.tools);
+        if (groups.length) {
+          enriched.capabilityGroups = {
+            agentCapabilityGroups: groups,
+            userPermissions: request.ctx.permissions ?? [],
+            projectRules: null,
+          };
+        }
+      }
+      if (enriched.requiresProjectTrust === true && enriched.projectTrusted === undefined && request.projectId) {
+        enriched.projectTrusted = await codeProjectTrust
+          .isTrusted(request.ctx, request.companyId, request.projectId)
+          .catch(() => false);
+      }
+      return policyEngine.evaluate(enriched);
+    },
   });
   const shellSandboxPort: CodeShellSandboxPort | undefined = projectSandbox ? {
     execute: async (input) => {
@@ -1193,7 +1524,7 @@ export function buildApp(config: AppConfig = {}) {
   } : undefined;
   const codeShellRuntime = new CodeShellRuntime({
     sandbox: shellSandboxPort, flags: featureFlagService, audit: auditLogService,
-    leases: secretLeases, limits: config.codeAgentLimits, policy: policyEngine,
+    leases: secretLeases, limits: config.codeAgentLimits, policy: enrichedPolicyEngine,
   });
   const codeProcessManager = new CodeProcessManager({
     sandbox: processSandboxPort, flags: featureFlagService, audit: auditLogService, leases: secretLeases,
@@ -1502,6 +1833,25 @@ export function buildApp(config: AppConfig = {}) {
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,
+    // C5: a standing `session`/`project` rule replaces the one-shot request; `once` keeps the existing
+    // payload-bound behaviour. Rules are consulted only after every prohibition has passed.
+    approvalRules: { findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query) },
+    // C5: bounded wait for a human decision. No decision inside the window → `approval_timeout` (504)
+    // and the change is not applied; the timeout is recorded as an Activity/run event.
+    approvalDecision: approvalsRepo ? {
+      timeoutMs: resolveApprovalTimeoutMs(process.env),
+      wait: async ({ ctx, companyId, approvalId }) => {
+        const report = await approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null);
+        if (!report) return null;
+        if (report.status === "approved") return { status: "approved" as const };
+        if (report.status === "rejected") return { status: "rejected" as const, comment: report.decisionNotes ?? null };
+        return { status: "pending" as const };
+      },
+      onTimeout: async ({ approvalId, waitedMs, action }) => {
+        await codeApprovalScope.recordTimeout(approvalId, waitedMs);
+        app.log.warn({ approvalId, waitedMs, action, kind: "approval_timeout" }, "code_approval_timeout");
+      },
+    } : undefined,
     turns: codeTurnTracker,
     writePort: codeProjectWorkspaceWritePort,
     // Formatter/syntax hooks run in the sandbox and only when the deployment configures them; their
@@ -1652,11 +2002,21 @@ export function buildApp(config: AppConfig = {}) {
   const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter).register(slackMessagingAdapter).register(emailMessagingAdapter);
   const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
   const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
-    const automationContext: AuthContext = {
+    /**
+     * C5a (owner decision): the unattended run executes as a **service identity** whose permissions are the
+     * reviewed inventory in `code-service-identity.ts`, instead of the owner with a fixed wide permission
+     * set. The owner id stays in the context because NPATI resolves companies by `user_id`
+     * (`assertCompany`), while `externalSubject` carries `service:automation:<id>` — so the principal is a
+     * service wherever it matters: it can never approve anything and can never reach production.
+     */
+    const automationIdentity = serviceIdentityForAutomation({
+      companyId: automation.companyId,
+      automationId: automation.id,
       workspaceId: automation.workspaceId,
-      userId: automation.userId,
-      permissions: ["workspace:read", "workspace:write", "business:manage", "tools:execute", "automation:execute_browser"],
-    };
+      ownerUserId: automation.userId,
+      allowedPermissions: automationAllowedPermissions.allowed,
+    });
+    const automationContext: AuthContext = automationIdentity.auth;
     const configuredTargets = browserCredentials
       ? (await browserCredentials.listTargets(automationContext, automation.companyId)).filter((target) => target.automationId === automation.id)
       : [];
@@ -3171,6 +3531,8 @@ ${localized.next}`;
     runtime: codeToolRuntime,
     assertCompany: async (ctx, companyId) => { await workspaceStore.getCompany(ctx, companyId); },
   });
+  // C5: scoped approval rules are visible and revocable; every change is audited before it applies.
+  registerCodeApprovalRoutes(app, authProvider, { store: workspaceStore, scope: codeApprovalScope });
   // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
   registerNetworkRoutes(app, {
     auth: authProvider,

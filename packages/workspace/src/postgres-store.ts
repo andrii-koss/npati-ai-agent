@@ -4,10 +4,11 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
+  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
-import { WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+import { CompanyMembershipError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
@@ -42,7 +43,10 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   user_id AS "userId", agent_id AS "agentId", mode, model_profile AS "modelProfile", status,
   parent_session_id AS "parentSessionId", run_id AS "runId", summary,
   data_classification AS "dataClassification", retention_class AS "retentionClass",
-  tool_manifest_version AS "toolManifestVersion", created_at AS "createdAt", updated_at AS "updatedAt"`;
+  tool_manifest_version AS "toolManifestVersion", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  const projectCodeTrustColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
+  trusted, trusted_by AS "trustedBy", trusted_at AS "trustedAt", revoked_by AS "revokedBy", revoked_at AS "revokedAt",
+  reason, revision, updated_at AS "updatedAt"`;
   const auditEntryColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", sequence,
   created_at AS "createdAt", actor, actor_role AS "actorRole", request_id AS "requestId",
   correlation_id AS "correlationId", snapshot_id AS "snapshotId", action, resource_type AS "resourceType",
@@ -59,6 +63,9 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   waiver_expires_at AS "waiverExpiresAt", waiver_reason AS "waiverReason", previous_reference AS "previousReference",
   revoked_at AS "revokedAt", revoked_by AS "revokedBy", revoke_reason AS "revokeReason",
   created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
+const codeApprovalRuleColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  project_id AS "projectId", session_id AS "sessionId", created_by AS "createdBy", scope, action, decision,
+  reason, expires_at AS "expiresAt", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const projectCheckpointColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", user_id AS "userId", name, description, commit_hash AS "commitHash",
   trigger, run_id AS "runId", file_count AS "fileCount", created_at AS "createdAt"`;
@@ -96,6 +103,21 @@ const companyToolAuditColumns = `id, workspace_id AS "workspaceId", company_id A
 const companyRunEventColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", run_id AS "runId",
   event_key AS "eventKey", event_type AS "eventType", run_status AS "runStatus", worker_id AS "workerId",
   attempt_count AS "attemptCount", message, details, created_at AS "createdAt"`;
+// C5a: timestamps stay `timestamptz` (pg returns Date), because the membership port compares them with
+// `Date#getTime()` when it decides whether an invite is still valid.
+const companyMemberColumns = `id, company_id AS "companyId", user_id AS "userId", role, status,
+  invited_by AS "invitedBy", invited_at AS "invitedAt", accepted_at AS "acceptedAt",
+  created_at AS "createdAt", updated_at AS "updatedAt", revision`;
+const companyInviteColumns = `id, company_id AS "companyId", email, role, token_hash AS "tokenHash",
+  expires_at AS "expiresAt", created_by AS "createdBy", accepted_at AS "acceptedAt", created_at AS "createdAt"`;
+/**
+ * The only-owner guard, shared by the demote, remove and invite-accept paths. It is part of the
+ * *statement* rather than a separate read, so a concurrent request cannot slip between "count the owners"
+ * and "write": a company may never be left without an active owner, even when a caller bypasses
+ * `CodeMembershipService` (a suspended owner cannot administer anything, so it does not count).
+ */
+const lastActiveOwnerPredicate = (companyParameter: string) =>
+  `(SELECT COUNT(*) FROM company_members m WHERE m.company_id=${companyParameter} AND m.role='owner' AND m.status='active') <= 1`;
 
 import migration004 from './migration-004';
 import migration005 from './migration-005';
@@ -877,6 +899,59 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    const codeApprovalRulesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='070_code_approval_rules'");
+    if (!codeApprovalRulesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration070 } = await import("./migration-070");
+        await runMigration070(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('070_code_approval_rules')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    const codeTrustMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='071_code_project_trust'");
+    if (!codeTrustMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration071 } = await import("./migration-071");
+        await runMigration071(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('071_code_project_trust')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C5a: company membership and invites. Additive: `workspace_members` keeps its meaning, and 072
+    // touches no existing table, row or query.
+    const companyMembershipMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='072_company_membership_and_invites'");
+    if (!companyMembershipMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration072 } = await import("./migration-072");
+        await runMigration072(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('072_company_membership_and_invites')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C5a: the company protected-branch policy read by the shell hard-deny phase
+    // (`CodeProtectedBranchRepository`). Additive: 073 creates its own table and index and touches no
+    // existing table, row or query.
+    const protectedBranchesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='073_company_protected_branches'");
+    if (!protectedBranchesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration073 } = await import("./migration-073");
+        await runMigration073(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('073_company_protected_branches')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   // --- C1b: sandbox image supply chain ------------------------------------------------------
@@ -1044,6 +1119,68 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [context.workspaceId, companyId, filters.actor ?? null, filters.requestId ?? null, filters.correlationId ?? null,
         filters.action ?? null, filters.fromSequence ?? null, Math.max(1, Math.min(filters.limit ?? 200, 1000))]);
     return result.rows;
+  }
+
+  /**
+   * C5: scoped approval rules. `once` approvals deliberately have no row here — they stay bound to a
+   * single payload hash in `company_approvals`, which is why a rule can only ever *add* a bounded
+   * allowance and can never widen a prohibition decided in an earlier policy phase.
+   */
+  async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
+    await this.assertCompany(context, companyId);
+    if (input.scope === "session" && !input.sessionId) {
+      throw new WorkspaceAccessError("A session-scoped approval rule must name its session");
+    }
+    if (!input.projectId) {
+      throw new WorkspaceAccessError("An approval rule must name its project");
+    }
+    const result = await this.pool.query<CodeApprovalRule>(
+      `INSERT INTO code_approval_rules (
+         id, workspace_id, company_id, project_id, session_id, created_by, scope, action, decision, reason, expires_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'allow',$9,$10)
+       ON CONFLICT (company_id, COALESCE(project_id,''), COALESCE(session_id,''), scope, action) DO UPDATE
+         SET reason=EXCLUDED.reason, expires_at=EXCLUDED.expires_at, created_by=EXCLUDED.created_by,
+             revision=code_approval_rules.revision+1, updated_at=now()
+       RETURNING ${codeApprovalRuleColumns}`,
+      [randomUUID(), context.workspaceId, companyId, input.projectId, input.sessionId ?? null, context.userId,
+        input.scope, input.action, input.reason ?? null, input.expiresAt ?? null]);
+    return result.rows[0]!;
+  }
+
+  async listCodeApprovalRules(context: AuthContext, companyId: string, filters: { projectId?: string; sessionId?: string; scope?: CodeApprovalRuleScope } = {}): Promise<CodeApprovalRule[]> {
+    await this.assertCompany(context, companyId);
+    const result = await this.pool.query<CodeApprovalRule>(
+      `SELECT ${codeApprovalRuleColumns} FROM code_approval_rules
+       WHERE workspace_id=$1 AND company_id=$2
+         AND ($3::text IS NULL OR project_id=$3)
+         AND ($4::text IS NULL OR session_id=$4)
+         AND ($5::text IS NULL OR scope=$5)
+       ORDER BY created_at DESC`,
+      [context.workspaceId, companyId, filters.projectId ?? null, filters.sessionId ?? null, filters.scope ?? null]);
+    return result.rows;
+  }
+
+  async deleteCodeApprovalRule(context: AuthContext, companyId: string, ruleId: string): Promise<void> {
+    await this.assertCompany(context, companyId);
+    await this.pool.query("DELETE FROM code_approval_rules WHERE workspace_id=$1 AND company_id=$2 AND id=$3",
+      [context.workspaceId, companyId, ruleId]);
+  }
+
+  async findMatchingCodeApprovalRule(context: AuthContext, query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string }): Promise<CodeApprovalRule | null> {
+    await this.assertCompany(context, query.companyId);
+    // Most specific first: a session rule wins over a project rule. Expired rules never match.
+    const result = await this.pool.query<CodeApprovalRule>(
+      `SELECT ${codeApprovalRuleColumns} FROM code_approval_rules
+       WHERE workspace_id=$1 AND company_id=$2 AND action=$3 AND decision='allow'
+         AND (expires_at IS NULL OR expires_at > now())
+         AND (
+           (scope='session' AND session_id=$4 AND $4::text IS NOT NULL AND project_id=$5 AND $5::text IS NOT NULL)
+           OR (scope='project' AND project_id=$5 AND $5::text IS NOT NULL)
+         )
+       ORDER BY CASE scope WHEN 'session' THEN 0 ELSE 1 END ASC, created_at DESC
+       LIMIT 1`,
+      [context.workspaceId, query.companyId, query.action, query.sessionId ?? null, query.projectId ?? null]);
+    return result.rows[0] ?? null;
   }
 
   async verifyAuditChain(context: AuthContext, companyId: string, range: { fromSequence?: number; toSequence?: number } = {}): Promise<AuditChainVerification> {
@@ -1621,10 +1758,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows;
   }
 
-  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {
+  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {
     const current = await this.getCodeSession(context, companyId, sessionId);
     if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, current.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
+    }
+    if (patch.expectedRevision !== undefined && patch.expectedRevision !== current.revision) {
+      throw new WorkspaceAccessError("Code session changed by another request. Reload and try again.");
     }
     const result = await this.pool.query<CodeSession>(`UPDATE code_sessions
       SET status=COALESCE($5,status),
@@ -1634,15 +1774,55 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           data_classification=COALESCE($9,data_classification),
           retention_class=COALESCE($10,retention_class),
           tool_manifest_version=COALESCE($11,tool_manifest_version),
+          mode=COALESCE($12,mode),
+          revision=revision+1,
           updated_at=now()
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
       RETURNING ${codeSessionColumns}`,
       [sessionId, context.workspaceId, companyId, context.userId, patch.status ?? null, patch.summary ?? null,
         patch.runId === undefined ? null : patch.runId, patch.modelProfile ?? null,
         patch.dataClassification ?? null, patch.retentionClass ?? null,
-        patch.toolManifestVersion === undefined ? null : patch.toolManifestVersion]);
+        patch.toolManifestVersion === undefined ? null : patch.toolManifestVersion, patch.mode ?? null]);
     if (!result.rows[0]) throw new WorkspaceNotFoundError("Code session not found");
     return result.rows[0];
+  }
+
+  // --- C5: project trust ---------------------------------------------------------------------
+
+  async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
+    const result = await this.pool.query<ProjectCodeTrust>(`SELECT ${projectCodeTrustColumns} FROM project_code_trust
+      WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3`,
+      [context.workspaceId, companyId, projectId]);
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Trust is a state change and therefore revision-checked. A missing row means "revision 0, not
+   * trusted", so the first write must pass `expectedRevision: 0`.
+   */
+  async setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust> {
+    const existing = await this.getProjectCodeTrust(context, companyId, projectId);
+    const currentRevision = existing?.revision ?? 0;
+    if (input.expectedRevision !== currentRevision) {
+      throw new WorkspaceAccessError("Project trust changed by another request. Reload and try again.");
+    }
+    const result = await this.pool.query<ProjectCodeTrust>(`INSERT INTO project_code_trust
+      (id, workspace_id, company_id, project_id, trusted, trusted_by, trusted_at, revoked_by, revoked_at, reason, revision)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1)
+      ON CONFLICT (company_id, project_id) DO UPDATE SET
+        trusted=$5,
+        trusted_by=CASE WHEN $5 THEN $6 ELSE project_code_trust.trusted_by END,
+        trusted_at=CASE WHEN $5 THEN now() ELSE project_code_trust.trusted_at END,
+        revoked_by=CASE WHEN $5 THEN project_code_trust.revoked_by ELSE $6 END,
+        revoked_at=CASE WHEN $5 THEN project_code_trust.revoked_at ELSE now() END,
+        reason=$10,
+        revision=project_code_trust.revision+1,
+        updated_at=now()
+      RETURNING ${projectCodeTrustColumns}`,
+      [randomUUID(), context.workspaceId, companyId, projectId, input.trusted, input.actor,
+        input.trusted ? new Date().toISOString() : null, input.trusted ? null : input.actor,
+        input.trusted ? null : new Date().toISOString(), input.reason ?? null]);
+    return result.rows[0]!;
   }
 
   /** Rejects an agent id that does not belong to the company (tenant isolation for sessions). */
@@ -2272,6 +2452,192 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const result = await this.pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
     await this.pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
     return result.rows[0]!;
+  }
+
+  // --- C5a: company membership and invites ---------------------------------------------------
+  // Signatures mirror the `CodeMembershipStore` port (apps/agent-api/src/code-membership.ts) exactly:
+  // company-scoped, no `AuthContext`, because membership *is* the authorisation anchor.
+
+  /** No row is `null`: there is no "owner by default" fallback anywhere in the membership path. */
+  async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
+    const result = await this.pool.query<CompanyMember>(`SELECT ${companyMemberColumns} FROM company_members
+      WHERE company_id=$1 AND user_id=$2`, [companyId, userId]);
+    return result.rows[0] ?? null;
+  }
+
+  async listCompanyMembers(companyId: string): Promise<CompanyMember[]> {
+    const result = await this.pool.query<CompanyMember>(`SELECT ${companyMemberColumns} FROM company_members
+      WHERE company_id=$1 ORDER BY created_at, id`, [companyId]);
+    return result.rows;
+  }
+
+  /**
+   * Owners that could actually administer the company. A `suspended`/`invited` owner has no role
+   * (`CodeMembershipService.resolveRoleForUser` returns null for it), so counting it here would let the
+   * only *usable* owner be demoted or removed and leave the company without an administrator.
+   */
+  async countCompanyOwners(companyId: string): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM company_members
+      WHERE company_id=$1 AND role='owner' AND status='active'`, [companyId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  async createCompanyInvite(input: CompanyInviteInput): Promise<CompanyInvite> {
+    if (!isCompanyRole(input.role)) {
+      throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
+    }
+    // A token hash is unique (company_invites_token_hash_key): a duplicate must be refused loudly rather
+    // than silently reused, because two live invites would share one secret.
+    const duplicate = await this.pool.query("SELECT 1 FROM company_invites WHERE token_hash=$1", [input.tokenHash]);
+    if (duplicate.rowCount) {
+      throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
+    }
+    const result = await this.pool.query<CompanyInvite>(`INSERT INTO company_invites
+      (id, company_id, email, role, token_hash, expires_at, created_by, accepted_at, created_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (token_hash) DO NOTHING
+      RETURNING ${companyInviteColumns}`,
+      [input.id, input.companyId, input.email, input.role, input.tokenHash, input.expiresAt, input.createdBy,
+        input.acceptedAt ?? null, input.createdAt ?? new Date()]);
+    if (!result.rows[0]) {
+      // The unique index won a race with the check above.
+      throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
+    }
+    return result.rows[0];
+  }
+
+  /**
+   * Returns the invite whatever its state (including expired and already accepted), so the caller can
+   * tell "not a valid token" apart from "valid but expired / already used".
+   */
+  async findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null> {
+    const result = await this.pool.query<CompanyInvite>(`SELECT ${companyInviteColumns} FROM company_invites
+      WHERE token_hash=$1`, [tokenHash]);
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Accepting an invite creates or reactivates the membership row with the **invited** role.
+   *
+   * The invite is re-read and claimed inside one transaction: `accepted_at IS NULL AND expires_at > $2`
+   * means a token is single-use and dead after its TTL even if the caller still holds a copy of the row.
+   * If the membership write is refused, the transaction rolls back, so the token is not burned.
+   */
+  async acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const claimed = await client.query<Pick<CompanyInvite, "companyId" | "role" | "createdBy" | "createdAt">>(
+        `UPDATE company_invites SET accepted_at=$2
+         WHERE id=$1 AND accepted_at IS NULL AND expires_at > $2
+         RETURNING company_id AS "companyId", role, created_by AS "createdBy", created_at AS "createdAt"`,
+        [input.invite.id, input.acceptedAt]);
+      const invite = claimed.rows[0];
+      if (!invite) {
+        const state = await client.query<{ acceptedAt: Date | null; expiresAt: Date }>(
+          `SELECT accepted_at AS "acceptedAt", expires_at AS "expiresAt" FROM company_invites WHERE id=$1`,
+          [input.invite.id]);
+        const row = state.rows[0];
+        if (!row) throw new CompanyMembershipError("invite_not_found", "Invite does not exist", { httpStatus: 404 });
+        if (row.acceptedAt) {
+          throw new CompanyMembershipError("invite_already_accepted", "Invite token was already used", { httpStatus: 409 });
+        }
+        throw new CompanyMembershipError("invite_expired", "Invite token has expired", { httpStatus: 410 });
+      }
+      // Accepting an invite must not demote the only active owner: the guard is part of the upsert, so
+      // even a direct store call (bypassing the service) cannot remove the company's administrator.
+      const result = await client.query<CompanyMember>(`INSERT INTO company_members
+        (id, company_id, user_id, role, status, invited_by, invited_at, accepted_at, created_at)
+        VALUES($1,$2,$3,$4,'active',$5,$6,$7,$7)
+        ON CONFLICT (company_id, user_id) DO UPDATE SET
+          role=$4,
+          status='active',
+          accepted_at=$7,
+          invited_by=COALESCE(company_members.invited_by, $5),
+          invited_at=COALESCE(company_members.invited_at, $6),
+          revision=company_members.revision+1,
+          updated_at=$7
+        WHERE NOT (company_members.status='active' AND company_members.role='owner' AND $4<>'owner'
+          AND ${lastActiveOwnerPredicate("$2")})
+        RETURNING ${companyMemberColumns}`,
+        [`cm_${randomUUID()}`, invite.companyId, input.userId, invite.role, invite.createdBy, invite.createdAt, input.acceptedAt]);
+      if (!result.rows[0]) {
+        throw new CompanyMembershipError(
+          "last_owner_protected",
+          "Cannot demote the only owner of the company by accepting an invite",
+          { httpStatus: 409, details: { operation: "demote", userId: input.userId } },
+        );
+      }
+      await client.query("COMMIT");
+      return result.rows[0];
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  /**
+   * Revision-checked role change. `revision` is the optimistic token: a mismatch is refused with the
+   * port's `membership_revision_conflict` (and the tree-wide "changed by another request" message, which
+   * existing route mappers already translate to 409) instead of silently overwriting a concurrent write.
+   * The only-owner guard lives in the same statement, so `CodeMembershipService`'s earlier check cannot
+   * be raced.
+   */
+  async updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember> {
+    if (!isCompanyRole(input.role)) {
+      throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
+    }
+    const result = await this.pool.query<CompanyMember>(`UPDATE company_members
+      SET role=$3, revision=revision+1, updated_at=$5
+      WHERE company_id=$1 AND user_id=$2 AND revision=$4
+        AND NOT (status='active' AND role='owner' AND $3<>'owner'
+          AND ${lastActiveOwnerPredicate("$1")})
+      RETURNING ${companyMemberColumns}`,
+      [input.companyId, input.userId, input.role, input.expectedRevision, input.updatedAt]);
+    if (result.rows[0]) return result.rows[0];
+    // The guarded write matched nothing: find out why, in the same order the in-memory store reports.
+    const current = await this.getCompanyMembership(input.companyId, input.userId);
+    if (!current) {
+      throw new CompanyMembershipError("membership_not_found", "User is not a member of this company", { httpStatus: 404 });
+    }
+    if (current.revision !== input.expectedRevision) {
+      throw new CompanyMembershipError(
+        "membership_revision_conflict",
+        "Company member changed by another request. Reload and try again.",
+        {
+          httpStatus: 409,
+          details: { expectedRevision: input.expectedRevision, actualRevision: current.revision },
+        },
+      );
+    }
+    const owners = await this.countCompanyOwners(input.companyId);
+    throw new CompanyMembershipError(
+      "last_owner_protected",
+      "Cannot demote the only owner of the company",
+      { httpStatus: 409, details: { operation: "demote", owners } },
+    );
+  }
+
+  /**
+   * Removing the last active owner is refused for the same reason as demoting it. Like the port's own
+   * implementation this is otherwise a delete: a user who is not a member is already refused with
+   * `membership_not_found` (404) by `CodeMembershipService` before the store is called.
+   */
+  async removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void> {
+    const result = await this.pool.query(`DELETE FROM company_members
+      WHERE company_id=$1 AND user_id=$2
+        AND NOT (status='active' AND role='owner' AND ${lastActiveOwnerPredicate("$1")})`,
+      [input.companyId, input.userId]);
+    if (result.rowCount) return;
+    // Nothing was deleted: either there was no row, or the only-owner guard refused the delete.
+    const current = await this.getCompanyMembership(input.companyId, input.userId);
+    if (!current) return;
+    const owners = await this.countCompanyOwners(input.companyId);
+    throw new CompanyMembershipError(
+      "last_owner_protected",
+      "Cannot remove the only owner of the company",
+      { httpStatus: 409, details: { operation: "remove", owners } },
+    );
   }
 
   private async hydrateOnboarding(context: AuthContext, row: Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">): Promise<BusinessOnboardingSession> {
