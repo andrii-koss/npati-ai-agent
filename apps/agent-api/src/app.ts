@@ -94,6 +94,10 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
+import { CodingAgentRunner } from "./coding-agent-runner";
+import type { CodeSession } from "@npati/workspace";
+import { registerCodeIntentRoutes, resolveChatCodeIntent } from "./code-intent-routing";
+import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
@@ -3735,6 +3739,58 @@ ${localized.next}`;
     runtime: codeToolRuntime,
     assertCompany: async (ctx, companyId) => { await workspaceStore.getCompany(ctx, companyId); },
   });
+  // C6: the coding agent loop. Wired to the GUARDED engine (`aiEngine`), never to `baseAiEngine`: that is
+  // what makes `policyContext` and the provider-data policy apply to every model call the loop makes.
+  const codeRbacForRun = new CodeRbac({ ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}), logger: app.log });
+  const codingAgentRunner = new CodingAgentRunner({
+    flags: featureFlagService,
+    rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
+    toolRuntime: codeToolRuntime,
+    engine: aiEngine,
+    schemas: CODE_TOOL_SCHEMAS,
+    imageAdmission: sandboxImagePolicy,
+    activity: { record: async (event) => { app.log.info(event, "code_run_activity"); } },
+    // Run-event persistence lands with the run trace (C6b); until then the loop's events are logged above.
+    runEvents: { append: async (entry) => entry },
+  });
+  // C6: the chat entry point for code intents. Additive on purpose — it never intercepts the existing chat
+  // stream, so plain chat and Run Company are untouched; a non-code message comes back as `routed: "chat"`.
+  // The active project is supplied by the caller (chat UI selection lands in C7); without it the bridge asks
+  // the user which project to use instead of guessing.
+  registerCodeIntentRoutes(app, authProvider, {
+    runner: {
+      run: async (invocation) => {
+        const result = await codingAgentRunner.run({
+          ctx: invocation.ctx,
+          session: invocation.session as CodeSession,
+          prompt: invocation.request,
+          ...(invocation.sessionId ? { turnId: invocation.sessionId } : {}),
+          ...(invocation.signal ? { signal: invocation.signal } : {}),
+        });
+        return { status: result.status, reason: result.reason, summary: result.summary };
+      },
+    },
+    isEnabled: async (ctx, companyId) => {
+      try {
+        await featureFlagService.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
+        return true;
+      } catch {
+        // A disabled (or unavailable) Coding Agent must leave chat behaviour unchanged.
+        return false;
+      }
+    },
+    resolveProject: async (ctx, companyId, projectId) => {
+      const project = await projectService.get(ctx, companyId, projectId);
+      if (!project || (project as { type?: string }).type !== "code_project") return null;
+      return { projectId, kind: "code_project" };
+    },
+    loadSession: async (ctx, companyId, projectId, sessionId) => {
+      if (sessionId) return codeService.getSession(ctx, companyId, sessionId);
+      const sessions = await codeService.listSessions(ctx, companyId, projectId, { limit: 1 });
+      return sessions[0] ?? null;
+    },
+    logger: app.log,
+  });
   // C5: scoped approval rules are visible and revocable; every change is audited before it applies.
   registerCodeApprovalRoutes(app, authProvider, { store: workspaceStore, scope: codeApprovalScope });
   // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
@@ -4561,6 +4617,71 @@ ${localized.next}`;
         if (!reply.raw.destroyed) reply.raw.write(": heartbeat\n\n");
         if(distributedChatLease)void activeSessionRegistry.renew(auth.workspaceId,auth.userId,distributedChatLease,45);
       }, 15_000);
+
+      // C6: end-to-end chat path for CODE intents. It runs the real agent loop over the SAME stream (no
+      // second SSE endpoint, no second cancellation mechanism) and only when ALL of these hold: the operator
+      // enabled the Coding Agent, a company+project were resolved, the project is a code project, and the
+      // classifier recognises a code intent. Every other case — flag off, plain chat, website/mobile
+      // project, Run Company, email — falls through to the existing pipeline completely unchanged.
+      try {
+        const codingEnabled = activeCompanyId
+          ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }).catch(() => false)
+          : false;
+        const codeProject = codingEnabled && activeCompanyId && activeProjectId
+          ? await projectService.get(auth, activeCompanyId, activeProjectId)
+          : null;
+        const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
+        const codeDecision = resolveChatCodeIntent({
+          message,
+          codingEnabled,
+          companyId: activeCompanyId,
+          projectId: activeProjectId,
+          projectKind: codeProjectKind,
+        });
+        if (codeDecision.mode === "clarify") {
+          send("result", { routed: "clarify", intent: codeDecision.intent, message: codeDecision.message });
+          clearInterval(heartbeat);
+          if (!reply.raw.writableEnded) reply.raw.end();
+          return;
+        }
+        if (codeDecision.mode === "run" && codeProject) {
+          const codeSessions = await codeService.listSessions(auth, activeCompanyId!, activeProjectId!, { limit: 1 });
+          const codeSession = codeSessions[0] ?? null;
+          if (!codeSession) {
+            send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
+          } else {
+            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: activeProjectId });
+            let runResult: unknown;
+            try {
+              runResult = await codingAgentRunner.run({ ctx: auth, session: codeSession, prompt: message, signal: streamController.signal });
+            } catch (error) {
+              runResult = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };
+            } finally {
+              // C6: release the sandbox after the run — on success, failure and cancellation — because the
+              // project object `destroy` needs is already loaded here. Without a sandbox service there is
+              // nothing to release in this composition, and that path is logged instead of masked.
+              if (projectSandbox) {
+                try {
+                  await projectSandbox.destroy(auth, codeProject as never);
+                } catch (error) {
+                  request.log.warn({ err: error }, "code_run_sandbox_release_failed");
+                }
+              } else {
+                request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
+              }
+            }
+            send("result", { routed: "code_runner", intent: codeDecision.intent, run: runResult });
+          }
+          clearInterval(heartbeat);
+          if (!reply.raw.writableEnded) reply.raw.end();
+          return;
+        }
+      } catch (error) {
+        // A failure inside the coding-agent branch must never break the chat stream: log it and continue with
+        // the existing pipeline exactly as if the branch had not matched.
+        request.log.warn({ err: error }, "code_intent_chat_branch_failed");
+      }
+
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
         if (projectIntent.intent !== "CHAT") {

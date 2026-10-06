@@ -290,6 +290,12 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.membership.accept": "workspace:read",
   "code.protected_branches.read": "workspace:read",
   "company.run": "workspace:read",
+  // C6: starting the agent loop is a workspace write surface (it may edit and run commands). Without this
+  // entry `requiredPermissionForAction` returns null and every run start is refused with `action_not_mapped`.
+  "code.run.start": "workspace:write",
+  // C6: creating a session is what makes a run possible at all; it was audited by `code-service.ts` but
+  // missing from this map, so any RBAC gate on it was denied by default.
+  "code.session.create": "workspace:write",
   // Mutating workspace surfaces.
   "code.fs.edit": "workspace:write",
   "code.fs.write": "workspace:write",

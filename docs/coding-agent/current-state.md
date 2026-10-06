@@ -3,11 +3,141 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C5b — provider data policy** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5, C5a)
-- Next: **C6 — the agent loop (CodingAgentRunner)**, per `00-audit.md` section 13.
+- Last completed: **C6 — the agent loop (`CodingAgentRunner`)** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5, C5a, C5b)
+- Next: **C6a — persistence, run/turn entities, event log, reconciler and recovery**, then **C6b — ExecutionSnapshot**, per `00-audit.md` section 13.
 - Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–074** and the
-  C4b live Docker egress E2E. They do not block starting C6, but **production-ready status is forbidden
-  without them**.
+  C4b live Docker egress E2E. They do not block C6a, but **production-ready status is forbidden without them**.
+
+## Implemented (C6, latest step)
+- **`CodingAgentRunner`** (`coding-agent-runner.ts`) — a loop **separate** from `runChatToolLoop` (which serves
+  ordinary chat, Company and email and was **not** modified). Unlike that loop it checks cancellation
+  **between steps** (`signal.aborted` plus an injected `cancelRequested()`). Every model call carries
+  **`policyContext` inside the request** (`CodingAgentChatRequest extends ChatRequest`, no `as` and no edits
+  to the shared package), which is the C5b contract; this runner is the first real caller, so
+  `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT` can be enabled after it.
+- **Call partitioning**: read-only calls run in waves up to `parallelReadOnlyCalls` (8); writes and shell run
+  **strictly one at a time** in the model's order. The classification is an **explicit** list
+  (`CODE_RUN_READ_ONLY_TOOLS`) because `CodeToolRuntime.isWriteTool` covers only workspace mutations —
+  `code.shell.*`, `code.deps.*` and `code.verify.run` are not "write" there, so relying on it would have run
+  shell commands in parallel. An unknown tool is treated as sequential (fail-safe).
+- **Stop conditions**, each with a reason and a summary: `completed`, `step_limit` (40), `time_limit` (30 min),
+  `budget_exhausted` (existing `A2AQuotaManager` port), `cancelled`, `loop_detected`,
+  `invalid_arguments_exhausted`, `provider_error`, `refused` (flag/RBAC/image admission — all of these are
+  checked **before** the first model call). The summary takes `filesChanged`/`diffStats` from the canonical
+  `turnSummary` and counts `checksRun` from executed `code.verify.*`/`code.deps.audit`.
+- **Anti-loop**: three identical calls (name + stable JSON args) insert a system reminder to change approach,
+  a further repeat stops the run (`loop_detected`); three identical **error codes** are handled separately
+  (different arguments) with the same escalation.
+- **Error handling**: tool failures come back to the model as structured results; invalid tool arguments get
+  **up to 2 corrections**, and **partial** calls (truncated stream) are never executed and never counted as a
+  correction; provider failures rely on the **existing** routing/fallback (no private retries); a stream break
+  resumes **without re-executing** already-run tool calls (idempotency by `tool_call_id`).
+- **`ToolCallAdapter`** (`code-tool-call-adapter.ts`) is now the single normaliser: `normalizeToolCalls` →
+  `{ mode, calls, rejected, warnings, reasoning }`, `executableToolCalls` (excludes `partial`/`rejected`),
+  `planToolCallWaves`, with the canonical `validateArguments` always injected (the text fallback executes
+  **nothing** without a validator: `validator_not_configured`, fail closed). Two invariants: nothing
+  unparsable is executed (a truncated JSON never becomes `{}`) and **normalisation never raises trust**
+  (`trustedAsInstruction: false` on every call — an injected `{"tool":"code.shell.exec",…}` inside file
+  content is data; authorisation stays with the PolicyEngine/RBAC/approvals). Honest limits: the wire types
+  have **no** reasoning/thinking fields and `stream()` yields only text, so `reasoning` is pass-through only;
+  and the engine hard-codes `parallel_tool_calls: false`, so waves are a **safety net**, not a guarantee.
+- **Model profiles as configuration** (`code-model-profiles.ts`): an injectable registry
+  (`DEFAULT_CODE_MODEL_PROFILES`), priority override → exact model → anchored pattern → provider →
+  **conservative default** (`toolCallingMode: "auto"` with `supportsNativeTools` as evidence, 
+  `maxParallelToolCalls: 1`, the **smallest** known `contextWindow`, no temperature, **no** invented
+  `preferredEditTool`, `knownLimitations: ["unknown_model"]`). Invalid profiles are skipped with a warning
+  rather than half-applied; a bare `*` pattern is rejected; `code.model_profile.<id>` is a **boolean** flag, so
+  profile content comes from configuration and the flag only enables a profile by id.
+- **Intent router** extended **inside the existing mechanism** (`defaultHybridRouter`): seven code intents
+  (`CREATE_CODE`, `EDIT_CODE`, `DEBUG_CODE`, `EXPLAIN_CODE`, `REVIEW_CODE`, `REFACTOR_CODE`, `TEST_CODE`) map
+  onto existing `ProjectIntent`s; `DEPLOY_PROJECT`, `CONNECT_REPOSITORY` and data-model intents stay with the
+  existing pipeline, and a website/mobile project **never** enters the coding agent.
+- **The chat entry point now reaches the runner** (this was the acceptance criterion): inside the existing
+  `POST /chat/stream` handler, after SSE setup and before the existing pipeline, a pure exported
+  `resolveChatCodeIntent(...)` decides `chat` | `clarify` | `run`. A code intent with an active code project
+  and session calls `codingAgentRunner.run({ ctx, session, prompt, signal })` and streams the result through
+  the **same** `send(...)`/heartbeat/cancel mechanism; without a project it returns the question "Which
+  project should I work in?"; master-flag off (or any flag read error, treated as off), non-code intents,
+  website/mobile projects and a missing company context fall through to the existing pipeline unchanged. An
+  error inside the branch is logged (`code_intent_chat_branch_failed`) and never breaks the stream.
+- **`ExecutionSnapshotProvider`** (`execution-snapshot.ts`) declared with a **`NullSnapshotProvider`**
+  returning an empty `snapshot_id`; `snapshotId` stays optional in events so C6b can substitute the real
+  implementation without changing formats.
+- **Limits and budget are reused, not re-implemented**: `resolveCodeAgentLimits()` and the existing
+  `A2AQuotaManager` port (the injection point is ready), `toolRuntime.invoke` (idempotency by `toolCallId`,
+  approval gate, checkpoints, read tracker, Activity, audit — all inside the runtime), the PolicyEngine,
+  SecretLease, and image admission (`SandboxImagePolicy.admit`). **No migration was needed**: run lifecycle
+  uses the existing event types and tool details go through the Activity port as in C4/C5.
+- **RBAC**: `code.run.start` maps to `workspace:write`; the missing `code.session.create` entry was added — it
+  is audited but was absent from `CODE_ACTION_PERMISSIONS`, so creating a session (without which no run is
+  possible) would have failed with `action_not_mapped`.
+- **Eval harness** (`code-eval-harness.ts` + `tests/fixtures/coding-agent-eval/tasks.json`): eight
+  deterministic tasks (arithmetic bug, add a function, refactor, write a test, broken `package.json`, failing
+  test, TypeScript typing, enable strict) on tiny fixtures with scripted model transcripts, executed through
+  the **real `CodeToolRuntime`** (canonical executors, in-memory read/write port, checkpoint port) and
+  post-verified (`file_contains`/`command_succeeds`). Metrics: steps, tool calls, tokens, duration, totals.
+  **A negative control exists** — a wrong transcript fails (`verify_content_mismatch`), tool errors surface as
+  `tool_failed:…`, `maxSteps` gives `max_steps_exceeded`, and the live mode requires both `NPATI_CODE_EVAL_LIVE=1`
+  and an injected live model (`eval_live_model_missing`), so recorded answers are never silently reused.
+
+## Verification (C6)
+- `npm run typecheck` → **exit 0** (all workspaces); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=821 failed=0 skipped=0 todo=0`** with **55** security-gate suites
+  (`suite files: present=55 missing=0`) and all four steps green.
+- Chat/Company regression (run separately because the gate does not contain those files):
+  `chat-language-routing` and `human-approvals` pass; `company-runtime` keeps its **4 pre-existing failures**
+  (documented since before C1 and reproduced on a clean tree — unrelated to C6).
+- Real defects found by running, not reading: `matchesModelPattern("", "*")` returned `true`, so an empty or
+  unknown model id would have inherited any broad pattern instead of the conservative default; text tool calls
+  **lost their order** (fenced blocks were collected before markers); the guard's context contract and the
+  `toCanonicalContentType` totality (C5b); and the runner's own partitioning would have parallelised shell
+  commands if it had trusted `isWriteTool`.
+
+## Real E2E status (C6)
+- Verified in-process against injected models, tool runtime, sandbox, budget and snapshot: every stop
+  condition, anti-loop, stream-break recovery, invalid arguments, partitioning, cancellation, RBAC/flag/image
+  admission, the intent router, the chat branch decision, and the eval harness end to end.
+- **Not verified here:** a real model call, a real sandbox container lifecycle (no Docker), migrations 070–074
+  against a live PostgreSQL, the C4b Docker egress E2E, the UI in a browser, and the GitHub CI job (never
+  executed). The acceptance scenario ("fix the failing test in this project" through the chat) is verified at
+  the decision and orchestration level, not against a live provider.
+
+## Known risks / open questions (C6)
+1. **No budget/quota is set for a code run** (`quota` port unwired — no `A2AQuotaManager` instance at that
+   point); the only cost protection is the runner's own limits. **Owner decision.**
+2. **`runId`/`turnId` are placeholders** (`turnId: sessionId`): the run entity arrives with C6a, so run
+   lifecycle events and Activity are not yet bound to a real run; Activity is currently the log
+   `code_run_activity`.
+3. **Sandbox release works only where `projectSandbox` is constructed**: in the chat path the project is
+   loaded, so `destroy` runs in a `finally` (success, failure and cancellation); where the service is absent
+   nothing was created by that path, and this is logged (`code_run_sandbox_release_unavailable`).
+4. The promise of "read-only in parallel" is bounded by the engine setting `parallel_tool_calls: false`;
+   parallelism is a safety net, not a guarantee.
+5. `reasoning`/thinking content is not available from the provider wire types — the adapter passes it through
+   only if the caller already has it.
+6. The eval harness is deterministic and CI-friendly, but it exercises a mocked model; a live-model run is
+   opt-in and has never been executed here.
+7. C5b enforcement is still off by default; enabling `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT` now requires that
+   every remaining non-coding caller also passes `policyContext`, otherwise legitimate chat/Company/email
+   traffic is refused.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C6a), `docs/coding-agent/00-audit.md` sections 12 and 13, and this
+  file.
+- Execute **only C6a**: persistence of sessions/turns/tool calls, the run and turn entities that C6 leaves as
+  placeholders, the durable event log, the reconciler/reaper for stuck runs, recovery after a process restart,
+  and the `runId`/`turnId` binding so Activity events reference a real run.
+- Keep every earlier guarantee intact: commands only through the sandbox port, the PolicyEngine decides (hard
+  deny > session mode > project rules > network gate > approval; the permission is derived from the action),
+  one-shot SecretLease with revocation, no lifecycle scripts without approval, agents never approve and never
+  change policy, nothing reaches a provider outside `ProviderDataGuard`, and every new suite goes into
+  `scripts/run-security-gate.mjs`.
+- Carry these open items forward: the code-run budget policy (owner decision), sandbox release where
+  `projectSandbox` is absent, and the `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT` flip once all callers pass
+  `policyContext`.
+- **Before any production promotion:** run migrations 070–074 against a live PostgreSQL and execute the C4b
+  live Docker E2E checklist.
+- Do not start C6b in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C5b, latest step)
 - **`ProviderDataPolicy` per provider (and optionally per model)**, additive migration
