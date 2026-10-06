@@ -150,6 +150,10 @@ export const DEFAULT_COMPANY_ROLE_MATRIX: Readonly<Record<CompanyRole, readonly 
     "tools:execute",
     "audit:read",
     "admin:all",
+    // C5b: changing the provider data policy decides what may leave NPATI, so the plan puts it at owner
+    // level. `admin:all` is a wildcard over the ordinary vocabulary and deliberately does **not** imply a
+    // privileged permission, so the owner has to name it: one mechanism (an explicit grant), not two.
+    "code.policy.manage",
   ],
   admin: ["workspace:read", "workspace:write", "business:manage", "tools:read", "tools:execute", "audit:read"],
   developer: ["workspace:read", "workspace:write", "tools:read", "tools:execute"],

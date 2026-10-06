@@ -7,6 +7,7 @@ import { mergeProjectText } from "./project-task-graph";
 import { ProjectFileLeaseManager, ProjectFileLockError } from "./project-file-lock";
 import path from "node:path";
 import { McpScopeGuard } from "./mcp-scopes";
+import { assertOutboundAllowed } from "./outbound-exfiltration-guard";
 import type { IsolatedExecSandbox } from "./wasm-exec-sandbox";
 import { CodeModePolicyController } from "./memory-import-codemode-clawhub";
 import type { EmailAgentTools } from "./email-agent-tools";
@@ -148,7 +149,23 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       if (!this.ai.mcpCall) throw new Error("NPATI AI tools are unavailable");
       const name = text(input.name ?? input.toolName, "MCP tool name", 200);
       authorizeCompanyMcp(context,name);
-      return this.ai.mcpCall({ name, arguments: record(input.arguments ?? input.input), signal, timeoutMs: 30_000 });
+      // C5b: MCP arguments leave NPATI for a third-party server, so the exfiltration guard inspects them
+      // before the call. Secrets are refused; private repository code needs approval.
+      const mcpArguments = record(input.arguments ?? input.input);
+      assertOutboundAllowed({
+        channel: "mcp",
+        parts: [
+          { kind: "metadata", value: name, label: "mcp_tool" },
+          { kind: "text", value: JSON.stringify(mcpArguments ?? {}), label: "mcp_arguments" },
+        ],
+        // C5b: this call site knows its tenant, so the policy is evaluated with a real project context
+        // instead of falling back to the process-wide snapshot.
+        context: {
+          companyId: company.id,
+          ...(typeof input.projectId === "string" ? { projectId: input.projectId } : {}),
+        },
+      });
+      return this.ai.mcpCall({ name, arguments: mcpArguments, signal, timeoutMs: 30_000 });
     }
     if (tool.startsWith("project.files.")) return this.projectFiles(context, company, tool, input);
     if (tool === "project.terminal.exec" || tool === "project.terminal.process") {

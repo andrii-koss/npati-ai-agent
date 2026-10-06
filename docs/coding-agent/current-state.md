@@ -3,11 +3,164 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C5a — RBAC** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5)
-- Next: **C5b — ProviderDataPolicy**, per `00-audit.md` section 13.
-- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–073** and the
-  C4b live Docker egress E2E. They do not block starting C5b, but **production-ready status is forbidden
+- Last completed: **C5b — provider data policy** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5, C5a)
+- Next: **C6 — the agent loop (CodingAgentRunner)**, per `00-audit.md` section 13.
+- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–074** and the
+  C4b live Docker egress E2E. They do not block starting C6, but **production-ready status is forbidden
   without them**.
+
+## Implemented (C5b, latest step)
+- **`ProviderDataPolicy` per provider (and optionally per model)**, additive migration
+  `074_provider_data_policies` with four tables: `provider_data_policies` (`company_id` nullable = platform
+  default, `model_pattern` nullable = whole provider, `policy_version`, `kind`
+  `hosted_third_party|self_hosted|local`, `allow_private_repo_code`, `max_data_classification`,
+  `allow_prompt_caching`, `external_retention`, `training_policy`, `region`, `jurisdiction`,
+  `required_redactions`, `allowed_content_types`, `terms_url`, `last_reviewed_at`, `reviewed_by`),
+  `code_project_data_policies` (classification default `confidential` + `path_rules`),
+  `provider_data_policy_versions` (append-only snapshots for C6b) and `provider_hosted_consent`
+  (explicit consent per company+project+provider).
+- **Conservative, fail-closed defaults**: an unknown or new **hosted** provider gets `public` only,
+  `allow_private_repo_code: false`, `allow_prompt_caching: false`, `training_policy: "unknown"`,
+  `external_retention: "unknown"`, **all six** redaction kinds and `allowed_content_types: ["metadata"]`
+  (no code, diff, files, logs, terminal or web) with `stale: true` / `no_policy_for_provider`. An unknown
+  `providerKind` is **not** treated as self-hosted. `local`/`self_hosted` reach `restricted` but secret,
+  token and key redaction is **always** mandatory — the validator and the store refuse to remove it for any
+  kind, and the resolver re-adds it even if the database row lacks it. Priority is model → provider →
+  platform default → hard fail-closed; two model patterns can never weaken each other (the stricter one
+  wins). `classifyContent` gives `code`/`diff`/`files`/`logs`/`terminal` a floor of `confidential` **even in
+  a public project**, and path rules can only **raise** the classification. `path_rules` with `..`,
+  absolute paths, `~`, backslashes or empty values are rejected by both the service and the store, and a
+  refusal leaves the stored policy untouched. Staleness is reported after 180 days (or when
+  `last_reviewed_at` is missing).
+- **`ProviderDataGuard` as an `AIEngine` decorator** (`provider-data-guard.ts`): a Proxy, so it covers all
+  twenty-plus engine methods and a new adapter method cannot create a hole; it intercepts `chat`/`stream`
+  and, when present, `transcribeAudio`/`embed`/`moderate`/`rerank`. **Content is walked generically over all
+  string leaves** (not over known `ChatRequest` fields), so a new field in the adapter cannot bypass it.
+  Refusals: `provider_policy_context_required`, `provider_policy_unavailable` (503), 
+  `provider_data_classification_exceeded` (403), `provider_content_type_not_allowed` (403),
+  `provider_private_code_not_allowed` (403), `redaction_placeholder_write_denied` (403),
+  `no_eligible_provider`. Redaction uses **stable placeholders** (`REDACTED:token_1`, `REDACTED:email_1`)
+  and the decision carries **counts only**; `assertNoContentInDecision` throws on content keys and URLs.
+  The guard is wrapped around `baseAiEngine` **before** the resilient engine in `app.ts`, and the same
+  wrapper is applied to the **second** engine instance in `worker.ts` (previously an unprotected path).
+- **Vocabulary unification**: the guard now **imports** the authoritative `ProviderDataClassification` /
+  `ProviderContentType` (aliased) and derives its ordering from `PROVIDER_DATA_CLASSIFICATIONS`. Legacy
+  spellings map in exactly one place (`CONTENT_TYPE_ALIASES` + `toCanonicalContentType`: `file_list` →
+  `files`, `web_content` → `web`, `text` → `prompt`), and canonical values now map **identically** — this
+  was a real defect: `diff`, `code`, `logs`, `terminal`, `metadata` and `embeddings` used to return
+  `undefined`, so a policy naming `diff` looked like "no such type".
+- **Routing is filtered by the same resolver**: `production-resilient-ai-engine.ts` gained an additive
+  `isModelEligible`; both `rawModels` arrays (chat and stream) are filtered **after** fallback models are
+  resolved from their five different sources, so a forbidden provider is never even attempted. If nothing
+  is eligible the run stops with `no_eligible_provider` (non-retryable) listing the rejected models and
+  reasons instead of "try anyway". Without `isModelEligible` behaviour is unchanged.
+- **One policy prefix**: `provider-data-policy-resolver.ts` is a **thin adapter** that delegates to the
+  authoritative `resolveEffectivePolicy` (no own priority/defaults/staleness logic). `OutboundPolicySnapshot`
+  caches the **raw store rows**, so every verdict is computed by the same function; unknown or unloaded
+  state yields an **explicit** refusal (`outbound_policy_context_required`, `snapshot_refresh_failed:…`) and
+  never a silent `null`. Eligibility calls the same resolver the engine guard uses, so "UI says eligible"
+  and "routing filters" cannot diverge. `config.providerDataPolicyResolver`/`Eligibility` **no longer exist
+  anywhere**; the snapshot refreshes on start, on a 60 s timer and on **every policy mutation** (a Proxy in
+  `app.ts` invalidates it).
+- **Outbound exfiltration guard** (`outbound-exfiltration-guard.ts`) wired into **all six channels**:
+  web search, web fetch, web crawl (**including `Crawl4AIProvider`, which until now used a direct `fetch`
+  bypassing everything**), MCP, email and webhooks (after the C4b/C5 destination policy), plus messaging
+  through a Proxy over every adapter. Delivery channels (email, webhook, messaging) **deny** on a secret
+  rather than redact (a placeholder would still travel as content); retrieval channels may redact by policy;
+  a secret in the **URL** always denies. A `restricted` project sends nothing through any channel. Decisions
+  carry metadata only, and each channel has a **positive path** test so the mechanism cannot "protect" by
+  breaking legitimate traffic.
+- **Placeholders can never be written to disk**: `assertNoPlaceholderInWrite` is called **before** the write
+  in `applyEdit`, in `writeFileSafe` (before `stat`/`read`, so a refusal has no side effects) and in
+  `applyPatch` as a **separate pass over the whole plan before the first write**, so a refusal cannot leave a
+  partially applied patch.
+- **Management, RBAC, versions, audit, transparency**: eight `apiVersion: "v1"` routes
+  (`GET|PUT …/code/data-policy/providers`, `…/versions`, `GET|PUT …/projects/:projectId`,
+  `POST|DELETE …/hosted-consent`, `…/eligibility`). Changing provider policy, lowering a project's
+  classification and hosted consent require the **privileged** `code.policy.manage`, which now lives
+  **explicitly** on `owner` in `DEFAULT_COMPANY_ROLE_MATRIX` (a wildcard never reveals it) — the earlier
+  separate "owner authority" fallback was **removed** so there is one mechanism, not two. Every change
+  bumps `policy_version`, writes an append-only snapshot, is audited **before** it is applied (fail closed)
+  and emits a `provider_policy_decision` Activity event containing **field names only**. Tenant isolation is
+  enforced per `companyId`. **Effective project classification is the strictest of the two sources** (the
+  C5b row and the C1 project record): neither may lower the other, an unreadable project record counts as
+  `confidential`, and lowering is evaluated against the effective value. UI: `CodeDataPolicyPanel.tsx`
+  (providers, stale >180 days warning, hosted-consent state, project classification and path rules,
+  eligibility table) inserted into `CodeSettingsPage.tsx`.
+
+## Verification (C5b)
+- `npm run typecheck` → **exit 0** (all workspaces including `apps/web`); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=739 failed=0 skipped=0 todo=0`** with **49** security-gate
+  suites (`suite files: present=49 missing=0`) and all four steps green.
+- Real defects found and fixed while closing the step (none by weakening a check):
+  1. **the policy did not affect what reached providers** — `providerDataPolicyResolver`/`Eligibility` were
+     read from a `config` that has no such fields, so the guard applied the conservative hosted default to
+     **every** request: the configured policy had no effect at all (the same "module exists, enforcement
+     does not read it" failure as protected branches in C5a);
+  2. **redaction was a silent no-op** — the policy names redaction kinds in the **plural**
+     (`secrets`, `tokens`, `keys`, `internal_hostnames`) while the scanner emits the **singular**, and a
+     type cast (`as`) hid the mismatch, so a policy requiring redaction could never match any kind; now a
+     single bridge (`REDACTION_KIND_FROM_POLICY`) and the test asserts the **effect** (the canary does not
+     arrive) rather than the field's presence;
+  3. **the guard's context contract was broken**: `AIEngine.chat(request)` takes only the request, so a
+     caller could not pass `policyContext` positionally, and every such call was refused with
+     `provider_policy_context_required` — the mechanism appeared to **block legitimate work**; both forms
+     are now accepted, with `request.policyContext` as the C6 contract;
+  4. **`toCanonicalContentType` was not total** — canonical values returned `undefined`;
+  5. `conservativeHostedPolicy` declared `["text"]`, a content type the policy vocabulary does not know;
+  6. the messaging wrapper threw **synchronously** while adapters return promises and several call sites use
+     `.catch(...)`, so the refusal would have bypassed their error handling;
+  7. the "is this code" heuristic treated **any JSON ending in `}`** as code, which would have sent every
+     legitimate webhook or automation payload to approval;
+  8. three C5a assertions still described the previous design ("no role has a privileged permission"); they
+     now assert the truth and **more**: no role receives a privileged permission **implicitly**, and exactly
+     `owner` names exactly `code.policy.manage`.
+
+## Real E2E status (C5b)
+- Verified in-process with injected stores, policies, resolvers and mock engines: the positive path (an
+  allowed self-hosted provider receives private code), every refusal, redaction end to end, the routing
+  filter, the placeholder write hook, the policy routes and the RBAC matrix.
+- **Not verified here:** migrations **070–074** against a live PostgreSQL, the C4b live Docker egress E2E,
+  a real provider call with a real policy row, the UI in a browser, and the GitHub CI job (never executed).
+- **Enforcement is off by default** (`NPATI_CODE_PROVIDER_DATA_ENFORCEMENT`): existing Chat/Company/Email
+  traffic does not pass `policyContext` yet, so enabling it now would block legitimate non-coding traffic.
+  The first real caller is `CodingAgentRunner` in **C6**, which must set the snapshot's active context.
+
+## Known risks / open questions (C5b)
+1. **`require_approval` in the outbound guard does not create a real approval** — it refuses with
+   `approval_required` (403) and sends nothing (fail closed); wiring it to the existing approval system is
+   `TODO(C6)`.
+2. **Messaging has no per-call project context** (the gateway is global), so it relies on the snapshot's
+   active context, which **C6 must set**; the other channels pass company/project explicitly.
+3. **Two sources of project classification remain** (`projects.data_classification` from C1 and the C5b
+   table); they are reconciled fail-closed (strictest wins) but the duplication itself is debt worth
+   collapsing when R1 lands.
+4. `data_classification`/`retention_class` still exist only on projects and code sessions — tool results,
+   logs, checkpoints and artifacts are not labelled yet (R1 scope; C5b labels only what goes to a provider).
+5. Approval payloads carry **file content** and are stored (hashed); they are never provider input, but
+   their classification/retention belongs to R1 and should be reviewed there.
+6. The `artifacts/**` probe harnesses are git-ignored verification aids; deleting them removes the only
+   executable proof for agents whose sessions cannot run vitest.
+7. `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT` must not be enabled before C6 passes `policyContext` from the
+   runner, otherwise legitimate Chat/Company/Email traffic is refused.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C6), `docs/coding-agent/00-audit.md` sections 11 and 13, and this
+  file.
+- Execute **only C6**: the own agent loop (`CodingAgentRunner`) with its own tool cycle, action schema,
+  limits, context assembly, `policyContext` on every model call, the active-context snapshot for outbound
+  channels, streamed Activity events and turn-level idempotency.
+- Keep all earlier guarantees intact: commands only through the sandbox port, the PolicyEngine decides
+  (hard deny > session mode > project rules > network gate > approval; the required permission is derived
+  from the action), one-shot SecretLease with revocation, no lifecycle scripts without approval, sensitive
+  changes always require approval, agents never approve and never change policy, nothing reaches a provider
+  outside `ProviderDataGuard`, and every new suite goes into `scripts/run-security-gate.mjs`.
+- **Before any production promotion:** run migrations 070–074 against a live PostgreSQL and execute the C4b
+  live Docker E2E checklist; then, and only then, consider `NPATI_SANDBOX_EGRESS_ENFORCED=true` and
+  `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT=true`.
+- Still open from C5a: whether the four file actions in the standing-rule allow list should become
+  approval-gated, and whether to replace the remaining ad-hoc admin checks in non-code modules.
+- Do not start C7 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C5a, latest step)
 - **One server-side authorization point** (`code-rbac.ts`), deny by default. The role matrix is

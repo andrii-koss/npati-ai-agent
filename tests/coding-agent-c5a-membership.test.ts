@@ -302,10 +302,33 @@ describe("security-gate: C5a membership — the role decides the permissions", (
     expect([...COMPANY_ROLES].sort()).toEqual(["admin", "developer", "owner", "reviewer"]);
   });
 
-  it("names no privileged permission in any company role", () => {
+  it("names no privileged permission implicitly, and names one explicitly only on owner", () => {
+    // The security property is **implicit** privilege: a role must never end up holding a privileged
+    // permission it did not name itself. `owner` names `code.policy.manage` on purpose (the plan puts the
+    // provider data policy at owner level), so the roles that name a privileged permission are exactly
+    // `["owner"]` — a second role would fail this test instead of passing silently — and production,
+    // protected-branch, RBAC and trust permissions stay unnamed by every role.
+    const explicitlyNaming = new Map<string, string[]>();
     for (const role of COMPANY_ROLES) {
+      const declared = permissionsForCompanyRole(role);
       for (const privileged of CODE_PRIVILEGED_PERMISSIONS) {
-        expect(permissionsForCompanyRole(role), `${role} must not hold ${privileged}`).not.toContain(privileged);
+        if (declared.includes(privileged)) {
+          explicitlyNaming.set(role, [...(explicitlyNaming.get(role) ?? []), privileged]);
+        }
+      }
+    }
+    expect([...explicitlyNaming.keys()]).toEqual(["owner"]);
+    expect(explicitlyNaming.get("owner")).toEqual(["code.policy.manage"]);
+
+    // The registry may only ever hand out a privileged permission the role declared: no wildcard
+    // (`admin:all` on owner) turns into one.
+    const registry = createRoleRegistry({ roles: { ...DEFAULT_COMPANY_ROLE_MATRIX } });
+    for (const role of COMPANY_ROLES) {
+      const declared = permissionsForCompanyRole(role);
+      const effective = registry.permissionsForRole(role);
+      for (const privileged of CODE_PRIVILEGED_PERMISSIONS) {
+        expect(effective.includes(privileged), `${role} must not gain ${privileged} implicitly`)
+          .toBe(declared.includes(privileged));
       }
     }
   });

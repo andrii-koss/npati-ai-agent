@@ -131,13 +131,34 @@ describe("security-gate: C5a RBAC foundation — the matrix is injected configur
     await expect(rbac.authorize(principal({ role: "reviewer" }), "company-rbac", base)).resolves.toMatchObject({ allowed: true, role: "reviewer" });
   });
 
-  it("keeps privileged permissions out of every default role", () => {
+  it("keeps privileged permissions out of every default role unless the role names them, and only owner names one", () => {
     const roles = Object.entries(DEFAULT_CODE_ROLE_MATRIX.roles);
     expect(roles.length).toBeGreaterThan(0);
-    for (const [role, permissions] of roles) {
-      expect(permissions, `${role} must not carry a privileged permission`).not.toContain("code.prod.operate");
-      expect(permissions).not.toContain("code.git.protected_write");
-      expect(permissions).not.toContain("code.policy.manage");
+    const registry = createRoleRegistry(DEFAULT_CODE_ROLE_MATRIX);
+    const explicitlyNaming = new Map<string, string[]>();
+    for (const [role, declared] of roles) {
+      for (const privileged of CODE_PRIVILEGED_PERMISSIONS) {
+        // The failure mode is **implicit** privilege: a privileged permission the role never named, picked
+        // up because a wildcard was expanded into the privileged space. Effective must equal declared for
+        // every privileged permission — `owner`'s `admin:all` included.
+        expect(
+          registry.permissionsForRole(role).includes(privileged),
+          `${role} must not gain ${privileged} implicitly`,
+        ).toBe(declared.includes(privileged));
+        if (declared.includes(privileged)) {
+          explicitlyNaming.set(role, [...(explicitlyNaming.get(role) ?? []), privileged]);
+        }
+      }
+    }
+    // Exactly one role names a privileged permission, and it is the owner naming only the data policy one:
+    // the plan puts the provider data policy at owner level. A second role — or another privileged
+    // permission on `owner` — fails here instead of passing as "no role holds a privileged permission".
+    expect([...explicitlyNaming.keys()]).toEqual(["owner"]);
+    expect(explicitlyNaming.get("owner")).toEqual(["code.policy.manage"]);
+    // Production, protected-branch writes, RBAC and trust stay unnamed by every role.
+    const allDeclared = Object.values(DEFAULT_CODE_ROLE_MATRIX.roles).flat();
+    for (const forbidden of ["code.prod.operate", "code.git.protected_write", "code.rbac.manage", "code.trust.manage"]) {
+      expect(allDeclared, `no role may name ${forbidden}`).not.toContain(forbidden);
     }
   });
 

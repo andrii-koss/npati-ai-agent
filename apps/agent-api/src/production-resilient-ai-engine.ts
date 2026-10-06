@@ -68,16 +68,56 @@ class AsyncChunkChannel {
   }
 }
 
+/** Verdict for one candidate model; production wiring resolves it from the provider data policy (C5b). */
+export type ModelEligibility = { eligible: boolean; reason?: string };
+
 export interface ResilientEngineOptions {
   queue?: AdaptiveAdmissionQueue;
   defaultTier?: PriorityTier;
   queueTimeoutMs?: number;
+  /**
+   * Optional eligibility gate applied to every candidate model (primary and fallbacks) before any attempt.
+   * A model that fails the gate is skipped silently, and if nothing is left the route fails with
+   * `NoEligibleProviderError` instead of trying a provider the policy forbids.
+   */
+  isModelEligible?: (model: string) => ModelEligibility | Promise<ModelEligibility>;
+}
+
+export class NoEligibleProviderError extends Error {
+  readonly code = "no_eligible_provider";
+  readonly retryable = false;
+  constructor(readonly rejected: Array<{ model: string; reason: string }>, readonly phase: "chat" | "stream") {
+    super(
+      `[no_eligible_provider] No ${phase} model is eligible under the provider data policy (rejected: ${rejected
+        .map((entry) => `${entry.model}:${entry.reason}`)
+        .join(", ") || "none"})`,
+    );
+    this.name = "NoEligibleProviderError";
+  }
 }
 
 export function createProductionResilientAIEngine(base: AIEngine, options: ResilientEngineOptions = {}): AIEngine {
   const queue = options.queue ?? new AdaptiveAdmissionQueue();
   const defaultTier = options.defaultTier ?? "pro";
   const defaultQueueTimeoutMs = options.queueTimeoutMs ?? 30_000;
+
+  /**
+   * Applies the eligibility gate to the resolved candidate list. Rejections are collected so the failure
+   * explains which provider was skipped and why; when no gate is configured the list passes through
+   * unchanged (previous behaviour).
+   */
+  const applyEligibility = async (candidates: string[], phase: "chat" | "stream"): Promise<string[]> => {
+    if (!options.isModelEligible || candidates.length === 0) return candidates;
+    const eligible: string[] = [];
+    const rejected: Array<{ model: string; reason: string }> = [];
+    for (const model of candidates) {
+      const verdict = await options.isModelEligible(model);
+      if (verdict.eligible) eligible.push(model);
+      else rejected.push({ model, reason: verdict.reason ?? "not_eligible" });
+    }
+    if (eligible.length === 0) throw new NoEligibleProviderError(rejected, phase);
+    return eligible;
+  };
 
   const healChat = async (request: ChatRequest): Promise<ChatResult> => {
     const rawModels = [
@@ -88,7 +128,8 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
       .filter((model, index, values) => values.indexOf(model) === index);
 
     const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-    const models = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
+    const candidates = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
+    const models = await applyEligibility(candidates, "chat");
 
     const startedAt = Date.now();
     const healed = await SelfHealingAutoCombo.executeWithHealing(
@@ -141,7 +182,8 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
           .filter((model, index, values) => values.indexOf(model) === index);
 
         const chatCapable = rawModels.filter((m) => m === "auto" || m.startsWith("auto/") || !isNonChatSpecialtyModel({ id: m }));
-        const models = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
+        const candidates = chatCapable.length > 0 ? chatCapable : [request.model ?? "auto"];
+        const models = await applyEligibility(candidates, "stream");
         let emitted = false;
         let lastError: unknown;
         const failedRoutes: InferenceRouteAttempt[] = [];

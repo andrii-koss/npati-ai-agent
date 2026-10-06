@@ -1,5 +1,6 @@
 import { CodeToolError } from "./code-tools-path";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
+import { assertNoPlaceholderInWrite } from "./provider-data-guard";
 import {
   assertMassOperation, detectEncoding, detectEol, guardWritePath, resolveWriteLimits,
   type CodeWritePort, type WriteLimits, type WriteOptions,
@@ -264,6 +265,13 @@ export async function applyPatch(
   }
   // Phase 3: write. A failure mid-way restores what was already written, so the engine never leaves a
   // half-applied patch behind (the runtime additionally records a checkpoint for the whole turn).
+  // C5b: a redaction placeholder must never reach disk, and the check runs over the whole plan *before* the
+  // first write so a refused patch cannot leave a partially applied change behind.
+  for (const item of planned) {
+    if (item.op.action !== "delete") {
+      assertNoPlaceholderInWrite(item.after, { tool: "code.fs.apply_patch", path: item.guarded.path });
+    }
+  }
   const written: Array<{ path: string; content: string }> = [];
   try {
     for (const item of planned) {

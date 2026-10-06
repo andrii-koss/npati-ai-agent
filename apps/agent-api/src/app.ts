@@ -75,6 +75,9 @@ import { CodeProjectTrustService } from "./code-project-trust";
 import { CodeSessionModeService, registerCodeSessionModeRoutes } from "./code-session-mode-routes";
 import { CodeMembershipService } from "./code-membership";
 import { registerCodeMembershipRoutes } from "./code-membership-routes";
+import { registerCodeDataPolicyRoutes } from "./code-data-policy-routes";
+import { ProviderDataPolicyAdminService } from "./provider-data-policy-service";
+import { ProviderDataPolicyService, type ProviderDataClassification } from "./provider-data-policy";
 import {
   CodeProtectedBranchRepository,
   CodeProtectedBranchService,
@@ -130,6 +133,8 @@ import { ProductionMemoryEngineRegistry, QdrantMemoryEngineAdapter, SqliteFts5Me
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
 import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
 import { createProductionResilientAIEngine, InferenceRouteFailure } from "./production-resilient-ai-engine";
+import { createProviderDataGuard } from "./provider-data-guard";
+import { createEnginePolicyResolver, OutboundPolicySnapshot, resolveOutboundPolicyFromSnapshot, type ProviderDataPolicyLookupPort } from "./provider-data-policy-resolver";
 import { AdmissionError, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
@@ -179,6 +184,7 @@ import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
 import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
 import {webResearchUrlValidator} from "./ssrf-url-validator";
+import { assertOutboundAllowed, createOutboundGuard, setOutboundGuard } from "./outbound-exfiltration-guard";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
@@ -801,14 +807,79 @@ export function buildApp(config: AppConfig = {}) {
     ttsModel: config.omnirouteTtsModel,
     embeddingModel: config.omnirouteEmbeddingModel, rerankModel: config.omnirouteRerankModel,
   });
-  const aiEngine = createProductionResilientAIEngine(baseAiEngine, {
+  // C5b: ProviderDataGuard sits between the engine and every caller that sends content to a model. It is
+  // only active when the operator opts in (`NPATI_CODE_PROVIDER_DATA_ENFORCEMENT=true`) because the first
+  // caller able to supply a policy context is the Coding Agent runner (C6); once enabled it is fail-closed.
+  //
+  // The resolver reads the configured policy from the same store the policy API writes to (`workspaceStore`),
+  // so what the UI shows and what actually reaches a provider cannot diverge. `workspaceStore` is declared
+  // further down with the policy service; the closure runs per request, long after startup, so the reference
+  // is safely initialised by then.
+  let engineDataPolicyResolver: ReturnType<typeof createEnginePolicyResolver> | undefined;
+  /**
+   * C5b: the outbound guard's policy snapshot. Initialised below next to the policy service (it needs the
+   * same store), and referenced lazily from the guard closure that is registered at the same place.
+   * `refreshOutboundPolicySnapshot` lets the policy routes invalidate the snapshot right after a change.
+   */
+  let outboundPolicySnapshot: OutboundPolicySnapshot | undefined;
+  let refreshOutboundPolicySnapshot: (() => void) | undefined;
+  const resolveEngineDataPolicy = (input: { model?: string; providerId?: string; policyContext?: { companyId: string } }) => {
+    const resolver = engineDataPolicyResolver;
+    if (!resolver) {
+      // Fail closed: until the policy service exists nothing may be sent, and the guard turns this into
+      // `provider_policy_unavailable` (503) instead of inventing a permissive default.
+      throw new Error("provider data policy resolver is not wired yet");
+    }
+    return resolver(input);
+  };
+  const providerDataGuardInstance = process.env.NPATI_CODE_PROVIDER_DATA_ENFORCEMENT === "true"
+    ? createProviderDataGuard(baseAiEngine, { resolvePolicy: (input) => resolveEngineDataPolicy(input) })
+    : undefined;
+  const guardedAiEngine = providerDataGuardInstance ?? baseAiEngine;
+  const aiEngine = createProductionResilientAIEngine(guardedAiEngine, {
     queue: globalAdmissionQueue,
     defaultTier: "pro",
+    // Routing eligibility is decided by the same resolver as the guard's per-request decision, so a model
+    // the UI reports as eligible is exactly the model routing is allowed to try. A stale policy (review
+    // older than 180 days) is never eligible, which forces a policy review instead of silent sending.
+    isModelEligible: providerDataGuardInstance
+      ? async (model: string) => {
+          try {
+            const policy = await resolveEngineDataPolicy({ model });
+            if (policy.stale) return { eligible: false, reason: "policy_stale" };
+            const projectDefault = "confidential";
+            const rank: Record<string, number> = { public: 0, internal: 1, confidential: 2, restricted: 3 };
+            if ((rank[projectDefault] ?? 3) > (rank[policy.maxDataClassification] ?? 3)) {
+              return { eligible: false, reason: `classification_exceeds:${policy.maxDataClassification}` };
+            }
+            return { eligible: true };
+          } catch (error) {
+            return { eligible: false, reason: error instanceof Error ? error.message : "policy_unresolved" };
+          }
+        }
+      : undefined,
   });
   const researchBundle = baseAiEngine instanceof OmniRouteEngine
     // C4b: web fetch/crawl must obey the same SSRF policy as every other outbound request, so the
     // hardened shared validator is injected instead of the package's lighter default.
-    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl, process.env, { validator: webResearchUrlValidator() })
+    // C5b: the exfiltration guard is injected alongside it, so a search query, a fetched URL or a crawl
+    // request carrying private repository content is inspected before it leaves NPATI.
+    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl, process.env, {
+      validator: webResearchUrlValidator(),
+      outboundGuard: { assertOutboundAllowed: (input) => {
+        assertOutboundAllowed({
+          channel: input.channel,
+          parts: input.parts,
+          ...(input.context
+            ? { context: {
+              ...(input.context.companyId ? { companyId: input.context.companyId } : {}),
+              ...(input.context.projectId ? { projectId: input.context.projectId } : {}),
+              ...(input.context.sessionId ? { sessionId: input.context.sessionId } : {}),
+            } }
+            : {}),
+        });
+      } },
+    })
     : undefined;
   const webResearch = config.webResearch ?? researchBundle?.service;
   const marketplace = config.marketplace ?? new OmniRouteMarketplace({
@@ -1431,6 +1502,139 @@ export function buildApp(config: AppConfig = {}) {
     findInviteCompanyId: async (tokenHash) =>
       (await workspaceStore.findCompanyInviteByTokenHash(tokenHash))?.companyId ?? null,
     logger: app.log,
+  });
+  /**
+   * C5b: provider data policy administration.
+   *
+   * The store-level service owns validation, the audited "journal before write" order and the version
+   * bump; `ProviderDataPolicyAdminService` on top of it owns *who may change what* (company-role anchored
+   * RBAC through the C5a gate), the Activity event, and the eligibility read model the UI needs. Both are
+   * built here so the routes and any later caller share one instance and therefore one policy view.
+   *
+   * Without the audit journal the reads answer but every change refuses (`audit_unavailable`, 503) — the
+   * policy that decides what may leave NPATI is not something that gets edited unattributed.
+   */
+  const codeDataPolicyAudit = codePrivilegedAudit
+    ? {
+        record: async (input: {
+          action: string;
+          actor: string;
+          companyId: string | null;
+          resourceType: string;
+          resourceId: string;
+          metadata?: Record<string, unknown>;
+        }) => {
+          await codePrivilegedAudit.record({
+            action: input.action,
+            actor: input.actor,
+            // A platform default has no company; the journal needs a scope, so it is named explicitly.
+            companyId: input.companyId ?? AUDIT_SYSTEM_WORKSPACE,
+            resourceType: input.resourceType,
+            resourceId: input.resourceId,
+            metadata: input.metadata ?? {},
+          });
+        },
+      }
+    : undefined;
+  const codeDataPolicyStoreService = new ProviderDataPolicyService({
+    store: workspaceStore,
+    ...(codeDataPolicyAudit ? { audit: codeDataPolicyAudit } : {}),
+  });
+  /**
+   * C5b: a policy change must take effect immediately, not after the snapshot's next tick, so the mutating
+   * methods of the policy service invalidate the outbound snapshot. The wrapper lives here (not in the policy
+   * module) because the snapshot is created below; the closure resolves it lazily at request time.
+   */
+  const invalidationWrappedDataPolicyService = new Proxy(codeDataPolicyStoreService, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function" || typeof property !== "string") return value;
+      if (!/^(?:upsert|update|create|delete|set|revoke|grant)/.test(property)) {
+        return (value as (...args: unknown[]) => unknown).bind(target);
+      }
+      return async (...args: unknown[]) => {
+        const result = await (value as (...args: unknown[]) => unknown).apply(target, args);
+        refreshOutboundPolicySnapshot?.();
+        return result;
+      };
+    },
+  });
+  // C5b: wire the provider data guard's resolver to the same store the policy API reads and writes, so a
+  // configured policy actually decides what may leave NPATI (and what routing considers eligible).
+  engineDataPolicyResolver = createEnginePolicyResolver(workspaceStore as unknown as ProviderDataPolicyLookupPort);
+  /**
+   * C5b: the outbound guard resolves its policy from a **snapshot** of the same store, so there is exactly
+   * one policy source. The resolver is synchronous by contract (call sites decide synchronously), so the
+   * snapshot is refreshed in the background: at startup, on an interval, and by `refreshOutboundPolicySnapshot()`
+   * which the policy routes call after a change.
+   */
+  outboundPolicySnapshot = new OutboundPolicySnapshot(workspaceStore as unknown as ProviderDataPolicyLookupPort);
+  const refreshOutboundSnapshot = () => {
+    void outboundPolicySnapshot?.refresh().catch((error) => {
+      app.log.warn({ error: error instanceof Error ? error.message : String(error) }, "outbound_policy_snapshot_refresh_failed");
+    });
+  };
+  refreshOutboundPolicySnapshot = refreshOutboundSnapshot;
+  setOutboundGuard(createOutboundGuard({
+    resolvePolicy: (channel, context) => {
+      if (context?.companyId && context.companyId !== outboundPolicySnapshot?.getActiveContext()?.companyId) {
+        outboundPolicySnapshot?.setActiveContext({
+          companyId: context.companyId,
+          ...(context.projectId ? { projectId: context.projectId } : {}),
+          ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+          ...(context.dataClassification ? { dataClassification: context.dataClassification } : {}),
+        });
+        refreshOutboundSnapshot();
+      } else if (context?.companyId && outboundPolicySnapshot) {
+        outboundPolicySnapshot.setActiveContext({
+          companyId: context.companyId,
+          ...(context.projectId ? { projectId: context.projectId } : {}),
+          ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+          ...(context.dataClassification ? { dataClassification: context.dataClassification } : {}),
+        });
+      }
+      const resolution = outboundPolicySnapshot
+        ? resolveOutboundPolicyFromSnapshot(outboundPolicySnapshot, channel)
+        : null;
+      if (!resolution) return null;
+      if (resolution.kind === "policy") return resolution.resolved.policy;
+      // Explicit refusal: the caller sees *why* nothing could be evaluated instead of a silent null.
+      return { code: resolution.code, reason: resolution.reason };
+    },
+    resolveProjectClassification: (_channel, context) => context?.dataClassification,
+    record: (event) => { app.log.info(event, "outbound_decision"); },
+  }));
+  refreshOutboundSnapshot();
+  const outboundSnapshotTimer = setInterval(refreshOutboundSnapshot, 60_000);
+  outboundSnapshotTimer.unref?.();
+  const codeDataPolicy = new ProviderDataPolicyAdminService({
+    store: workspaceStore,
+    policies: invalidationWrappedDataPolicyService,
+    resolveRole: (context, companyId) => codeMembership.resolveRoleForUser(context, companyId),
+    /**
+     * C5b: the project record carries its own (C1) classification, which the project drawer edits, while
+     * the policy row decides what may reach a provider. The two are combined by taking the **strictest**
+     * one, so neither can lower the protection the other set; a project that cannot be read counts as
+     * `confidential` rather than as "no constraint" (see `provider-data-policy-service.ts`).
+     */
+    projectClassification: {
+      readProjectClassification: async (context, companyId, projectId) => {
+        const project = await workspaceStore.getProject(context, companyId, projectId);
+        return (project?.dataClassification as ProviderDataClassification | undefined) ?? null;
+      },
+    },
+    rbac: { ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}), logger: app.log },
+    activity: { record: (event) => { app.log.info(event, "provider_policy_decision"); } },
+    logger: app.log,
+  });
+  const codeDataPolicyContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    if (!/\/code\/data-policy(?:\/|$)/.test(request.url.split("?")[0] ?? "")) return;
+    codeDataPolicyContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeDataPolicyRoutes(app, {
+    service: codeDataPolicy,
+    getAuthContext: (request) => codeDataPolicyContexts.get(request as object) ?? null,
   });
   /**
    * C5: the effective capability groups of an agent are derived from the code tools it was granted

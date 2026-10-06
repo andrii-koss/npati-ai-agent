@@ -736,6 +736,190 @@ export class CompanyMembershipError extends WorkspaceAccessError {
   }
 }
 
+/**
+ * C5b: ProviderDataPolicy records.
+ *
+ * These mirror `ProviderDataPolicyRecord`, `ProjectDataPolicyRecord`, `ProviderDataPolicyVersionRecord`
+ * and `ProviderHostedConsentRecord` in `apps/agent-api/src/provider-data-policy.ts` **structurally** —
+ * the workspace package cannot import the app, exactly like the C5a membership port. The app-side module
+ * is the contract other agents are written against, so field names, optionality and types must stay in
+ * sync; `DataClassification` is reused verbatim so there is one classification vocabulary in the tree.
+ *
+ * Semantics the store must not soften:
+ * - `companyId === null` on a policy means "platform default, applies to every company"; a non-null value
+ *   means that tenant only. Tenant isolation is by `companyId`, never by the caller's convenience.
+ * - `modelPattern === null` means "the whole provider"; a value scopes the policy to matching models.
+ * - `policyVersion` is monotonic and must be bumped by the store, which also appends the snapshot that the
+ *   version refers to. A write whose `expectedPolicyVersion` does not match is refused, never merged.
+ * - A project policy with no row is `confidential` — the record type has no "unspecified" state, because
+ *   the default must be a value, not an absence.
+ * - A hosted-provider consent with `revokedAt !== null` counts as **no** consent.
+ */
+export type ProviderDataPolicyKind = "hosted_third_party" | "self_hosted" | "local";
+export const PROVIDER_DATA_POLICY_KINDS: readonly ProviderDataPolicyKind[] =
+  ["hosted_third_party", "self_hosted", "local"] as const;
+export type ProviderTrainingPolicy = "no_training" | "may_train" | "unknown";
+export const PROVIDER_TRAINING_POLICIES: readonly ProviderTrainingPolicy[] =
+  ["no_training", "may_train", "unknown"] as const;
+export type ProviderRedactionKind = "secrets" | "tokens" | "keys" | "pii" | "email" | "internal_hostnames";
+export const PROVIDER_REDACTION_KINDS: readonly ProviderRedactionKind[] =
+  ["secrets", "tokens", "keys", "pii", "email", "internal_hostnames"] as const;
+/** Redaction no policy may switch off (mirrored in the app-side validator). */
+export const MANDATORY_PROVIDER_REDACTIONS: readonly ProviderRedactionKind[] =
+  ["secrets", "tokens", "keys"] as const;
+export type ProviderContentType =
+  | "metadata" | "prompt" | "code" | "diff" | "files" | "logs" | "terminal" | "web" | "embeddings";
+export const PROVIDER_CONTENT_TYPES: readonly ProviderContentType[] =
+  ["metadata", "prompt", "code", "diff", "files", "logs", "terminal", "web", "embeddings"] as const;
+export type ExternalRetention = "none" | "unknown" | `N_days:${number}`;
+
+export function isProviderDataPolicyKind(value: unknown): value is ProviderDataPolicyKind {
+  return typeof value === "string" && (PROVIDER_DATA_POLICY_KINDS as readonly string[]).includes(value);
+}
+export function isProviderTrainingPolicy(value: unknown): value is ProviderTrainingPolicy {
+  return typeof value === "string" && (PROVIDER_TRAINING_POLICIES as readonly string[]).includes(value);
+}
+export function isProviderContentType(value: unknown): value is ProviderContentType {
+  return typeof value === "string" && (PROVIDER_CONTENT_TYPES as readonly string[]).includes(value);
+}
+export function isProviderRedactionKind(value: unknown): value is ProviderRedactionKind {
+  return typeof value === "string" && (PROVIDER_REDACTION_KINDS as readonly string[]).includes(value);
+}
+/** `none` | `unknown` | `N_days:<days>`; anything else is refused rather than stored as-is. */
+export function isExternalRetention(value: unknown): value is ExternalRetention {
+  return value === "none" || value === "unknown"
+    || (typeof value === "string" && /^N_days:\d{1,5}$/.test(value));
+}
+
+export interface ProviderDataPolicyRecord {
+  id: string;
+  /** `null` = platform default for every company. */
+  companyId: string | null;
+  providerId: string;
+  /** `null` = the whole provider. */
+  modelPattern: string | null;
+  policyVersion: number;
+  kind: ProviderDataPolicyKind;
+  allowPrivateRepoCode: boolean;
+  maxDataClassification: DataClassification;
+  allowPromptCaching: boolean;
+  externalRetention: ExternalRetention;
+  trainingPolicy: ProviderTrainingPolicy;
+  /**
+   * Always present in a stored row (the column is nullable, so the value is `null` rather than absent).
+   * They are required-but-nullable on purpose: that is what makes `WorkspaceStore` structurally assignable
+   * to the app-side `ProviderDataPolicyStorePort`, whose record mirrors this one.
+   */
+  region: string | null;
+  jurisdiction: string | null;
+  requiredRedactions: ProviderRedactionKind[];
+  allowedContentTypes: ProviderContentType[];
+  termsUrl: string | null;
+  lastReviewedAt: Date | null;
+  reviewedBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** `expectedPolicyVersion: null` means "this must not exist yet"; a number means "replace exactly this". */
+export interface UpsertProviderDataPolicyStoreInput {
+  companyId: string | null;
+  providerId: string;
+  modelPattern: string | null;
+  actor: string;
+  kind: ProviderDataPolicyKind;
+  allowPrivateRepoCode: boolean;
+  maxDataClassification: DataClassification;
+  allowPromptCaching: boolean;
+  externalRetention: ExternalRetention;
+  trainingPolicy: ProviderTrainingPolicy;
+  region?: string | null;
+  jurisdiction?: string | null;
+  requiredRedactions?: readonly ProviderRedactionKind[];
+  allowedContentTypes?: readonly ProviderContentType[];
+  termsUrl?: string | null;
+  lastReviewedAt?: Date | null;
+  reviewedBy?: string | null;
+  expectedPolicyVersion: number | null;
+}
+
+export interface ProviderDataPolicyVersionRecord {
+  id: string;
+  companyId: string | null;
+  providerId: string;
+  modelPattern: string | null;
+  policyVersion: number;
+  payload: unknown;
+  actor: string;
+  createdAt: Date;
+}
+
+export interface ProjectDataPolicyPathRule {
+  pattern: string;
+  classification: DataClassification;
+}
+
+export interface ProjectDataPolicyRecord {
+  companyId: string;
+  projectId: string;
+  /** Never absent: an unconfigured project is `confidential`, not "unspecified". */
+  dataClassification: DataClassification;
+  pathRules: ProjectDataPolicyPathRule[];
+  policyVersion: number;
+  updatedBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface UpsertProjectDataPolicyStoreInput {
+  companyId: string;
+  projectId: string;
+  actor: string;
+  dataClassification?: DataClassification;
+  pathRules?: readonly ProjectDataPolicyPathRule[];
+  /** `null` = must not exist yet; a number = replace exactly that version; `undefined` = no check. */
+  expectedPolicyVersion?: number | null;
+  /** Path rules are validated app-side as well; the store refuses an escape rather than normalising it. */
+}
+
+export interface ProviderHostedConsentRecord {
+  companyId: string;
+  projectId: string;
+  providerId: string;
+  grantedBy: string;
+  grantedAt: Date;
+  /** Non-null means withdrawn, and therefore "no consent". */
+  revokedAt: Date | null;
+}
+
+/**
+ * Storage refusal for the policy tables. It extends `WorkspaceAccessError` for the same reason the C5a
+ * membership errors do: the tree-wide route mappers already recognise that class, so a precise refusal is
+ * never reported as an unexpected 500. Codes mirror the app-side `ProviderDataPolicyError`
+ * (`data_policy_not_found` 404, `data_policy_revision_conflict` 409, and the validation codes 400).
+ */
+export class ProviderDataPolicyStoreError extends WorkspaceAccessError {
+  override readonly code: string;
+  override readonly status: number;
+  readonly httpStatus: number;
+  readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
+
+  constructor(
+    code: string,
+    message: string,
+    options: { httpStatus?: number; retryable?: boolean; details?: Record<string, unknown> } = {},
+  ) {
+    super(message);
+    this.name = "ProviderDataPolicyStoreError";
+    this.code = code;
+    this.httpStatus = options.httpStatus ?? 403;
+    this.status = this.httpStatus;
+    this.retryable = options.retryable ?? false;
+    this.details = options.details;
+  }
+}
+
 export interface WorkspaceStore {
   initialize(context?: AuthContext): Promise<void>;
   getUserSetting(context: AuthContext, key: string): Promise<UserSetting | null>;
@@ -909,4 +1093,52 @@ export interface WorkspaceStore {
   acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember>;
   updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember>;
   removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void>;
+
+  /**
+   * C5b: ProviderDataPolicy storage — company-scoped, no `AuthContext`, mirroring the C5a convention:
+   * the caller (an app-side service) has already resolved the principal and the company, and the policy
+   * tables are the authorisation *subject*, not the authorisation check.
+   *
+   * Invariants every implementation must keep:
+   * - a read with no row returns `null`: absence is never a permissive policy;
+   * - `upsertProviderDataPolicy` bumps `policyVersion` (previous + 1, starting at 1), appends the full
+   *   snapshot to the history table with the given `actor`, and refuses a mismatch against
+   *   `expectedPolicyVersion` (`data_policy_revision_conflict`, 409) instead of merging;
+   * - `upsertProviderDataPolicy` refuses a `requiredRedactions` list that omits secrets/tokens/keys, and an
+   *   unknown kind/classification/training policy/retention/content type (`invalid_*`, 400);
+   * - every method is scoped by `companyId`; a row of another company is never read, listed or written;
+   * - `getHostedProviderConsent` returns the row whatever its state, and a row with `revokedAt` set counts
+   *   as no consent for callers.
+   */
+  getProviderDataPolicy(input: {
+    companyId: string | null;
+    providerId: string;
+    modelPattern: string | null;
+  }): Promise<ProviderDataPolicyRecord | null>;
+  listProviderDataPolicies(companyId: string | null): Promise<ProviderDataPolicyRecord[]>;
+  upsertProviderDataPolicy(input: UpsertProviderDataPolicyStoreInput): Promise<ProviderDataPolicyRecord>;
+  listProviderDataPolicyVersions(
+    companyId: string | null,
+    providerId?: string,
+  ): Promise<ProviderDataPolicyVersionRecord[]>;
+  getProjectDataPolicy(companyId: string, projectId: string): Promise<ProjectDataPolicyRecord | null>;
+  upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord>;
+  grantHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    grantedBy: string;
+    grantedAt: Date;
+  }): Promise<ProviderHostedConsentRecord>;
+  revokeHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    revokedAt: Date;
+  }): Promise<ProviderHostedConsentRecord>;
+  getHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+  }): Promise<ProviderHostedConsentRecord | null>;
 }

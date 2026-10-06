@@ -5,10 +5,12 @@ import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
-  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole } from "./types";
+  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole,
+  ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
+  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
-import { CompanyMembershipError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+import { CompanyMembershipError, ProviderDataPolicyStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
@@ -118,6 +120,27 @@ const companyInviteColumns = `id, company_id AS "companyId", email, role, token_
  */
 const lastActiveOwnerPredicate = (companyParameter: string) =>
   `(SELECT COUNT(*) FROM company_members m WHERE m.company_id=${companyParameter} AND m.role='owner' AND m.status='active') <= 1`;
+
+// C5b: ProviderDataPolicy. Timestamps stay `timestamptz` (pg returns Date) because the policy staleness
+// rule compares `last_reviewed_at` against a 180-day window, and the history rows are read back as-is.
+const providerDataPolicyColumns = `id, company_id AS "companyId", provider_id AS "providerId",
+  model_pattern AS "modelPattern", policy_version AS "policyVersion", kind,
+  allow_private_repo_code AS "allowPrivateRepoCode", max_data_classification AS "maxDataClassification",
+  allow_prompt_caching AS "allowPromptCaching", external_retention AS "externalRetention",
+  training_policy AS "trainingPolicy", region, jurisdiction, required_redactions AS "requiredRedactions",
+  allowed_content_types AS "allowedContentTypes", terms_url AS "termsUrl",
+  last_reviewed_at AS "lastReviewedAt", reviewed_by AS "reviewedBy",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const providerDataPolicyVersionColumns = `id, company_id AS "companyId", provider_id AS "providerId",
+  model_pattern AS "modelPattern", policy_version AS "policyVersion", payload, actor,
+  created_at AS "createdAt"`;
+const projectDataPolicyColumns = `company_id AS "companyId", project_id AS "projectId",
+  data_classification AS "dataClassification", path_rules AS "pathRules",
+  policy_version AS "policyVersion", updated_by AS "updatedBy",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+const hostedProviderConsentColumns = `company_id AS "companyId", project_id AS "projectId",
+  provider_id AS "providerId", granted_by AS "grantedBy", granted_at AS "grantedAt",
+  revoked_at AS "revokedAt"`;
 
 import migration004 from './migration-004';
 import migration005 from './migration-005';
@@ -948,6 +971,20 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration073 } = await import("./migration-073");
         await runMigration073(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('073_company_protected_branches')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C5b: ProviderDataPolicy, project classification, policy history and hosted-provider consent.
+    // Additive: 074 creates its own four tables and indexes and touches no existing table, row or query.
+    const providerDataPoliciesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='074_provider_data_policies'");
+    if (!providerDataPoliciesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration074 } = await import("./migration-074");
+        await runMigration074(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('074_provider_data_policies')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -2738,5 +2775,326 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }
     return { ...current, business: { ...current.business, activationStatus: "active" as const }, status: "completed" as const, updatedAt: new Date().toISOString() };
+  }
+
+  // --- C5b: ProviderDataPolicy ------------------------------------------------------------------
+  // Company-scoped and deliberately without `AuthContext`, mirroring the C5a membership convention: the
+  // policy is the *subject* of authorisation, and the app-side service has already resolved the principal.
+  // Every statement is scoped by `company_id` (with `NULL` meaning the platform default row), so one tenant
+  // can never read or write another's policy.
+
+  /**
+   * Validation duplicated from `provider-data-policy.ts` on purpose: a direct store call must be as safe as
+   * one that went through the service. The codes match the app-side error class so a single route mapper
+   * handles both.
+   */
+  private assertValidProviderPolicy(input: UpsertProviderDataPolicyStoreInput): void {
+    if (!isProviderDataPolicyKind(input.kind)) {
+      throw new ProviderDataPolicyStoreError("invalid_policy_field", `Unsupported provider kind: ${String(input.kind)}`, {
+        httpStatus: 400, details: { field: "kind" },
+      });
+    }
+    if (!isClassificationAtLeast(input.maxDataClassification, "public")) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_classification",
+        `Unsupported classification: ${String(input.maxDataClassification)}`,
+        { httpStatus: 400, details: { field: "maxDataClassification" } },
+      );
+    }
+    if (!isProviderTrainingPolicy(input.trainingPolicy)) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_field",
+        `Unsupported training policy: ${String(input.trainingPolicy)}`,
+        { httpStatus: 400, details: { field: "trainingPolicy" } },
+      );
+    }
+    if (!isExternalRetention(input.externalRetention)) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_retention",
+        `Unsupported external retention: ${String(input.externalRetention)}`,
+        { httpStatus: 400, details: { field: "externalRetention" } },
+      );
+    }
+    const redactions = input.requiredRedactions ?? MANDATORY_PROVIDER_REDACTIONS;
+    for (const kind of redactions) {
+      if (!isProviderRedactionKind(kind)) {
+        throw new ProviderDataPolicyStoreError("invalid_policy_field", `Unsupported redaction kind: ${String(kind)}`, {
+          httpStatus: 400, details: { field: "requiredRedactions" },
+        });
+      }
+    }
+    const missing = MANDATORY_PROVIDER_REDACTIONS.filter((kind) => !redactions.includes(kind));
+    if (missing.length > 0) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_field",
+        `Required redactions must include: ${missing.join(", ")}`,
+        { httpStatus: 400, details: { field: "requiredRedactions", missing } },
+      );
+    }
+    for (const contentType of input.allowedContentTypes ?? ["metadata"]) {
+      if (!isProviderContentType(contentType)) {
+        throw new ProviderDataPolicyStoreError(
+          "invalid_policy_field",
+          `Unsupported content type: ${String(contentType)}`,
+          { httpStatus: 400, details: { field: "allowedContentTypes" } },
+        );
+      }
+    }
+  }
+
+  async getProviderDataPolicy(input: {
+    companyId: string | null;
+    providerId: string;
+    modelPattern: string | null;
+  }): Promise<ProviderDataPolicyRecord | null> {
+    const result = await this.pool.query<ProviderDataPolicyRecord>(
+      `SELECT ${providerDataPolicyColumns} FROM provider_data_policies
+       WHERE COALESCE(company_id,'')=COALESCE($1,'') AND provider_id=$2 AND COALESCE(model_pattern,'')=COALESCE($3,'')`,
+      [input.companyId, input.providerId, input.modelPattern],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listProviderDataPolicies(companyId: string | null): Promise<ProviderDataPolicyRecord[]> {
+    const result = await this.pool.query<ProviderDataPolicyRecord>(
+      `SELECT ${providerDataPolicyColumns} FROM provider_data_policies
+       WHERE COALESCE(company_id,'')=COALESCE($1,'')
+       ORDER BY provider_id, model_pattern`,
+      [companyId],
+    );
+    return result.rows;
+  }
+
+  /**
+   * One transaction: check the expected version, bump `policy_version` (previous + 1), then append the
+   * accepted snapshot to the history with the acting `actor`. A mismatch rolls back, so a concurrent writer
+   * can never be silently overwritten and the history always matches the live row.
+   */
+  async upsertProviderDataPolicy(input: UpsertProviderDataPolicyStoreInput): Promise<ProviderDataPolicyRecord> {
+    this.assertValidProviderPolicy(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<ProviderDataPolicyRecord>(
+        `SELECT ${providerDataPolicyColumns} FROM provider_data_policies
+         WHERE COALESCE(company_id,'')=COALESCE($1,'') AND provider_id=$2 AND COALESCE(model_pattern,'')=COALESCE($3,'')
+         FOR UPDATE`,
+        [input.companyId, input.providerId, input.modelPattern],
+      );
+      const existing = current.rows[0] ?? null;
+      if (input.expectedPolicyVersion === null && existing) {
+        throw new ProviderDataPolicyStoreError("data_policy_revision_conflict", "A policy for this provider already exists", {
+          httpStatus: 409, details: { expectedPolicyVersion: null, actualPolicyVersion: existing.policyVersion },
+        });
+      }
+      if (typeof input.expectedPolicyVersion === "number") {
+        if (!existing) {
+          throw new ProviderDataPolicyStoreError("data_policy_not_found", "No policy to update for this provider", {
+            httpStatus: 404, details: { expectedPolicyVersion: input.expectedPolicyVersion },
+          });
+        }
+        if (existing.policyVersion !== input.expectedPolicyVersion) {
+          throw new ProviderDataPolicyStoreError(
+            "data_policy_revision_conflict",
+            "Provider data policy changed by another request. Reload and try again.",
+            {
+              httpStatus: 409,
+              details: { expectedPolicyVersion: input.expectedPolicyVersion, actualPolicyVersion: existing.policyVersion },
+            },
+          );
+        }
+      }
+
+      // The mandatory redactions are unioned in, so a row written through this path can never omit them.
+      const redactions = [...new Set([...MANDATORY_PROVIDER_REDACTIONS, ...(input.requiredRedactions ?? [])])];
+      const contentTypes = [...new Set(input.allowedContentTypes ?? ["metadata"])];
+      const result = await client.query<ProviderDataPolicyRecord>(
+        `INSERT INTO provider_data_policies
+           (id, company_id, provider_id, model_pattern, policy_version, kind, allow_private_repo_code,
+            max_data_classification, allow_prompt_caching, external_retention, training_policy, region,
+            jurisdiction, required_redactions, allowed_content_types, terms_url, last_reviewed_at, reviewed_by,
+            created_at, updated_at)
+         VALUES ($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now())
+         ON CONFLICT (COALESCE(company_id,''), provider_id, COALESCE(model_pattern,'')) DO UPDATE SET
+           kind=EXCLUDED.kind,
+           allow_private_repo_code=EXCLUDED.allow_private_repo_code,
+           max_data_classification=EXCLUDED.max_data_classification,
+           allow_prompt_caching=EXCLUDED.allow_prompt_caching,
+           external_retention=EXCLUDED.external_retention,
+           training_policy=EXCLUDED.training_policy,
+           region=EXCLUDED.region,
+           jurisdiction=EXCLUDED.jurisdiction,
+           required_redactions=EXCLUDED.required_redactions,
+           allowed_content_types=EXCLUDED.allowed_content_types,
+           terms_url=EXCLUDED.terms_url,
+           last_reviewed_at=EXCLUDED.last_reviewed_at,
+           reviewed_by=EXCLUDED.reviewed_by,
+           policy_version=provider_data_policies.policy_version+1,
+           updated_at=now()
+         RETURNING ${providerDataPolicyColumns}`,
+        [existing?.id ?? `pdp_${randomUUID()}`, input.companyId, input.providerId, input.modelPattern, input.kind,
+          input.allowPrivateRepoCode, input.maxDataClassification, input.allowPromptCaching, input.externalRetention,
+          input.trainingPolicy, input.region ?? null, input.jurisdiction ?? null, redactions, contentTypes,
+          input.termsUrl ?? null, input.lastReviewedAt ?? null, input.reviewedBy ?? null],
+      );
+      const record = result.rows[0]!;
+
+      await client.query(
+        `INSERT INTO provider_data_policy_versions
+           (id, company_id, provider_id, model_pattern, policy_version, payload, actor, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+         ON CONFLICT (COALESCE(company_id,''), provider_id, COALESCE(model_pattern,''), policy_version) DO NOTHING`,
+        [randomUUID(), record.companyId, record.providerId, record.modelPattern, record.policyVersion,
+          JSON.stringify(record), input.actor],
+      );
+
+      await client.query("COMMIT");
+      return record;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listProviderDataPolicyVersions(
+    companyId: string | null,
+    providerId?: string,
+  ): Promise<ProviderDataPolicyVersionRecord[]> {
+    const result = await this.pool.query<ProviderDataPolicyVersionRecord>(
+      `SELECT ${providerDataPolicyVersionColumns} FROM provider_data_policy_versions
+       WHERE COALESCE(company_id,'')=COALESCE($1,'') AND ($2::text IS NULL OR provider_id=$2)
+       ORDER BY policy_version, created_at`,
+      [companyId, providerId ?? null],
+    );
+    return result.rows;
+  }
+
+  async getProjectDataPolicy(companyId: string, projectId: string): Promise<ProjectDataPolicyRecord | null> {
+    const result = await this.pool.query<ProjectDataPolicyRecord>(
+      `SELECT ${projectDataPolicyColumns} FROM code_project_data_policies
+       WHERE company_id=$1 AND project_id=$2`,
+      [companyId, projectId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /** An unconfigured project is `confidential` (never `public`): the default is applied here, on read. */
+  async upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord> {
+    const current = await this.getProjectDataPolicy(input.companyId, input.projectId);
+    if (input.expectedPolicyVersion === null && current) {
+      throw new ProviderDataPolicyStoreError("data_policy_revision_conflict", "A project data policy already exists", {
+        httpStatus: 409, details: { expectedPolicyVersion: null, actualPolicyVersion: current.policyVersion },
+      });
+    }
+    if (typeof input.expectedPolicyVersion === "number" && current
+      && current.policyVersion !== input.expectedPolicyVersion) {
+      throw new ProviderDataPolicyStoreError(
+        "data_policy_revision_conflict",
+        "Project data policy changed by another request. Reload and try again.",
+        {
+          httpStatus: 409,
+          details: { expectedPolicyVersion: input.expectedPolicyVersion, actualPolicyVersion: current.policyVersion },
+        },
+      );
+    }
+    const classification = input.dataClassification ?? current?.dataClassification ?? DEFAULT_DATA_CLASSIFICATION;
+    if (!isClassificationAtLeast(classification, "public")) {
+      throw new ProviderDataPolicyStoreError("invalid_classification", `Unsupported classification: ${String(classification)}`, {
+        httpStatus: 400, details: { field: "dataClassification" },
+      });
+    }
+    const pathRules = (input.pathRules ?? current?.pathRules ?? []).map((rule) => this.assertValidPathRule(rule));
+    const result = await this.pool.query<ProjectDataPolicyRecord>(
+      `INSERT INTO code_project_data_policies
+         (company_id, project_id, data_classification, path_rules, policy_version, updated_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,1,$5,now(),now())
+       ON CONFLICT (company_id, project_id) DO UPDATE SET
+         data_classification=EXCLUDED.data_classification,
+         path_rules=EXCLUDED.path_rules,
+         updated_by=EXCLUDED.updated_by,
+         policy_version=code_project_data_policies.policy_version+1,
+         updated_at=now()
+       RETURNING ${projectDataPolicyColumns}`,
+      [input.companyId, input.projectId, classification, JSON.stringify(pathRules), input.actor],
+    );
+    return result.rows[0]!;
+  }
+
+  /** A rule that could escape the project is refused, never normalised: a normalised escape is still one. */
+  private assertValidPathRule(rule: ProjectDataPolicyPathRule): ProjectDataPolicyPathRule {
+    const pattern = rule && typeof rule.pattern === "string" ? rule.pattern.trim() : "";
+    const escapes = pattern.length === 0 || pattern.startsWith("/") || pattern.startsWith("~")
+      || pattern.includes("\\") || pattern.split("/").some((segment) => segment === "..");
+    if (escapes) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_path_rule",
+        `Path rule must stay inside the project: ${String(rule?.pattern)}`,
+        { httpStatus: 400, details: { field: "pathRules", pattern: rule?.pattern } },
+      );
+    }
+    if (!isClassificationAtLeast(rule.classification, "public")) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_classification",
+        `Unsupported classification in path rule: ${String(rule.classification)}`,
+        { httpStatus: 400, details: { field: "classification", pattern } },
+      );
+    }
+    return { pattern, classification: rule.classification };
+  }
+
+  async grantHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    grantedBy: string;
+    grantedAt: Date;
+  }): Promise<ProviderHostedConsentRecord> {
+    // A fresh grant clears a previous revocation: consent is explicit, and re-granting is the only way back.
+    const result = await this.pool.query<ProviderHostedConsentRecord>(
+      `INSERT INTO provider_hosted_consent
+         (company_id, project_id, provider_id, granted_by, granted_at, revoked_at)
+       VALUES ($1,$2,$3,$4,$5,NULL)
+       ON CONFLICT (company_id, project_id, provider_id) DO UPDATE SET
+         granted_by=EXCLUDED.granted_by, granted_at=EXCLUDED.granted_at, revoked_at=NULL
+       RETURNING ${hostedProviderConsentColumns}`,
+      [input.companyId, input.projectId, input.providerId, input.grantedBy, input.grantedAt],
+    );
+    return result.rows[0]!;
+  }
+
+  async revokeHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    revokedAt: Date;
+  }): Promise<ProviderHostedConsentRecord> {
+    const result = await this.pool.query<ProviderHostedConsentRecord>(
+      `UPDATE provider_hosted_consent SET revoked_at=$4
+       WHERE company_id=$1 AND project_id=$2 AND provider_id=$3
+       RETURNING ${hostedProviderConsentColumns}`,
+      [input.companyId, input.projectId, input.providerId, input.revokedAt],
+    );
+    if (!result.rows[0]) {
+      throw new ProviderDataPolicyStoreError("data_policy_not_found", "No hosted provider consent to revoke", {
+        httpStatus: 404, details: { providerId: input.providerId },
+      });
+    }
+    return result.rows[0];
+  }
+
+  /** The row whatever its state; a caller must treat `revokedAt !== null` as no consent at all. */
+  async getHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+  }): Promise<ProviderHostedConsentRecord | null> {
+    const result = await this.pool.query<ProviderHostedConsentRecord>(
+      `SELECT ${hostedProviderConsentColumns} FROM provider_hosted_consent
+       WHERE company_id=$1 AND project_id=$2 AND provider_id=$3`,
+      [input.companyId, input.projectId, input.providerId],
+    );
+    return result.rows[0] ?? null;
   }
 }

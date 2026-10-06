@@ -162,18 +162,39 @@ describe("security-gate: C5a RBAC — the matrix is injected configuration, not 
     );
   });
 
-  it("names no privileged permission in any default role of either matrix", () => {
-    const matrices: Array<[string, Record<string, readonly string[]>]> = [
-      ["code-rbac.DEFAULT_CODE_ROLE_MATRIX", DEFAULT_CODE_ROLE_MATRIX.roles],
-      ["code-membership.DEFAULT_COMPANY_ROLE_MATRIX", DEFAULT_COMPANY_ROLE_MATRIX as unknown as Record<string, readonly string[]>],
+  it("gives no default role a privileged permission it does not name, and names them only on owner", () => {
+    const registries: Array<[string, ReturnType<typeof createRoleRegistry>, Record<string, readonly string[]>]> = [
+      ["DEFAULT_CODE_ROLE_MATRIX", createRoleRegistry(DEFAULT_CODE_ROLE_MATRIX), DEFAULT_CODE_ROLE_MATRIX.roles],
+      [
+        "DEFAULT_COMPANY_ROLE_MATRIX",
+        createRoleRegistry({ roles: { ...DEFAULT_COMPANY_ROLE_MATRIX } }),
+        DEFAULT_COMPANY_ROLE_MATRIX as unknown as Record<string, readonly string[]>,
+      ],
     ];
-    for (const [name, roles] of matrices) {
+    for (const [name, registry, roles] of registries) {
       expect(Object.keys(roles).length, `${name} must define roles`).toBeGreaterThan(0);
-      for (const [role, permissions] of Object.entries(roles)) {
+      const explicitlyNaming = new Map<string, string[]>();
+      for (const [role, declared] of Object.entries(roles)) {
         for (const privileged of CODE_PRIVILEGED_PERMISSIONS) {
-          expect(permissions, `${name}: role ${role} must not hold ${privileged}`).not.toContain(privileged);
+          // The failure mode is **implicit** privilege: a privileged permission a role never named, picked
+          // up because a wildcard was expanded into the privileged space. It must hold exactly when the
+          // role declares it — for every role, `owner` included.
+          expect(
+            registry.permissionsForRole(role).includes(privileged),
+            `${name}: role ${role} must not gain ${privileged} implicitly`,
+          ).toBe(declared.includes(privileged));
+          if (declared.includes(privileged)) {
+            explicitlyNaming.set(role, [...(explicitlyNaming.get(role) ?? []), privileged]);
+          }
         }
       }
+      // Exactly one role names a privileged permission and it is the owner (the plan puts the provider
+      // data policy at owner level). A second role starting to name one — `code.prod.operate`,
+      // `code.git.protected_write`, `code.rbac.manage`, `code.trust.manage` — fails right here instead of
+      // slipping through as "still no privileged permission at all".
+      expect([...explicitlyNaming.keys()], `${name}: only owner may name a privileged permission`).toEqual(["owner"]);
+      expect(explicitlyNaming.get("owner"), `${name}: owner names exactly the data policy permission`)
+        .toEqual(["code.policy.manage"]);
     }
     expect(CODE_PRIVILEGED_PERMISSIONS).toContain("code.prod.operate");
   });
