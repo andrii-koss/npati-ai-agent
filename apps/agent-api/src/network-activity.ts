@@ -25,6 +25,9 @@ export interface NetworkDecisionEvent {
   projectId?: string;
   sessionId?: string;
   sandboxId?: string;
+  /** C6b: the run and ExecutionSnapshot this connection belongs to, when the caller knows them. */
+  runId?: string;
+  snapshotId?: string;
   /** Tool name when the traffic was produced by a tool call. */
   tool?: string;
   phase: NetworkPhase;
@@ -83,6 +86,8 @@ export function redactNetworkDecision(event: Omit<NetworkDecisionEvent, "kind" |
   if (redacted.code) redacted.code = CredentialMasker.mask(String(redacted.code));
   if (redacted.tool) redacted.tool = CredentialMasker.mask(String(redacted.tool));
   if (redacted.sandboxId) redacted.sandboxId = CredentialMasker.mask(String(redacted.sandboxId));
+  if (redacted.runId) redacted.runId = CredentialMasker.mask(String(redacted.runId));
+  if (redacted.snapshotId) redacted.snapshotId = CredentialMasker.mask(String(redacted.snapshotId));
   if (redacted.resolvedIp) redacted.resolvedIp = CredentialMasker.mask(String(redacted.resolvedIp));
   return redacted;
 }

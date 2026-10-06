@@ -43,6 +43,8 @@ export interface CodeRunReconcileActivityEvent {
   projectId: string;
   sessionId: string;
   runId: string;
+  /** C6b: snapshot of the run this reconciliation belongs to, when one exists. */
+  snapshotId?: string;
   reason: string;
   lastFinishedTurn?: number;
   replayedReadOnlyToolCalls?: number;

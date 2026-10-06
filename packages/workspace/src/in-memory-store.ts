@@ -6,8 +6,13 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType,
   CodeRunStateRecord, CodeRunStateStatus, CodeRunTurnRecord, CodeRunToolCallRecord, CreateCodeRunStateInput,
   ApplyCodeRunStateEventInput, UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput,
-  CodeRunScanPage } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
+  CodeRunScanPage, CreateExecutionSnapshotInput, ExecutionSnapshotRecord, ExecutionSnapshotDiff,
+  ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
+  CreateSnapshotConfigVersionInput, CodeActivityEventRecord, CreateCodeActivityEventInput,
+  ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord, CreateReplayBundleInput,
+  ListReplayBundlesInput } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, ExecutionSnapshotImmutableError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor } from "./types";
+import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -64,6 +69,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   // keyed by (run, turnIndex) exactly like the primary key of `code_run_turns`.
   private readonly codeRunStates = new Map<string, CodeRunStateRecord>();
   private readonly codeRunTurns = new Map<string, CodeRunTurnRecord>();
+  // C6b: append-only snapshots and config versions. Keyed by id; the session chain is derived on read.
+  private readonly executionSnapshots = new Map<string, ExecutionSnapshotRecord>();
+  private readonly snapshotConfigVersions = new Map<string, SnapshotConfigVersionRecord>();
+  // C6b: durable Activity events. Append-only, keyed by id; reads sort newest first like the postgres index.
+  private readonly codeActivityEvents = new Map<string, CodeActivityEventRecord>();
+  private readonly replayBundles = new Map<string, ReplayBundleRecord>();
+  private readonly replayBundleSteps = new Map<string, ReplayBundleStepRecord[]>();
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -2165,5 +2177,250 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   /** Same predicate for a removal: the row itself must be the company's only active owner. */
   private isLastActiveOwner(member: CompanyMember): boolean {
     return member.status === "active" && member.role === "owner" && this.activeOwnerCount(member.companyId) <= 1;
+  }
+
+  // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
+
+  async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
+    const id = input.id ?? randomUUID();
+    // A snapshot is evidence: reusing an id would rewrite history, so this is a refusal, not an upsert.
+    if (this.executionSnapshots.has(id)) throw new ExecutionSnapshotImmutableError(`create with existing id ${id}`);
+
+    const previous = await this.getLatestSnapshotForSession(input.companyId, input.sessionId);
+    const record: ExecutionSnapshotRecord = {
+      id,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      runId: input.runId ?? null,
+      snapshotVersion: (previous?.snapshotVersion ?? 0) + 1,
+      payload: input.payload,
+      payloadHash: snapshotPayloadHash(input.payload),
+      prevSnapshotId: previous?.id ?? null,
+      prevPayloadHash: previous?.payloadHash ?? null,
+      trigger: input.trigger,
+      legacy: input.legacy === true,
+      createdAt: input.now ?? new Date(),
+      createdBy: input.createdBy,
+    };
+    this.executionSnapshots.set(record.id, record);
+    return record;
+  }
+
+  async getExecutionSnapshot(companyId: string, snapshotId: string): Promise<ExecutionSnapshotRecord | null> {
+    const record = this.executionSnapshots.get(snapshotId);
+    return record && record.companyId === companyId ? record : null;
+  }
+
+  async getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null> {
+    const matching = [...this.executionSnapshots.values()]
+      .filter((record) => record.companyId === companyId && record.sessionId === sessionId)
+      .sort((a, b) => b.snapshotVersion - a.snapshotVersion);
+    return matching[0] ?? null;
+  }
+
+  async getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null> {
+    const matching = [...this.executionSnapshots.values()]
+      .filter((record) => record.companyId === companyId && record.runId === runId)
+      .sort((a, b) => b.snapshotVersion - a.snapshotVersion);
+    return matching[0] ?? null;
+  }
+
+  async listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]> {
+    const limit = Math.min(Math.max(input.limit, 1), 500);
+    return [...this.executionSnapshots.values()]
+      .filter((record) => record.companyId === input.companyId
+        && (!input.sessionId || record.sessionId === input.sessionId)
+        && (!input.projectId || record.projectId === input.projectId))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
+  }
+
+  diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff {
+    const { changes, unchanged } = diffSnapshotPayloads(a.payload, b.payload);
+    return {
+      fromSnapshotId: a.id, toSnapshotId: b.id,
+      fromVersion: a.snapshotVersion, toVersion: b.snapshotVersion,
+      changes, unchanged,
+    };
+  }
+
+  async createSnapshotConfigVersion(input: CreateSnapshotConfigVersionInput): Promise<SnapshotConfigVersionRecord> {
+    const existing = await this.findSnapshotConfigVersionByHash(input.companyId, input.kind, input.contentHash);
+    // Identical content must reuse its version: a new row per call would make every snapshot point at a
+    // different "version" of the same text and destroy the meaning of the number.
+    if (existing) return existing;
+    const nextVersion = [...this.snapshotConfigVersions.values()]
+      .filter((record) => record.companyId === input.companyId && record.kind === input.kind)
+      .reduce((max, record) => Math.max(max, record.version), 0) + 1;
+    const record: SnapshotConfigVersionRecord = {
+      id: input.id ?? `scv_${randomUUID()}`,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      kind: input.kind,
+      version: nextVersion,
+      contentHash: input.contentHash,
+      content: input.content,
+      createdAt: input.now ?? new Date(),
+      createdBy: input.createdBy,
+    };
+    this.snapshotConfigVersions.set(record.id, record);
+    return record;
+  }
+
+  async getSnapshotConfigVersion(
+    companyId: string, kind: SnapshotConfigKind, version: number,
+  ): Promise<SnapshotConfigVersionRecord | null> {
+    return [...this.snapshotConfigVersions.values()].find((record) => record.companyId === companyId
+      && record.kind === kind && record.version === version) ?? null;
+  }
+
+  async findSnapshotConfigVersionByHash(
+    companyId: string, kind: SnapshotConfigKind, contentHash: string,
+  ): Promise<SnapshotConfigVersionRecord | null> {
+    return [...this.snapshotConfigVersions.values()].find((record) => record.companyId === companyId
+      && record.kind === kind && record.contentHash === contentHash) ?? null;
+  }
+
+  async listSnapshotConfigVersions(companyId: string, kind: SnapshotConfigKind): Promise<SnapshotConfigVersionRecord[]> {
+    return [...this.snapshotConfigVersions.values()]
+      .filter((record) => record.companyId === companyId && record.kind === kind)
+      .sort((a, b) => b.version - a.version);
+  }
+
+  /**
+   * C6b: append-only Activity events. Mirrors the postgres ordering (`created_at DESC, id DESC`) and the
+   * keyset cursor, so a read written against one store behaves identically on the other.
+   */
+  async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
+    const record: CodeActivityEventRecord = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      projectId: input.projectId ?? null,
+      sessionId: input.sessionId ?? null,
+      runId: input.runId ?? null,
+      snapshotId: input.snapshotId ?? null,
+      kind: input.kind,
+      payload: input.payload,
+      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+      retentionClass: input.retentionClass ?? DEFAULT_RETENTION_CLASS,
+      createdAt: input.now ?? new Date(),
+    };
+    this.codeActivityEvents.set(record.id, record);
+    return record;
+  }
+
+  async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+    const cursor = input.cursor ? decodeCodeActivityCursor(input.cursor) : null;
+    return [...this.codeActivityEvents.values()]
+      .filter((record) => record.companyId === input.companyId)
+      .filter((record) => !input.sessionId || record.sessionId === input.sessionId)
+      .filter((record) => !input.runId || record.runId === input.runId)
+      .filter((record) => !input.snapshotId || record.snapshotId === input.snapshotId)
+      .filter((record) => {
+        if (!cursor) return true;
+        // Keyset comparison over (createdAt, id), newest first.
+        const at = record.createdAt.getTime();
+        const cursorAt = Date.parse(cursor.createdAt);
+        return at < cursorAt || (at === cursorAt && record.id < cursor.id);
+      })
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit);
+  }
+
+  /**
+   * C6b: replay bundles. Mirrors the postgres semantics exactly: header plus ordered steps, idempotent by
+   * `(runId, bundleVersion)`, append-only (no update or delete method exists on either store).
+   */
+  async createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord> {
+    const existing = await this.getReplayBundle(input.companyId, input.runId, input.bundleVersion);
+    if (existing) return existing;
+    const now = input.now ?? new Date();
+    const record: ReplayBundleRecord = {
+      id: input.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      runId: input.runId,
+      executionSnapshotId: input.executionSnapshotId ?? null,
+      bundleVersion: input.bundleVersion,
+      runnerVersion: input.runnerVersion ?? null,
+      systemPromptVersion: input.systemPromptVersion ?? null,
+      systemPromptContentHash: input.systemPromptContentHash ?? null,
+      modelProfileVersion: input.modelProfileVersion ?? null,
+      provider: input.provider ?? null,
+      model: input.model ?? null,
+      replayMode: input.replayMode,
+      sourceRunId: input.sourceRunId ?? null,
+      sourceSnapshotId: input.sourceSnapshotId ?? null,
+      terminalStatus: input.terminalStatus ?? null,
+      terminalReason: input.terminalReason ?? null,
+      payload: input.payload,
+      payloadHash: input.payloadHash,
+      replayInputHash: input.replayInputHash,
+      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+      retentionClass: input.retentionClass ?? DEFAULT_RETENTION_CLASS,
+      createdAt: now,
+    };
+    this.replayBundles.set(record.id, record);
+    const steps: ReplayBundleStepRecord[] = [];
+    let seq = 0;
+    const seen = new Set<string>();
+    for (const step of input.steps) {
+      // Idempotency mirrors the unique index on (bundleId, kind, turnIndex, toolCallId): a repeated step is
+      // dropped, never duplicated.
+      const identity = `${step.kind}:${step.turnIndex}:${step.toolCallId ?? ""}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      seq += 1;
+      steps.push({
+        id: step.id ?? randomUUID(),
+        bundleId: record.id,
+        companyId: input.companyId,
+        seq,
+        kind: step.kind,
+        turnIndex: step.turnIndex,
+        toolCallId: step.toolCallId ?? null,
+        payload: step.payload,
+        payloadHash: step.payloadHash,
+        createdAt: step.createdAt ?? now,
+      });
+    }
+    this.replayBundleSteps.set(record.id, steps);
+    return record;
+  }
+
+  async getReplayBundle(companyId: string, runId: string, bundleVersion?: number): Promise<ReplayBundleRecord | null> {
+    const matches = [...this.replayBundles.values()]
+      .filter((bundle) => bundle.companyId === companyId && bundle.runId === runId)
+      .filter((bundle) => bundleVersion === undefined || bundle.bundleVersion === bundleVersion)
+      .sort((a, b) => b.bundleVersion - a.bundleVersion);
+    return matches[0] ?? null;
+  }
+
+  /** C6b: by-id read, tenant-scoped (mirrors the postgres query). */
+  async getReplayBundleById(companyId: string, bundleId: string): Promise<ReplayBundleRecord | null> {
+    const bundle = this.replayBundles.get(bundleId);
+    return bundle && bundle.companyId === companyId ? bundle : null;
+  }
+
+  async listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
+    return [...this.replayBundles.values()]
+      .filter((bundle) => bundle.companyId === input.companyId)
+      .filter((bundle) => !input.runId || bundle.runId === input.runId)
+      .filter((bundle) => !input.sessionId || bundle.sessionId === input.sessionId)
+      .filter((bundle) => !input.executionSnapshotId || bundle.executionSnapshotId === input.executionSnapshotId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit);
+  }
+
+  async listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]> {
+    const steps = this.replayBundleSteps.get(bundleId) ?? [];
+    return steps.filter((step) => step.companyId === companyId).slice().sort((a, b) => a.seq - b.seq);
   }
 }

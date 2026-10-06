@@ -124,6 +124,42 @@ export const SECURITY_GATE_TESTS = [
   // approval; that a migration hidden inside a project script is detected; that the agent never sees a
   // production connection string; and that a revoked/denied verdict never reaches the engine at all.
   "tests/coding-agent-c6a-migration-safety.test.ts",
+  // C6b: execution snapshots are append-only (a reused id is refused, and there is no update/delete path at
+  // all); a run's snapshot is found by `run_id`; config versions are deduplicated by content hash and a change
+  // mints a new immutable version; a secret-shaped value in the sources refuses persistence (`snapshot_secret_detected`)
+  // rather than being silently stripped; and a run without a snapshot answers `legacy_no_snapshot` instead of failing.
+  "tests/coding-agent-c6b-snapshot-store.test.ts",
+  // C6b: every Activity family (tool call, policy decision, network decision, run, reconciliation) carries
+  // its `snapshot_id` and is persisted with a classification/retention from creation; a command line, diff,
+  // prompt or terminal output in the payload is refused instead of being stored; a secret hidden in an
+  // innocuous key is refused by value; and a store failure is reported without changing the decision.
+  "tests/coding-agent-c6b-activity-snapshot.test.ts",
+  // C6b: the versioned replay bundle. Recording covers every field a deterministic replay needs (format
+  // version, environment, prompt/profile versions, provider answers, ordered tool calls with their schema
+  // version and the canonical settled result); the recorded input hash is stable for the same exchange; a raw
+  // artifact is excluded from the replay input so untruncated output cannot influence a replay; a secret in a
+  // provider answer or a tool result refuses the bundle instead of being stripped; and a failed write is
+  // reported without changing the run.
+  "tests/coding-agent-c6b-replay-bundle.test.ts",
+  // C6b: deterministic replay. The recorded mode verifies the recorded run against its own two records (the
+  // model output and the execution) and makes no provider call and no tool execution at all — the engine has
+  // no live port, so that is structural, not promised. Every divergence (a different order, tool, schema
+  // version, argument hash, an extra or missing call, a contradicted terminal status) is reported with a
+  // structured, metadata-only reason; an unsupported format version, a tampered input hash and a truncated
+  // recording are refused instead of partially replayed.
+  "tests/coding-agent-c6b-replay-deterministic.test.ts",
+  // C6b: live replay. It starts a **new** run, really calls the model and the tools, keeps the source
+  // run/snapshot references, and is labelled best-effort with the owner's notice verbatim — a result that
+  // claims "deterministic" is refused by a guard, and the shared gate refuses the replay without permission.
+  "tests/coding-agent-c6b-replay-live.test.ts",
+  // C6b: the read-only "why did the agent act this way" surface. A run recorded before C6b answers
+  // `legacy_no_snapshot` (and a run without a recording `no_bundle`) with HTTP 200 and no error shape, so
+  // history stays readable; the snapshot answer carries the identity Run Trace needs; the diff is the
+  // store's content-safe structural diff and never echoes payload values; replay metadata is counts and
+  // hashes only, with the best-effort notice verbatim for a live bundle; a stored Activity event that
+  // carries content is refused loudly instead of being filtered; reads are authorized by the shared gate on
+  // named actions, refused before the store is touched, and tenant-scoped.
+  "tests/coding-agent-c6b-snapshot-api.test.ts",
 ];
 
 /**

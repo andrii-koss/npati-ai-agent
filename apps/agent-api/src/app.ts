@@ -9,7 +9,7 @@ import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@
 import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
-import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "@npati/workspace";
 import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
@@ -71,6 +71,7 @@ import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
 import { NetworkActivityRecorder } from "./network-activity";
 import { PolicyDecisionRecorder } from "./policy-decision-activity";
+import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activity-sink";
 import { CodeProjectTrustService } from "./code-project-trust";
 import { CodeSessionModeService, registerCodeSessionModeRoutes } from "./code-session-mode-routes";
 import { CodeMembershipService } from "./code-membership";
@@ -94,16 +95,26 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
-import { CodingAgentRunner } from "./coding-agent-runner";
+import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder } from "./coding-agent-runner";
+import { ReplayBundleRecorder } from "./code-replay-bundle";
+import { ensureModelProfilesVersion, ensureSystemPromptVersion } from "./code-snapshot-versioning";
+import { createExecutionSnapshotProvider } from "./execution-snapshot";
 import { CodeRunStateLog } from "./code-run-state";
 import { CodeRunReconciler } from "./code-run-reconciler";
 import type { CodeSession } from "@npati/workspace";
 import { registerCodeIntentRoutes, resolveChatCodeIntent } from "./code-intent-routing";
+// C6b: replay. Deterministic replay verifies the recorded bundle without any live port; live replay starts a
+// new run and is labelled best-effort.
+import { CodeReplayService, registerCodeReplayRoutes } from "./code-replay-routes";
+import { getReplayBundleById, readReplayBundle, type ReplayBundleReadPort } from "./code-replay-bundle";
+// C6b: the read-only "why did the agent act this way" surface (snapshot for a run, snapshot diff, Activity
+// events of a run, replay metadata). Reads only, so it cannot widen what an agent may do.
+import { registerCodeSnapshotRoutes } from "./code-snapshot-routes";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
-import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
+import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort, currentManifestVersion } from "./code-tool-runtime";
 import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-deps-policy";
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
 import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
@@ -122,7 +133,7 @@ import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-appro
 import { registerCodeApprovalRoutes } from "./code-approval-routes";
 import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
-import { DEFAULT_CODE_AGENT_LIMITS, type CodeAgentLimits } from "./code-agent-config";
+import { DEFAULT_CODE_AGENT_LIMITS, resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
 import { registerProjectDeployRoutes } from "./project-deploy-routes";
 import { ProjectBrowserQaService } from "./project-browser-qa-service";
@@ -1233,8 +1244,18 @@ export function buildApp(config: AppConfig = {}) {
     : undefined;
   runnerReadinessTimer?.unref();
   if (runnerReadiness) void runnerReadiness.check(true).catch(() => undefined);
+  // C6b: every Activity event is persisted **and** logged. The sink is the single write path, so the
+  // snapshot reference and the metadata-only guarantees live in one place instead of in each caller.
+  const codeActivitySink = createCodeRunActivitySink({
+    store: workspaceStore,
+    workspaceId: AUDIT_SYSTEM_WORKSPACE,
+    classification: {
+      resolve: () => ({ dataClassification: DEFAULT_DATA_CLASSIFICATION, retentionClass: DEFAULT_RETENTION_CLASS }),
+    },
+    log: (event, message) => { app.log.info(event, message); },
+  });
   const networkActivity = new NetworkActivityRecorder({
-    sink: { record: (event) => { app.log.info(event, "network_decision"); } },
+    sink: activitySinkForKind(codeActivitySink, "network_decision"),
   });
   const egressAllowlist = resolveEgressAllowlist();
   app.log.info({ proxyHosts: toProxyAllowedHosts(egressAllowlist) }, "egress_allowlist_configured");
@@ -1265,7 +1286,7 @@ export function buildApp(config: AppConfig = {}) {
   // ExecutionSnapshot arrive with C6/C6b; until then the sink is the structured log, exactly like the
   // C4 tool activity and the C4b network decision events).
   const policyDecisionActivity = new PolicyDecisionRecorder({
-    sink: { record: (event) => { app.log.info(event, "policy_decision"); } },
+    sink: activitySinkForKind(codeActivitySink, "policy_decision"),
   });
   /**
    * C5a: production operations. `code.prod.operate` is named by no default role, agents and service
@@ -1400,6 +1421,7 @@ export function buildApp(config: AppConfig = {}) {
         projectId: request.projectId,
         sessionId: request.sessionId,
         runId: request.runId,
+        snapshotId: request.snapshotId,
         tool: request.tool,
         action: request.tool,
         mode: matrixModeFor(request.sessionMode),
@@ -2104,7 +2126,7 @@ export function buildApp(config: AppConfig = {}) {
       checkSyntax: async ({ ctx, companyId, projectId, paths }) => runSandboxPostWriteHook(codeSandboxExecPort, ctx, companyId, projectId, process.env.NPATI_CODE_SYNTAX_COMMAND, paths),
     } : undefined,
     toPort: () => createProjectWorkspaceReadPort(projectWorkspace, codeSandboxExecPort),
-    activity: { record: async (event) => { app.log.info({ ...event, kind: "code.tool.activity" }, "code tool activity"); } },
+    activity: activitySinkForKind(codeActivitySink, "code_tool_activity"),
   });
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
   // published checksum), so a session can always be read with the exact tool versions it used.
@@ -3785,6 +3807,39 @@ ${localized.next}`;
     heartbeatMs: config.codeAgentLimits?.runHeartbeatMs ?? DEFAULT_CODE_AGENT_LIMITS.runHeartbeatMs,
     logger: app.log,
   });
+  // C6b: per-run environment holder + the real snapshot provider. The admitted sandbox image digest and the
+  // policy composition exist only for one run, so they are published here and read by the sources below.
+  const codeRunEnvironment = createCodeRunEnvironmentHolder();
+  const codeSnapshotProvider = createExecutionSnapshotProvider({
+    store: workspaceStore,
+    // The runner always passes the session's own workspace; this fallback mirrors the audit system workspace.
+    workspaceId: AUDIT_SYSTEM_WORKSPACE,
+    sources: {
+      // A single `policy_version` does not exist (see `policyComposition` below), so this stays null.
+      policyVersion: async () => null,
+      policyComposition: async () => codeRunEnvironment.policyComposition(),
+      toolManifestVersion: async () => currentManifestVersion(),
+      // C6b: the exact prompt and profile of this run, resolved to an immutable version by content hash (the
+      // runner publishes them through the holder, because only the runner knows their content).
+      modelProfileVersion: async () => codeRunEnvironment.modelProfileVersion(),
+      // `parameters` stay absent: the runner passes no generation parameters, so no temperature exists to
+      // record. Inventing one would be worse than the honest absence.
+      modelSelection: async () => codeRunEnvironment.modelSelection(),
+      systemPrompt: async () => codeRunEnvironment.systemPrompt(),
+      // The build that executed the run: without it "which runner" is unanswerable.
+      runnerVersion: async () => buildRunnerVersion(buildInfo),
+      sandboxImage: async () => codeRunEnvironment.sandboxImage(),
+      // Per-run facts published by the runner through the holder above.
+      featureFlags: async () => codeRunEnvironment.featureFlags(),
+      providerDataPolicy: async () => codeRunEnvironment.providerDataPolicy(),
+      baseCommit: async () => codeRunEnvironment.baseCommit(),
+      // C8 owns project instructions: until it lands the hash is genuinely unknown (`null`), and the trust
+      // status is the conservative default rather than a claim that the project was trusted.
+      projectInstructions: async () => ({ contentHash: null, trustStatus: "untrusted" }),
+      toolchain: async () => codeRunEnvironment.toolchain(),
+    },
+    resolveRole: async () => null,
+  });
   const codingAgentRunner = new CodingAgentRunner({
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
@@ -3793,12 +3848,171 @@ ${localized.next}`;
     schemas: CODE_TOOL_SCHEMAS,
     imageAdmission: sandboxImagePolicy,
     runState: codeRunStateLog,
-    activity: { record: async (event) => { app.log.info(event, "code_run_activity"); } },
+    // C6b: the snapshot is real, not the null provider. The provider is built once per process, so the facts
+    // that only exist per run (the admitted image digest and the policy composition) travel through the
+    // holder below. Every source that this deployment genuinely cannot answer returns `null` with the reason
+    // next to it — a fabricated value would make "policy changed" a lie.
+    snapshot: codeSnapshotProvider,
+    environment: codeRunEnvironment,
+    // C6b: the prompt/profile versions come from the existing content-addressed registries, so two runs with
+    // identical configuration share a version and any change mints a new one.
+    snapshotConfigVersions: {
+      ensureSystemPromptVersion: async ({ ctx, companyId, projectId, workspaceId, promptText, profileId }) => {
+        try {
+          const ref = await ensureSystemPromptVersion({
+            store: workspaceStore,
+            companyId,
+            workspaceId,
+            createdBy: ctx.userId,
+            content: { runnerVersion: buildRunnerVersion(buildInfo), profileId, projectId },
+            promptText,
+          });
+          return { version: ref.version, contentHash: ref.contentHash };
+        } catch {
+          return null;
+        }
+      },
+      ensureModelProfilesVersion: async ({ ctx, companyId, workspaceId, profile }) => {
+        try {
+          const ref = await ensureModelProfilesVersion({
+            store: workspaceStore,
+            companyId,
+            workspaceId,
+            createdBy: ctx.userId,
+            content: { profile },
+          });
+          return ref.version;
+        } catch {
+          return null;
+        }
+      },
+    },
+    policyCompositionSources: {
+      // C5b project data policy: the version is what changed when someone edited the policy.
+      projectPolicyVersion: async ({ ctx, companyId, projectId }) => {
+        try {
+          const view = await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId);
+          return view.policyVersion;
+        } catch {
+          return null;
+        }
+      },
+      // C5 scoped approval rules: the highest revision in force for this project/session.
+      approvalRulesRevision: async ({ ctx, companyId, projectId, sessionId }) => {
+        try {
+          const rules = await codeApprovalScope.listRules(ctx, companyId, {
+            projectId,
+            ...(sessionId ? { sessionId } : {}),
+          });
+          return rules.reduce((max: number, rule: { revision: number }) => Math.max(max, rule.revision), 0);
+        } catch {
+          return null;
+        }
+      },
+      // C5a company membership: the highest member revision (a role change bumps it).
+      companyMembershipRevision: async ({ ctx, companyId }) => {
+        try {
+          const members = await codeMembership.listMembers(ctx, companyId);
+          return members.reduce((max: number, member: { revision: number }) => Math.max(max, member.revision), 0);
+        } catch {
+          return null;
+        }
+      },
+      // Resolved flags in force for this run (master + sub-flags with scope/source), never the raw list.
+      featureFlags: async ({ ctx, companyId }) => {
+        try {
+          const described = await featureFlagService.describe(ctx, { companyId, userId: ctx.userId });
+          return { master: described.master, flags: described.flags, darkLaunch: described.darkLaunch };
+        } catch {
+          return null;
+        }
+      },
+      // Effective provider data policy for the run: the version that governs it plus the classification that
+      // was actually applied (the strictest of the C5b row and the C1 project record).
+      providerDataPolicy: async ({ ctx, companyId, projectId, model }) => {
+        try {
+          const providerId = (model ?? "auto").split("/")[0] || "auto";
+          const resolved = await codeDataPolicyStoreService.resolveForCompany({
+            companyId,
+            providerId,
+            model: model ?? null,
+            providerKind: null,
+          });
+          let classification: string | null = null;
+          try {
+            classification = (await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId)).effectiveClassification;
+          } catch {
+            classification = null;
+          }
+          return { version: resolved.policyVersion ?? null, classification };
+        } catch {
+          return null;
+        }
+      },
+      // Branch and dirty come from `status`; the HEAD hash comes from the log (never derived from `status`).
+      baseCommit: async ({ ctx, companyId, projectId }) => {
+        try {
+          const status = await projectGitService.status(ctx, companyId, projectId);
+          let commit: string | null = null;
+          try {
+            const entries = await projectGitService.log(ctx, companyId, projectId, 1);
+            commit = entries[0]?.hash ?? null;
+          } catch {
+            commit = null;
+          }
+          return { branch: status.branch ?? null, commit, dirty: status.clean === false };
+        } catch {
+          return null;
+        }
+      },
+      // The project's detected toolchain (C1 detector output), recorded as-is.
+      toolchain: async ({ ctx, companyId, projectId }) => {
+        try {
+          const project = await projectService.get(ctx, companyId, projectId);
+          const toolchain = (project as { toolchain?: unknown } | null)?.toolchain;
+          return toolchain && typeof toolchain === "object" ? (toolchain as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      },
+    },
+    activity: activitySinkForKind(codeActivitySink, "run_activity"),
     // C6a: when the reaper reports disk pressure it refuses new runs. The check runs at run start — after
     // RBAC, before image admission and before any model or tool call — and a gate that throws refuses too
     // (`admission_gate_unavailable`), because "the gate did not answer" must never mean "let it run".
     admissionGate: { isRefusingNewRuns: () => codeReaper.isRefusingNewRuns() },
-    // Run-event persistence lands with the run trace (C6b); until then the loop's events are logged above.
+    /**
+     * C6b: record what a deterministic replay needs — every model answer and the canonical, model-visible,
+     * settled tool result. The recorder writes one bundle per run (idempotent by run + format version) and its
+     * failure never changes the run; a bundle containing a secret is refused instead of silently redacted.
+     */
+    replayBundle: {
+      start: (replayInput) => new ReplayBundleRecorder({
+        store: workspaceStore,
+        context: {
+          workspaceId: replayInput.workspaceId,
+          companyId: replayInput.companyId,
+          projectId: replayInput.projectId,
+          sessionId: replayInput.sessionId,
+          runId: replayInput.runId,
+          executionSnapshotId: replayInput.snapshotId ?? null,
+          runnerVersion: buildRunnerVersion(buildInfo),
+          systemPromptVersion: replayInput.systemPrompt?.version ?? null,
+          systemPromptContentHash: replayInput.systemPrompt?.contentHash ?? null,
+          modelProfileVersion:
+            typeof replayInput.modelProfileVersion === "number" ? replayInput.modelProfileVersion : null,
+          provider: replayInput.modelSelection?.provider ?? null,
+          model: replayInput.modelSelection?.model ?? null,
+          replayMode: "recorded",
+          ...(replayInput.dataClassification ? { dataClassification: replayInput.dataClassification } : {}),
+          ...(replayInput.retentionClass ? { retentionClass: replayInput.retentionClass } : {}),
+        },
+        toolOutputChars: resolveCodeAgentLimits().toolOutputChars,
+        logger: { warn: (message, meta) => app.log.warn(meta ?? {}, message) },
+      }),
+    },
+    logger: { warn: (message, meta) => app.log.warn(meta ?? {}, message) },
+    // C6b: activity is persisted by the shared sink above; the run-entity binding arrives with the run trace.
     runEvents: { append: async (entry) => entry },
   });
   // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
@@ -3806,7 +4020,7 @@ ${localized.next}`;
   // as a doubt and never replayed. This is what turns a crash into a recoverable state instead of a mystery.
   const codeRunReconciler = new CodeRunReconciler({
     log: codeRunStateLog,
-    activity: { record: async (event) => { app.log.info(event, "code_run_reconcile"); } },
+    activity: activitySinkForKind(codeActivitySink, "run_reconcile"),
   });
   {
     void codeRunReconciler.reconcileRuns().catch((error) => {
@@ -3856,6 +4070,111 @@ ${localized.next}`;
       const sessions = await codeService.listSessions(ctx, companyId, projectId, { limit: 1 });
       return sessions[0] ?? null;
     },
+    logger: app.log,
+  });
+  /**
+   * C6b: replay routes.
+   *
+   * A replay is authorized by the shared gate with its own named action (`code.replay.run`), so the permission
+   * is derived from the action rather than trusted from the caller. Deterministic replay verifies the recorded
+   * bundle and makes **no** provider call and runs **no** tool — the engine has no live port at all, so that is
+   * structural. Live replay starts a new run and carries the best-effort notice.
+   *
+   * The recorded bundle is owned by `code-replay-bundle.ts` (migration 078): its reader and its recorded
+   * hashes are used directly, so no canonicalisation is re-implemented here.
+   */
+  const codeReplayContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    if (!/\/code\/(?:runs\/[^/]+\/replay|replay(?:\/|$))/.test(request.url.split("?")[0] ?? "")) return;
+    codeReplayContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeReplayRoutes(app, {
+    service: new CodeReplayService({
+      authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+      loadRecording: async (_ctx, companyId, _projectId, runId) => {
+        // The store implements the bundle read port, so the recorded steps, their canonical hashes and the
+        // stored `replayInputHash` all come from the one recording implementation.
+        const store = workspaceStore as unknown as ReplayBundleReadPort;
+        const [recording, header] = await Promise.all([
+          readReplayBundle({ store, companyId, runId }),
+          store.getReplayBundle(companyId, runId),
+        ]);
+        return {
+          recording,
+          bundleVersion: header?.bundleVersion ?? null,
+          terminalStatus: header?.terminalStatus ?? null,
+        };
+      },
+      loadSession: async (ctx, companyId, _projectId, sessionId) =>
+        sessionId ? codeService.getSession(ctx, companyId, sessionId) : null,
+      // The status route reads by replay id through the bundle module's by-id reader: tenant-scoped in the
+      // store, and an unknown or foreign id answers `no_bundle` (the route then returns one identical 404, so
+      // it cannot be used to probe another company's replay ids).
+      loadReplayById: async (_ctx, companyId, replayId) =>
+        getReplayBundleById({ store: workspaceStore as unknown as ReplayBundleReadPort, companyId, replayId }),
+      toolVersions: (toolName) => CODE_TOOL_SCHEMAS.find((schema) => schema.name === toolName)?.version ?? null,
+      // The status route reads a replay record by id. No such record store exists yet: the bundle read port is
+      // keyed by run id and exposes no by-id accessor, and live replay returns its record in the POST response.
+      // Until a replay-record store exists the route answers `replay_not_found` — fail-closed and honest,
+      // rather than a second store bolted on here.
+      live: {
+        loadSourceRun: async (ctx, companyId, runId) => {
+          const state = await codeRunStateLog.loadRunState(companyId, runId);
+          if (!state) return null;
+          const snapshot = await workspaceStore.getSnapshotForRun(companyId, runId);
+          return {
+            projectId: state.projectId,
+            sessionId: state.sessionId,
+            snapshotId: snapshot?.id ?? null,
+            prompt: null,
+          };
+        },
+        // A live replay is a **new** run: no `runId` is passed, so the source run keeps its own identity and
+        // the new one gets its own. It really calls the model and the tools through the real runner.
+        startRun: async (input) => {
+          const result = await codingAgentRunner.run({
+            ctx: input.ctx,
+            session: input.session,
+            prompt: input.prompt,
+          });
+          return {
+            runId: result.runId ?? `${input.sourceRunId}:live`,
+            snapshotId: result.snapshotId ? result.snapshotId : null,
+            status: result.status,
+            ...(result.reason ? { reason: result.reason } : {}),
+          };
+        },
+      },
+      onActivity: async (event) => {
+        app.log.info(event, "code_replay_activity");
+      },
+    }),
+    getAuthContext: (request) => codeReplayContexts.get(request as object) ?? null,
+  });
+  /**
+   * C6b: read-only snapshot and Activity surface behind Run Trace.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism the session-mode, production,
+   * membership, data-policy and replay surfaces use, so there is no second auth path. `/code/runs/:runId/replay`
+   * is matched by both this hook and the replay hook above (this module serves the GET metadata route, the
+   * replay module serves POST and its own status route), so that one path authenticates twice; that is the
+   * cost of keeping both surfaces' contexts independent, and it is a read-only path.
+   */
+  const codeSnapshotContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/(?:runs\/[^/]+\/(?:snapshot|activity|replay)|snapshots(?:\/|$))/.test(path)) return;
+    codeSnapshotContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeSnapshotRoutes(app, {
+    // Reads go through the same store the writer uses, so a run's snapshot and its Activity can never be
+    // read from a different source than the one that was written.
+    store: workspaceStore,
+    // The shared C5a gate with named actions (`code.snapshot.read`, `code.activity.read`,
+    // `code.replay.read`): the permission is derived from the action, so a read cannot be authorized by
+    // handing in a convenient label.
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeSnapshotContexts.get(request as object) ?? null,
     logger: app.log,
   });
   // C5: scoped approval rules are visible and revocable; every change is audited before it applies.

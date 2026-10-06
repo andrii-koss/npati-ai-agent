@@ -47,6 +47,12 @@ export interface PolicyRequest {
   sessionId?: string;
   runId?: string;
   agentId?: string;
+  /**
+   * C6b: the ExecutionSnapshot this decision belongs to. Optional on purpose: a caller with no snapshot
+   * (an action outside a run, or a pre-C6b caller) leaves it unset rather than passing a fabricated id, and
+   * the persisted Activity event records "no snapshot" honestly.
+   */
+  snapshotId?: string;
   tool: string;
   toolVersion?: number;
   command?: string;

@@ -38,6 +38,8 @@ export interface PolicyDecisionEvent {
   projectId?: string;
   sessionId?: string;
   runId?: string;
+  /** C6b: the ExecutionSnapshot this decision belongs to; absent when no snapshot exists (never fabricated). */
+  snapshotId?: string;
   /** The attempted capability/tool, e.g. `code.shell.exec`. */
   tool?: string;
   /** Short action label (never a full command line). */
@@ -120,6 +122,7 @@ export function redactPolicyDecision(
   if (event.projectId) redacted.projectId = mask(String(event.projectId));
   if (event.sessionId) redacted.sessionId = mask(String(event.sessionId));
   if (event.runId) redacted.runId = mask(String(event.runId));
+  if (event.snapshotId) redacted.snapshotId = mask(String(event.snapshotId));
   if (event.tool) redacted.tool = mask(String(event.tool));
   if (event.mode) redacted.mode = mask(String(event.mode));
   if (event.code) redacted.code = mask(String(event.code));

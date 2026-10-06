@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+// C6b: read-only "why did this run act this way" — execution snapshot, snapshot diff and replay status.
+import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
@@ -985,6 +987,11 @@ export function ActivityPage() {
                 <p>{t("activity.trace.selectRunCopy")}</p>
               </div>
             )}
+            {/* C6b: the minimum Run Trace needs to explain a run's environment and policies. A run with no
+                snapshot says legacy_no_snapshot rather than rendering an error. */}
+            {selectedRunId ? (
+              <CodeSnapshotPanel companyId={selectedCompanyId} runId={selectedRunId} isUk={language === "uk"} />
+            ) : null}
           </section>
         </div>
       </div>

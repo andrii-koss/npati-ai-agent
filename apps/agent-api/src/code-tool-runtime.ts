@@ -247,6 +247,9 @@ export interface CodeToolActivityEvent {
   companyId: string;
   projectId: string;
   sessionId?: string;
+  /** C6b: the run and its ExecutionSnapshot, so every Activity event can be explained after the fact. */
+  runId?: string;
+  snapshotId?: string;
   tool: string;
   toolVersion: number;
   schemaVersion: number;
@@ -586,6 +589,12 @@ export class CodeToolRuntime {
     approvalId?: string;
     /** C3: existing run/agent identity, required by the approval system when consuming. */
     runId?: string; agentId?: string;
+    /**
+     * C6b: the ExecutionSnapshot this call belongs to. Optional and never fabricated: a call outside a run
+     * (or from a caller that predates C6b) leaves it unset, and both the Activity event and the audit entry
+     * then record "no snapshot" honestly.
+     */
+    snapshotId?: string;
   }): Promise<CodeToolInvokeResult | CodeToolInvokeFailure> {
     const started = Date.now();
     const sessionId = input.sessionId ?? `project:${input.projectId}`;
@@ -673,6 +682,7 @@ export class CodeToolRuntime {
         // the change instead of applying it without a record (rule 23, fail closed).
         await this.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
           checkpointId, turnId, action: "pre_write", strict: true,
+          ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
         });
       }
 
@@ -743,7 +753,7 @@ export class CodeToolRuntime {
       };
       this.idempotency.set(cacheKey, { at: Date.now(), result });
       await this.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
-      await this.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0 });
+      await this.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0, ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}) });
       return result;
     } catch (error) {
       const failure = this.toFailure(error, input.tool);
@@ -1088,11 +1098,12 @@ export class CodeToolRuntime {
     return this.options.wrap ? this.options.wrap(tool, payload) : wrapToolResult(tool, payload);
   }
 
-  private async recordActivity(input: { companyId: string; projectId: string; sessionId?: string; tool: string; toolVersion: number; durationMs: number; bytes: number; truncated: boolean; ok: boolean; errorCode?: string }): Promise<void> {
+  private async recordActivity(input: { companyId: string; projectId: string; sessionId?: string; runId?: string; snapshotId?: string; tool: string; toolVersion: number; durationMs: number; bytes: number; truncated: boolean; ok: boolean; errorCode?: string }): Promise<void> {
     if (!this.options.activity) return;
     try {
       await this.options.activity.record({
         companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
+        runId: input.runId, snapshotId: input.snapshotId,
         tool: input.tool, toolVersion: input.toolVersion, schemaVersion: input.toolVersion,
         durationMs: input.durationMs, bytes: input.bytes, truncated: input.truncated, ok: input.ok, errorCode: input.errorCode,
       });
@@ -1107,7 +1118,7 @@ export class CodeToolRuntime {
     tool: CodeToolSchema | undefined,
     decision: "allowed" | "denied",
     errorCode?: string,
-    extra?: { checkpointId?: string | null; turnId?: string; changes?: number; action?: string; strict?: boolean },
+    extra?: { checkpointId?: string | null; turnId?: string; changes?: number; action?: string; strict?: boolean; snapshotId?: string },
   ): Promise<void> {
     if (!this.options.audit) return;
     try {
@@ -1117,6 +1128,8 @@ export class CodeToolRuntime {
         action: decision === "allowed" ? (this.writeTools.has(input.tool) ? input.tool : "code.tool.invoke") : "code.tool.denied",
         resourceType: "code_tool", resourceId: input.tool, projectId: input.projectId,
         decision,
+        // C6b: only set when the caller genuinely knows the snapshot; never fabricated here.
+        ...(extra?.snapshotId ? { snapshotId: extra.snapshotId } : {}),
         payload: { tool: input.tool, toolVersion: tool?.version ?? null, toolCallId: input.toolCallId, errorCode: errorCode ?? null },
         // No file content, no secrets: paths, hashes and diff statistics only.
         metadata: {

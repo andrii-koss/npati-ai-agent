@@ -1428,4 +1428,339 @@ export interface WorkspaceStore {
    */
   listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>>;
   listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>>;
+
+  // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
+  /**
+   * Snapshots are append-only: `create` refuses to touch an existing row and there is no update or delete
+   * method at all, so the only way to change what the system looked like is to record a new snapshot.
+   */
+  createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord>;
+  getExecutionSnapshot(companyId: string, snapshotId: string): Promise<ExecutionSnapshotRecord | null>;
+  /** The newest snapshot of a session, or `null` when the session predates C6b (`legacy_no_snapshot`). */
+  getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null>;
+  getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null>;
+  listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]>;
+  /** Structural diff of two snapshots, metadata only. Never returns values from the payload verbatim. */
+  diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff;
+  /** Config versions are immutable: identical content returns the existing version instead of a new one. */
+  createSnapshotConfigVersion(input: CreateSnapshotConfigVersionInput): Promise<SnapshotConfigVersionRecord>;
+  getSnapshotConfigVersion(companyId: string, kind: SnapshotConfigKind, version: number): Promise<SnapshotConfigVersionRecord | null>;
+  findSnapshotConfigVersionByHash(companyId: string, kind: SnapshotConfigKind, contentHash: string): Promise<SnapshotConfigVersionRecord | null>;
+  listSnapshotConfigVersions(companyId: string, kind: SnapshotConfigKind): Promise<SnapshotConfigVersionRecord[]>;
+
+  // --- C6b: durable Activity events referencing their snapshot ---------------------------------------
+  /**
+   * Append-only: there is no update or delete method for activity events. `snapshotId` is optional because
+   * events from before C6b (or from a path outside any run) have no snapshot, and storing a fabricated id
+   * would be worse than storing none.
+   */
+  createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord>;
+  /** Newest first. Tenant-scoped; filters by session, run or snapshot when given. */
+  listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]>;
+
+  // --- C6b: versioned replay bundles -------------------------------------------------------------------
+  /**
+   * Writes a bundle header together with its ordered steps. Both tables are append-only, so there is no
+   * update or delete method. Idempotent by `(runId, bundleVersion)`: recording the same run twice returns the
+   * stored bundle instead of appending a second one.
+   */
+  createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord>;
+  /** The bundle of a run; without `bundleVersion` the newest one is returned. */
+  getReplayBundle(companyId: string, runId: string, bundleVersion?: number): Promise<ReplayBundleRecord | null>;
+  /**
+   * The same bundle addressed by its own id, which is what a replay status endpoint and the UI hold.
+   * Tenant-scoped: a bundle of another company is simply not found.
+   */
+  getReplayBundleById(companyId: string, bundleId: string): Promise<ReplayBundleRecord | null>;
+  /** Newest first, tenant-scoped. */
+  listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]>;
+  /** Steps in the recorded (executed) order. */
+  listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]>;
+}
+
+// --- C6b snapshot DTOs (declared after the interface on purpose: TypeScript hoists them) --------------
+
+export type ExecutionSnapshotTrigger =
+  | "session_start"
+  | "run_start"
+  | "config_change"
+  | "resume"
+  | "recovery";
+
+export type SnapshotConfigKind = "system_prompt" | "model_profiles";
+
+export interface ExecutionSnapshotRecord {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  runId: string | null;
+  snapshotVersion: number;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  prevSnapshotId: string | null;
+  prevPayloadHash: string | null;
+  trigger: ExecutionSnapshotTrigger;
+  legacy: boolean;
+  createdAt: Date;
+  createdBy: string;
+}
+
+export interface CreateExecutionSnapshotInput {
+  companyId: string;
+  workspaceId: string;
+  projectId: string;
+  sessionId: string;
+  runId?: string | null;
+  payload: Record<string, unknown>;
+  trigger: ExecutionSnapshotTrigger;
+  createdBy: string;
+  legacy?: boolean;
+  /** Injectable clock so tests never depend on wall time. */
+  now?: Date;
+  /** Injectable id generator; production uses a random id, tests use a deterministic one. */
+  id?: string;
+}
+
+export interface ListExecutionSnapshotsInput {
+  companyId: string;
+  sessionId?: string;
+  projectId?: string;
+  limit: number;
+}
+
+export interface SnapshotFieldChange {
+  field: string;
+  /** Rendered as a short, secret-free string ("v1 -> v2", "false -> true", "changed", "added", "removed"). */
+  from: string;
+  to: string;
+}
+
+export interface ExecutionSnapshotDiff {
+  fromSnapshotId: string;
+  toSnapshotId: string;
+  fromVersion: number;
+  toVersion: number;
+  changes: SnapshotFieldChange[];
+  unchanged: string[];
+}
+
+export interface SnapshotConfigVersionRecord {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  kind: SnapshotConfigKind;
+  version: number;
+  contentHash: string;
+  content: Record<string, unknown>;
+  createdAt: Date;
+  createdBy: string;
+}
+
+export interface CreateSnapshotConfigVersionInput {
+  companyId: string;
+  workspaceId: string;
+  kind: SnapshotConfigKind;
+  content: Record<string, unknown>;
+  contentHash: string;
+  createdBy: string;
+  now?: Date;
+  id?: string;
+}
+
+/** Raised when a caller tries to mutate an append-only snapshot or config version. */
+export class ExecutionSnapshotImmutableError extends Error {
+  readonly code = "snapshot_immutable";
+  readonly httpStatus = 409;
+  constructor(operation: string) {
+    super(`Execution snapshots are append-only: ${operation} is not permitted`);
+    this.name = "ExecutionSnapshotImmutableError";
+  }
+}
+
+// --- C6b Activity event persistence -------------------------------------------------------------------
+
+/**
+ * The Activity event families the Coding Agent produces. The database CHECK states the same vocabulary in
+ * migration 077, so an unknown kind cannot be persisted even by a direct SQL write.
+ */
+export type CodeActivityEventKind =
+  | "code_tool_activity"
+  | "policy_decision"
+  | "network_decision"
+  | "run_activity"
+  | "run_reconcile";
+
+export interface CodeActivityEventRecord {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string | null;
+  sessionId: string | null;
+  runId: string | null;
+  /** Snapshot this event belongs to; `null` for events produced before C6b or outside a run. */
+  snapshotId: string | null;
+  kind: CodeActivityEventKind;
+  /** Metadata only. Content-like keys are rejected before the insert (see `code-run-activity-sink.ts`). */
+  payload: Record<string, unknown>;
+  dataClassification: DataClassification;
+  retentionClass: RetentionClass;
+  createdAt: Date;
+}
+
+export interface CreateCodeActivityEventInput {
+  companyId: string;
+  workspaceId: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+  runId?: string | null;
+  snapshotId?: string | null;
+  kind: CodeActivityEventKind;
+  payload: Record<string, unknown>;
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  now?: Date;
+  id?: string;
+}
+
+export interface ListCodeActivityEventsInput {
+  companyId: string;
+  sessionId?: string;
+  runId?: string;
+  snapshotId?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/**
+ * Keyset cursor for activity reads: `(created_at, id)`, so paging never depends on an offset that shifts
+ * while new events are appended. Malformed input is rejected instead of silently restarting from page one.
+ */
+export function encodeCodeActivityCursor(input: { createdAt: Date; id: string }): string {
+  return Buffer.from(JSON.stringify({ t: input.createdAt.toISOString(), i: input.id }), "utf8").toString("base64url");
+}
+
+// --- C6b replay bundle DTOs ---------------------------------------------------------------------------
+
+/**
+ * How a bundle may be replayed. `recorded` is the deterministic one: every model answer and every settled
+ * tool result is present, so the same sequence is reproducible. `live_best_effort` means the run is re-issued
+ * against a live model: the model, package registries, GitHub and third-party services can all have changed
+ * since, so an identical outcome is **not** guaranteed and callers must say so.
+ */
+export type ReplayMode = "recorded" | "live_best_effort";
+
+/** What a recorded step is. A tool-result step is the canonical, model-visible, settled result. */
+export type ReplayStepKind = "model_step" | "tool_call";
+
+export interface ReplayBundleStepRecord {
+  id: string;
+  bundleId: string;
+  companyId: string;
+  /** Monotonic per bundle; the recorded order is the executed order. */
+  seq: number;
+  kind: ReplayStepKind;
+  turnIndex: number;
+  /** Present for `tool_call` steps; `null` for model steps. */
+  toolCallId: string | null;
+  payload: Record<string, unknown>;
+  /** Integrity of this step's payload; a rewritten step no longer matches. */
+  payloadHash: string;
+  createdAt: Date;
+}
+
+export interface ReplayBundleRecord {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  runId: string;
+  /** The ExecutionSnapshot this bundle belongs to, when the run had one. */
+  executionSnapshotId: string | null;
+  /** Version of the **bundle format** (rule 13), not of the run. */
+  bundleVersion: number;
+  runnerVersion: string | null;
+  systemPromptVersion: number | null;
+  systemPromptContentHash: string | null;
+  modelProfileVersion: number | null;
+  provider: string | null;
+  model: string | null;
+  replayMode: ReplayMode;
+  /** Set for `live_best_effort` bundles: the recorded run they were re-issued from. */
+  sourceRunId: string | null;
+  sourceSnapshotId: string | null;
+  terminalStatus: string | null;
+  terminalReason: string | null;
+  /** Summary: step counts, the replay-input hash and the environment the replay must match. No content. */
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  /** Hash of the replay **input** (steps, excluding non-input artifacts such as raw output references). */
+  replayInputHash: string;
+  dataClassification: DataClassification;
+  retentionClass: RetentionClass;
+  createdAt: Date;
+}
+
+export interface CreateReplayBundleStepInput {
+  id?: string;
+  kind: ReplayStepKind;
+  turnIndex: number;
+  toolCallId?: string | null;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  createdAt?: Date;
+}
+
+export interface CreateReplayBundleInput {
+  id?: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  runId: string;
+  executionSnapshotId?: string | null;
+  bundleVersion: number;
+  runnerVersion?: string | null;
+  systemPromptVersion?: number | null;
+  systemPromptContentHash?: string | null;
+  modelProfileVersion?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  replayMode: ReplayMode;
+  sourceRunId?: string | null;
+  sourceSnapshotId?: string | null;
+  terminalStatus?: string | null;
+  terminalReason?: string | null;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  replayInputHash: string;
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  /** Written with the header in one transaction, in this order. */
+  steps: CreateReplayBundleStepInput[];
+  now?: Date;
+}
+
+export interface ListReplayBundlesInput {
+  companyId: string;
+  runId?: string;
+  sessionId?: string;
+  executionSnapshotId?: string;
+  limit?: number;
+}
+
+export function decodeCodeActivityCursor(cursor: string): { createdAt: string; id: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {
+    throw new WorkspaceAccessError("Invalid activity cursor");
+  }
+  const value = parsed as { t?: unknown; i?: unknown };
+  if (typeof value?.t !== "string" || typeof value?.i !== "string" || Number.isNaN(Date.parse(value.t))) {
+    throw new WorkspaceAccessError("Invalid activity cursor");
+  }
+  return { createdAt: value.t, id: value.i };
 }
