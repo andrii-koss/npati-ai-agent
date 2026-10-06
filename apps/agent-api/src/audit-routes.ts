@@ -1,3 +1,4 @@
+import { hasAdminPermission } from "./code-rbac";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
@@ -23,7 +24,7 @@ async function auditReadContext(auth: AuthProvider, r: FastifyRequest) {
 }
 
 function isAdmin(c: { permissions: string[] }): boolean {
-  return c.permissions.some((permission) => ["*", "owner", "admin:all", "audit:read"].includes(permission));
+  return hasAdminPermission(c.permissions) || c.permissions.includes("audit:read");
 }
 
 function err(reply: any, e: unknown) {

@@ -13,7 +13,7 @@
  * Usage: node scripts/run-security-gate.mjs [--list]
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,7 +57,36 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c4b-webhook-policy.test.ts",
   // C4b: the provider/runner wiring must expose the same enforcement defaults as the policy module.
   "tests/coding-agent-c4b-allowlist-wiring.test.ts",
+  // C5 (SG-2): effective permissions and trust, every approval-bypass attempt, and the structured
+  // decision events that make a verdict provable afterwards.
+  "tests/coding-agent-c5-approval-scope.test.ts",
+  "tests/coding-agent-c5-trust-and-injection.test.ts",
+  "tests/coding-agent-c5-capability-groups.test.ts",
+  "tests/coding-agent-c5-decision-activity.test.ts",
+  "tests/coding-agent-c5-approval-bypass.test.ts",
+  // C5a (SG-2): people-side authorization — the RBAC gate, company membership and invites, and the
+  // escalation attempts (developer -> full_auto, reviewer -> run, protected-branch pushes).
+  "tests/coding-agent-c5a-rbac-foundation.test.ts",
+  "tests/coding-agent-c5a-rbac.test.ts",
+  "tests/coding-agent-c5a-membership.test.ts",
+  "tests/coding-agent-c5a-role-escalation.test.ts",
+  // C5a: the decisions that change what a person may do — protected branches (D9), the role -> session
+  // mode matrix (D6), membership (D4), project trust (D7), the privileged-permission boundary (D3) and
+  // the action -> permission mapping (D11).
+  "tests/coding-agent-c5a-protected-branches.test.ts",
+  // C5a: production operations (code.prod.operate, step-up/two-person) and the narrow service identity
+  // unattended automations run as.
+  "tests/coding-agent-c5a-prod-operations.test.ts",
+  "tests/coding-agent-c5a-automations-identity.test.ts",
 ];
+
+/**
+ * Suites listed above but absent from disk. The list is the contract, so a missing file is reported
+ * before vitest is even started: previously that surfaced as a confusing vitest exit code.
+ */
+export function findMissingSuiteFiles(root, suites) {
+  return suites.filter((suite) => !existsSync(path.join(root, suite)));
+}
 
 /**
  * Decides whether a vitest JSON report passes the gate. Exported so the rule "a skipped security-gate
@@ -161,6 +190,17 @@ function main() {
   const reportPath = path.join(reportDir, "vitest-report.json");
   const vitestBin = path.resolve(ROOT, "node_modules", "vitest", "vitest.mjs");
   let ok = true;
+  // Every configured suite must exist before vitest starts. The list is a contract, so a deleted,
+  // renamed or mistyped path fails here with its own message instead of as a bare vitest exit code.
+  const missingFiles = findMissingSuiteFiles(ROOT, SECURITY_GATE_TESTS);
+  process.stdout.write(
+    `\n[security-gate] suite files: present=${SECURITY_GATE_TESTS.length - missingFiles.length} missing=${missingFiles.length}\n`,
+  );
+  if (missingFiles.length) {
+    process.stdout.write(`[security-gate] FAILED: ${missingFiles.length} configured suite file(s) do not exist:\n`);
+    for (const suite of missingFiles) process.stdout.write(`[security-gate]   missing file: ${suite}\n`);
+    ok = false;
+  }
   try {
     process.stdout.write(`\n[security-gate] vitest run (${SECURITY_GATE_TESTS.length} suites)\n`);
     // The local vitest entry point is invoked through the Node binary, so no shell and no `npx`

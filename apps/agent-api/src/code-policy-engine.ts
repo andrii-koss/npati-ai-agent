@@ -1,5 +1,9 @@
 import type { AuthContext } from "@npati/workspace";
 import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_DEPS_CAPABILITIES } from "@npati/shared";
+import { assertCapabilityGranted, CodeCapabilityError } from "./code-capability-groups";
+import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
+import { hasAdminPermission, type CodeCanonicalSessionMode } from "./code-rbac";
+import { detectGitWriteAttempts } from "./code-shell-classifier";
 
 /**
  * C4: centralized server-side policy engine.
@@ -15,16 +19,26 @@ import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIE
 
 export type PolicyDecision = "allow" | "deny" | "require_approval";
 export type PolicyPhase =
-  | "feature_flag" | "rbac" | "capability" | "hard_deny" | "network_enforcement" | "session_mode"
-  | "project_rules" | "risk_classification" | "approval";
+  | "feature_flag" | "rbac" | "capability" | "capability_groups" | "hard_deny" | "network_enforcement" | "session_mode"
+  | "trust" | "project_rules" | "risk_classification" | "approval";
 export type PolicyRisk = "safe" | "controlled" | "approval" | "hard_deny";
-export type CodeSessionModeName = "plan" | "edit" | "auto" | "full_auto";
+/**
+ * The session mode a request carries. C5a (D6): both vocabularies are accepted — the C1 spellings
+ * (`plan`/`edit`/`auto`/`full_auto`) that sessions are stored with, and the canonical matrix names
+ * (`plan`/`ask`/`auto_edit`/`full_auto_sandbox`); `matrixModeFor` maps either onto one matrix mode.
+ */
+export type CodeSessionModeName = "plan" | "edit" | "auto" | "full_auto" | CodeCanonicalSessionMode;
+
+/** C5: policy surfaces that only a user may change. An agent principal can never touch them. */
+export type PolicyChangeKind = "session_mode" | "project_rules" | "trust" | "allowlist" | "tool_policy";
 
 export interface PolicyRequest {
   ctx: AuthContext;
   companyId: string;
   projectId?: string;
   sessionId?: string;
+  runId?: string;
+  agentId?: string;
   tool: string;
   toolVersion?: number;
   command?: string;
@@ -33,6 +47,15 @@ export interface PolicyRequest {
   approved?: boolean;
   approvalId?: string;
   toolCallId?: string;
+  /** C5: the scoped rule that selected this decision, when one applied (recorded in the decision event). */
+  ruleRef?: { scope: string; id: string } | null;
+  /**
+   * C5: the scope this call asks for. `once` (default) keeps the one-shot approval bound to one payload
+   * hash and creates no rule; `session`/`project` may be matched against an existing scoped rule.
+   */
+  approvalScope?: "once" | "session" | "project";
+  /** C5: how long the caller is willing to wait for a human decision (clamped by the service). */
+  approvalTimeoutMs?: number;
   /** True only when egress enforcement is actually guaranteed (C4b); otherwise network commands are denied. */
   networkEnforcementGuaranteed?: boolean;
   /**
@@ -45,6 +68,33 @@ export interface PolicyRequest {
     installScripts?: boolean;
     registryChange?: boolean;
   };
+  /**
+   * C5: the agent's capability groups, the user's permissions and the project's rules. When present,
+   * the engine intersects them in the `capability_groups` phase — before risk classification and
+   * approval — and refuses with `capability_not_granted`. Absent means "no group source configured",
+   * which leaves existing behaviour untouched.
+   */
+  capabilityGroups?: {
+    agentCapabilityGroups: string[];
+    userPermissions: string[];
+    projectRules?: { allow?: string[]; deny?: string[] } | null;
+  } | null;
+  /**
+   * C5: set when the call itself would change policy (mode, rules, trust, allowlist, tool policy).
+   * An agent principal is always refused here; a user still goes through RBAC in the routes.
+   */
+  policyChange?: PolicyChangeKind;
+  /**
+   * C5: set when this tool call would apply repository instructions as instructions. It requires an
+   * explicit owner/admin trust record; repository content itself can never grant it.
+   */
+  requiresProjectTrust?: boolean;
+  projectTrusted?: boolean;
+  /**
+   * C5: repository instruction candidates reviewed for this call. A policy-mutation attempt inside
+   * repository content is refused in the `trust` phase and never applied, trusted project or not.
+   */
+  repositoryInstructions?: { policyMutationAttempts?: number; notes?: string[] } | null;
 }
 
 export interface PolicyResult {
@@ -67,12 +117,61 @@ export interface PolicyEngineDeps {
     requestApproval(ctx: AuthContext, companyId: string, input: Record<string, unknown>): Promise<{ id: string }>;
     consumeApproved(ctx: AuthContext, companyId: string, id: string, params: Record<string, unknown>): Promise<unknown>;
   };
+  /**
+   * C5: scoped approval rules (`session` | `project`). Consulted **only** in the approval phase, which
+   * runs after `hard_deny`, the session-mode check, project rules and the network enforcement gate —
+   * that ordering is what makes a rule unable to bypass any of them. `once` approvals create no rule.
+   */
+  approvalRules?: {
+    findRule(ctx: AuthContext, query: {
+      companyId: string; projectId?: string | null; sessionId?: string | null; action: string;
+    }): Promise<{ id: string; scope: string; expiresAt?: string | null } | null>;
+  };
+  /**
+   * C5: reads a decided approval so a rejection can carry the reviewer's comment back to the model.
+   * Read-only and purely informational: it never changes a verdict.
+   */
+  getApproval?: (ctx: AuthContext, companyId: string, id: string) => Promise<{
+    status?: string; notes?: string | null; comment?: string | null;
+  } | null>;
   projectRules?: (ctx: AuthContext, companyId: string, projectId?: string) => Promise<{
     allowedTools?: string[]; deniedTools?: string[]; requireApprovalFor?: string[];
   } | null>;
-  /** Whether the sandbox actually enforces the egress allowlist (C4b). Default: not guaranteed. */
+  /**
+   * Whether the sandbox actually enforces the egress allowlist (C4b). Default: not guaranteed.
+   */
   networkEnforcement?: () => boolean;
+  /**
+   * C5a (D9): the company-level protected-branch policy (`code-protected-branches.ts`, wired in
+   * `app.ts`). Consulted in the **hard-deny** phase for a git write — before the session mode, the
+   * project rules, the network gate and the approval phase — so a push into a protected branch is
+   * refused for every principal: the owner, `admin:all`, a session rule and an `approved: true` claim
+   * included. The port reads the *company* list (with the built-in `main`/`master`/`release` default
+   * when the store cannot be read), which is what makes that list the enforcement source of truth.
+   * Absent means the port is not wired; the classifier's own force-push rule stays the only guard.
+   */
+  protectedBranches?: {
+    evaluateGitWrite(
+      ctx: AuthContext,
+      companyId: string,
+      input: { operation: "push" | "force_push"; branch: string },
+    ): Promise<{
+      allowed: boolean;
+      code: string | null;
+      reason: string;
+      branch: string;
+      operation: string;
+      protected: boolean;
+      policyRevision: number;
+    }>;
+  };
   sessionMode?: (ctx: AuthContext, companyId: string, sessionId: string) => Promise<CodeSessionModeName | null>;
+  /**
+   * C5: records every decision (allow, deny and require_approval) as a structured Activity event.
+   * This is observability, not a gate — the engine calls it after the verdict and never lets a
+   * recorder failure change the decision (it logs the failure instead).
+   */
+  decisionRecorder?: (request: PolicyRequest, result: PolicyResult) => Promise<void> | void;
   logger?: { warn(obj: unknown, message?: string): void };
 }
 
@@ -107,8 +206,8 @@ const APPROVAL_GATED_TOOLS = new Set(
     .map((capability) => capability.id),
 );
 
-/** The normalized modes of the owner's decision matrix. */
-export type MatrixMode = "plan" | "ask" | "auto_edit" | "full_auto_sandbox";
+/** The normalized modes of the owner's decision matrix. One definition, shared with `code-rbac.ts`. */
+export type MatrixMode = CodeCanonicalSessionMode;
 
 /**
  * Owner matrix: mode x risk. `hard_deny` is denied in every mode (phase 4 returns first, this row is
@@ -162,7 +261,8 @@ export function isReadOnlyTool(tool: string): boolean { return READ_TOOLS.has(to
 export function isShellTool(tool: string): boolean { return SHELL_TOOLS.has(tool); }
 
 export function isAdmin(ctx: AuthContext): boolean {
-  return ctx.permissions.some((permission) => ["*", "owner", "admin:all"].includes(permission));
+  // C5a: one definition of the admin vocabulary, shared with `code-rbac.ts`.
+  return hasAdminPermission(ctx.permissions);
 }
 
 /**
@@ -227,6 +327,21 @@ export class PolicyEngine {
   constructor(private readonly deps: PolicyEngineDeps) {}
 
   async evaluate(request: PolicyRequest): Promise<PolicyResult> {
+    const result = await this.evaluateInternal(request);
+    // C5: record the verdict (who, what, mode, rule, outcome). Deliberately after the decision is
+    // computed and deliberately non-blocking for security: a failing recorder must not change, delay
+    // or weaken the verdict, so the failure is logged and the result is returned unchanged.
+    if (this.deps.decisionRecorder) {
+      try {
+        await this.deps.decisionRecorder(request, result);
+      } catch (error) {
+        this.deps.logger?.warn({ err: error }, "policy_decision_record_failed");
+      }
+    }
+    return result;
+  }
+
+  private async evaluateInternal(request: PolicyRequest): Promise<PolicyResult> {
     const reasons: string[] = [];
     const { ctx, tool } = request;
 
@@ -248,7 +363,7 @@ export class PolicyEngine {
       return deny("agent_cannot_approve", "An agent or service principal cannot approve its own action", 403, "rbac");
     }
     const permission = permissionForTool(tool);
-    if (!ctx.permissions.includes(permission) && !isAdmin(ctx)) {
+    if (!ctx.permissions.includes(permission) && !hasAdminPermission(ctx.permissions)) {
       return deny("permission_denied", `Missing permission: ${permission}`, 403, "rbac");
     }
     reasons.push(`permission:${permission}`);
@@ -264,11 +379,75 @@ export class PolicyEngine {
     }
     reasons.push(`capability:${tool}@${request.toolVersion ?? capability.version ?? 1}`);
 
+    // Phase 3b — capability groups (C5): the agent's groups ∩ the user's permissions ∩ project rules.
+    // Runs before risk classification and approval on purpose: a tool the agent has no group for is
+    // refused outright, so no approval is ever requested for something it was never allowed to do.
+    if (request.capabilityGroups) {
+      try {
+        assertCapabilityGranted(request.capabilityGroups, tool);
+        reasons.push("capability_group:granted");
+      } catch (error) {
+        const known = error as CodeCapabilityError;
+        return deny(known.code ?? "capability_not_granted", known.message, known.httpStatus ?? 403, "capability_groups");
+      }
+    }
+
+    // Phase 3c — policy changes and project trust (C5). Repository content is DATA: a file can neither
+    // widen policy nor mark a project trusted, and reading one never changes state.
+    if (request.policyChange && isAgentPrincipal(ctx)) {
+      return deny("agent_cannot_change_policy", "An agent cannot change session mode or policy", 403, "trust");
+    }
+    if (request.repositoryInstructions && (request.repositoryInstructions.policyMutationAttempts ?? 0) > 0) {
+      return deny(
+        "repository_instruction_policy_change",
+        "Repository content attempted to change policy; it is treated as data and is not applied",
+        403,
+        "trust",
+      );
+    }
+    if (request.requiresProjectTrust && request.projectTrusted !== true) {
+      return deny("project_not_trusted", "This action applies repository instructions and the project is not trusted", 403, "trust");
+    }
+
     // Phase 4 — hard deny: unreachable by any mode, role or approval.
     for (const path of request.paths ?? []) {
       if (isUnsafePath(path)) return deny("path_outside_workspace", `Unsafe path: ${path}`, 403, "hard_deny");
       if (path.replace(/\\/g, "/").split("/").includes(".git")) {
         return deny("git_dir_protected", "Writes inside .git are never allowed", 403, "hard_deny");
+      }
+    }
+    // Phase 4b — protected branches (C5a D9). This is the call site where the enforcement layer reads
+    // the **company** protected-branch policy: the port below is `CodeProtectedBranchService
+    // .evaluateGitWrite` (wired in `app.ts`), which loads `company_protected_branches` and answers
+    // `protected_branch_write_denied` / `force_push_denied` for a git write. It runs before the mode,
+    // the rules and the approval phase, and it deliberately consults no permission, role or approval —
+    // so a protected-branch write cannot be lifted by an owner, by `admin:all`, by a session rule or by
+    // `approved: true`. An unprotected branch falls through untouched and keeps its `approval` class.
+    if (request.command !== undefined && this.deps.protectedBranches) {
+      const attempts = detectGitWriteAttempts(request.command);
+      for (const attempt of attempts) {
+        let decision: Awaited<ReturnType<NonNullable<PolicyEngineDeps["protectedBranches"]>["evaluateGitWrite"]>>;
+        try {
+          decision = await this.deps.protectedBranches.evaluateGitWrite(ctx, request.companyId, attempt);
+        } catch (error) {
+          // Fail closed: a policy port that throws is not evidence that the branch is unprotected.
+          this.deps.logger?.warn({ err: error, companyId: request.companyId }, "policy_protected_branch_check_failed");
+          return deny(
+            "protected_branch_policy_unavailable",
+            "The protected-branch policy could not be evaluated; the git write is refused",
+            503,
+            "hard_deny",
+            true,
+          );
+        }
+        if (!decision.allowed) {
+          reasons.push(`protected_branch:${decision.branch}=denied:${decision.code}`);
+          return {
+            ...deny(decision.code ?? "protected_branch_write_denied", decision.reason, 403, "hard_deny"),
+            risk: "hard_deny",
+          };
+        }
+        reasons.push(`protected_branch:${decision.branch}=not_protected`);
       }
     }
     let risk: PolicyRisk | undefined;
@@ -395,15 +574,40 @@ export class PolicyEngine {
         });
       } catch (error) {
         const code = (error as { code?: string }).code ?? "approval_invalid";
+        // A rejection is not a failure to consume: the reviewer's comment (redacted, capped, and
+        // explicitly marked as data) is what the model needs in order to change its approach.
+        const rejection = await this.describeRejection(request, code);
+        if (rejection) return rejection;
         return deny(code, error instanceof Error ? error.message : "Approval could not be consumed", 409, phase);
       }
       return { decision: "allow", phase, reasons: [...reasons, "approval:consumed"], risk, status: 200 };
+    }
+    // C5: a standing rule for this action short-circuits the request. Never consulted for an approval
+    // raised in the `project_rules` phase, because that phase precedes the network enforcement gate.
+    if (this.deps.approvalRules && phase !== "project_rules") {
+      const action = approvalActionFor(request);
+      const rule = await this.deps.approvalRules
+        .findRule(request.ctx, {
+          companyId: request.companyId, projectId: request.projectId ?? null,
+          sessionId: request.sessionId ?? null, action,
+        })
+        .catch(() => null);
+      if (rule) {
+        request.ruleRef = { scope: rule.scope, id: rule.id };
+        return {
+          decision: "allow", phase, risk, status: 200,
+          reasons: [...reasons, `approval:rule:${rule.scope}`, `approval:rule_id:${rule.id}`, `approval:action:${action}`],
+        };
+      }
     }
     try {
       const created = await approvals.requestApproval(request.ctx, request.companyId, {
         tool: request.tool,
         payloadHash: payloadHashFor(request),
         toolCallId: request.toolCallId,
+        // The scope a caller asks for is recorded on the request; `once` (the default) creates no rule.
+        approvalScope: request.approvalScope ?? "once",
+        approvalTimeoutMs: request.approvalTimeoutMs ?? null,
         digest: digestOf(request.command ?? request.paths?.join(",") ?? request.tool),
       });
       return {
@@ -414,6 +618,25 @@ export class PolicyEngine {
       this.deps.logger?.warn({ err: error }, "policy_approval_request_failed");
       return deny("approval_unavailable", "Approval request could not be created", 503, phase);
     }
+  }
+
+  /**
+   * C5: turns a rejected approval into a structured `approval_denied` result carrying the reviewer's
+   * comment. Returns null when the approval was not actually rejected, so every other consumption
+   * failure keeps its existing code and status.
+   */
+  private async describeRejection(request: PolicyRequest, code: string): Promise<PolicyResult | null> {
+    if (!this.deps.getApproval) return null;
+    const approvalId = String(request.approvalId ?? request.toolCallId ?? "");
+    const approval = await this.deps.getApproval(request.ctx, request.companyId, approvalId).catch(() => null);
+    const status = String(approval?.status ?? "").toLowerCase();
+    if (status !== "rejected" && code !== "approval_rejected") return null;
+    const comment = redactDenyComment(approval?.comment ?? approval?.notes);
+    return {
+      decision: "deny", phase: "approval", status: 403, retryable: false,
+      code: "approval_denied",
+      reasons: ["approval:rejected", ...(comment ? [`approval:comment:${comment}`] : [])],
+    };
   }
 }
 
@@ -447,3 +670,10 @@ export function fnv1a(value: string): string {
 }
 
 export function digestOf(value: string): string { return fnv1a(value); }
+
+/**
+ * C5: the canonical action a scoped rule is keyed by. The implementation lives in
+ * `code-approval-scope.ts` so the grant path and this enforcement path cannot drift apart; it is
+ * re-exported here because the policy surface is where callers look for it.
+ */
+export { approvalActionFor } from "./code-approval-scope";

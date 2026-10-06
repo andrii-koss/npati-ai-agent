@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { CodeError, type CodeService } from "./code-service";
+import { hasAdminPermission, isAdminPrincipal } from "./code-rbac";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError, FeatureFlagError, isValidCodeFlagKey, type FeatureFlagService } from "./feature-flags";
 import { API_VERSION, resolveApiVersion } from "./api-versioning";
 
@@ -43,7 +44,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
     // `unsupported_api_version` and every response carries the version it was served with.
     resolveApiVersion(request.headers);
     const ctx = await auth.authenticate(request);
-    if (!ctx.permissions.includes(permission) && !ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+    if (!ctx.permissions.includes(permission) && !hasAdminPermission(ctx.permissions)) {
       throw new WorkspaceAccessError("Missing permission: " + permission);
     }
     if (!service) throw new CodeError("code_unavailable", "Coding Agent is unavailable", 503, true);
@@ -198,7 +199,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
         // Changing a flag is an administrative act: `business:manage` alone must not be enough, so the
         // role check runs before any company lookup (a plain member gets 403 flag_admin_required).
-        if (!ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+        if (!isAdminPrincipal(ctx)) {
           return reply.code(403).send({ error: { code: "flag_admin_required", message: "Changing a feature flag requires the owner/admin role", retryable: false } });
         }
         if (!isValidCodeFlagKey(request.body.flagKey)) {
@@ -224,7 +225,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         const ctx = await auth.authenticate(request);
         if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
         // Same administrative role requirement as a flag change; a plain member cannot stop the feature.
-        if (!ctx.permissions.some((value) => ["*", "owner", "admin:all"].includes(value))) {
+        if (!isAdminPrincipal(ctx)) {
           return reply.code(403).send({ error: { code: "flag_admin_required", message: "Using the kill switch requires the owner/admin role", retryable: false } });
         }
         if (!service) return reply.code(503).send({ error: { code: "code_unavailable", message: "Coding Agent is unavailable", retryable: true } });

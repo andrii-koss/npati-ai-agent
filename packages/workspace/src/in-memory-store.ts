@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
+  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, isCompanyRole, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -15,12 +16,14 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly companyAgents = new Map<string, CompanyAgent>();
   private readonly projects = new Map<string, Project>();
   private readonly codeSessions = new Map<string, CodeSession>();
+  private readonly projectCodeTrust = new Map<string, ProjectCodeTrust>();
   private readonly auditLog = new Map<string, AuditEntry[]>();
   private readonly auditAnchors = new Map<string, AuditAnchor[]>();
   private readonly featureFlags = new Map<string, FeatureFlag>();
   private readonly featureFlagHistory: FeatureFlagHistoryEntry[] = [];
   private readonly codeToolManifests = new Map<number, CodeToolManifest>();
   private readonly sandboxImages = new Map<string, SandboxImage>();
+  private readonly codeApprovalRules = new Map<string, CodeApprovalRule>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
@@ -42,6 +45,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly userSettings = new Map<string, StoredUserSetting>();
   private readonly businessCreateRequests = new Map<string, string>();
   private readonly onboardings = new Map<string, Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>();
+  // C5a: company membership. Members are keyed by (company, user) like the unique index in migration 072;
+  // invites by id, with the token hash acting as the second unique key.
+  private readonly companyMembers = new Map<string, CompanyMember>();
+  private readonly companyInvites = new Map<string, CompanyInvite>();
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -405,6 +412,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       status: "active", parentSessionId: input.parentSessionId ?? null, runId: null,
       summary: input.summary ?? null, dataClassification: requested,
       retentionClass: input.retentionClass ?? project.retentionClass, toolManifestVersion: null,
+      revision: 1,
       createdAt: timestamp, updatedAt: timestamp,
     };
     this.codeSessions.set(session.id, session);
@@ -607,6 +615,65 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return latest ? structuredClone(latest) : null;
   }
 
+  // --- C5: scoped approval rules ------------------------------------------------------------
+
+  async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
+    this.assertCompany(context, companyId);
+    if (input.scope === "session" && !input.sessionId) {
+      throw new WorkspaceAccessError("A session-scoped approval rule must name its session");
+    }
+    if (!input.projectId) throw new WorkspaceAccessError("An approval rule must name its project");
+    const key = `${context.workspaceId}|${companyId}|${input.projectId}|${input.sessionId ?? ""}|${input.scope}|${input.action}`;
+    const existing = this.codeApprovalRules.get(key);
+    const record: CodeApprovalRule = {
+      id: existing?.id ?? randomUUID(), workspaceId: context.workspaceId, companyId,
+      projectId: input.projectId, sessionId: input.sessionId ?? null, createdBy: context.userId,
+      scope: input.scope, action: input.action, decision: "allow",
+      reason: input.reason ?? null, expiresAt: input.expiresAt ?? null,
+      revision: (existing?.revision ?? 0) + 1,
+      createdAt: existing?.createdAt ?? now(), updatedAt: now(),
+    };
+    this.codeApprovalRules.set(key, record);
+    return structuredClone(record);
+  }
+
+  async listCodeApprovalRules(context: AuthContext, companyId: string, filters: { projectId?: string; sessionId?: string; scope?: CodeApprovalRuleScope } = {}): Promise<CodeApprovalRule[]> {
+    return structuredClone([...this.codeApprovalRules.values()]
+      .filter((rule) => rule.workspaceId === context.workspaceId && rule.companyId === companyId)
+      .filter((rule) => (filters.projectId ? rule.projectId === filters.projectId : true))
+      .filter((rule) => (filters.sessionId ? rule.sessionId === filters.sessionId : true))
+      .filter((rule) => (filters.scope ? rule.scope === filters.scope : true))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
+
+  async deleteCodeApprovalRule(context: AuthContext, companyId: string, ruleId: string): Promise<void> {
+    this.assertCompany(context, companyId);
+    for (const [key, rule] of this.codeApprovalRules) {
+      if (rule.id === ruleId && rule.workspaceId === context.workspaceId && rule.companyId === companyId) {
+        this.codeApprovalRules.delete(key);
+      }
+    }
+  }
+
+  async findMatchingCodeApprovalRule(context: AuthContext, query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string }): Promise<CodeApprovalRule | null> {
+    this.assertCompany(context, query.companyId);
+    const at = now();
+    const matches = [...this.codeApprovalRules.values()].filter((rule) => {
+      if (rule.workspaceId !== context.workspaceId || rule.companyId !== query.companyId) return false;
+      if (rule.action !== query.action || rule.decision !== "allow") return false;
+      if (rule.expiresAt && rule.expiresAt <= at) return false;
+      // A session rule additionally requires its project to match: a session belongs to exactly one
+      // project, so a session-scoped allowance must never leak into another project's requests.
+      if (rule.scope === "session") {
+        return Boolean(query.sessionId) && rule.sessionId === query.sessionId
+          && Boolean(query.projectId) && rule.projectId === query.projectId;
+      }
+      return Boolean(query.projectId) && rule.projectId === query.projectId;
+    });
+    matches.sort((a, b) => (a.scope === b.scope ? b.createdAt.localeCompare(a.createdAt) : a.scope === "session" ? -1 : 1));
+    return matches[0] ? structuredClone(matches[0]) : null;
+  }
+
   // --- C1b: sandbox image supply chain ------------------------------------------------------
 
   async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
@@ -654,9 +721,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return candidates.length ? structuredClone(candidates[0]!) : null;
   }
 
-  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
+  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
     if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, session.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
+    }
+    if (patch.expectedRevision !== undefined && patch.expectedRevision !== session.revision) {
+      throw new WorkspaceAccessError("Code session changed by another request. Reload and try again.");
     }
     const next: CodeSession = {
       ...session,
@@ -667,9 +737,44 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       dataClassification: patch.dataClassification ?? session.dataClassification,
       retentionClass: patch.retentionClass ?? session.retentionClass,
       toolManifestVersion: patch.toolManifestVersion === undefined ? session.toolManifestVersion : patch.toolManifestVersion,
+      mode: patch.mode ?? session.mode,
+      revision: session.revision + 1,
       updatedAt: now(),
     };
     this.codeSessions.set(sessionId, next);
+    return structuredClone(next);
+  }
+
+  // --- C5: project trust ---------------------------------------------------------------------
+
+  async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
+    this.assertCompany(context, companyId);
+    return structuredClone(this.projectCodeTrust.get(`${companyId}:${projectId}`) ?? null);
+  }
+
+  async setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust> {
+    this.assertCompany(context, companyId);
+    const key = `${companyId}:${projectId}`;
+    const existing = this.projectCodeTrust.get(key);
+    if (input.expectedRevision !== (existing?.revision ?? 0)) {
+      throw new WorkspaceAccessError("Project trust changed by another request. Reload and try again.");
+    }
+    const timestamp = now();
+    const next: ProjectCodeTrust = {
+      id: existing?.id ?? randomUUID(),
+      workspaceId: context.workspaceId,
+      companyId,
+      projectId,
+      trusted: input.trusted,
+      trustedBy: input.trusted ? input.actor : (existing?.trustedBy ?? null),
+      trustedAt: input.trusted ? timestamp : (existing?.trustedAt ?? null),
+      revokedBy: input.trusted ? (existing?.revokedBy ?? null) : input.actor,
+      revokedAt: input.trusted ? (existing?.revokedAt ?? null) : timestamp,
+      reason: input.reason ?? null,
+      revision: (existing?.revision ?? 0) + 1,
+      updatedAt: timestamp,
+    };
+    this.projectCodeTrust.set(key, next);
     return structuredClone(next);
   }
 
@@ -1404,5 +1509,186 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.onboardings.set(sessionId, row);
     this.current.set(`${context.workspaceId}:${context.userId}`, business.id);
     return this.hydrateOnboarding(row);
+  }
+
+  // --- C5a: company membership and invites ---------------------------------------------------
+  // The same semantics as the postgres store (and the `CodeMembershipStore` port in
+  // apps/agent-api/src/code-membership.ts): company-scoped, no `AuthContext`, no default role.
+
+  /** No row is `null`: membership is never assumed, and there is no "owner by default" fallback. */
+  async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
+    return structuredClone(this.companyMembers.get(`${companyId}:${userId}`) ?? null);
+  }
+
+  /** The actual stored role and status of every member; nothing is inferred. */
+  async listCompanyMembers(companyId: string): Promise<CompanyMember[]> {
+    return structuredClone([...this.companyMembers.values()]
+      .filter((member) => member.companyId === companyId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)));
+  }
+
+  /** Active owners only — a suspended owner cannot administer anything, so it is not a protection. */
+  async countCompanyOwners(companyId: string): Promise<number> {
+    return this.activeOwnerCount(companyId);
+  }
+
+  async createCompanyInvite(input: CompanyInviteInput): Promise<CompanyInvite> {
+    if (!isCompanyRole(input.role)) {
+      throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
+    }
+    // Mirrors the unique indexes on company_invites: one id, one token hash — one live secret.
+    if (this.companyInvites.has(input.id) || this.findInviteByTokenHash(input.tokenHash)) {
+      throw new CompanyMembershipError(
+        "invite_token_conflict",
+        "An invite with this id or token hash already exists",
+        { httpStatus: 409 },
+      );
+    }
+    const invite: CompanyInvite = {
+      id: input.id,
+      companyId: input.companyId,
+      email: input.email,
+      role: input.role,
+      tokenHash: input.tokenHash,
+      expiresAt: input.expiresAt,
+      createdBy: input.createdBy,
+      acceptedAt: input.acceptedAt ?? null,
+      createdAt: input.createdAt ?? new Date(),
+    };
+    this.companyInvites.set(invite.id, invite);
+    return structuredClone(invite);
+  }
+
+  /** Returns the invite in every state (expired and already accepted included) so callers can tell them apart. */
+  async findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null> {
+    const invite = this.findInviteByTokenHash(tokenHash);
+    return invite ? structuredClone(invite) : null;
+  }
+
+  /**
+   * The invite is re-read from the store, never trusted from the caller's copy: a token is single-use
+   * (`acceptedAt`) and dies at `expiresAt`. The invite is marked accepted only after the membership guard
+   * passed, so a refused acceptance does not burn the token — matching the postgres transaction.
+   */
+  async acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember> {
+    const invite = this.companyInvites.get(input.invite.id);
+    if (!invite) throw new CompanyMembershipError("invite_not_found", "Invite does not exist", { httpStatus: 404 });
+    if (invite.acceptedAt) {
+      throw new CompanyMembershipError("invite_already_accepted", "Invite token was already used", { httpStatus: 409 });
+    }
+    if (invite.expiresAt.getTime() <= input.acceptedAt.getTime()) {
+      throw new CompanyMembershipError("invite_expired", "Invite token has expired", { httpStatus: 410 });
+    }
+    const key = `${invite.companyId}:${input.userId}`;
+    const existing = this.companyMembers.get(key) ?? null;
+    // Accepting an invite must not demote the only active owner (the update path refuses it too).
+    if (existing && this.isLastActiveOwnerDemotion(existing, invite.role)) {
+      throw new CompanyMembershipError(
+        "last_owner_protected",
+        "Cannot demote the only owner of the company by accepting an invite",
+        { httpStatus: 409, details: { operation: "demote", owners: this.activeOwnerCount(invite.companyId) } },
+      );
+    }
+    this.companyInvites.set(invite.id, { ...invite, acceptedAt: input.acceptedAt });
+    const member: CompanyMember = {
+      id: existing?.id ?? `cm_${randomUUID()}`,
+      companyId: invite.companyId,
+      userId: input.userId,
+      // The invited role, verbatim: never a default and never derived from the previous row.
+      role: invite.role,
+      status: "active",
+      invitedBy: existing?.invitedBy ?? invite.createdBy,
+      invitedAt: existing?.invitedAt ?? invite.createdAt,
+      acceptedAt: input.acceptedAt,
+      createdAt: existing?.createdAt ?? input.acceptedAt,
+      updatedAt: input.acceptedAt,
+      revision: (existing?.revision ?? 0) + 1,
+    };
+    this.companyMembers.set(key, member);
+    return structuredClone(member);
+  }
+
+  /**
+   * Revision-checked role change: a stale `expectedRevision` is refused as the port's
+   * `membership_revision_conflict` (409, both revisions in `details`) with the tree-wide "changed by
+   * another request" message. The last-owner check comes after it, the same order the postgres store
+   * diagnoses, and both run before anything is written.
+   */
+  async updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember> {
+    if (!isCompanyRole(input.role)) {
+      throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
+    }
+    const key = `${input.companyId}:${input.userId}`;
+    const existing = this.companyMembers.get(key);
+    if (!existing) {
+      throw new CompanyMembershipError("membership_not_found", "User is not a member of this company", { httpStatus: 404 });
+    }
+    if (existing.revision !== input.expectedRevision) {
+      // The port contract: a stale revision is a conflict that writes nothing, and the caller can see
+      // both revisions.
+      throw new CompanyMembershipError(
+        "membership_revision_conflict",
+        "Company member changed by another request. Reload and try again.",
+        {
+          httpStatus: 409,
+          details: { expectedRevision: input.expectedRevision, actualRevision: existing.revision },
+        },
+      );
+    }
+    if (this.isLastActiveOwnerDemotion(existing, input.role)) {
+      throw new CompanyMembershipError(
+        "last_owner_protected",
+        "Cannot demote the only owner of the company",
+        { httpStatus: 409, details: { operation: "demote", owners: this.activeOwnerCount(input.companyId) } },
+      );
+    }
+    const member: CompanyMember = { ...existing, role: input.role, updatedAt: input.updatedAt, revision: existing.revision + 1 };
+    this.companyMembers.set(key, member);
+    return structuredClone(member);
+  }
+
+  /**
+   * Removing the last active owner is refused for the same reason as demoting it. Like the port's own
+   * implementation this is otherwise a delete: a user who is not a member is already refused with
+   * `membership_not_found` (404) by `CodeMembershipService` before the store is called.
+   */
+  async removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void> {
+    const key = `${input.companyId}:${input.userId}`;
+    const existing = this.companyMembers.get(key);
+    if (!existing) return;
+    if (this.isLastActiveOwner(existing)) {
+      throw new CompanyMembershipError(
+        "last_owner_protected",
+        "Cannot remove the only owner of the company",
+        { httpStatus: 409, details: { operation: "remove", owners: this.activeOwnerCount(input.companyId) } },
+      );
+    }
+    this.companyMembers.delete(key);
+  }
+
+  private findInviteByTokenHash(tokenHash: string): CompanyInvite | undefined {
+    for (const invite of this.companyInvites.values()) {
+      if (invite.tokenHash === tokenHash) return invite;
+    }
+    return undefined;
+  }
+
+  private activeOwnerCount(companyId: string): number {
+    let owners = 0;
+    for (const member of this.companyMembers.values()) {
+      if (member.companyId === companyId && member.role === "owner" && member.status === "active") owners += 1;
+    }
+    return owners;
+  }
+
+  /** True for the write that would leave the company without a usable owner (postgres: lastActiveOwnerPredicate). */
+  private isLastActiveOwnerDemotion(member: CompanyMember, nextRole: string): boolean {
+    return member.status === "active" && member.role === "owner" && nextRole !== "owner"
+      && this.activeOwnerCount(member.companyId) <= 1;
+  }
+
+  /** Same predicate for a removal: the row itself must be the company's only active owner. */
+  private isLastActiveOwner(member: CompanyMember): boolean {
+    return member.status === "active" && member.role === "owner" && this.activeOwnerCount(member.companyId) <= 1;
   }
 }
