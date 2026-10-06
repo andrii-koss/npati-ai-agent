@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AuthContext, Project } from "@npati/workspace";
@@ -47,6 +47,22 @@ export interface ProjectChangesResult {
   changes: ProjectFileChange[];
 }
 
+/**
+ * The honest outcome of a workspace removal.
+ *
+ * `removed` is the state of the disk afterwards, not the fact that we tried: a delete that failed to remove bytes
+ * answers `removed: false` with a reason and the outstanding targets, so a caller can never read success from an
+ * attempt. `alreadyAbsent` distinguishes "was already gone" (an idempotent re-run) from "we just removed it".
+ */
+export interface ProjectWorkspaceRemoval {
+  removed: boolean;
+  alreadyAbsent: boolean;
+  /** Absolute path the removal was scoped to. Reported for diagnostics, never for a caller to delete. */
+  path: string;
+  reason?: string;
+  outstanding?: string[];
+}
+
 export interface ProjectWorkspace {
   info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectWorkspaceInfo>;
   listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
@@ -60,6 +76,11 @@ export interface ProjectWorkspace {
   moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
   setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<{ fileCount: number }>;
   getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectChangesResult>;
+  /**
+   * C7: removes the on-disk workspace of a project. This runs **after** the project record is gone, so it cannot
+   * depend on a project row and must be safe to call twice.
+   */
+  removeProjectWorkspace(ctx: AuthContext, companyId: string, projectId: string): Promise<ProjectWorkspaceRemoval>;
   registerWorktree?(companyId: string, projectId: string, agentId: string, worktreeDir: string): void;
   unregisterWorktree?(companyId: string, projectId: string, agentId: string): void;
   getWorktree?(companyId: string, projectId: string, agentId?: string): string | undefined;
@@ -67,6 +88,16 @@ export interface ProjectWorkspace {
 
 export class ProjectFileError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400, public readonly currentRevision?: string) { super(message); }
+}
+
+/**
+ * Compares two resolved paths. Windows path comparison is case-insensitive, and a case mismatch would otherwise
+ * read as "this is a link", which would refuse legitimate removals.
+ */
+export function samePath(left: string, right: string): boolean {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 export function safeProjectPath(value: string): string {
@@ -499,5 +530,91 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     };
 
     return { summary, changes };
+  }
+
+  /**
+   * C7: remove the on-disk workspace of a project.
+   *
+   * Design notes that matter for safety:
+   *  - It deliberately does **not** read the project record. The delete route removes the project first, so
+   *    requiring a row would make the cleanup impossible exactly when it is needed; the tenant scope therefore
+   *    comes from `companyId` being a validated identifier that is joined under the workspace root, which is what
+   *    keeps one tenant's call from ever reaching another tenant's directory.
+   *  - Every path component is checked with `lstat`: a symlink at any level makes the call **refuse** instead of
+   *    following the link and deleting something outside the workspace root.
+   *  - Idempotent: an already-absent directory is `removed: true, alreadyAbsent: true`.
+   *  - Honest failure: if bytes survive, the answer is `removed: false` with the reason and the outstanding
+   *    target — never a success message over remaining data.
+   */
+  async removeProjectWorkspace(ctx: AuthContext, companyId: string, projectId: string): Promise<ProjectWorkspaceRemoval> {
+    if (!validId(companyId) || !validId(projectId)) throw new ProjectFileError("invalid_project", "Invalid project identifier");
+    const allowed = ctx.permissions.includes("*") || ctx.permissions.includes("owner") || ctx.permissions.includes("business:manage") || ctx.permissions.includes("workspace:write");
+    if (!allowed) throw new ProjectFileError("permission_denied", "Project workspace removal denied", 403);
+
+    const companyDir = path.join(this.root, companyId);
+    const dir = path.join(companyDir, projectId);
+    // Defence in depth: the joined path must stay strictly inside the root even though both ids are validated.
+    if (dir !== path.join(this.root, companyId, projectId) || !dir.startsWith(this.root + path.sep)) {
+      throw new ProjectFileError("invalid_path", "Workspace path escapes the workspace root", 403);
+    }
+
+    for (const candidate of [this.root, companyDir, dir]) {
+      const entry = await lstat(candidate).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (!entry) continue;
+      if (entry.isSymbolicLink()) throw new ProjectFileError("invalid_path", "Symlink workspace is not allowed", 403);
+    }
+
+    // `isSymbolicLink()` is not enough on Windows: a directory junction is a reparse point that `lstat` may report
+    // as an ordinary directory, and `rm -rf` through one is exactly how a "delete my project" turns into "delete
+    // something else". Resolving the real path and comparing it against the expected path under the real root
+    // catches links, junctions and mount points alike, whatever the platform calls them.
+    const realRoot = await realpath(this.root).catch(() => undefined);
+    if (realRoot) {
+      const expected: Array<[string, string[]]> = [[companyDir, [companyId]], [dir, [companyId, projectId]]];
+      for (const [candidate, parts] of expected) {
+        const real = await realpath(candidate).catch(() => undefined);
+        if (real && !samePath(real, path.join(realRoot, ...parts))) {
+          throw new ProjectFileError("invalid_path", "Symlink workspace is not allowed", 403);
+        }
+      }
+    }
+
+    const before = await lstat(dir).catch(() => undefined);
+    if (!before) {
+      this.forgetWorkspaceState(companyId, projectId);
+      return { removed: true, alreadyAbsent: true, path: dir };
+    }
+    if (!before.isDirectory()) {
+      // A file where a workspace directory belongs is not ours to delete, and reporting success would be a lie.
+      throw new ProjectFileError("invalid_path", "Workspace path is not a directory", 409);
+    }
+
+    try {
+      await rm(dir, { recursive: true, force: true });
+    } catch (error) {
+      return { removed: false, alreadyAbsent: false, path: dir, reason: error instanceof Error ? error.message : "workspace_removal_failed", outstanding: ["workspace"] };
+    }
+
+    const after = await lstat(dir).catch(() => undefined);
+    if (after) {
+      return { removed: false, alreadyAbsent: false, path: dir, reason: "workspace_removal_incomplete", outstanding: ["workspace"] };
+    }
+
+    // The per-company directory is pruned only when it is genuinely empty (`rmdir` refuses otherwise), so a shared
+    // parent can never take another project's data with it.
+    await rmdir(companyDir).catch(() => undefined);
+    this.forgetWorkspaceState(companyId, projectId);
+    return { removed: true, alreadyAbsent: false, path: dir };
+  }
+
+  /** Drop in-process bookkeeping for a project whose directory is gone, so no lock or worktree outlives it. */
+  private forgetWorkspaceState(companyId: string, projectId: string): void {
+    this.locks.delete(path.join(this.root, companyId, projectId));
+    for (const key of Array.from(this.activeWorktrees.keys())) {
+      if (key.startsWith(`${companyId}:${projectId}:`)) this.activeWorktrees.delete(key);
+    }
   }
 }

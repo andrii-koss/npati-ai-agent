@@ -160,6 +160,65 @@ export const SECURITY_GATE_TESTS = [
   // carries content is refused loudly instead of being filtered; reads are authorized by the shared gate on
   // named actions, refused before the store is touched, and tenant-scoped.
   "tests/coding-agent-c6b-snapshot-api.test.ts",
+  // C7: the code project lifecycle. Archive and delete go through the existing service (whose hook destroys
+  // the sandbox), a partial cleanup is never reported as success, a repeated delete is `already_deleted` with
+  // byte-identical answers for a missing and a foreign project (so the route is not an existence oracle),
+  // every mutation is journalled before it applies (a failing journal means no effect), and each new action is
+  // mapped so an unmapped action is refused instead of inheriting the caller's label.
+  "tests/coding-agent-c7-project-lifecycle.test.ts",
+  // C7: session control. Stop reports the three facts separately (recorded, aborted, sandbox released) and is
+  // idempotent; usage says `unavailable` with a reason instead of inventing zeros; changes are rebuilt from
+  // named fields so the reader's diff body cannot reach the client; revert validates paths with the canonical
+  // validator before any git call, refuses per-file revert rather than silently hard-resetting everything, and
+  // never touches the workspace when the journal fails; the active context is validated, not duplicated.
+  "tests/coding-agent-c7-session-control.test.ts",
+  // C7: the agent stream the Workspace renders. The transcript is read from the C6b replay bundle because the
+  // runner never writes `code_run_turns.messages`; a run without a bundle is answered as `streamUnavailable`
+  // rather than an empty stream, so "said nothing" and "never stored it" stay distinguishable. An unknown run
+  // and a foreign run answer with byte-identical 404s (no existence oracle), authorization happens before any
+  // store read, a credential in a stored tool result is refused instead of served, and a huge result is bounded
+  // with an explicit truncation marker.
+  "tests/coding-agent-c7-run-stream.test.ts",
+  // C7: the web-source XSS invariant, runnable without jsdom or @testing-library (which are not installed),
+  // so an HTML-injection path in `apps/web/src` cannot enter unnoticed: `dangerouslySetInnerHTML` and the
+  // DOM-writing primitives are allowed only at explicitly listed sites with a written reason and an
+  // occurrence cap, and a `javascript:` or template-built `href`/`src` is refused outright. It also executes
+  // the pure escaping helpers behind chat card markdown, which is where a quote-escape gap let a link URL
+  // close its own `href` attribute and install an event handler.
+  "tests/coding-agent-c7-web-xss-source-scan.test.ts",
+  // C7: the chat-side integration of the code workspace. Pins that the PERSISTED active project/session is
+  // what chat follows (and that an explicit request project still wins), that the stored pointer is scoped to
+  // its user and company, that a payload from a future schema version is treated as absent rather than guessed
+  // at (acting on an unknown shape would start work in a workspace nobody selected), and that the versioned
+  // code card travels with the message it belongs to and never into another user's conversation.
+  "tests/coding-agent-c7-chat-integration.test.ts",
+  // C7: real removal of a project's on-disk workspace. Pins that a delete which leaves bytes behind answers
+  // `partial` instead of "deleted", that removal is idempotent, that a symlinked workspace is refused with the
+  // link target left intact, and that a sibling project of the same company is untouched.
+  "tests/coding-agent-c7-workspace-cleanup.test.ts",
+  // C7: path-scoped revert. Pins that restoring named paths never issues `reset --hard` or `clean`, that hostile
+  // paths (traversal, absolute, `~`, secret, malformed) are refused before any git process starts, that a symlink
+  // in the path aborts the call, and that a mandatory pre-restore safety checkpoint keeps the revert reversible.
+  "tests/coding-agent-c7-revert-paths.test.ts",
+  // C7: usage accounting and the RBAC of destructive project actions. Pins that an unknown measurement is never
+  // reported as `0` (three distinguishable answers: not recorded / unmeasurable with a reason / real totals),
+  // that price is never inferred from tokens, and that archive/delete are allowed for owner/admin and denied for
+  // developer/reviewer on the existing `business:manage` vocabulary.
+  "tests/coding-agent-c7-usage-and-rbac.test.ts",
+  // C7: the shared project-files adapter. Pins that exactly one module builds a `files/*` URL — a source scan
+  // over `apps/web/src` fails on a hand-built one unless it is listed with a written reason, and a *stale*
+  // exemption fails too, so the list cannot rot into a blanket permission. Also pins that ids and paths are
+  // always encoded (a hostile id may not become a path segment or a query parameter) and that traversal,
+  // absolute, drive-letter, home-relative and backslash paths are refused by the typed guard.
+  "tests/coding-agent-c7-project-files-adapter.test.ts",
+  // C7: Website Builder regression behind that shared surface. The real `LocalProjectWorkspace` and the real
+  // file routes are driven so a shared surface cannot break its original consumer: write/tree/read round-trip
+  // with the revision, `website` and `code_project` served by the one implementation, `workspace:read` still
+  // required (a permission set with nothing relevant is the negative control — `business:manage` is granted
+  // read by design and would be a false negative), another tenant's project yields no content, and the
+  // service's own protections still hold for the new consumer: `invalid_path` for traversal and `secret_path`
+  // for `.env`/`.ssh`/`credentials`/`*.pem`.
+  "tests/website-builder-regression.test.ts",
 ];
 
 /**

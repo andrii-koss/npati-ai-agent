@@ -23,6 +23,7 @@ import { WebsiteEditor } from "./WebsiteEditor";
 import { DataStudioPage } from "./DataStudioPage";
 import { DataStudioSettingsPage } from "./DataStudioSettingsPage";
 import { CodeSettingsPage } from "./CodeSettingsPage";
+import { CodeWorkspacePage } from "./CodeWorkspacePage";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
   const token = getStoredAuthToken();
@@ -1523,6 +1524,7 @@ export function App() {
             <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
             <Route path="/settings/data-studio" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
         <Route path="/settings/code" element={<Workspace><CodeSettingsPage /></Workspace>} />
+        <Route path="/settings/code/:companyId/:projectId" element={<FullscreenRoute><CodeWorkspacePage /></FullscreenRoute>} />
             <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
             <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />
             <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />

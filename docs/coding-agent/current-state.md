@@ -3,15 +3,21 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C6b — versioned execution snapshot** (after C0…C6a). All seven owner completion
-  conditions are met: the snapshot is immutable; Activity and Audit events carry `snapshot_id` where
-  applicable; recorded deterministic replay is proven by test; live replay is explicitly best-effort with the
-  owner's notice verbatim; the snapshot/diff API works; a minimal read-only view lives in the existing Run
-  Trace; and a secret canary cannot reach snapshot or replay artifacts.
-- Next: **C7 — UI/Code Workspace** (and then C8…), per `00-audit.md` section 13.
+- Last completed: **C6b — versioned execution snapshot**.
+- **C7 — Code Workspace UI: implementation complete, but NOT signed as complete.** Six of the seven owner
+  completion conditions hold (chat integration with a persisted active project; Website Builder link; real
+  workspace+sandbox cleanup on delete; path-scoped `Revert file`; usage with measured-vs-estimated honesty;
+  Website Builder/Chat regressions green). The seventh — "the main UI E2E passes" — **cannot be met in this
+  repository**, because the mechanism the owner asked to reuse does not exist here: Playwright is present only
+  inside `vendor/omniroute` (a vendored third-party package), the root has no e2e script, `apps/web` has no test
+  dependencies, and `tests/manual-product-e2e-web.test.ts` cannot even be loaded outside the bundler because
+  `app.ts` pulls `project-deploy-service.ts`, which value-imports type-only symbols from `@npati/workspace`.
+  **Owner decision required** (see below).
+- Next: **C8**, once the C7 E2E question is answered and `current-state.md` is updated to C7 complete; order in
+  `00-audit.md` section 13 is binding.
 - Carried forward: **release checks still pending** — migrations **070–078** have never run against a live
-  PostgreSQL (SQL and the append-only triggers were verified by reading plus contract tests) and the C4b live
-  Docker egress E2E has not been executed. **Production-ready status is forbidden without them.**
+  PostgreSQL and the C4b live Docker egress E2E has not been executed. **Production-ready status is forbidden
+  without them.**
 
 ## Implemented (C6b, partial — green but incomplete)
 - **Immutable snapshot storage** (migration `076_execution_snapshots`): `execution_snapshots` and

@@ -212,6 +212,13 @@ export interface CodeRunStatePort {
     runId: string;
     status: "completed" | "failed" | "cancelled" | "interrupted";
     reason?: string;
+    /**
+     * The run summary, persisted with the terminal state so "what did this run cost?" is answerable later without
+     * the caller having kept the HTTP response. It is an **estimate** (the loop counts provider usage when the
+     * provider reports it and falls back to estimated per-call constants otherwise), which the persistence layer
+     * stamps as `estimated: true`.
+     */
+    estimate?: { tokenCount: number; costUsd: number | null; turns: number; toolCalls: number; filesChanged: number; diffStats: { files: number; linesAdded: number; linesRemoved: number } };
   }): Promise<unknown>;
 }
 
@@ -835,6 +842,16 @@ export class CodingAgentRunner {
           : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
         await writeState(() => this.ports.runState!.markFinished({
           companyId, runId: stateRunId!, status: stateStatus, reason,
+          // Persisted as an estimate, never as metering: `costUsd` is the loop's own number and the provider may
+          // have reported no usage at all, so a reader must be able to tell the two apart.
+          estimate: {
+            tokenCount: summary.tokens,
+            costUsd: Number.isFinite(summary.costUsd) ? summary.costUsd : null,
+            turns: summary.turns,
+            toolCalls: summary.toolCalls,
+            filesChanged: summary.filesChanged.length,
+            diffStats: summary.diffStats,
+          },
         }));
       }
       return finish(status, reason, message);

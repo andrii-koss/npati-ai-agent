@@ -12,7 +12,7 @@ import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
 
 type DataClassification = "public" | "internal" | "confidential" | "restricted";
 type RetentionClass = "ephemeral" | "short" | "standard" | "extended" | "until_deleted";
-type SessionMode = "plan" | "edit" | "auto" | "full_auto";
+type SessionMode = "plan" | "ask" | "auto_edit" | "full_auto_sandbox";
 type SessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived";
 
 interface CompanySummary {
@@ -141,7 +141,7 @@ function formatDate(value: string | undefined, isUk: boolean): string {
 
 const CLASSIFICATIONS: DataClassification[] = ["public", "internal", "confidential", "restricted"];
 const RETENTIONS: RetentionClass[] = ["ephemeral", "short", "standard", "extended", "until_deleted"];
-const SESSION_MODES: SessionMode[] = ["plan", "edit", "auto", "full_auto"];
+const SESSION_MODES: SessionMode[] = ["plan", "ask", "auto_edit", "full_auto_sandbox"];
 
 function classificationLabel(value: DataClassification | undefined, isUk: boolean): string {
   switch (value) {
@@ -164,9 +164,13 @@ function retentionLabel(value: RetentionClass | undefined, isUk: boolean): strin
   }
 }
 
-function sessionModeLabel(value: SessionMode | undefined, isUk: boolean): string {
+function sessionModeLabel(value: SessionMode | string | undefined, isUk: boolean): string {
   switch (value) {
     case "plan": return isUk ? "план" : "plan";
+    case "ask": return isUk ? "запит" : "ask";
+    case "auto_edit": return isUk ? "авторедагування" : "auto edit";
+    case "full_auto_sandbox": return isUk ? "повний авто (sandbox)" : "full auto (sandbox)";
+    // Legacy C1 spellings stay renderable: sessions persisted before C5 may still carry them.
     case "edit": return isUk ? "редагування" : "edit";
     case "auto": return isUk ? "авто" : "auto";
     case "full_auto": return isUk ? "повний авто" : "full auto";
@@ -1296,8 +1300,8 @@ function CreateSessionDrawer({ isUk, projects, initialProjectId, onClose, onSubm
             </select>
             <small>
               {isUk
-                ? "plan — лише планування; edit — правки з підтвердженням; auto/full_auto — ширша автономія під політикою проєкту."
-                : "plan — planning only; edit — changes with approval; auto/full_auto — wider autonomy under the project policy."}
+                ? "plan — лише планування; ask — відповіді без змін; auto_edit — правки з підтвердженням; full_auto_sandbox — ширша автономія під політикою проєкту."
+                : "plan — planning only; ask — answers without changes; auto_edit — changes with approval; full_auto_sandbox — wider autonomy under the project policy."}
             </small>
           </label>
           <label className="browser-form-field">

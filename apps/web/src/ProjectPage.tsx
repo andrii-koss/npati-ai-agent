@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
+import { listProjectFiles, readProjectFile, searchProjectFiles } from "./project-files-client";
 import type { Project } from "./ProjectSection";
 
 type FileEntry = { path: string; name: string; type: "file" | "directory"; size?: number; revision?: string };
@@ -356,12 +357,13 @@ export function ProjectPage() {
     try {
       const [proj, tree, chg, pStatus] = await Promise.all([
         apiGet<Project>(base),
-        apiGet<{ files: FileEntry[] }>(`${base}/files/tree`),
+        // Shared adapter (C7): the tree comes from the same client module the code workspace uses.
+        listProjectFiles({ companyId, projectId }),
         apiGet<ChangesResult>(`${base}/changes`).catch(() => ({ summary: { added: 0, modified: 0, deleted: 0, total: 0 }, changes: [] })),
         apiGet<PreviewStatusResponse>(`${base}/preview/status`).catch(() => null),
       ]);
       setProject(proj);
-      setFiles(tree.files);
+      setFiles(tree.files as FileEntry[]);
       setChanges(chg);
       if (pStatus) setPreviewStatus(pStatus);
       setError("");
@@ -500,8 +502,9 @@ export function ProjectPage() {
   const openFile = async (filePath: string) => {
     try {
       setError("");
-      const content = await apiGet<FileContent>(`${base}/files/read?path=${encodeURIComponent(filePath)}`);
-      setSelectedFile(content);
+      // Shared adapter (C7): one implementation of the project file read for every page.
+      const content = await readProjectFile({ companyId, projectId }, filePath);
+      setSelectedFile(content as FileContent);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to open file");
     }
@@ -511,11 +514,11 @@ export function ProjectPage() {
     e.preventDefault();
     try {
       setError("");
-      const url = fileSearchQuery.trim()
-        ? `${base}/files/search?query=${encodeURIComponent(fileSearchQuery.trim())}`
-        : `${base}/files/tree`;
-      const result = await apiGet<{ files: FileEntry[] }>(url);
-      setFiles(result.files);
+      const query = fileSearchQuery.trim();
+      const files = query
+        ? await searchProjectFiles({ companyId, projectId }, query)
+        : (await listProjectFiles({ companyId, projectId })).files;
+      setFiles(files as FileEntry[]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Search unavailable");
     }

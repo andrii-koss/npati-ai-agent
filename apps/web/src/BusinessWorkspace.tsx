@@ -10,6 +10,7 @@ import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { SPEECH_VOICES } from "./speech-voices";
+import { persistedModeLabel } from "./code-workspace/actions";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { confirmModal, alertModal } from "./ConfirmDialog";
@@ -1089,6 +1090,15 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const builderUrl = card.companyId
     ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.projectId ?? card.id)}`
     : `/projects/${encodeURIComponent(card.projectId ?? card.id)}`;
+  // C7: a code project opens the Code Workspace instead of the Website Builder. `tab=changes` is the same
+  // convention the builder link uses, so the Changes action lands on the tab the user asked for.
+  const isCodeProject = card.kind === "code_project";
+  const codeWorkspaceUrl = card.companyId && card.projectId
+    ? `/settings/code/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.projectId)}${card.sessionId ? `?session=${encodeURIComponent(card.sessionId)}` : ""}`
+    : null;
+  const codeChangesUrl = codeWorkspaceUrl
+    ? `${codeWorkspaceUrl}${codeWorkspaceUrl.includes("?") ? "&" : "?"}tab=changes`
+    : null;
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -1184,11 +1194,13 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
       <div className="project-chat-card">
         <div className="project-chat-card-top">
           <div className="project-chat-card-info">
-            <span className="project-chat-card-icon">🌐</span>
+            <span className="project-chat-card-icon">{isCodeProject ? "⌨️" : "🌐"}</span>
             <div>
               <h4 className="project-chat-card-title">{card.name}</h4>
               <span className="project-chat-card-sub">
-                {card.framework || "Website"} · {card.agentName ? `${card.agentName} (${card.agentRole})` : "Developer Agent"}
+                {isCodeProject
+                  ? `Code · ${card.agentName ? `${card.agentName} (${card.agentRole})` : "Developer Agent"}`
+                  : `${card.framework || "Website"} · ${card.agentName ? `${card.agentName} (${card.agentRole})` : "Developer Agent"}`}
               </span>
             </div>
           </div>
@@ -1199,15 +1211,33 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           {card.previewUrl && <span className="preview-live-badge">● Live Preview Active</span>}
         </div>
         <div className="project-chat-card-actions">
-          <button type="button" className="button-primary" onClick={() => navigate(builderUrl)}>
-            Open in Website Builder →
-          </button>
-          <button type="button" className="button-secondary" onClick={() => void openPreview()}>
-            Preview
-          </button>
-          <button type="button" className="button-secondary" onClick={() => navigate(`${builderUrl}?tab=changes`)}>
-            Changes
-          </button>
+          {isCodeProject && codeWorkspaceUrl ? (
+            <>
+              <button type="button" className="button-primary" onClick={() => navigate(codeWorkspaceUrl)}>
+                Open Workspace →
+              </button>
+              <button type="button" className="button-secondary" onClick={() => navigate(codeChangesUrl!)}>
+                Changes{typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}
+              </button>
+            </>
+          ) : (
+            <button type="button" className="button-primary" onClick={() => navigate(builderUrl)}>
+              Open in Website Builder →
+            </button>
+          )}
+          {!isCodeProject && (
+            <button type="button" className="button-secondary" onClick={() => void openPreview()}>
+              Preview
+            </button>
+          )}
+          {!isCodeProject && (
+            <button type="button" className="button-secondary" onClick={() => navigate(`${builderUrl}?tab=changes`)}>
+              Changes
+            </button>
+          )}
+          {isCodeProject && card.codeMode && persistedModeLabel(card.codeMode, false) && (
+            <span className="project-chat-card-meta-note">Mode: {persistedModeLabel(card.codeMode, false)}</span>
+          )}
           {card.runId && (
             <Link to={`/activity?runId=${card.runId}`} className="button-secondary project-view-run-link">
               View Run

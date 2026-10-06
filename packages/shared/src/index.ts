@@ -101,6 +101,12 @@ export interface RunContextSnapshot extends ActiveContext {
   capturedAt: string;
 }
 
+/**
+ * Version of the persisted project-card payload. Cards written before C7 carry no version and are read as
+ * version 1; adding or changing a field requires bumping this (rule 13: persisted JSON formats are versioned).
+ */
+export const PROJECT_CARD_DATA_VERSION = 2;
+
 export interface ProjectCardData {
   id: string;
   projectId?: string;
@@ -115,6 +121,16 @@ export interface ProjectCardData {
   agentName?: string;
   agentRole?: string;
   runId?: string;
+  /** Format version of this payload. Absent means a pre-C7 card (version 1). */
+  cardVersion?: number;
+  /** Which workspace the card opens. Absent means a website project, i.e. the pre-C7 shape. */
+  kind?: "website_project" | "code_project";
+  /** Code session the card points at; only meaningful for `kind: "code_project"`. */
+  sessionId?: string;
+  /** Session mode at capture time (plan | ask | auto_edit | full_auto_sandbox), for display only. */
+  codeMode?: string;
+  /** Changed-file count at capture time, so the Changes action can show a badge without a second request. */
+  changesCount?: number;
 }
 
 export interface ProjectActionData {
