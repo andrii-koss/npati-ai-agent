@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
+import { writeProjectFile } from "./project-files-client";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
@@ -490,13 +491,8 @@ export function WebsiteBuilderDashboard() {
       // Write initial scaffold files into the workspace
       for (const [filePath, content] of Object.entries(files)) {
         try {
-          await apiFetch(
-            `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(created.id)}/files/write`,
-            {
-              method: "POST",
-              body: JSON.stringify({ path: filePath, content }),
-            }
-          );
+          // Shared adapter (C7): the scaffold write goes through the same client module as the file browser.
+          await writeProjectFile({ companyId, projectId: created.id }, filePath, content);
         } catch {
           // ignore individual write fail
         }
@@ -940,6 +936,16 @@ export function WebsiteBuilderDashboard() {
                       {t.preview} ↗
                     </a>
                   )}
+
+                  {/* C7: the same project, opened in the code workspace. One link, no second service. */}
+                  <Link
+                    to={`/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`}
+                    className="button-secondary"
+                    style={{ padding: "8px 12px", fontSize: "13px", textDecoration: "none" }}
+                    title={language === "uk" ? "Відкрити цей самий проєкт у Code Workspace" : "Open this same project in Code Workspace"}
+                  >
+                    {"</>"} {language === "uk" ? "Код" : "Code"}
+                  </Link>
 
                   <button
                     type="button"

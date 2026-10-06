@@ -5,6 +5,7 @@ import { CodeError, type CodeService } from "./code-service";
 import { hasAdminPermission, isAdminPrincipal } from "./code-rbac";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError, FeatureFlagError, isValidCodeFlagKey, type FeatureFlagService } from "./feature-flags";
 import { API_VERSION, resolveApiVersion } from "./api-versioning";
+import { CodeProjectRouteError, resolveCreateKind } from "./code-project-lifecycle-routes";
 
 type CompanyParams = { companyId: string };
 type ProjectParams = { companyId: string; projectId: string };
@@ -21,6 +22,7 @@ function fail(reply: FastifyReply, error: unknown) {
   }
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: "code_access_denied", message: error.message, retryable: false } });
   if (error instanceof WorkspaceNotFoundError) return reply.code(404).send({ error: { code: "code_not_found", message: error.message, retryable: false } });
+  if (error instanceof CodeProjectRouteError) return reply.code(error.httpStatus).send({ error: { code: error.code, message: error.message, retryable: error.retryable, ...(Object.keys(error.details).length ? { details: error.details } : {}) } });
   const message = error instanceof Error ? error.message : "Coding Agent request failed";
   return reply.code(500).send({ error: { code: "code_error", message, retryable: true } });
 }
@@ -63,11 +65,22 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
   app.get<{ Params: CompanyParams; Querystring: { includeArchived?: string } }>("/companies/:companyId/code/projects", async (request, reply) => {
     try {
       const { ctx, service } = await authorize(request, "workspace:read");
-      return { projects: await service.listProjects(ctx, request.params.companyId, request.query.includeArchived === "true") };
+      const projects = await service.listProjects(ctx, request.params.companyId, request.query.includeArchived === "true");
+      // C7: additively enriched with the newest session per project, so the UI can offer "continue where you
+      // left off" without a second list endpoint. Every pre-existing field is passed through untouched.
+      const sessions = await service.listSessions(ctx, request.params.companyId, undefined, { includeArchived: false, limit: 200 });
+      const newest = new Map<string, { sessionId: string; mode: string; status: string; updatedAt: string }>();
+      for (const session of sessions) {
+        const current = newest.get(session.projectId);
+        if (!current || session.updatedAt > current.updatedAt) {
+          newest.set(session.projectId, { sessionId: session.id, mode: session.mode, status: session.status, updatedAt: session.updatedAt });
+        }
+      }
+      return { projects: projects.map((project) => ({ ...project, lastSession: newest.get(project.id) ?? null })) };
     } catch (error) { return fail(reply, error); }
   });
 
-  app.post<{ Params: CompanyParams; Body: { name: string; description?: string; repositoryUrl?: string; branch?: string; credentialId?: string; dataClassification?: string; retentionClass?: string } }>(
+  app.post<{ Params: CompanyParams; Body: { name: string; description?: string; repositoryUrl?: string; branch?: string; credentialId?: string; dataClassification?: string; retentionClass?: string; kind?: string } }>(
     "/companies/:companyId/code/projects",
     { schema: { body: { type: "object", additionalProperties: false, required: ["name"], properties: {
       name: { type: "string", minLength: 1, maxLength: 200 },
@@ -77,10 +90,23 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
       credentialId: { type: "string", maxLength: 200 },
       dataClassification: { type: "string", enum: ["public", "internal", "confidential", "restricted"] },
       retentionClass: { type: "string", enum: ["ephemeral", "short", "standard", "extended", "until_deleted"] },
+      // C7: the UI states which creation flow it is showing. `import_repository` requires a repository URL and
+      // `empty`/`upload` forbid one, so the declared kind can never disagree with what is actually created.
+      // The creation itself stays on the existing `CodeService.createProject` path (which imports the repository
+      // and detects the toolchain), so no second creation path exists.
+      kind: { type: "string", enum: ["import_repository", "upload", "empty"] },
     } } } },
     async (request, reply) => {
       try {
         const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
+        const kind = request.body.kind === undefined ? undefined : resolveCreateKind(request.body.kind);
+        const repositoryUrl = typeof request.body.repositoryUrl === "string" ? request.body.repositoryUrl.trim() : "";
+        if (kind === "import_repository" && !repositoryUrl) {
+          throw new CodeProjectRouteError("invalid_arguments", "repositoryUrl is required when kind is import_repository", 400, { field: "repositoryUrl" });
+        }
+        if (kind !== undefined && kind !== "import_repository" && repositoryUrl) {
+          throw new CodeProjectRouteError("invalid_arguments", "repositoryUrl is only accepted when kind is import_repository", 400, { field: "repositoryUrl" });
+        }
         const project = await service.createProject(ctx, request.params.companyId, request.body as never);
         return reply.code(201).send(project);
       } catch (error) { return fail(reply, error); }

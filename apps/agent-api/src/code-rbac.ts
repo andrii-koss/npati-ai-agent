@@ -354,6 +354,26 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   // get their own names so a caller cannot authorize a replay or a write with a read action's label.
   "code.snapshot.read": "workspace:read",
   "code.activity.read": "workspace:read",
+  // C7: the project lifecycle and session control the UI needs. Reading a project list and the changes of a
+  // session are ordinary read surfaces; creating, renaming, unarchiving, stopping and reverting are workspace
+  // writes. Archiving and deleting are mapped to `business:manage` because they are destructive in the same
+  // way as the other project/company administration surfaces (archiving releases the sandbox, deleting removes
+  // the project and its workspace). They are **not** privileged: an owner-only delete would need a privileged
+  // permission named on `owner` explicitly, which is a deliberate one-line change and is called out in the
+  // step report rather than silently invented here.
+  "code.project.list": "workspace:read",
+  "code.session.list": "workspace:read",
+  "code.changes.read": "workspace:read",
+  "code.session.usage.read": "workspace:read",
+  "code.active_context.read": "workspace:read",
+  "code.project.create": "workspace:write",
+  "code.project.rename": "workspace:write",
+  "code.project.unarchive": "workspace:write",
+  "code.session.stop": "workspace:write",
+  "code.changes.revert": "workspace:write",
+  "code.active_context.write": "workspace:write",
+  "code.project.archive": "business:manage",
+  "code.project.delete": "business:manage",
 });
 
 /**

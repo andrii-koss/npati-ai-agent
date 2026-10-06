@@ -1,6 +1,7 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
+import { cardLinkHtml, escapeInlineText } from "./chat-markdown-inline";
 
 const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -626,10 +627,11 @@ function markdownToCardHtml(md: string): string {
   let listType: "ul" | "ol" = "ul";
 
   const formatInline = (str: string): string => {
-    let s = str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    // C7 security fix: escaping (including quotes) and link building moved into a pure module so the
+    // gate can execute the invariant. Quotes are escaped before any markup is inserted, and the href is
+    // escaped again — previously a `"` inside the URL could close the href attribute and install an
+    // event handler (`[x](https://a.com/"onmouseover="location=name)`).
+    let s = escapeInlineText(str);
     // Bold: **text** or __text__
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
@@ -637,8 +639,11 @@ function markdownToCardHtml(md: string): string {
     s = s.replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, "$1<em>$2</em>$3");
     // Code inline: `code`
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-    // Links: [label](url)
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)/g, '<a href="$2" class="chat-card-link" style="color:var(--brand-500, #3b82f6);text-decoration:underline;font-weight:600;display:inline-flex;margin-top:4px;">$1</a>');
+    // Links: [label](url) — the URL is validated and re-escaped by cardLinkHtml.
+    s = s.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)/g,
+      (_match: string, label: string, url: string) => cardLinkHtml(label, url)
+    );
     return s;
   };
 
@@ -702,6 +707,63 @@ function markdownToCardHtml(md: string): string {
   return htmlParts.join("");
 }
 
+/**
+ * Sanitizes HTML before it is written with `innerHTML` or rendered with `dangerouslySetInnerHTML`.
+ *
+ * The card body is a `contentEditable` node, so its `innerHTML` is not necessarily the markup this component
+ * produced: a paste can put arbitrary markup there, and mirroring that raw markup into another node with
+ * `innerHTML` would install it as live DOM (the fullscreen copy writes whatever the inline copy holds). The
+ * output of `markdownToCardHtml` is already escaped, so this is defence in depth for the edited path: only the
+ * card vocabulary survives, anything else is unwrapped (script/style/iframe/object/embed are dropped with their
+ * content), and a link keeps `href` only when it is http(s) or root-relative.
+ *
+ * This reuses the sanitizer pattern already in the repo (`EmailInboxPage`'s `sanitizeEmailHtml`: allowlist tags,
+ * http(s)-only hrefs, `rel="noopener noreferrer"`) rather than adding a sanitizer dependency.
+ */
+const CARD_ALLOWED_TAGS = new Set([
+  "A", "P", "BR", "HR", "STRONG", "EM", "B", "I", "U", "S", "CODE", "PRE", "BLOCKQUOTE",
+  "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6", "SPAN", "DIV", "TABLE", "THEAD", "TBODY", "TR", "TH", "TD",
+]);
+const CARD_DROPPED_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH", "FORM", "LINK", "META", "BASE"]);
+const CARD_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
+  A: new Set(["href", "class", "rel", "target", "title"]),
+};
+
+export function sanitizeCardHtml(html: string): string {
+  if (!html) return "";
+  // Outside a browser (static/server render) there is no parser and no contentEditable, so fall back to text:
+  // showing escaped markup is worse-looking but can never become live DOM.
+  if (typeof DOMParser === "undefined") {
+    return html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const visit = (parent: Element) => {
+    for (const child of Array.from(parent.children)) {
+      const tag = child.tagName.toUpperCase();
+      if (CARD_DROPPED_TAGS.has(tag)) {
+        child.remove();
+        continue;
+      }
+      if (!CARD_ALLOWED_TAGS.has(tag)) {
+        child.replaceWith(...Array.from(child.childNodes));
+        continue;
+      }
+      const allowed = CARD_ALLOWED_ATTRIBUTES[tag] ?? new Set<string>();
+      for (const attribute of Array.from(child.attributes)) {
+        if (!allowed.has(attribute.name.toLowerCase())) child.removeAttribute(attribute.name);
+      }
+      if (tag === "A") {
+        const href = child.getAttribute("href") ?? "";
+        if (!(/^https?:\/\//i.test(href) || href.startsWith("/"))) child.removeAttribute("href");
+        child.setAttribute("rel", "noopener noreferrer");
+      }
+      visit(child);
+    }
+  };
+  visit(parsed.body);
+  return parsed.body.innerHTML;
+}
+
 function EditableContentCard({
   initialContent,
   title,
@@ -718,7 +780,7 @@ function EditableContentCard({
 
   useEffect(() => {
     if (!isUserEditedRef.current) {
-      const html = markdownToCardHtml(initialContent);
+      const html = sanitizeCardHtml(markdownToCardHtml(initialContent));
       if (bodyRef.current && document.activeElement !== bodyRef.current) {
         bodyRef.current.innerHTML = html;
       }
@@ -730,7 +792,9 @@ function EditableContentCard({
 
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     isUserEditedRef.current = true;
-    const html = e.currentTarget.innerHTML;
+    // Read through the sanitizer: this node is contentEditable, so its innerHTML may hold pasted markup, and
+    // the very next lines copy it into the other card (the fullscreen mirror).
+    const html = sanitizeCardHtml(e.currentTarget.innerHTML);
     if (bodyRef.current && e.currentTarget !== bodyRef.current) {
       bodyRef.current.innerHTML = html;
     }
@@ -788,7 +852,7 @@ function EditableContentCard({
       if (next) {
         requestAnimationFrame(() => {
           if (modalBodyRef.current && bodyRef.current) {
-            modalBodyRef.current.innerHTML = bodyRef.current.innerHTML;
+            modalBodyRef.current.innerHTML = sanitizeCardHtml(bodyRef.current.innerHTML);
           }
         });
       }
@@ -875,7 +939,7 @@ function EditableContentCard({
           spellCheck={true}
           onInput={handleInput}
           onClick={handleCardLinkClick}
-          dangerouslySetInnerHTML={{ __html: initialHtml }}
+          dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(initialHtml) }}
         />
       </div>
 
@@ -949,7 +1013,7 @@ function EditableContentCard({
               spellCheck={true}
               onInput={handleInput}
               onClick={handleCardLinkClick}
-              dangerouslySetInnerHTML={{ __html: bodyRef.current ? bodyRef.current.innerHTML : initialHtml }}
+              dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(bodyRef.current ? bodyRef.current.innerHTML : initialHtml) }}
             />
           </div>
         </div>

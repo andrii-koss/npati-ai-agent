@@ -21715,5 +21715,31 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
   }
 }
 
-
-
+/* --- C7 Code Workspace (additive; every rule is scoped to .code-workspace) --- */
+.code-workspace .mobile-view-switch { display: none; gap: 6px; margin: 8px 0 12px; flex-wrap: wrap; }
+.code-workspace .mobile-view-button { border: 1px solid #eef2f6; background: transparent; color: inherit; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.code-workspace .mobile-view-button.active { border-color: currentColor; }
+.code-workspace .code-file-tree { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; }
+.code-workspace .code-file-tree-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-file-tree-item.active { background: rgba(110, 168, 254, 0.12); }
+.code-workspace .code-stream { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.code-workspace .code-stream-toggle { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; cursor: pointer; padding: 6px 4px; }
+.code-workspace .code-stream-kind { font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-stream-body { border-left: 2px solid #eef2f6; margin-left: 6px; padding-left: 10px; }
+.code-workspace .code-approvals { margin-top: 16px; }
+.code-workspace .code-approval-card { border: 1px solid #eef2f6; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.code-workspace .code-approval-body { max-height: 240px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-workspace .code-approval-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.code-workspace .code-approval-deny { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.code-workspace .code-approval-deny textarea { min-height: 64px; width: 100%; }
+.code-workspace .code-changes-list { list-style: none; margin: 0; padding: 0; }
+.code-workspace .code-change-header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-diff { max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-workspace .code-workspace-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.code-workspace .code-workspace-usage { font-size: 12px; }
+.code-workspace .code-workspace-sessions { display: flex; gap: 8px; margin-top: 12px; }
+.code-workspace .project-preview-frame iframe { width: 100%; min-height: 420px; border: 1px solid #eef2f6; border-radius: 10px; }
+@media (max-width: 900px) {
+  .code-workspace .mobile-view-switch { display: flex; }
+  .code-workspace .code-workspace-controls { flex-direction: column; align-items: stretch; }
+}

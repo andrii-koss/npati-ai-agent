@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AuthContext, Project, ProjectCheckpoint, CheckpointTrigger, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
-import { safeProjectPath, ProjectFileError } from "./project-workspace";
+import { safeProjectPath, samePath, ProjectFileError } from "./project-workspace";
 
 const execFileAsync = promisify(execFile);
 
@@ -111,6 +111,11 @@ export class ProjectGitService {
     private readonly workspaceRoot: string,
     thresholds?: Partial<CheckpointThresholds>,
     private readonly resolveGithubCredential?: (ctx: AuthContext, companyId: string, credentialId: string) => Promise<string>,
+    /**
+     * Test seam for the git process. Production passes nothing and the real `git` binary is used; a suite injects
+     * a spooler so it can assert the exact argv (for example that a path-scoped revert never issues `reset --hard`).
+     */
+    private readonly runGitImpl?: (dir: string, args: string[], env: Record<string, string>) => Promise<{ stdout: string; stderr: string }>,
   ) {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
@@ -140,6 +145,7 @@ export class ProjectGitService {
   }
 
   private async runGit(dir: string, args: string[], env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
+    if (this.runGitImpl) return this.runGitImpl(dir, args, env);
     try {
       const result = await execFileAsync("git", ["-c", `core.hooksPath=${path.join(dir, ".git", "npati-disabled-hooks")}`, ...args], {
         cwd: dir,
@@ -566,13 +572,118 @@ export class ProjectGitService {
     };
   }
 
+  /**
+   * C7: revert **only the named paths** back to a commit (default `HEAD`, or a checkpoint's commit).
+   *
+   * Why this exists as its own method instead of reusing `restoreCheckpoint`: `restoreCheckpoint` performs
+   * `git reset --hard` + `git clean -fd`, which is correct for "revert everything" and catastrophic for "revert
+   * this one file" — it would discard unrelated work that the caller never asked to touch. This method therefore
+   * issues a path-scoped `git checkout <commit> -- <paths>` and never a workspace-wide reset.
+   *
+   * Guards, all enforced **before** any git process starts:
+   *  - every path goes through the canonical `safeProjectPath` (refuses `..`, absolute paths, drive letters,
+   *    backslashes, protected/secret paths) and `~`-prefixed paths are refused outright;
+   *  - each path component is checked with `lstat`, so a symlink anywhere along the path aborts the call rather
+   *    than letting git write through a link into somewhere else;
+   *  - a mandatory pre-restore safety checkpoint is taken first, so the revert itself is reversible;
+   *  - per-file outcomes are collected, so one path that cannot be restored does not silently mark the others as
+   *    done — the caller receives both lists.
+   */
+  async restorePaths(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    input: { files: string[]; checkpointId?: string; commitHash?: string },
+  ): Promise<{ restored: string[]; failed: Array<{ path: string; reason: string }>; targetCommit: string; safetyCheckpointId: string | null }> {
+    this.requireWrite(ctx);
+    const requested = Array.isArray(input?.files) ? input.files : [];
+    if (requested.length === 0) throw new GitError("FILES_REQUIRED", "List of files to restore is required", 400);
+    if (requested.length > 200) throw new GitError("TOO_MANY_FILES", "At most 200 paths can be restored at once", 400);
+
+    // Validate everything up front: a single bad path must refuse the whole call, not partially apply a revert.
+    const safeFiles = requested.map((file) => {
+      if (typeof file === "string" && file.trimStart().startsWith("~")) {
+        throw new GitError("INVALID_PATH", "Home-relative paths are not allowed", 400);
+      }
+      return safeProjectPath(file);
+    });
+    if (new Set(safeFiles).size !== safeFiles.length) throw new GitError("DUPLICATE_PATHS", "Duplicate paths in restore request", 400);
+
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    await this.assertNoSymlinkPath(dir, safeFiles);
+
+    let targetCommit: string;
+    if (input.checkpointId) {
+      const checkpoint = await this.getCheckpoint(ctx, companyId, projectId, input.checkpointId);
+      if (!checkpoint.commitHash) throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint does not have an associated commit hash", 400);
+      targetCommit = checkpoint.commitHash;
+    } else if (input.commitHash) {
+      if (!/^[0-9a-fA-F]{7,64}$/.test(input.commitHash)) throw new GitError("INVALID_COMMIT", "Invalid commit hash", 400);
+      targetCommit = input.commitHash;
+    } else {
+      const { stdout } = await this.runGit(dir, ["rev-parse", "HEAD"]);
+      targetCommit = stdout.trim();
+      if (!targetCommit) throw new GitError("NO_COMMIT", "The project has no commit to restore to", 400);
+    }
+
+    // MANDATORY SAFETY: the same pre-restore checkpoint `restoreCheckpoint` takes, so a path revert is undoable.
+    const safety = await this.createCheckpoint(ctx, companyId, projectId, {
+      name: `Before restoring ${safeFiles.length} path(s)`,
+      description: `Automatic safety checkpoint taken prior to a path-scoped restore of: ${safeFiles.join(", ")}`,
+      trigger: "pre_restore",
+    });
+
+    const restored: string[] = [];
+    const failed: Array<{ path: string; reason: string }> = [];
+    for (const file of safeFiles) {
+      try {
+        // Path-scoped checkout. `--` separates paths from revisions so a path can never be read as an option.
+        await this.runGit(dir, ["checkout", targetCommit, "--", file]);
+        restored.push(file);
+      } catch (error) {
+        failed.push({ path: file, reason: error instanceof Error ? error.message : "restore_failed" });
+      }
+    }
+
+    return { restored, failed, targetCommit, safetyCheckpointId: safety?.id ?? null };
+  }
+
+  /** Refuse a path that is, or traverses, a symlink: git must never write through a link out of the workspace. */
+  private async assertNoSymlinkPath(dir: string, files: string[]): Promise<void> {
+    const resolvedDir = path.resolve(dir);
+    const realDir = await realpath(dir).catch(() => undefined);
+    for (const file of files) {
+      const parts = file.split("/");
+      let candidate = dir;
+      for (let index = 0; index < parts.length; index += 1) {
+        candidate = path.join(candidate, parts[index]!);
+        const entry = await lstat(candidate).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (!entry) break;
+        if (entry.isSymbolicLink()) throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
+        // `isSymbolicLink()` misses reparse points that the platform reports as directories (Windows junctions),
+        // so the resolved location is compared as well: a link anywhere along the path resolves outside the root.
+        if (realDir) {
+          const real = await realpath(candidate).catch(() => undefined);
+          if (real && !samePath(real, path.join(realDir, ...parts.slice(0, index + 1)))) {
+            throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
+          }
+        }
+      }
+      if (!path.resolve(candidate).startsWith(resolvedDir + path.sep) && path.resolve(candidate) !== resolvedDir) {
+        throw new GitError("INVALID_PATH", "Restore path escapes the project workspace", 403);
+      }
+    }
+  }
+
   async push(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { branch?: string; credentialId?: string; approved?: boolean },
-  ): Promise<{ pushed: boolean; branch: string; remote: string }> {
-    this.requireWrite(ctx);
+  ): Promise<{ pushed: boolean; branch: string; remote: string }> {    this.requireWrite(ctx);
     if (!options.approved) throw new GitApprovalRequiredError();
     const { project } = await this.getProjectPath(ctx, companyId, projectId);
     if (project.repositoryProvider !== "github" || !project.repositoryUrl) throw new GitError("REPOSITORY_NOT_CONNECTED", "Connect a GitHub repository first", 400);

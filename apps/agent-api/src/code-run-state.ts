@@ -180,6 +180,59 @@ const FORBIDDEN_STATE_KEYS = [
   "password", "credentials", "apikey", "api_key", "filecontent",
 ] as const;
 
+/** Where a persisted run estimate came from. Versioned vocabulary so a future real meter can be told apart. */
+export const RUN_ESTIMATE_SOURCE = "runner_summary_estimate";
+
+/** What the runner reports about a finished run, before it is stamped as an estimate. */
+export interface CodeRunEstimateInput {
+  /**
+   * Named `tokenCount`, not `tokens`: the run-state guard forbids a `token` key because that is a credential, and a
+   * count must never be confused with a value. The API surfaces it as `tokens` because there it is unambiguous.
+   */
+  tokenCount: number;
+  costUsd: number | null;
+  turns: number;
+  toolCalls: number;
+  filesChanged: number;
+  diffStats: { files: number; linesAdded: number; linesRemoved: number };
+}
+
+/**
+ * A persisted run estimate. `estimated` is part of the stored shape, not a UI hint: any reader that shows these
+ * numbers must show them as an estimate, and a future provider-metered value would arrive as `estimated: false`
+ * with a different `source` — so the contract already has room for the honest distinction (rule 13).
+ */
+export interface CodeRunEstimate extends CodeRunEstimateInput {
+  estimated: true;
+  source: typeof RUN_ESTIMATE_SOURCE;
+}
+
+/** Reads a persisted estimate out of a run-state `details` bag, validating rather than trusting its shape. */
+export function readRunEstimate(details: Record<string, unknown> | null | undefined): CodeRunEstimate | null {
+  const candidate = details?.estimate;
+  if (!candidate || typeof candidate !== "object") return null;
+  const value = candidate as Record<string, unknown>;
+  const numberOf = (key: string): number | null => (typeof value[key] === "number" && Number.isFinite(value[key]) ? (value[key] as number) : null);
+  const tokens = numberOf("tokenCount");
+  if (tokens === null) return null;
+  const cost = typeof value.costUsd === "number" && Number.isFinite(value.costUsd) ? value.costUsd : null;
+  const diffStats = value.diffStats && typeof value.diffStats === "object" ? (value.diffStats as Record<string, unknown>) : {};
+  return {
+    tokenCount: tokens,
+    costUsd: cost,
+    turns: numberOf("turns") ?? 0,
+    toolCalls: numberOf("toolCalls") ?? 0,
+    filesChanged: numberOf("filesChanged") ?? 0,
+    diffStats: {
+      files: typeof diffStats.files === "number" ? diffStats.files : 0,
+      linesAdded: typeof diffStats.linesAdded === "number" ? diffStats.linesAdded : 0,
+      linesRemoved: typeof diffStats.linesRemoved === "number" ? diffStats.linesRemoved : 0,
+    },
+    estimated: true,
+    source: RUN_ESTIMATE_SOURCE,
+  };
+}
+
 /**
  * A run-state record may carry names, ids, counts and reasons — never content. This is asserted on every
  * write rather than only in tests: a caller that passes a command string in `details` fails loudly instead of
@@ -382,14 +435,30 @@ export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
   }
 
   /** Terminal state of a run. `completed`/`failed`/`cancelled` all stamp `finished_at`. */
-  async markFinished(input: { companyId: string; runId: string; status: CodeRunStateStatus; reason?: string }): Promise<CodeRunStateRecord> {
+  async markFinished(input: {
+    companyId: string;
+    runId: string;
+    status: CodeRunStateStatus;
+    reason?: string;
+    /**
+     * The runner's own summary of the run, persisted so a later read can answer "what did this cost?" without the
+     * caller having kept the HTTP response. It is an **estimate** (`CodingAgentRunner` fills it from estimated
+     * per-call constants when the provider reports no usage), which is why it is stored under an explicit
+     * `estimated: true` marker instead of being presented as metering.
+     */
+    estimate?: CodeRunEstimateInput;
+  }): Promise<CodeRunStateRecord> {
     if (input.reason) assertNoSensitiveRunState({ reason: input.reason });
+    const details = {
+      ...(input.reason ? { stopReason: input.reason } : {}),
+      ...(input.estimate ? { estimate: { ...input.estimate, estimated: true as const, source: RUN_ESTIMATE_SOURCE } } : {}),
+    };
     return this.apply(input.runId, {
       companyId: input.companyId,
       runId: input.runId,
       status: input.status,
       finishedAt: new Date(this.now()),
-      ...(input.reason ? { details: { stopReason: input.reason } } : {}),
+      ...(Object.keys(details).length > 0 ? { details } : {}),
     });
   }
 

@@ -10,7 +10,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -95,11 +95,11 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
-import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder } from "./coding-agent-runner";
+import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder, type CodingAgentRunResult } from "./coding-agent-runner";
 import { ReplayBundleRecorder } from "./code-replay-bundle";
 import { ensureModelProfilesVersion, ensureSystemPromptVersion } from "./code-snapshot-versioning";
 import { createExecutionSnapshotProvider } from "./execution-snapshot";
-import { CodeRunStateLog } from "./code-run-state";
+import { CodeRunStateLog, readRunEstimate } from "./code-run-state";
 import { CodeRunReconciler } from "./code-run-reconciler";
 import type { CodeSession } from "@npati/workspace";
 import { registerCodeIntentRoutes, resolveChatCodeIntent } from "./code-intent-routing";
@@ -110,6 +110,12 @@ import { getReplayBundleById, readReplayBundle, type ReplayBundleReadPort } from
 // C6b: the read-only "why did the agent act this way" surface (snapshot for a run, snapshot diff, Activity
 // events of a run, replay metadata). Reads only, so it cannot widen what an agent may do.
 import { registerCodeSnapshotRoutes } from "./code-snapshot-routes";
+import { registerCodeRunStreamRoutes } from "./code-run-stream-routes";
+import { registerCodeProjectLifecycleRoutes } from "./code-project-lifecycle-routes";
+import { registerCodeSessionControlRoutes } from "./code-session-control-routes";
+import { collectCodeSessionUsage } from "./code-session-usage";
+import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-context-store";
+import { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
@@ -4161,10 +4167,166 @@ ${localized.next}`;
    * cost of keeping both surfaces' contexts independent, and it is a read-only path.
    */
   const codeSnapshotContexts = new WeakMap<object, AuthContext>();
+  /**
+   * C7: the cancellation registry the Stop route writes to and the agent loop reads from. It is created here,
+   * next to the runner it serves, because both the route and the loop must observe the same object; a second
+   * registry would make Stop silently ineffective.
+   */
+  const codeRunCancellation = new CodeRunCancellationRegistry();
+  /**
+   * C7: the project lifecycle and session-control surfaces.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism the session-mode, production,
+   * membership, data-policy, snapshot and replay surfaces use, so there is no second auth path.
+   */
+  const codeLifecycleContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
-    if (!/\/code\/(?:runs\/[^/]+\/(?:snapshot|activity|replay)|snapshots(?:\/|$))/.test(path)) return;
-    codeSnapshotContexts.set(request, await authProvider.authenticate(request));
+    const isProjectLifecycle = /\/code\/projects\/[^/]+(?:\/(?:archive|unarchive))?$/.test(path);
+    const isSessionControl = /\/code\/(?:active-context|sessions\/[^/]+\/(?:stop|usage|changes|changes\/revert))$/.test(path)
+      || /\/projects\/[^/]+\/code\/sessions$/.test(path);
+    if (!isProjectLifecycle && !isSessionControl) return;
+    codeLifecycleContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeProjectLifecycleRoutes(app, {
+    projects: {
+      list: async (ctx, companyId, includeArchived) => projectService.list(ctx, companyId, includeArchived),
+      get: async (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
+      rename: async (ctx, companyId, projectId, name, expectedRevision) => projectService.rename(ctx, companyId, projectId, name, expectedRevision),
+      // `ProjectService.archive`/`delete` already run their `beforeRemove` hook, which destroys the sandbox and
+      // detaches DataBackend artifacts — so the route must not repeat that cleanup.
+      archive: async (ctx, companyId, projectId, expectedRevision) => projectService.archive(ctx, companyId, projectId, expectedRevision),
+      delete: async (ctx, companyId, projectId) => { await projectService.delete(ctx, companyId, projectId); },
+    },
+    sessions: { list: async (ctx, companyId, projectId, options) => codeService.listSessions(ctx, companyId, projectId, options) },
+    // C7: the on-disk workspace is removed by the service that owns the workspace root, not by this file. The port
+    // stays optional in the route, so a deployment without that service still reports `partial` honestly.
+    removeWorkspace: async (ctx, companyId, projectId) => projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId),
+    // Unarchive has no supported store path today: `updateProject` carries only `{ name?, expectedRevision, code? }`
+    // and there is no `unarchiveProject`, so forcing `{ status: "ready" }` would not compile and inventing a store
+    // method is outside this step. The hook is therefore left unwired on purpose and the route answers 503
+    // `project_unarchive_unavailable` with `unarchive_not_configured` rather than pretending to unarchive.
+    // No existing mechanism removes the on-disk workspace (the sandbox hook removes containers only), so it is
+    // deliberately left unwired: the delete route then reports `partial` with `workspace_removal_not_configured`
+    // instead of claiming bytes were removed.
+    // The audit port is one-argument while `AuditLogService.record` takes a context, so the shared
+    // `codePrivilegedAudit` adapter is reused here: passing the service directly does not satisfy the port, and a
+    // second adapter would be a second way to write the same journal.
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeLifecycleContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  registerCodeSessionControlRoutes(app, {
+    sessions: {
+      get: async (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId),
+      list: async (ctx, companyId, projectId, options) => codeService.listSessions(ctx, companyId, projectId, options),
+    },
+    cancellation: codeRunCancellation,
+    // The run a session points at is C6a's durable state, read through the same log the loop writes.
+    runState: async (_ctx, companyId, runId) => {
+      try {
+        const state = await codeRunStateLog.loadRunState(companyId, runId);
+        return state ? { status: state.status, startedAt: state.startedAt, heartbeatAt: state.heartbeatAt } : null;
+      } catch {
+        // A run lookup failure must not hide the session itself.
+        return null;
+      }
+    },
+    // The C6 sandbox release path: the project record owns the sandbox id, and `destroy` is idempotent.
+    releaseSandbox: async (ctx, { companyId, projectId }) => {
+      if (!projectSandbox) return { released: false, reason: "sandbox_runner_not_configured" };
+      try {
+        const project = await projectService.get(ctx, companyId, projectId);
+        if (!project.sandboxId) return { released: true, reason: "no_sandbox" };
+        await projectSandbox.destroy(ctx, project);
+        return { released: true };
+      } catch (error) {
+        return { released: false, reason: error instanceof Error ? error.message : "sandbox_release_failed" };
+      }
+    },
+    // Usage has two sources, and the answer says which one produced it. Provider-measured tokens come from the C6b
+    // replay bundle (the only place per-model-step provider usage is persisted); when no provider reported usage,
+    // the runner's own summary is used and marked `estimated: true`. Price is never inferred from tokens, so an
+    // unknown cost is `null` with a reason rather than a `0` a dashboard would read as "this run was free".
+    usage: async (_ctx, { companyId, sessionId, runId }) => collectCodeSessionUsage(
+      {
+        listBundles: async (input) => workspaceStore.listReplayBundles({ companyId: input.companyId, sessionId: input.sessionId, limit: input.limit ?? 200 }),
+        listSteps: async (tenant, bundleId) => workspaceStore.listReplayBundleSteps(tenant, bundleId),
+        // The estimate is persisted with the terminal run state by the runner, so it survives the HTTP response.
+        loadRunEstimate: async (tenant, targetRunId) => {
+          try {
+            const state = await codeRunStateLog.loadRunState(tenant, targetRunId);
+            return readRunEstimate(state?.details ?? null);
+          } catch {
+            return null;
+          }
+        },
+      },
+      { companyId, sessionId, runId },
+    ),
+    // Changes come from the existing workspace reader, reduced to **statistics**: the reader also returns the
+    // diff body, and forwarding it here would turn this surface into a new content-egress path. Callers that
+    // need the body already have the turn-diff route.
+    changes: async (ctx, { companyId, projectId }) => {
+      const result = await projectWorkspace.getChanges(ctx, companyId, projectId);
+      return {
+        summary: result.summary,
+        changes: result.changes.map((change) => {
+          const lines = change.diff.split(/\r?\n/);
+          return {
+            path: change.path,
+            status: change.status,
+            added: lines.filter((line) => /^\+(?!\+)/.test(line)).length,
+            removed: lines.filter((line) => /^-(?!--)/.test(line)).length,
+          };
+        }),
+      };
+    },
+    revert: {
+      // Revert brings the workspace back to the newest `pre_run` checkpoint, through the existing checkpoint
+      // service — whose mandatory pre-restore safety checkpoint is what makes the action itself reversible.
+      all: async (ctx, { companyId, projectId }) => {
+        const checkpoints = await projectGitService.listCheckpoints(ctx, companyId, projectId, 50);
+        const target = checkpoints.find((checkpoint) => checkpoint.trigger === "pre_run") ?? checkpoints[0];
+        if (!target) return { restored: false, files: [], safetyCheckpointId: null, reason: "no_checkpoint_available" };
+        const { backupCheckpoint } = await projectGitService.restoreCheckpoint(ctx, companyId, projectId, target.id);
+        return { restored: true, files: [], safetyCheckpointId: backupCheckpoint?.id ?? null };
+      },
+      // Per-file revert is a path-scoped restore (`git checkout <commit> -- <paths>`) and never the workspace-wide
+      // `reset --hard` + `clean -fd` that `all` uses: reverting one file must not discard unrelated work.
+      files: async (ctx, { companyId, projectId, files }) => {
+        const outcome = await projectGitService.restorePaths(ctx, companyId, projectId, { files });
+        const restoredAll = outcome.failed.length === 0 && outcome.restored.length > 0;
+        return {
+          restored: restoredAll,
+          files: outcome.restored,
+          safetyCheckpointId: outcome.safetyCheckpointId,
+          ...(restoredAll ? {} : { reason: outcome.failed.length > 0 ? `restore_failed:${outcome.failed[0]!.path}` : "no_files_restored" }),
+        };
+      },
+    },
+    activeContext: {
+      resolve: async (ctx, requested) => {
+        const resolved = await activeContextResolver.resolve(ctx, requested);
+        return {
+          contextType: String(resolved.context.contextType),
+          companyId: (resolved.context.companyId as string | null | undefined) ?? null,
+          projectId: (resolved.context.projectId as string | null | undefined) ?? null,
+          projectStatus: resolved.project?.status ?? null,
+        };
+      },
+    },
+    // C7: the active code context lives in the EXISTING per-user settings store — the same one the chat project
+    // cards use — so "continue in the active project" survives a reload without a second settings system.
+    activeContextStore: {
+      read: (ctx, companyId) => readCodeActiveContext(workspaceStore, ctx, companyId),
+      write: (ctx, companyId, input) => writeCodeActiveContext(workspaceStore, ctx, companyId, input),
+    },
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeLifecycleContexts.get(request as object) ?? null,
+    logger: app.log,
   });
   registerCodeSnapshotRoutes(app, {
     // Reads go through the same store the writer uses, so a run's snapshot and its Activity can never be
@@ -4175,6 +4337,27 @@ ${localized.next}`;
     // handing in a convenient label.
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeSnapshotContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  /**
+   * C7: the agent stream the Code Workspace renders (assistant text and tool calls, in order).
+   *
+   * The transcript comes from the C6b replay bundle because `code_run_turns.messages` is never written by the
+   * runner — so a run without a bundle answers `streamUnavailable` rather than an empty stream. Its own
+   * path-scoped context map, same mechanism as every other code surface.
+   */
+  const codeRunStreamContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/runs\/[^/]+\/turns$/.test(path)) return;
+    codeRunStreamContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeRunStreamRoutes(app, {
+    store: workspaceStore,
+    // Read-only surface: the existing `code.changes.read` action carries `workspace:read`, so a caller that
+    // may read a run's diff may read its stream and no new permission is invented for the same data.
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeRunStreamContexts.get(request as object) ?? null,
     logger: app.log,
   });
   // C5: scoped approval rules are visible and revocable; every change is audited before it applies.
@@ -5017,15 +5200,24 @@ ${localized.next}`;
         const codingEnabled = activeCompanyId
           ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }).catch(() => false)
           : false;
-        const codeProject = codingEnabled && activeCompanyId && activeProjectId
-          ? await projectService.get(auth, activeCompanyId, activeProjectId)
+        // C7: "continue this conversation in the active project". When the request names no project, the active
+        // context the user persisted (PUT /code/active-context) decides — that is what makes chat resume in the
+        // workspace they were last in instead of asking again. An explicit body projectId always wins, and a
+        // stored context that no longer validates (archived project, revoked access) is dropped rather than used.
+        const storedActiveContext = codingEnabled && activeCompanyId && !activeProjectId
+          ? await readCodeActiveContext(workspaceStore, auth, activeCompanyId).catch(() => null)
+          : null;
+        const effectiveProjectId = activeProjectId ?? storedActiveContext?.projectId ?? null;
+        const effectiveSessionId = activeProjectId ? undefined : storedActiveContext?.sessionId ?? undefined;
+        const codeProject = codingEnabled && activeCompanyId && effectiveProjectId
+          ? await projectService.get(auth, activeCompanyId, effectiveProjectId).catch(() => null)
           : null;
         const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
         const codeDecision = resolveChatCodeIntent({
           message,
           codingEnabled,
           companyId: activeCompanyId,
-          projectId: activeProjectId,
+          projectId: codeProject ? effectiveProjectId : null,
           projectKind: codeProjectKind,
         });
         if (codeDecision.mode === "clarify") {
@@ -5035,18 +5227,37 @@ ${localized.next}`;
           return;
         }
         if (codeDecision.mode === "run" && codeProject) {
-          const codeSessions = await codeService.listSessions(auth, activeCompanyId!, activeProjectId!, { limit: 1 });
-          const codeSession = codeSessions[0] ?? null;
+          const codeSessions = await codeService.listSessions(auth, activeCompanyId!, effectiveProjectId!, { limit: 1 });
+          const storedSession = effectiveSessionId
+            ? await codeService.getSession(auth, activeCompanyId!, effectiveSessionId).catch(() => null)
+            : null;
+          // The stored session is used only when it still belongs to the resolved project and is not archived;
+          // otherwise the newest session of that project is used, exactly as before.
+          const codeSession = storedSession && storedSession.status !== "archived" && storedSession.projectId === effectiveProjectId
+            ? storedSession
+            : codeSessions[0] ?? null;
           if (!codeSession) {
             send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
-            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: activeProjectId });
+            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId });
             let runResult: unknown;
             try {
-              runResult = await codingAgentRunner.run({ ctx: auth, session: codeSession, prompt: message, signal: streamController.signal });
+              // C7: Stop must be able to reach this loop. A cancellation left over from a previous Stop is
+              // cleared first (a stale flag would cancel work the user never asked to stop), then the stream's
+              // abort controller is registered so Stop can interrupt a step that is already in flight.
+              codeRunCancellation.clearSession(codeSession.id);
+              codeRunCancellation.registerController(codeSession.id, streamController);
+              runResult = await codingAgentRunner.run({
+                ctx: auth,
+                session: codeSession,
+                prompt: message,
+                signal: streamController.signal,
+                cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
+              });
             } catch (error) {
               runResult = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };
             } finally {
+              codeRunCancellation.unregisterController(codeSession.id, streamController);
               // C6: release the sandbox after the run — on success, failure and cancellation — because the
               // project object `destroy` needs is already loaded here. Without a sandbox service there is
               // nothing to release in this composition, and that path is logged instead of masked.
@@ -5060,7 +5271,52 @@ ${localized.next}`;
                 request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
               }
             }
-            send("result", { routed: "code_runner", intent: codeDecision.intent, run: runResult });
+            // C7: the chat answer carries a card for the code project/session, so the conversation offers
+            // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
+            // run actually reported (never from a guess) and persisted through the existing chat-card store.
+            const finishedRun = runResult && typeof runResult === "object" ? (runResult as Partial<CodingAgentRunResult>) : null;
+            const runStatus = typeof finishedRun?.status === "string" ? finishedRun.status : "unknown";
+            const changedFiles = Array.isArray(finishedRun?.summary?.filesChanged) ? finishedRun.summary.filesChanged.length : undefined;
+            const codeCard: ProjectCardData = {
+              id: codeSession.id,
+              projectId: effectiveProjectId ?? undefined,
+              companyId: activeCompanyId!,
+              name: codeProject?.name ?? "Code project",
+              status: runStatus,
+              cardVersion: PROJECT_CARD_DATA_VERSION,
+              kind: "code_project",
+              sessionId: codeSession.id,
+              codeMode: codeSession.mode,
+              ...(typeof changedFiles === "number" ? { changesCount: changedFiles } : {}),
+              ...(typeof finishedRun?.runId === "string" ? { runId: finishedRun.runId } : {}),
+            };
+            let cardConversationId: string | undefined;
+            if (memoryPolicy.writeAllowed) {
+              try {
+                const conversation = request.body.conversationId
+                  ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+                  : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+                if (conversation) {
+                  cardConversationId = conversation.id;
+                  await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+                  const summary = typeof finishedRun?.message === "string" && finishedRun.message
+                    ? finishedRun.message
+                    : `The code agent finished with status ${runStatus}.`;
+                  const assistantMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", summary);
+                  await saveChatProjectCard(workspaceStore, auth, conversation.id, assistantMessage.id, codeCard);
+                }
+              } catch (error) {
+                // A card is a convenience: failing to store it must not turn a completed run into a chat error.
+                request.log.warn({ err: error }, "code_chat_card_store_failed");
+              }
+            }
+            send("result", {
+              routed: "code_runner",
+              intent: codeDecision.intent,
+              run: runResult,
+              projectCard: codeCard,
+              ...(cardConversationId ? { conversationId: cardConversationId } : {}),
+            });
           }
           clearInterval(heartbeat);
           if (!reply.raw.writableEnded) reply.raw.end();
