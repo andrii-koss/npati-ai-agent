@@ -8,6 +8,7 @@ import type { PolicyEngine } from "./code-policy-engine";
 import type { AuditLogService } from "./audit-log";
 import { SecretLeaseProvider, redactLeaseValues, type SecretEnvironmentReference } from "./code-secret-lease";
 import { CredentialMasker } from "./security-guardrails";
+import { MIGRATION_CODES, assertNoProductionCredentialsVisible } from "./code-migration-safety";
 
 /**
  * C4: shell runtime for the coding agent.
@@ -140,9 +141,47 @@ export interface CodeShellRuntimeOptions {
   sessionTtlMs?: number;
   maxSessions?: number;
   now?: () => number;
+  /**
+   * C6a: which hosts count as production and which as development DataBackends. The shell always declares
+   * the **ephemeral sandbox** as its execution target, but a command that names a host itself
+   * (`psql -h db.prod.internal`) is judged by that host, so this list is what makes such a command a hard
+   * deny. Values fall back to `NPATI_CODE_PRODUCTION_URLS` / `NPATI_CODE_PRODUCTION_HOSTS` /
+   * `NPATI_CODE_DEV_DB_HOSTS` / `NPATI_CODE_PRODUCTION_SECRET_KEYS` and default to empty (nothing to
+   * compare against) rather than to a permissive list.
+   */
+  migrationTargets?: MigrationTargetConfig;
 }
 
 const INTERACTIVE_PATTERNS = [/(?:\(y\/n\)|\[y\/n\]|\[Y\/n\]|yes\/no)/i, /\bpassword\s*:/i, /\bpassphrase\s*:/i, /press any key/i, /are you sure/i, /enter .*:\s*$/i];
+
+/**
+ * C6a: production/development database identities used by the migration-safety phase. Every field is
+ * optional and empty by default: an empty list means "nothing is known to be production", so the check
+ * never blocks work by accident — but it also never invents a permissive target.
+ */
+export interface MigrationTargetConfig {
+  productionUrls?: string[];
+  productionHosts?: string[];
+  devHosts?: string[];
+  productionSecretKeys?: string[];
+}
+
+function splitList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+/** Reads the migration-target configuration from the environment (all optional). */
+export function resolveMigrationTargetConfig(env: NodeJS.ProcessEnv = process.env): MigrationTargetConfig {
+  return {
+    productionUrls: splitList(env.NPATI_CODE_PRODUCTION_URLS),
+    productionHosts: splitList(env.NPATI_CODE_PRODUCTION_HOSTS),
+    devHosts: splitList(env.NPATI_CODE_DEV_DB_HOSTS),
+    productionSecretKeys: splitList(env.NPATI_CODE_PRODUCTION_SECRET_KEYS),
+  };
+}
 
 /**
  * Reveals whether output looks like a program waiting for terminal input. A timeout alone is not
@@ -228,7 +267,18 @@ export class CodeShellRuntime {
       runId?: string; agentId?: string; policyChange?: "session_mode" | "project_rules" | "trust" | "allowlist" | "tool_policy";
       requiresProjectTrust?: boolean; projectTrusted?: boolean;
       repositoryInstructions?: { policyMutationAttempts?: number; notes?: string[] } | null;
+      /**
+       * C6a: extra migration context from the caller (migration files in the diff, a rollback plan, or a
+       * dev DataBackend routed through the Data Studio engine). The shell itself always declares the
+       * **ephemeral sandbox** target, and a host named inside the command still overrides it.
+       */
+      migration?: {
+        files?: Array<{ path: string; content: string }>;
+        dataStudioEngine?: boolean;
+        rollbackPlan?: boolean;
+      };
     };
+    const migrationTargets = this.options.migrationTargets ?? resolveMigrationTargetConfig();
     const decision = await policy.evaluate({
       ctx: context,
       companyId: input.companyId,
@@ -247,6 +297,18 @@ export class CodeShellRuntime {
       requiresProjectTrust: extended.requiresProjectTrust,
       projectTrusted: extended.projectTrusted,
       repositoryInstructions: extended.repositoryInstructions,
+      // C6a: a shell command runs against the ephemeral sandbox database, and the caller may add the
+      // diff/rollback context. A migration that names a production host is still refused, because the
+      // engine lets the host inside the command win over this declaration.
+      migration: {
+        sandboxEphemeral: true,
+        target: {
+          productionUrls: migrationTargets.productionUrls,
+          productionHosts: migrationTargets.productionHosts,
+          devHosts: migrationTargets.devHosts,
+        },
+        ...(extended.migration ?? {}),
+      },
     });
     if (decision.decision !== "allow") {
       const risk = decision.risk ?? classification.risk;
@@ -269,6 +331,24 @@ export class CodeShellRuntime {
       if (/(?:TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|CREDENTIAL|PRIVATE_KEY)/i.test(name) || value.length > 2_000) {
         throw new ShellRuntimeError("invalid_environment", `Refusing to keep a secret-looking variable in the shell session: ${name}`, 400);
       }
+    }
+    // C6a: production credentials must never be visible to the agent. The check is deliberately narrow —
+    // it fires only for a variable whose *value* points at a configured production host, or for an
+    // explicitly named production secret key — so a development connection string keeps working. It runs
+    // before any lease is delivered and before the sandbox is touched.
+    const credentialCheck = assertNoProductionCredentialsVisible({
+      agentEnv: environment,
+      productionUrls: migrationTargets.productionUrls ?? [],
+      productionSecretKeys: migrationTargets.productionSecretKeys ?? [],
+    });
+    if (!credentialCheck.safe) {
+      throw new ShellRuntimeError(
+        credentialCheck.code ?? MIGRATION_CODES.credentialsVisible,
+        `Refusing to run: the shell environment exposes production credentials (${credentialCheck.leakedKeys.join(", ")})`,
+        403,
+        false,
+        { leakedKeys: credentialCheck.leakedKeys },
+      );
     }
 
     // Secret delivery for exactly this call.

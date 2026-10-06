@@ -95,6 +95,8 @@ import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runn
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
 import { CodingAgentRunner } from "./coding-agent-runner";
+import { CodeRunStateLog } from "./code-run-state";
+import { CodeRunReconciler } from "./code-run-reconciler";
 import type { CodeSession } from "@npati/workspace";
 import { registerCodeIntentRoutes, resolveChatCodeIntent } from "./code-intent-routing";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
@@ -108,6 +110,7 @@ import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resol
 import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
+import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { isAgentPrincipal, matrixModeFor, PolicyEngine } from "./code-policy-engine";
 import { classifyShellCommand } from "./code-shell-classifier";
@@ -119,7 +122,7 @@ import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-appro
 import { registerCodeApprovalRoutes } from "./code-approval-routes";
 import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
-import type { CodeAgentLimits } from "./code-agent-config";
+import { DEFAULT_CODE_AGENT_LIMITS, type CodeAgentLimits } from "./code-agent-config";
 import { ProjectDeployService } from "./project-deploy-service";
 import { registerProjectDeployRoutes } from "./project-deploy-routes";
 import { ProjectBrowserQaService } from "./project-browser-qa-service";
@@ -1736,6 +1739,38 @@ export function buildApp(config: AppConfig = {}) {
   });
   const codeProcessManager = new CodeProcessManager({
     sandbox: processSandboxPort, flags: featureFlagService, audit: auditLogService, leases: secretLeases,
+  });
+  /**
+   * C6a: the reaper is an orchestrator over ports. Only the capabilities that exist today are wired; every
+   * other step is reported as `skipped` with a reason, so a missing scan API stays visible in the metrics
+   * instead of looking like "nothing to clean". Note that `SecretLeaseProvider.startReaper()` was never
+   * started before this step, so expired leases were previously never revoked in a running server.
+   */
+  const codeReaper = new CodeReaper({
+    intervalMs: config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs,
+    toolCallNoProgressMs: config.codeAgentLimits?.toolCallNoProgressMs ?? DEFAULT_CODE_AGENT_LIMITS.toolCallNoProgressMs,
+    maxRunMinutes: config.codeAgentLimits?.maxRunMinutes ?? DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes,
+    secretLeases: {
+      preview: async () => {
+        const now = Date.now();
+        return secretLeases.list({ state: "active" }).filter((lease) => lease.state === "active" && lease.expiresAt <= now).length;
+      },
+      reap: () => secretLeases.reap(),
+    },
+    processRecords: { reapIdle: () => codeProcessManager.reapIdle() },
+    shellSessions: { reap: () => codeShellRuntime.reap() },
+    // Detected, not assumed: until the approvals module exposes a bulk expiry (with its own audit) the
+    // step is reported as `port_unavailable` rather than reaching into its private pool.
+    staleApprovals: asStaleApprovalReaper(approvalsRepo),
+    disk: {
+      usage: async () => {
+        const { statfs } = await import("node:fs/promises");
+        const stats = await statfs(process.cwd());
+        return { freeBytes: Number(stats.bavail) * Number(stats.bsize), freeInodes: Number(stats.ffree) };
+      },
+    },
+    activity: { record: (event) => { app.log.info(event, "code_reaper"); } },
+    logger: { warn: (payload, message) => { app.log.warn(payload, message ?? "code_reaper_warning"); }, info: () => undefined },
   });
   /** Bookkeeping only: the process ports carry no session id, so the adapter remembers it per process. */
   const codeProcessSessions = new Map<string, { sessionId: string; companyId: string; projectId: string }>();
@@ -3742,6 +3777,14 @@ ${localized.next}`;
   // C6: the coding agent loop. Wired to the GUARDED engine (`aiEngine`), never to `baseAiEngine`: that is
   // what makes `policyContext` and the provider-data policy apply to every model call the loop makes.
   const codeRbacForRun = new CodeRbac({ ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}), logger: app.log });
+  // C6a: durable run state. The log is the single writer of turn boundaries, the write-ahead tool-call records
+  // and the lease/heartbeat that let another process decide whether a run is still alive.
+  const codeRunStateLog = new CodeRunStateLog({
+    store: workspaceStore,
+    leaseMs: config.codeAgentLimits?.runLeaseMs ?? DEFAULT_CODE_AGENT_LIMITS.runLeaseMs,
+    heartbeatMs: config.codeAgentLimits?.runHeartbeatMs ?? DEFAULT_CODE_AGENT_LIMITS.runHeartbeatMs,
+    logger: app.log,
+  });
   const codingAgentRunner = new CodingAgentRunner({
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
@@ -3749,10 +3792,34 @@ ${localized.next}`;
     engine: aiEngine,
     schemas: CODE_TOOL_SCHEMAS,
     imageAdmission: sandboxImagePolicy,
+    runState: codeRunStateLog,
     activity: { record: async (event) => { app.log.info(event, "code_run_activity"); } },
+    // C6a: when the reaper reports disk pressure it refuses new runs. The check runs at run start — after
+    // RBAC, before image admission and before any model or tool call — and a gate that throws refuses too
+    // (`admission_gate_unavailable`), because "the gate did not answer" must never mean "let it run".
+    admissionGate: { isRefusingNewRuns: () => codeReaper.isRefusingNewRuns() },
     // Run-event persistence lands with the run trace (C6b); until then the loop's events are logged above.
     runEvents: { append: async (entry) => entry },
   });
+  // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
+  // moved to `interrupted`; read-only calls with an unknown result may be replayed, mutating calls are reported
+  // as a doubt and never replayed. This is what turns a crash into a recoverable state instead of a mystery.
+  const codeRunReconciler = new CodeRunReconciler({
+    log: codeRunStateLog,
+    activity: { record: async (event) => { app.log.info(event, "code_run_reconcile"); } },
+  });
+  {
+    void codeRunReconciler.reconcileRuns().catch((error) => {
+      app.log.warn({ err: error }, "code_run_reconcile_startup_failed");
+    });
+    const codeRunReconcileTimer = setInterval(() => {
+      void codeRunReconciler.reconcileRuns().catch((error) => {
+        app.log.warn({ err: error }, "code_run_reconcile_failed");
+      });
+    }, config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs);
+    codeRunReconcileTimer.unref?.();
+    app.addHook("onClose", async () => { clearInterval(codeRunReconcileTimer); });
+  }
   // C6: the chat entry point for code intents. Additive on purpose — it never intercepts the existing chat
   // stream, so plain chat and Run Company are untouched; a non-code message comes back as `routed: "chat"`.
   // The active project is supplied by the caller (chat UI selection lands in C7); without it the bridge asks
@@ -3911,7 +3978,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); codeReaper.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();
@@ -3921,6 +3988,10 @@ ${localized.next}`;
     await objectStorage?.initialize();
     if (chatFiles) { const legacy = await chatFiles.migrateLegacy(); if (legacy.failed) app.log.warn(legacy,"Some legacy attachments could not be migrated"); await chatFiles.cleanupPending(); }
     storageReconciler?.start();
+    // C6a: one pass at boot (catches leaks left by a previous process) and then periodically. The reaper
+    // never throws and never blocks startup: a failing step is reported in its summary and its metrics.
+    void codeReaper.run().catch(() => undefined);
+    codeReaper.start((summary) => { app.log.warn({ skipped: summary.skipped, errors: summary.errors }, "code_reaper_attention"); });
     emailInboxWorker.start();
     automationScheduler.start();
   });

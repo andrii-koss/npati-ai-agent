@@ -3,8 +3,11 @@ import { assertNoSecrets } from "@npati/memory";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
-  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS } from "./types";
+  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType,
+  CodeRunStateRecord, CodeRunStateStatus, CodeRunTurnRecord, CodeRunToolCallRecord, CreateCodeRunStateInput,
+  ApplyCodeRunStateEventInput, UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput,
+  CodeRunScanPage } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -57,6 +60,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   // invites by id, with the token hash acting as the second unique key.
   private readonly companyMembers = new Map<string, CompanyMember>();
   private readonly companyInvites = new Map<string, CompanyInvite>();
+  // C6a: run state. Runs are keyed by id (a run id is globally unique in the postgres table too); turns are
+  // keyed by (run, turnIndex) exactly like the primary key of `code_run_turns`.
+  private readonly codeRunStates = new Map<string, CodeRunStateRecord>();
+  private readonly codeRunTurns = new Map<string, CodeRunTurnRecord>();
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -1956,6 +1963,189 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       if (invite.tokenHash === tokenHash) return invite;
     }
     return undefined;
+  }
+
+  // --- C6a: durable Coding Agent run state --------------------------------------------------
+  // The same semantics as the postgres store, including the sequence guard, the atomic lease transition and
+  // the tool-call merge, so the reconciler behaves identically with and without a database.
+
+  async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
+    const existing = await this.getCodeRunState(input.companyId, input.runId);
+    // Idempotent by run: a retried create never rewinds the cursor and never steals the lease.
+    if (existing) return existing;
+    const record: CodeRunStateRecord = {
+      runId: input.runId,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      status: "running",
+      turnIndex: 0,
+      lastEventSeq: 1,
+      leaseOwner: input.owner,
+      leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+      heartbeatAt: input.now,
+      startedAt: input.now,
+      updatedAt: input.now,
+      finishedAt: null,
+      details: { ...(input.details ?? {}) },
+      revision: 1,
+    };
+    this.codeRunStates.set(input.runId, record);
+    return structuredClone(record);
+  }
+
+  async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
+    const current = this.codeRunStates.get(input.runId);
+    if (!current || current.companyId !== input.companyId) {
+      throw new CodeRunStateStoreError("code_run_state_not_found", "No such run state", {
+        httpStatus: 404, details: { runId: input.runId },
+      });
+    }
+    // The sequence guard: a retried write (same or older seq) changes nothing at all.
+    if (current.lastEventSeq >= input.seq) return structuredClone(current);
+
+    const now = input.lease?.now ?? new Date();
+    const leaseTransitionAllowed = (() => {
+      if (!input.lease) return false;
+      if (input.lease.mode === "acquire") {
+        return current.leaseOwner === null || current.leaseOwner === input.lease.owner
+          || current.leaseExpiresAt === null || current.leaseExpiresAt.getTime() < input.lease.now.getTime();
+      }
+      return current.leaseOwner === input.lease.owner;
+    })();
+
+    const next: CodeRunStateRecord = {
+      ...current,
+      status: input.status ?? current.status,
+      turnIndex: input.turnIndex ?? current.turnIndex,
+      heartbeatAt: input.heartbeatAt ?? current.heartbeatAt,
+      finishedAt: input.finishedAt !== undefined ? input.finishedAt : current.finishedAt,
+      details: input.details !== undefined ? { ...input.details } : current.details,
+      lastEventSeq: input.seq,
+      revision: current.revision + 1,
+      updatedAt: now,
+    };
+    if (input.lease && leaseTransitionAllowed) {
+      next.leaseOwner = input.lease.mode === "release" ? null : input.lease.owner;
+      next.leaseExpiresAt = input.lease.mode === "release"
+        ? null
+        : new Date(input.lease.now.getTime() + (input.lease.leaseMs ?? 0));
+    }
+    this.codeRunStates.set(input.runId, next);
+    return structuredClone(next);
+  }
+
+  async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
+    const record = this.codeRunStates.get(runId);
+    // A run of another company is indistinguishable from a missing one.
+    if (!record || record.companyId !== companyId) return null;
+    return structuredClone(record);
+  }
+
+  async listStaleCodeRunStates(input: { now: Date; limit: number }): Promise<CodeRunStateRecord[]> {
+    return structuredClone([...this.codeRunStates.values()]
+      .filter((record) => record.status === "running"
+        && (record.leaseExpiresAt === null || record.leaseExpiresAt.getTime() < input.now.getTime()))
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+      .slice(0, Math.max(1, input.limit)));
+  }
+
+  async upsertCodeRunTurn(input: UpsertCodeRunTurnInput): Promise<CodeRunTurnRecord> {
+    const key = `${input.runId}\u0000${input.turnIndex}`;
+    const existing = this.codeRunTurns.get(key) ?? null;
+    if (existing && existing.companyId !== input.companyId) {
+      throw new CodeRunStateStoreError("code_run_state_not_found", "No such run turn", {
+        httpStatus: 404, details: { runId: input.runId, turnIndex: input.turnIndex },
+      });
+    }
+    const record: CodeRunTurnRecord = {
+      runId: input.runId,
+      companyId: input.companyId,
+      turnIndex: input.turnIndex,
+      // A turn that already finished is never reopened by a late write.
+      status: input.status === "running" && existing && existing.status !== "running" ? existing.status : input.status,
+      outcome: mergeCodeRunTurnOutcome(existing?.outcome ?? null, input.outcome ?? null),
+      toolCalls: mergeCodeRunToolCalls(existing?.toolCalls ?? [], input.toolCalls ?? []),
+      messages: structuredClone([...(input.messages ?? existing?.messages ?? [])]),
+      results: structuredClone([...(input.results ?? existing?.results ?? [])]),
+      checkpointId: input.checkpointId ?? existing?.checkpointId ?? null,
+      startedAt: input.startedAt ?? existing?.startedAt ?? new Date(),
+      finishedAt: input.finishedAt ?? existing?.finishedAt ?? null,
+    };
+    this.codeRunTurns.set(key, record);
+    return structuredClone(record);
+  }
+
+  async getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null> {
+    const record = this.codeRunTurns.get(`${runId}\u0000${turnIndex}`);
+    if (!record || record.companyId !== companyId) return null;
+    return structuredClone(record);
+  }
+
+  async listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]> {
+    return structuredClone([...this.codeRunTurns.values()]
+      .filter((record) => record.runId === runId && record.companyId === companyId)
+      .sort((a, b) => a.turnIndex - b.turnIndex));
+  }
+
+  /**
+   * Keyset scan over running runs. The ordering is (startedAt, runId) and the cursor is the position of the
+   * last row of the previous page, so a row inserted while the reaper pages through cannot cause a row to be
+   * skipped or repeated.
+   */
+  async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const matching = [...this.codeRunStates.values()]
+      .filter((record) => record.status === "running"
+        && (input.companyId === null || record.companyId === input.companyId)
+        && record.startedAt.getTime() < input.startedBefore.getTime())
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime() || a.runId.localeCompare(b.runId));
+    const afterCursor = cursor
+      ? matching.filter((record) => record.startedAt.getTime() > Date.parse(cursor.startedAt)
+        || (record.startedAt.getTime() === Date.parse(cursor.startedAt) && record.runId > cursor.runId))
+      : matching;
+    const page = afterCursor.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      items: structuredClone(page),
+      nextCursor: afterCursor.length > limit && last
+        ? encodeCodeRunScanCursor({ startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: 0 })
+        : null,
+    };
+  }
+
+  /** Keyset scan over the open turns, ordered by (startedAt, runId, turnIndex). */
+  async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const statuses = input.statuses ?? ["running"];
+    const matching = [...this.codeRunTurns.values()]
+      .filter((record) => statuses.includes(record.status)
+        && (input.companyId === null || record.companyId === input.companyId)
+        && record.startedAt.getTime() < input.startedBefore.getTime())
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime()
+        || a.runId.localeCompare(b.runId) || a.turnIndex - b.turnIndex);
+    const afterCursor = cursor
+      ? matching.filter((record) => {
+        const at = record.startedAt.getTime();
+        const cursorAt = Date.parse(cursor.startedAt);
+        if (at !== cursorAt) return at > cursorAt;
+        if (record.runId !== cursor.runId) return record.runId > cursor.runId;
+        return record.turnIndex > cursor.turnIndex;
+      })
+      : matching;
+    const page = afterCursor.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      items: structuredClone(page),
+      nextCursor: afterCursor.length > limit && last
+        ? encodeCodeRunScanCursor({
+          startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: last.turnIndex,
+        })
+        : null,
+    };
   }
 
   private activeOwnerCount(companyId: string): number {

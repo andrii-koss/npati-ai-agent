@@ -7,10 +7,12 @@ import migration003 from "./migration-003";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
-  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS } from "./types";
+  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
+  CodeRunStateRecord, CodeRunTurnRecord, CodeRunTurnStatus, CreateCodeRunStateInput, ApplyCodeRunStateEventInput,
+  UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput, CodeRunScanPage } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
-import { CompanyMembershipError, ProviderDataPolicyStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+import { CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
@@ -141,6 +143,16 @@ const projectDataPolicyColumns = `company_id AS "companyId", project_id AS "proj
 const hostedProviderConsentColumns = `company_id AS "companyId", project_id AS "projectId",
   provider_id AS "providerId", granted_by AS "grantedBy", granted_at AS "grantedAt",
   revoked_at AS "revokedAt"`;
+// C6a: durable run state. `last_event_seq` is a `bigint`, and `pg` returns those as strings, so it is cast
+// back to a number here — the app-side log compares sequence numbers, not decimal strings.
+const codeRunStateColumns = `run_id AS "runId", workspace_id AS "workspaceId", company_id AS "companyId",
+  project_id AS "projectId", session_id AS "sessionId", status, turn_index AS "turnIndex",
+  last_event_seq::int AS "lastEventSeq", lease_owner AS "leaseOwner", lease_expires_at AS "leaseExpiresAt",
+  heartbeat_at AS "heartbeatAt", started_at AS "startedAt", updated_at AS "updatedAt",
+  finished_at AS "finishedAt", details, revision`;
+const codeRunTurnColumns = `run_id AS "runId", company_id AS "companyId", turn_index AS "turnIndex",
+  status, outcome, tool_calls AS "toolCalls", messages, results, checkpoint_id AS "checkpointId",
+  started_at AS "startedAt", finished_at AS "finishedAt"`;
 
 import migration004 from './migration-004';
 import migration005 from './migration-005';
@@ -985,6 +997,20 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration074 } = await import("./migration-074");
         await runMigration074(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('074_provider_data_policies')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C6a: durable Coding Agent run state (turn boundaries, monotonic event sequence, lease/heartbeat).
+    // Additive: 075 creates its own two tables and indexes and touches no existing table, row or query.
+    const codeRunStateMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='075_code_run_state'");
+    if (!codeRunStateMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration075 } = await import("./migration-075");
+        await runMigration075(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('075_code_run_state')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -3096,5 +3122,228 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [input.companyId, input.projectId, input.providerId],
     );
     return result.rows[0] ?? null;
+  }
+
+  // --- C6a: durable Coding Agent run state --------------------------------------------------
+
+  /**
+   * Creates the run row already leased by `owner`. `ON CONFLICT DO NOTHING` makes a retried create
+   * idempotent: the second call returns the existing row with its cursor and lease untouched, so a
+   * duplicated start can never rewind a run or steal its own lease.
+   */
+  async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
+    const expiresAt = new Date(input.now.getTime() + input.leaseMs);
+    await this.pool.query(
+      `INSERT INTO code_run_states(
+         run_id, workspace_id, company_id, project_id, session_id, status, turn_index, last_event_seq,
+         lease_owner, lease_expires_at, heartbeat_at, started_at, updated_at, details)
+       VALUES ($1,$2,$3,$4,$5,'running',0,1,$6,$7,$8,$8,$8,$9::jsonb)
+       ON CONFLICT (run_id) DO NOTHING`,
+      [
+        input.runId, input.workspaceId, input.companyId, input.projectId, input.sessionId,
+        input.owner, expiresAt, input.now, JSON.stringify(input.details ?? {}),
+      ],
+    );
+    const stored = await this.getCodeRunState(input.companyId, input.runId);
+    if (!stored) {
+      throw new CodeRunStateStoreError("code_run_state_not_found", "The run state could not be created", {
+        httpStatus: 404, details: { runId: input.runId },
+      });
+    }
+    return stored;
+  }
+
+  /**
+   * One statement applies the whole patch, including the lease transition:
+   *
+   * - the `seq` guard (`last_event_seq < $seq`) makes a retried write a no-op, which is what lets the caller
+   *   write after every turn without worrying about duplicates;
+   * - the lease condition is expressed inside the same `WHERE`, so the check and the write cannot be split by
+   *   a concurrent writer. A refused lease transition still lets the non-lease part of the patch land (the
+   *   status/cursor of a run we no longer own is still true information), which is why the lease predicate is
+   *   written per-mode rather than as an early return.
+   */
+  async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
+    const leasePredicate = (() => {
+      if (!input.lease) return "TRUE";
+      if (input.lease.mode === "acquire") {
+        return "(lease_owner IS NULL OR lease_owner=$7 OR lease_expires_at IS NULL OR lease_expires_at < $6)";
+      }
+      if (input.lease.mode === "renew") return "lease_owner=$7";
+      return "lease_owner=$7";
+    })();
+    const leaseExpiresAt = input.lease
+      ? (input.lease.mode === "release" ? null : new Date(input.lease.now.getTime() + (input.lease.leaseMs ?? 0)))
+      : undefined;
+    const result = await this.pool.query<CodeRunStateRecord>(
+      `UPDATE code_run_states SET
+         status = COALESCE($4, status),
+         turn_index = COALESCE($5, turn_index),
+         heartbeat_at = COALESCE($8, heartbeat_at),
+         finished_at = CASE WHEN $9::boolean THEN $10 ELSE finished_at END,
+         details = COALESCE($11::jsonb, details),
+         last_event_seq = $3,
+         lease_owner = CASE WHEN $12::boolean AND ${leasePredicate} THEN $7 ELSE lease_owner END,
+         lease_expires_at = CASE WHEN $12::boolean AND ${leasePredicate} THEN $13 ELSE lease_expires_at END,
+         revision = revision + 1,
+         updated_at = $6
+       WHERE company_id=$1 AND run_id=$2 AND last_event_seq < $3
+       RETURNING ${codeRunStateColumns}`,
+      [
+        input.companyId, input.runId, input.seq,
+        input.status ?? null, input.turnIndex ?? null, input.lease?.now ?? new Date(),
+        input.lease?.owner ?? null, input.heartbeatAt ?? null,
+        input.finishedAt !== undefined, input.finishedAt ?? null,
+        input.details === undefined ? null : JSON.stringify(input.details),
+        Boolean(input.lease), leaseExpiresAt ?? null,
+      ],
+    );
+    if (result.rows[0]) return result.rows[0];
+    // Either the sequence was already applied (idempotent no-op) or the row is gone/foreign.
+    const current = await this.getCodeRunState(input.companyId, input.runId);
+    if (!current) {
+      throw new CodeRunStateStoreError("code_run_state_not_found", "No such run state", {
+        httpStatus: 404, details: { runId: input.runId },
+      });
+    }
+    return current;
+  }
+
+  async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
+    const result = await this.pool.query<CodeRunStateRecord>(
+      `SELECT ${codeRunStateColumns} FROM code_run_states WHERE company_id=$1 AND run_id=$2`,
+      [companyId, runId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * The reconciler's only system-wide read. It returns runs that *claim* to be running with a lease that has
+   * expired (or was never taken), which is exactly the set a crashed process leaves behind.
+   */
+  async listStaleCodeRunStates(input: { now: Date; limit: number }): Promise<CodeRunStateRecord[]> {
+    const result = await this.pool.query<CodeRunStateRecord>(
+      `SELECT ${codeRunStateColumns} FROM code_run_states
+       WHERE status='running' AND (lease_expires_at IS NULL OR lease_expires_at < $1)
+       ORDER BY started_at ASC
+       LIMIT $2`,
+      [input.now, Math.max(1, input.limit)],
+    );
+    return result.rows;
+  }
+
+  /**
+   * Records a turn boundary. Tool calls merge by `toolCallId` (the same call re-recorded with a terminal
+   * outcome replaces its pending entry), and a stored terminal outcome is never downgraded to
+   * `unknown_outcome` — a repeated late write must not turn a known result back into a doubt.
+   */
+  async upsertCodeRunTurn(input: UpsertCodeRunTurnInput): Promise<CodeRunTurnRecord> {
+    const existing = await this.getCodeRunTurn(input.companyId, input.runId, input.turnIndex);
+    const merged = mergeCodeRunToolCalls(existing?.toolCalls ?? [], input.toolCalls ?? []);
+    const outcome = mergeCodeRunTurnOutcome(existing?.outcome ?? null, input.outcome ?? null);
+    const status: CodeRunTurnStatus = input.status === "running" && existing && existing.status !== "running"
+      ? existing.status
+      : input.status;
+    const result = await this.pool.query<CodeRunTurnRecord>(
+      `INSERT INTO code_run_turns(
+         run_id, company_id, turn_index, status, outcome, tool_calls, messages, results, checkpoint_id,
+         started_at, finished_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11)
+       ON CONFLICT (run_id, turn_index) DO UPDATE SET
+         status = EXCLUDED.status,
+         outcome = EXCLUDED.outcome,
+         tool_calls = EXCLUDED.tool_calls,
+         messages = EXCLUDED.messages,
+         results = EXCLUDED.results,
+         checkpoint_id = COALESCE(EXCLUDED.checkpoint_id, code_run_turns.checkpoint_id),
+         finished_at = COALESCE(EXCLUDED.finished_at, code_run_turns.finished_at)
+       RETURNING ${codeRunTurnColumns}`,
+      [
+        input.runId, input.companyId, input.turnIndex, status, outcome,
+        JSON.stringify(merged),
+        JSON.stringify(input.messages ?? existing?.messages ?? []),
+        JSON.stringify(input.results ?? existing?.results ?? []),
+        input.checkpointId ?? existing?.checkpointId ?? null,
+        input.startedAt ?? existing?.startedAt ?? new Date(),
+        input.finishedAt ?? existing?.finishedAt ?? null,
+      ],
+    );
+    return result.rows[0]!;
+  }
+
+  async getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null> {
+    const result = await this.pool.query<CodeRunTurnRecord>(
+      `SELECT ${codeRunTurnColumns} FROM code_run_turns
+       WHERE company_id=$1 AND run_id=$2 AND turn_index=$3`,
+      [companyId, runId, turnIndex],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]> {
+    const result = await this.pool.query<CodeRunTurnRecord>(
+      `SELECT ${codeRunTurnColumns} FROM code_run_turns
+       WHERE company_id=$1 AND run_id=$2 ORDER BY turn_index ASC`,
+      [companyId, runId],
+    );
+    return result.rows;
+  }
+
+  /**
+   * Keyset scan over the run rows, used by the reaper. One row beyond the limit is requested on purpose: it is
+   * the only reliable way to know whether a next page exists without a second query, and the extra row is
+   * dropped before returning.
+   */
+  async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const result = await this.pool.query<CodeRunStateRecord>(
+      `SELECT ${codeRunStateColumns} FROM code_run_states
+       WHERE ($1::text IS NULL OR company_id=$1)
+         AND started_at < $2
+         AND status='running'
+         AND ($3::timestamptz IS NULL OR (started_at, run_id, 0::integer) > ($3::timestamptz, $4, 0))
+       ORDER BY started_at ASC, run_id ASC
+       LIMIT $5`,
+      [input.companyId, input.startedBefore, cursor?.startedAt ?? null, cursor?.runId ?? "", limit + 1],
+    );
+    const rows = result.rows.slice(0, limit);
+    const last = rows[rows.length - 1];
+    return {
+      items: rows,
+      nextCursor: result.rows.length > limit && last
+        ? encodeCodeRunScanCursor({ startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: 0 })
+        : null,
+    };
+  }
+
+  /** Keyset scan over the open turns, used by the reaper to find tool calls with no progress. */
+  async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const statuses = [...(input.statuses ?? ["running"])];
+    const result = await this.pool.query<CodeRunTurnRecord>(
+      `SELECT ${codeRunTurnColumns} FROM code_run_turns
+       WHERE ($1::text IS NULL OR company_id=$1)
+         AND started_at < $2
+         AND status = ANY($3::text[])
+         AND ($4::timestamptz IS NULL OR (started_at, run_id, turn_index) > ($4::timestamptz, $5, $6))
+       ORDER BY started_at ASC, run_id ASC, turn_index ASC
+       LIMIT $7`,
+      [
+        input.companyId, input.startedBefore, statuses,
+        cursor?.startedAt ?? null, cursor?.runId ?? "", cursor?.turnIndex ?? 0, limit + 1,
+      ],
+    );
+    const rows = result.rows.slice(0, limit);
+    const last = rows[rows.length - 1];
+    return {
+      items: rows,
+      nextCursor: result.rows.length > limit && last
+        ? encodeCodeRunScanCursor({
+          startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: last.turnIndex,
+        })
+        : null,
+    };
   }
 }

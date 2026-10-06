@@ -305,6 +305,105 @@ export class CompanyApprovalsRepository {
   }
 
   /**
+   * C6a (additive): system-wide sweep that moves **stale** `pending` requests to `expired`.
+   *
+   * Why it exists: expiry was previously only *lazy* — `decide`/`decideAsAudience` mark a single row expired
+   * when somebody touches it, and `consumeApproved` simply refuses. A request nobody ever touches therefore
+   * stayed `pending` forever, which is wrong on its own (the UI keeps showing a decision that can no longer
+   * be taken) and hides the fact that the requester is no longer waiting for anything. This method closes
+   * that gap without changing any of the existing paths: `decide`, `decideAsAudience` and `consumeApproved`
+   * keep their exact semantics, including their lazy expiry.
+   *
+   * Scope: deliberately **all companies** (no `AuthContext`, no `workspaceId`/`companyId` filter), because
+   * this is an operator/background reap, not a user action. Two consequences are intentional and must stay:
+   *   - it is **not** reachable from a route. It is called in-process by the code-run reaper; exposing a
+   *     cross-tenant sweep over HTTP would need an explicit owner-level permission first;
+   *   - it never returns or journals payload content: only ids, the tool name, the risk level, the requester
+   *     and the (already public) payload hash.
+   *
+   * Idempotent and race-safe: the update is conditional (`status='pending' AND expires_at < $2`), so a row
+   * another process already resolved or expired is skipped instead of being counted. Calling it twice in a
+   * row performs work only the first time and returns `{ expired: 0, ids: [] }` the second time. When the
+   * audit port is injected the transition is journalled **before** it is applied, so an unavailable journal
+   * refuses that row (`AUDIT_UNAVAILABLE`, 503) rather than leaving a state change unrecorded (rule 23);
+   * because each row is journalled and applied individually, a failure mid-batch leaves the already-processed
+   * rows consistent and the next call simply continues with the rest.
+   */
+  async expireStaleApprovals(params: { now?: number | Date; limit?: number } = {}): Promise<number> {
+    const result = await this.expireStaleApprovalsDetailed(params);
+    return result.expired;
+  }
+
+  /**
+   * Same sweep, but returns the affected ids as well.
+   *
+   * Why two methods instead of one: the code-run reaper already declares its port as
+   * `expireStaleApprovals({ now: number }): Promise<number>` (`code-reaper.ts:171,583`), where `now` is
+   * `Date.now()` (epoch **milliseconds**) and the result feeds a numeric counter (`cleaned.staleApprovals`).
+   * The reaper must not be touched, so `expireStaleApprovals` keeps exactly that shape, and callers that need
+   * the ids (metrics, audit review, tests) use this variant. Both share one implementation, so they cannot
+   * drift.
+   */
+  async expireStaleApprovalsDetailed(params: { now?: number | Date; limit?: number } = {}): Promise<{ expired: number; ids: string[] }> {
+    const now = params.now instanceof Date ? params.now : new Date(params.now ?? Date.now());
+    const limit = Math.max(1, Math.min(params.limit ?? 500, 5_000));
+    const candidates = await this.pool.query<CompanyApproval>(
+      `SELECT ${appCols} FROM company_approvals
+        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < $1
+        ORDER BY expires_at ASC, id ASC
+        LIMIT $2`,
+      [now, limit]
+    );
+    const ids: string[] = [];
+    for (const approval of candidates.rows) {
+      await this.journalExpiry(approval, now);
+      const updated = await this.pool.query<{ id: string }>(
+        `UPDATE company_approvals SET status = 'expired'
+          WHERE id = $1 AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < $2
+          RETURNING id`,
+        [approval.id, now]
+      );
+      if (updated.rows[0]) ids.push(updated.rows[0].id);
+    }
+    return { expired: ids.length, ids };
+  }
+
+  /**
+   * Journal one system expiry. Mirrors `journal()`: without the port nothing is written (the port is
+   * injected in `app.ts`), with the port the record is written **before** the transition and a failing
+   * journal refuses the transition instead of leaving it unrecorded.
+   */
+  private async journalExpiry(approval: CompanyApproval, now: Date): Promise<void> {
+    if (!this.audit) return;
+    try {
+      await this.audit.record({
+        action: "company.approval.expired",
+        actor: "system",
+        companyId: approval.companyId,
+        resourceType: "company_approval",
+        resourceId: approval.id,
+        decision: "deny",
+        ...(approval.payloadHash ? { payloadHash: approval.payloadHash } : {}),
+        metadata: {
+          toolName: approval.toolName,
+          riskLevel: approval.riskLevel,
+          requestedBy: approval.userId,
+          requestedAt: approval.requestedAt,
+          expiresAt: approval.expiresAt ?? null,
+          expiredAt: now.toISOString(),
+          reason: "stale_pending_request",
+        },
+      });
+    } catch (error) {
+      throw Object.assign(new Error("Approval expiry requires the audit journal"), {
+        status: 503,
+        code: "AUDIT_UNAVAILABLE",
+        cause: error,
+      });
+    }
+  }
+
+  /**
    * Journal an approval decision. When the audit port is present this runs **before** the decision is
    * applied, so an unavailable journal refuses the decision instead of leaving it unrecorded (rule 23).
    * Without the port the behaviour is exactly as before this step (the port is injected in `app.ts`).

@@ -75,9 +75,11 @@ export type CodingAgentStopReason =
   | "invalid_arguments_exhausted"
   | "provider_error"
   | "tool_failure"
+  /** C6a: the lease was lost (another process owns the run, or it expired), so this process stopped. */
+  | "interrupted"
   | "refused";
 
-export type CodingAgentRunStatus = "completed" | "stopped" | "failed" | "cancelled";
+export type CodingAgentRunStatus = "completed" | "stopped" | "failed" | "cancelled" | "interrupted";
 
 export interface CodingAgentPolicyContext {
   companyId: string;
@@ -154,6 +156,58 @@ export interface CodeRunQuotaPort {
   recordUsage(sessionId: string, tokens: number, costUsd: number): void;
 }
 
+/**
+ * C6a: the durable run-state port. `CodeRunStateLog` implements it; the runner only needs this narrow surface.
+ *
+ * Every method is optional in spirit — the runner calls them best-effort — **except** the lease: a refused
+ * renewal means another process owns the run, and the runner must stop rather than keep writing state and
+ * mutating a workspace it no longer owns.
+ */
+export interface CodeRunStatePort {
+  startRun(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    owner: string;
+    runId?: string;
+  }): Promise<{ runId: string }>;
+  renewLease(input: { companyId: string; runId: string; owner: string }): Promise<{ held: boolean }>;
+  releaseLease?(input: { companyId: string; runId: string; owner: string }): Promise<unknown>;
+  /** Records a turn boundary. Called after every turn, never only at the end. */
+  appendTurn(input: {
+    companyId: string;
+    runId: string;
+    turnIndex: number;
+    status: "running" | "finished" | "failed";
+    outcome?: "ok" | "failed" | "unknown_outcome" | null;
+    checkpointId?: string | null;
+  }): Promise<unknown>;
+  /**
+   * Records one tool call. It is written **twice**: once before execution with `unknown_outcome` (the
+   * write-ahead record that survives a crash) and once after with the real outcome. The second write replaces
+   * the first for the same `toolCallId`.
+   */
+  appendToolCall(input: {
+    companyId: string;
+    runId: string;
+    turnIndex: number;
+    toolCallId: string;
+    tool: string;
+    readOnly: boolean;
+    outcome: "ok" | "failed" | "unknown_outcome";
+    errorCode?: string;
+    startedAt?: Date;
+    finishedAt?: Date | null;
+  }): Promise<unknown>;
+  markFinished(input: {
+    companyId: string;
+    runId: string;
+    status: "completed" | "failed" | "cancelled" | "interrupted";
+    reason?: string;
+  }): Promise<unknown>;
+}
+
 export interface CodeRunActivityEvent {
   kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished";
   companyId: string;
@@ -187,6 +241,10 @@ export interface CodingAgentRunnerPorts {
     admit(ctx: AuthContext, input: { companyId: string; reference: string }): Promise<{ reference: string; dev: boolean }>;
   };
   quota?: CodeRunQuotaPort;
+  /** C6a: durable run state (turn boundaries, write-ahead tool calls, lease/heartbeat). */
+  runState?: CodeRunStatePort;
+  /** Lease identity of this process. Defaults to a per-run id derived from the pid and a random suffix. */
+  runStateOwner?: string;
   snapshot?: ExecutionSnapshotProvider | null;
   activity?: { record(event: CodeRunActivityEvent): Promise<void> };
   /** Existing run lifecycle events. C6 uses the existing types only; tool detail goes through `activity`. */
@@ -196,6 +254,16 @@ export interface CodingAgentRunnerPorts {
   /** Releases the sandbox after a cancelled or finished run (existing provider/cleanup path). */
   sandbox?: {
     release(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; reason: string }): Promise<void>;
+  };
+  /**
+   * Deployment-level admission gate, read **before** the first model call. The C6a reaper raises
+   * `isRefusingNewRuns()` under disk pressure; without this port that signal would change nothing.
+   * Optional: when absent the runner behaves exactly as before, so existing compositions keep working.
+   */
+  admissionGate?: {
+    isRefusingNewRuns(): boolean;
+    /** Optional refusal code; defaults to `disk_pressure` (the reaper's own reason). */
+    refusalCode?(): string | undefined;
   };
   limits?: Partial<CodeAgentLimits>;
   /**
@@ -227,6 +295,8 @@ export interface CodingAgentRunInput {
   signal?: AbortSignal;
   /** Cancellation that is not an AbortSignal (existing `run.cancelRequested` flag). */
   cancelRequested?: () => boolean | Promise<boolean>;
+  /** C6a: lease identity of this process; defaults to a per-run id derived from the pid and a random suffix. */
+  runStateOwner?: string;
   /** Extra system-prompt lines from the caller (profiles, project context). Never from file contents. */
   extraSystemPromptLines?: readonly string[];
 }
@@ -248,6 +318,11 @@ export interface CodingAgentRunResult {
   message: string;
   summary: CodingAgentRunSummary;
   snapshotId: string;
+  /**
+   * Machine-readable refusal/failure code when the stop reason alone is too coarse (e.g. `disk_pressure`
+   * for a deployment-level admission refusal). Additive: callers that switch on `reason` are unaffected.
+   */
+  code?: string;
   /** Echo of the caller's run id (the entry point owns run creation); absent when it supplied none. */
   runId?: string;
   model?: string;
@@ -412,7 +487,25 @@ export class CodingAgentRunner {
     let model: string | undefined;
     let provider: string | undefined;
 
-    const finish = (status: CodingAgentRunStatus, reason: CodingAgentStopReason, message: string): CodingAgentRunResult => {
+    // C6a: durable run state. `stateRunId` stays undefined until the run is admitted, so a refused run
+    // leaves no state row behind; from then on every exit path writes a terminal state.
+    let stateRunId: string | undefined;
+    const stateOwner = input.runStateOwner ?? this.ports.runStateOwner
+      ?? `runner-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    /** Set by the heartbeat when a renewal is refused: another process owns the run. */
+    let leaseLost = false;
+    const stopHeartbeat = (): void => {
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    };
+
+    const finish = (
+      status: CodingAgentRunStatus,
+      reason: CodingAgentStopReason,
+      message: string,
+      code?: string,
+    ): CodingAgentRunResult => {
+      stopHeartbeat();
       const finishedAt = this.now();
       return {
         status,
@@ -422,10 +515,42 @@ export class CodingAgentRunner {
         snapshotId,
         startedAt,
         finishedAt,
+        ...(code ? { code } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
+        ...(stateRunId ? { runId: stateRunId } : {}),
         ...(model ? { model } : {}),
         ...(provider ? { provider } : {}),
       };
+    };
+
+    /** Best-effort state write: a state-store hiccup must not change the run's outcome. */
+    const writeState = async (operation: () => Promise<unknown>): Promise<void> => {
+      try {
+        await operation();
+      } catch {
+        // Swallowed on purpose: durability is a guarantee of the store, not a gate for the loop. The one
+        // exception is the lease, which is checked separately because a lost lease must stop the run.
+      }
+    };
+
+    /**
+     * Terminal exit from the loop: the run state is stamped before the result is returned, so a process that
+     * finishes a run never leaves it looking like it is still running.
+     */
+    const stop = async (
+      status: CodingAgentRunStatus,
+      reason: CodingAgentStopReason,
+      message: string,
+    ): Promise<CodingAgentRunResult> => {
+      if (stateRunId && this.ports.runState) {
+        const stateStatus = status === "cancelled"
+          ? "cancelled"
+          : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
+        await writeState(() => this.ports.runState!.markFinished({
+          companyId, runId: stateRunId!, status: stateStatus, reason,
+        }));
+      }
+      return finish(status, reason, message);
     };
 
     const release = async (reason: string): Promise<void> => {
@@ -459,6 +584,27 @@ export class CodingAgentRunner {
         sessionId,
         mode: session.mode,
       });
+      // (3a) Deployment admission (C6a reaper): the flag is read here so it is actionable, not decorative.
+      // A gate that cannot answer refuses the run: an unavailable verdict must never let work through.
+      if (this.ports.admissionGate) {
+        let refusing = false;
+        let code = "disk_pressure";
+        try {
+          refusing = this.ports.admissionGate.isRefusingNewRuns() === true;
+          code = this.ports.admissionGate.refusalCode?.() ?? code;
+        } catch {
+          refusing = true;
+          code = "admission_gate_unavailable";
+        }
+        if (refusing) {
+          return finish(
+            "failed",
+            "refused",
+            `The deployment is refusing new runs (${code}); the run was not started.`,
+            code,
+          );
+        }
+      }
       // (3) Sandbox image admission (C1b). Absent policy or a refusal stops the run before any model call.
       if (input.imageReference) {
         if (!this.ports.imageAdmission) {
@@ -488,6 +634,40 @@ export class CodingAgentRunner {
       message: "Coding Agent run started",
     });
     await record({ kind: "run_started", companyId, projectId, sessionId, runId: input.runId, reason: session.mode });
+
+    // (5) C6a: durable run state + lease. A run whose state cannot be recorded is refused rather than run
+    // "invisibly": without the row there is no turn boundary, and a crash would leave a mutating tool call
+    // with no record that it ever started. This is the only state write that is allowed to fail the run.
+    if (this.ports.runState) {
+      try {
+        const startedState = await this.ports.runState.startRun({
+          ctx,
+          companyId,
+          projectId,
+          sessionId,
+          owner: stateOwner,
+          ...(input.runId ? { runId: input.runId } : {}),
+        });
+        stateRunId = startedState.runId;
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        return finish(
+          "failed",
+          "refused",
+          failure.message ?? `The run state could not be recorded (${failure.code ?? "state_unavailable"}).`,
+        );
+      }
+      // The lease is renewed on a timer, not only between turns: a single long shell command must not let the
+      // lease expire and hand the run to a reconciler while this process is still working.
+      const heartbeatEveryMs = Math.max(1_000, this.limits.runHeartbeatMs);
+      heartbeatTimer = setInterval(() => {
+        if (!stateRunId || leaseLost) return;
+        void this.ports.runState!.renewLease({ companyId, runId: stateRunId, owner: stateOwner })
+          .then((verdict) => { if (!verdict.held) leaseLost = true; })
+          .catch(() => undefined);
+      }, heartbeatEveryMs);
+      heartbeatTimer.unref?.();
+    }
 
     const tools = this.toolDescriptors(session);
     const modelName = input.model ?? "auto";
@@ -557,27 +737,37 @@ export class CodingAgentRunner {
 
     // The loop. Each iteration is one assistant turn.
     for (;;) {
+      if (leaseLost) {
+        // Another process owns this run: stop before touching the workspace again. The exit is `interrupted`
+        // rather than `failed` because nothing is known to be broken — the run simply moved elsewhere.
+        await release("interrupted");
+        return stop(
+          "interrupted",
+          "interrupted",
+          "Stopped: this process lost the run lease (another worker took over). No further changes were made.",
+        );
+      }
       if (await cancelled()) {
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
-        return finish("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
+        return stop("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
       }
       if (steps >= this.limits.maxStepsPerRun) {
         await release("step_limit");
         summary.remaining = "Step limit reached; the task may be unfinished.";
-        return finish("stopped", "step_limit", `Stopped after ${this.limits.maxStepsPerRun} turns: the step limit was reached.`);
+        return stop("stopped", "step_limit", `Stopped after ${this.limits.maxStepsPerRun} turns: the step limit was reached.`);
       }
       if (this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
         await release("time_limit");
         summary.remaining = "Time limit reached; the task may be unfinished.";
-        return finish("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
+        return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
       }
       if (this.ports.quota) {
         const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd);
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
-          return finish("stopped", "budget_exhausted", `Stopped: ${verdict.error ?? "the token or cost budget is exhausted"}.`);
+          return stop("stopped", "budget_exhausted", `Stopped: ${verdict.error ?? "the token or cost budget is exhausted"}.`);
         }
       }
 
@@ -604,7 +794,7 @@ export class CodingAgentRunner {
         const failure = error as { code?: string; message?: string };
         await release("provider_error");
         await this.ports.runEvents?.append({ eventKey: `code-run-failed:${turnId}`, eventType: "failed", runStatus: "failed", message: "Coding Agent run failed" });
-        return finish("failed", "provider_error", failure.message ?? `The model provider failed (${failure.code ?? "provider_error"}).`);
+        return stop("failed", "provider_error", failure.message ?? `The model provider failed (${failure.code ?? "provider_error"}).`);
       }
 
       steps += 1;
@@ -649,13 +839,37 @@ export class CodingAgentRunner {
       const callsToRun = executableToolCalls(normalized);
       const assistantText = result.content ?? "";
 
+      /**
+       * C6a: the turn boundary is opened **before** the calls run, and the cursor moves with it. A process
+       * that dies during this turn therefore leaves a `running` turn whose pending calls are exactly the ones
+       * whose result nobody observed.
+       */
+      const openTurn = async (): Promise<void> => {
+        if (!stateRunId || !this.ports.runState) return;
+        // `appendTurn` moves the run cursor together with the turn boundary, under one sequence, so there is no
+        // window where a turn exists while the run still claims to be on an earlier one.
+        await writeState(() => this.ports.runState!.appendTurn({
+          companyId, runId: stateRunId!, turnIndex: steps, status: "running",
+        }));
+      };
+
       if (!callsToRun.length && !normalized.rejected.length) {
+        // The final assistant turn is still a turn: it gets a boundary that closes as finished before the run is
+        // marked completed, so a recovery never has to guess whether the last turn even started.
+        await openTurn();
+        if (stateRunId && this.ports.runState) {
+          await writeState(() => this.ports.runState!.appendTurn({
+            companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
+          }));
+        }
         await release("completed");
         await this.ports.runEvents?.append({ eventKey: `code-run-completed:${turnId}`, eventType: "completed", runStatus: "completed", message: "Coding Agent run completed" });
         this.applyTurnSummary(summary, sessionId, turnId);
         summary.remaining = "The model finished without further tool calls.";
-        return finish("completed", "completed", assistantText || "The run finished.");
+        return stop("completed", "completed", assistantText || "The run finished.");
       }
+
+      await openTurn();
 
       // The assistant turn is echoed back verbatim (including native calls) so the model sees its own plan.
       const assistantMessage: ChatMessage = { role: "assistant", content: assistantText };
@@ -679,7 +893,7 @@ export class CodingAgentRunner {
         argumentCorrections.set(key, count);
         if (count > MAX_ARGUMENT_CORRECTIONS) {
           await release("invalid_arguments_exhausted");
-          return finish("stopped", "invalid_arguments_exhausted", `Stopped: the model kept sending unusable arguments for ${rejected.name ?? "a tool"} (${rejected.code}).`);
+          return stop("stopped", "invalid_arguments_exhausted", `Stopped: the model kept sending unusable arguments for ${rejected.name ?? "a tool"} (${rejected.code}).`);
         }
         messages.push({
           role: "tool",
@@ -701,7 +915,7 @@ export class CodingAgentRunner {
       if (repeatedSignatures.length === LOOP_REPEAT_THRESHOLD && new Set(repeatedSignatures).size === 1) {
         if (loopReminded) {
           await release("loop_detected");
-          return finish("stopped", "loop_detected", `Stopped: the same tool call (${callsToRun[0]?.name ?? "unknown"}) was repeated without progress.`);
+          return stop("stopped", "loop_detected", `Stopped: the same tool call (${callsToRun[0]?.name ?? "unknown"}) was repeated without progress.`);
         }
         loopReminded = true;
         messages.push({ role: "system", content: REMINDER_MESSAGE });
@@ -710,6 +924,20 @@ export class CodingAgentRunner {
 
       const execute = async (call: NormalizedToolCall): Promise<{ call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }> => {
         const startedCall = this.now();
+        const readOnlyCall = isReadOnlyRunTool(call.name);
+        /**
+         * C6a write-ahead record: the call is persisted as `unknown_outcome` **before** it runs, so a crash
+         * mid-call leaves evidence that it started. Without this, a mutating call that was interrupted would be
+         * invisible after a restart, and a recovery could not tell "never started" from "may have landed" —
+         * which is the difference between replaying it safely and corrupting the repository.
+         */
+        if (stateRunId && this.ports.runState) {
+          await writeState(() => this.ports.runState!.appendToolCall({
+            companyId, runId: stateRunId!, turnIndex: steps,
+            toolCallId: call.id, tool: call.name, readOnly: readOnlyCall,
+            outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
+          }));
+        }
         const invokeInput = {
           companyId,
           projectId,
@@ -719,6 +947,7 @@ export class CodingAgentRunner {
           toolCallId: call.id,
           turnId,
           ...(input.runId ? { runId: input.runId } : {}),
+          ...(stateRunId ? { runId: stateRunId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
         };
         let result: CodeToolInvokeResult | CodeToolInvokeFailure;
@@ -738,6 +967,16 @@ export class CodingAgentRunner {
               ...(failure.details ? { details: failure.details } : {}),
             },
           };
+        }
+        // The terminal record replaces the write-ahead one for the same `toolCallId`.
+        if (stateRunId && this.ports.runState) {
+          await writeState(() => this.ports.runState!.appendToolCall({
+            companyId, runId: stateRunId!, turnIndex: steps,
+            toolCallId: call.id, tool: call.name, readOnly: readOnlyCall,
+            outcome: result.ok ? "ok" : "failed",
+            ...(result.ok ? {} : { errorCode: result.error.code }),
+            startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
+          }));
         }
         summary.toolCalls += 1;
         if (CHECK_TOOL_PREFIXES.some((prefix) => call.name.startsWith(prefix)) && result.ok) {
@@ -765,6 +1004,9 @@ export class CodingAgentRunner {
       // safety net for providers that return several calls anyway — never a promise of concurrency.
       const waveLimit = Math.max(1, Math.min(profile.maxParallelToolCalls, this.limits.parallelReadOnlyCalls));
 
+      /** C6a: whether any call of this turn failed — the turn outcome recorded at the boundary. */
+      let turnHadFailure = false;
+
       /** Appends one tool result and feeds the repeated-error detector. */
       const appendToolResult = (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): void => {
         const payload = outcome.result.ok
@@ -773,6 +1015,7 @@ export class CodingAgentRunner {
         const { text } = bounded(JSON.stringify(payload), this.limits.toolOutputChars);
         messages.push({ role: "tool", tool_call_id: outcome.call.id, content: text });
         if (!outcome.result.ok) {
+          turnHadFailure = true;
           repeatedErrors.push(`${outcome.call.name}:${outcome.result.error.code}`);
           while (repeatedErrors.length > LOOP_REPEAT_THRESHOLD) repeatedErrors.shift();
         } else {
@@ -801,12 +1044,24 @@ export class CodingAgentRunner {
         if (repeatedErrors.length === LOOP_REPEAT_THRESHOLD && new Set(repeatedErrors).size === 1) {
           if (errorReminded) {
             await release("loop_detected");
-            return finish("stopped", "loop_detected", `Stopped: the same error (${repeatedErrors[0] ?? "unknown"}) kept repeating.`);
+            return stop("stopped", "loop_detected", `Stopped: the same error (${repeatedErrors[0] ?? "unknown"}) kept repeating.`);
           }
           errorReminded = true;
           messages.push({ role: "system", content: REMINDER_MESSAGE });
           await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_error" });
         }
+      }
+
+      // C6a: every call of this turn has been recorded, so the boundary closes here. This is the turn a
+      // recovery will resume from, and `unknown_outcome` can no longer appear inside it.
+      if (stateRunId && this.ports.runState) {
+        await writeState(() => this.ports.runState!.appendTurn({
+          companyId,
+          runId: stateRunId!,
+          turnIndex: steps,
+          status: "finished",
+          outcome: turnHadFailure ? "failed" : "ok",
+        }));
       }
     }
   }
