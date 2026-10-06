@@ -1,5 +1,4 @@
 import Fastify from "fastify";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -8,6 +7,9 @@ import { dockerFailure } from "./sandbox-runner-diagnostics";
 import { SandboxProviderError, type SandboxScope } from "./sandbox-provider";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type WorkspaceStore } from "@npati/workspace";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
+import { dockerEgressProbe, resolveEgressEnforcement } from "./sandbox-egress-enforcement";
+import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
+import { authenticateRunnerRequest, createRunnerReadiness } from "./runner-readiness";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 
 /**
@@ -44,6 +46,36 @@ const imageAdmission: SandboxImageAdmission = { admit: async (context, input) =>
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
 if ((process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote") === "remote" && process.env.NPATI_SANDBOX_RUNNER_ISOLATED_HOST !== "true") throw new Error("Remote sandbox runner requires an isolated host");
+/**
+ * C4b: enforcement readiness. `NPATI_SANDBOX_EGRESS_ENFORCED` is advisory only — the provider asks this
+ * object, which actually probes the freshly created run network (proxy health, no direct egress, no
+ * DNS bypass) and caches the verdict for a short TTL.
+ */
+const dockerExec = promisify(execFile);
+const dockerCommand = async (commandArgs: string[], timeoutMs = 30_000): Promise<{ ok: boolean; output: string }> =>
+  dockerExec("docker", commandArgs, { timeout: timeoutMs, maxBuffer: 256_000 })
+    .then(({ stdout, stderr }) => ({ ok: true, output: `${stdout}${stderr}`.trim() }))
+    .catch((error: NodeJS.ErrnoException & { stderr?: string; stdout?: string }) => ({ ok: false, output: `${error.stdout ?? ""}${error.stderr ?? error.message ?? ""}`.trim() }));
+
+const egressEnforcement = resolveEgressEnforcement(process.env, {
+  probe: dockerEgressProbe({
+    docker: dockerCommand,
+    sandboxImage: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
+  }),
+  log: (event, details) => console.warn(`[sandbox-runner] ${event} ${JSON.stringify(details)}`),
+});
+
+/** C4b: readiness facts served to the API (see `runner-readiness.ts`). */
+const runnerReadiness = createRunnerReadiness({
+  docker: dockerCommand,
+  enforcement: egressEnforcement,
+  images: {
+    sandbox: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
+    egressProxy: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",
+  },
+  ttlMs: Number(process.env.NPATI_SANDBOX_RUNNER_READINESS_TTL_MS) || undefined,
+});
+
 const provider = new DockerSandboxProvider({
   image: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
   proxyImage: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",
@@ -53,10 +85,14 @@ const provider = new DockerSandboxProvider({
   pids: Number(process.env.NPATI_SANDBOX_PIDS) || 128,
   maxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || 500,
   maxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || 20_000_000,
-  allowedHosts: sandboxAllowedHostsWithProjectApi(process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com", process.env.NPATI_PROJECT_API_PUBLIC_URL),
-}, imageAdmission);
-const dockerExec = promisify(execFile);
-async function runnerPreflight(): Promise<void> {
+  // C4b: the effective allowlist comes from the canonical allowlist module — the approved install
+  // registries plus an EMPTY run set (deny all) — and `NPATI_SANDBOX_ALLOWED_HOSTS` stays the operator
+  // override. Git hosts and vendor mirrors are never implicit defaults.
+  allowedHosts: sandboxAllowedHostsWithProjectApi(
+    process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({ env: process.env })),
+    process.env.NPATI_PROJECT_API_PUBLIC_URL),
+}, imageAdmission, egressEnforcement);
+const runnerPreflight = async (): Promise<void> => {
   const socketPresent = await stat("/var/run/docker.sock").then((value) => value.isSocket()).catch(() => false);
   const check = async (args: string[]) => dockerExec("docker", args, { timeout: 10_000, maxBuffer: 64_000 }).then(({ stdout }) => ({ ok: true, output: stdout.trim() })).catch((error: NodeJS.ErrnoException & { stderr?: string }) => ({ ok: false, code: dockerFailure(args.slice(0, 2).join("."), error.stderr ?? error.message ?? "", false, error.code).code, output: "" }));
   const [version, info, projectImage, egressImage, networks] = await Promise.all([
@@ -74,16 +110,20 @@ const app = Fastify({ bodyLimit: 25_000_000, logger: false });
 const seen = new Map<string, number>();
 app.get("/health", async () => ({ status: "ok" }));
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
+/**
+ * C4b (owner decision): the runner is the authoritative component for network enforcement, so it exposes
+ * the readiness facts to the API through the same HMAC authentication as every other endpoint. Each fact
+ * is reported separately, and `required_images_ready` is checked here because only this process has docker.
+ */
+app.post<{ Body: string }>("/v1/readiness", async (request, reply) => {
+  const auth = authenticateRunnerRequest({ headers: request.headers, body: request.body ?? "", secret, seen });
+  if (!auth.ok) return reply.code(auth.status).send({ error: { code: auth.code, message: auth.message } });
+  const report = await runnerReadiness.collect();
+  return report;
+});
 app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
-  const timestamp = String(request.headers["x-npati-timestamp"] ?? "");
-  const nonce = String(request.headers["x-npati-nonce"] ?? "");
-  const signature = String(request.headers["x-npati-signature"] ?? "");
-  const now = Date.now(), time = Number(timestamp);
-  if (!Number.isSafeInteger(time) || Math.abs(now - time) > 30_000 || !/^[0-9a-f-]{36}$/i.test(nonce) || !/^[0-9a-f]{64}$/i.test(signature) || seen.has(nonce)) return reply.code(401).send({ error: { code: "unauthorized", message: "Invalid runner authentication" } });
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${nonce}.${request.body}`).digest();
-  if (!timingSafeEqual(expected, Buffer.from(signature, "hex"))) return reply.code(401).send({ error: { code: "unauthorized", message: "Invalid runner authentication" } });
-  seen.set(nonce, now);
-  for (const [key, value] of seen) if (now - value > 60_000) seen.delete(key);
+  const auth = authenticateRunnerRequest({ headers: request.headers, body: request.body ?? "", secret, seen });
+  if (!auth.ok) return reply.code(auth.status).send({ error: { code: auth.code, message: auth.message } });
   let operation = "unknown", scope: SandboxScope | undefined, sandboxId = "";
   try {
     const parsed = JSON.parse(request.body) as { operation: string; payload: Record<string, unknown> };

@@ -3,8 +3,147 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C4a — supply-chain security** (after C0, C1, C1c, C1a, C1b, C2, C3, C4)
-- Next: **C4b — network policy** (enforced egress proxy/firewall, DNS/IP validation, redirect re-check, SSRF and DNS-rebinding protection; then `NPATI_SANDBOX_EGRESS_ENFORCED=true`), per `00-audit.md` section 13.
+- Last completed: **C4b — egress enforcement** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a)
+- Status: **implementation complete — production validation pending**. Do **not** set
+  `NPATI_SANDBOX_EGRESS_ENFORCED=true` in production on the strength of unit/security tests alone; the live
+  Docker E2E checklist below must pass first (owner decision).
+- Next: **C5 — policy engine, RBAC and project rules** (then C5a/C5b), per `00-audit.md` section 13.
+
+## Owner decisions applied to C4b (second pass)
+- **Webhook transport is its own destination policy**, never the web-fetch allowlist: the allowed
+  destination is the webhook endpoint explicitly saved by a user/Company, matched by exact scheme +
+  hostname + port, with no wildcard allow of any kind; the URL passes SSRF validation **on save** (and is
+  refused, not stored, if it fails), DNS/IP validation is repeated **on every delivery**, private/internal/
+  metadata/Docker/NPATI targets are always blocked, redirects are disabled by default (if ever supported,
+  every hop must pass the full re-validation and policy check), and delivery uses the **same shared
+  SSRF-safe client** — no second implementation.
+- **No new default allowlist hosts.** Install keeps only the agreed official registry endpoints; the
+  build/run phase defaults to **deny all** (the git hosts that used to sit there were removed). Additional
+  hostnames are added after C5/C5a only as a project/company rule through RBAC → approval → AuditLog
+  (a developer may propose, an owner/admin confirms); no broad wildcard hosts for convenience.
+- **Readiness source of truth is the runner** (it owns Docker and the sandbox), so the docker daemon probe
+  is **not** duplicated in `agent-api`. The runner exposes an **authenticated readiness endpoint** returning
+  `docker_ready`, `egress_proxy_ready`, `network_policy_ready`, `dns_policy_ready`, `required_images_ready`
+  and `overall_ready`; `agent-api` checks it before any network-dependent execution with a short cache
+  (≤30 s) and fails closed with `network_enforcement_unavailable` when the runner is unavailable or
+  `overall_ready !== true`. The env flag is never proof of readiness.
+- **Live Docker E2E is the gate for production enablement** (owner checklist): direct internet bypass
+  blocked; `HTTP_PROXY` unset does not bypass enforcement; external DNS blocked; direct IP blocked;
+  private/internal/metadata targets blocked; cross-sandbox access blocked; redirect to a private IP blocked;
+  a DNS-rebinding probe blocked; an allowed registry works during fetch/install; build/run network stays
+  disabled where the policy requires it; the egress proxy stays healthy under basic concurrent load.
+
+## Implemented (C4b, latest step)
+- **Default-deny by topology, not by variables**: each run network is created `--internal` with
+  `gateway_mode_ipv4=isolated`, so there is no route out; the only container attached to both the internal
+  network and the outside bridge is the NPATI egress proxy (`egress`), and the sandbox joins only
+  `npati-net-<id>`. Unsetting `HTTP_PROXY`/`HTTPS_PROXY` cannot restore egress. **Honest limitation:** no
+  nftables/host firewall was added — the mechanism is Docker network topology; UDP/ICMP are unreachable
+  because the only peer is the proxy, and IPv6 egress is denied (`family: 4` only).
+- **The proxy is the single policy point** (`sandbox-egress-proxy.mjs`, extended, not duplicated):
+  hostname allowlist (exact or `*.domain` = exactly one label; `evil.npmjs.org.attacker.com` and
+  `npmjs.org.attacker.net` fail, wildcard apex fails), **IP literals never allowed**, every encoding
+  normalised (decimal/hex/octal/mixed/trailing dot/`[::ffff:…]`/`::1`) with ambiguous leading-zero forms
+  denied, the full forbidden-range list plus forbidden names (`localhost`, `metadata*`, `postgres`,
+  `postgres-projects`, `agent-api`, `egress`, `sandbox-runner`) even if listed, resolution inside the proxy
+  with **all** answers validated, **pinning** to the validated address with re-validation per connection
+  and a short TTL cache, SNI-pinning against domain fronting, ports 80/443 (22 for allowlisted git hosts),
+  redirect limit 5 with full re-validation per hop, structured `egress_denied` decisions plus an audit hook
+  (AuditLog itself is `TODO(C5a)` — the proxy has no database access).
+- **Readiness probe** (`sandbox-egress-enforcement.ts`): 60 s TTL cache, **three factual checks** (proxy
+  health, direct egress from the run network fails, DNS outside the proxy fails), structured reasons
+  (`proxy_unhealthy`, `direct_egress_open`, `dns_bypass_open`, `probe_unavailable`, `probe_not_configured`,
+  `disabled_by_configuration`), `assertEnforced()` → `network_enforcement_unavailable` (503, retryable),
+  called **before** creating any workload container. **`NPATI_SANDBOX_EGRESS_ENFORCED=true` is not proof**
+  (owner decision): `agent-api` reads the last **verified** report synchronously and refreshes it in the
+  background, so network commands are refused until the first successful probe; `=false` is a kill switch.
+  The docker probe lives in the runner process (the only one with docker access) — a documented seam.
+- **One shared SSRF-safe HTTP client** (`ssrf-policy.ts`, `ssrf-safe-http.ts`) for every path that can
+  receive a URL from a model or user: own DNS resolution, **pinning** with the original SNI/`Host`,
+  re-validation of every redirect in the same budget, stripping of `authorization`/`cookie`/
+  `proxy-authorization`/`x-api-key` on a host change, size (413) and own deadline (504), 30 s resolution
+  cache, `dns_rebinding_detected`. `web.fetch`/`web.crawl`/search pages go through the same policy via an
+  injected validator (additive parameter in `packages/web-research`, default unchanged). The authority is
+  validated **before** WHATWG normalisation, so `http://08.0.0.1/`, `http://010.0.0.1/` and
+  `http://0177.0.0.1/` are refused like `http://127.0.0.1/` and never reach the transport.
+- **Allowlist and activity**: `egress-allowlist.ts` is the single source (install and run sets differ; the
+  build phase has no network at all), with official registry defaults, an additive strictly validated
+  operator override, strict wildcard semantics, and `EgressAllowlistManager` requiring owner/admin with an
+  audit entry written **before** the change is applied (fail closed; routes are `TODO(C5a)`).
+  `network-activity.ts` records one `network_decision` per decision (host, port, phase, action, code,
+  resolved IP, bytes, duration) with **no** headers/body/query/URL, redaction via `CredentialMasker` and a
+  throwing `assertNoSensitiveNetworkPayload`, plus per-company/phase summaries (real run-Activity and
+  `ExecutionSnapshot` stay `TODO(C6)`); `network-routes.ts` exposes read-only state and a forced re-probe.
+- **SG-1** now runs **27** security-gate suites plus four steps (vitest, tool schemas, sandbox images,
+  typosquat datasets) and fails on any failure, `skipped`/`todo`, an empty report, a configured suite that
+  did not run, or a suite that reported no tests at all.
+
+## Verification (C4b)
+- `npm run typecheck` → **0 errors** (all workspaces); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=386 failed=0 skipped=0 todo=0`** with **30** security-gate
+  suites and all four steps (vitest, tool schemas, sandbox images, typosquat datasets) green; the seven C4b
+  suites pass on their own (**63+ tests**), and every path in the gate list exists (`missing_count = 0`).
+- Second pass (owner decisions, all verified by the same run): the webhook destination policy (separate from
+  web-fetch, exact scheme+host+port built from the stored endpoint, SSRF validation on save and DNS/IP
+  re-validation on every delivery, redirects disabled, same shared client); install keeps exactly the ten
+  approved registry endpoints while **run defaults to deny-all**; the runner readiness endpoint with six
+  separate facts is the single source of truth for `network_enforcement` (short cache, fail closed); and the
+  allowlist **single source of truth is now wired into the provider, the runner, the classifier and the
+  proxy fallback list** — `github.com` in the run phase is denied with `egress_allowlist_empty`. A real
+  defect was fixed on the way: the provider's allowlist validator **threw on an empty list**, so deny-all was
+  physically impossible.
+- **Real defects found and fixed** (none by weakening a check): the resolver TTL was treated as
+  milliseconds although it is seconds, so the pinning cache lived 1 s instead of 30 and the DNS-rebinding
+  protection was effectively disabled; `isForbiddenIp("08.0.0.1")` returned false (`08` parsed as decimal
+  8 → public `8.0.0.1`), now the whole ambiguous leading-zero class is denied and never canonicalised;
+  WHATWG normalised literals before the policy ran (`http://010.0.0.1/` became public `8.0.0.1`), so the
+  authority is now validated before `new URL(...)`; the readiness probe split its JS payload on spaces;
+  `EgressEnforcementError` passed `retryable` in the `step` slot; the DNS cache could not be reset on an
+  allowlist change; two `it()` callbacks had `await` without `async`, so an entire security-gate file
+  loaded with zero tests (caught by the `findEmptySuites` diagnostic added after the same class hit C4a);
+  octal was not recognised as an address literal and returned the wrong refusal code.
+- Machine-checked invariant: the shared client is never more permissive than the proxy — **1960 addresses,
+  `permissive = 0`** (one deliberate stricter case: AS112 `192.175.48.0/24`).
+
+## Real E2E status (C4b)
+- Verified in-process with injected resolvers, transports and probes: the policy surface, pinning,
+  redirect re-validation, header stripping, limits, the readiness probe and its failure modes, allowlist
+  administration with fail-closed audit, and network decision records.
+- **Not verified here:** live probes against a real Docker daemon, an actual topological default-deny (no
+  container was started), a real DNS-rebinding attempt, real redirect chains through the proxy, proxy
+  behaviour under load; the GitHub CI job has still never run.
+
+## Known risks / open questions (C4b)
+1. **Webhook transport semantics need a decision**: a tenant webhook URL is legitimately an arbitrary
+   public host, so it needs its own allowlist/rules rather than the web-fetch list (the retry engine
+   receives its transport by injection today).
+2. **`agent-api` is fail-closed until a probe is injected**: the docker probe lives in the runner process,
+   so the API refuses network commands until it has a verified report; sharing the verdict across processes
+   is a deliberate follow-up.
+3. No nftables/host firewall: isolation rests on Docker network topology, so the provider must keep
+   creating the isolated network (host networking would silently remove the guarantee).
+4. The proxy records allowlist changes to an audit hook, not the C1c AuditLog (no database access in that
+   process); C5a must close this.
+5. Additional install/run allowlist hosts are configuration, not code; an empty allowlist denies everything
+   (intended).
+6. `NPATI_SANDBOX_EGRESS_ENFORCED=true` must never be treated as readiness — anything reading that flag
+   directly would reintroduce the gap the owner decision closed.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (version 4, section C5), `docs/coding-agent/00-audit.md` sections 8 and
+  13, and this file.
+- Execute **only C5**: policy engine, RBAC and project rules — effective permissions as the intersection of
+  the agent's capability groups, the user's role and the project rules, enforced server-side; the agent and
+  its token can never be an approver; allowlist/policy changes then go through approval + RBAC, which closes
+  both C4b `TODO(C5a)` items (proxy-side audit and allowlist routes).
+- Keep C4/C4a/C4b guarantees intact: commands only through the sandbox port, PolicyEngine decides (with the
+  `network_enforcement` phase driven by the readiness probe), one-shot SecretLease with revocation, no
+  lifecycle scripts without approval, sensitive changes always require approval, and every new suite added
+  to `scripts/run-security-gate.mjs`.
+- Early follow-up worth doing (not a C5 feature): add `tests/**` to type checking (`tsconfig.tests.json` +
+  `typecheck:tests` in CI) — two separate blockers in C4a/C4b were test-file defects invisible both to
+  `npm run typecheck` and to the vitest JSON reporter.
+- Do not start C6 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C4a, latest step)
 - **Install policy per package manager** (`code-deps-policy.ts`, fully env-configured): npm

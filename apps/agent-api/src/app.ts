@@ -69,6 +69,11 @@ import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
 import { registerCodeRoutes } from "./code-routes";
+import { NetworkActivityRecorder } from "./network-activity";
+import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
+import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
+import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
+import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
@@ -155,6 +160,7 @@ import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reco
 import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
 import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
+import {webResearchUrlValidator} from "./ssrf-url-validator";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
@@ -782,7 +788,9 @@ export function buildApp(config: AppConfig = {}) {
     defaultTier: "pro",
   });
   const researchBundle = baseAiEngine instanceof OmniRouteEngine
-    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl)
+    // C4b: web fetch/crawl must obey the same SSRF policy as every other outbound request, so the
+    // hardened shared validator is injected instead of the package's lighter default.
+    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl, process.env, { validator: webResearchUrlValidator() })
     : undefined;
   const webResearch = config.webResearch ?? researchBundle?.service;
   const marketplace = config.marketplace ?? new OmniRouteMarketplace({
@@ -1079,6 +1087,36 @@ export function buildApp(config: AppConfig = {}) {
    * rules, risk classification, approval. A direct API or tool call cannot skip it: the shell runtime
    * refuses to run anything when no policy engine is injected.
    */
+  // C4b (owner decision): the **sandbox runner** is the authoritative component for network enforcement,
+  // because it owns the Docker daemon and creates the run network. This process therefore does not probe
+  // Docker itself; it asks the runner through an authenticated readiness endpoint and caches the verdict
+  // for a short TTL (≤30 s). The `NPATI_SANDBOX_EGRESS_ENFORCED` flag can only switch the feature off —
+  // it is never a source of `true`. The local `EgressEnforcement` object stays only for the in-process
+  // (no-runner) mode, where this process is the sandbox host itself.
+  const runnerReadiness = sandboxRunnerUrl && sandboxRunnerSecret
+    ? new RunnerReadinessClient({
+        baseUrl: sandboxRunnerUrl,
+        secret: sandboxRunnerSecret,
+        ttlMs: resolveRunnerReadinessTtl(process.env),
+        timeoutMs: Number.parseInt(process.env.NPATI_SANDBOX_RUNNER_READINESS_TIMEOUT_MS ?? "4000", 10) || 4_000,
+        enabled: process.env.NPATI_SANDBOX_EGRESS_ENFORCED !== "false",
+        transport: (globalThis as { fetch?: typeof fetch }).fetch,
+      })
+    : undefined;
+  const egressEnforcement = resolveEgressEnforcement(process.env, {
+    log: (event, details) => app.log.warn({ event, ...details }, "egress_enforcement"),
+  });
+  // Refresh the runner verdict so the synchronous policy hook always reads a fresh value.
+  const runnerReadinessTimer = runnerReadiness
+    ? setInterval(() => { void runnerReadiness.check(true).catch(() => undefined); }, runnerReadiness.ttlMs)
+    : undefined;
+  runnerReadinessTimer?.unref();
+  if (runnerReadiness) void runnerReadiness.check(true).catch(() => undefined);
+  const networkActivity = new NetworkActivityRecorder({
+    sink: { record: (event) => { app.log.info(event, "network_decision"); } },
+  });
+  const egressAllowlist = resolveEgressAllowlist();
+  app.log.info({ proxyHosts: toProxyAllowedHosts(egressAllowlist) }, "egress_allowlist_configured");
   const policyEngine = new PolicyEngine({
     flags: featureFlagService,
     capabilities: {
@@ -1099,8 +1137,11 @@ export function buildApp(config: AppConfig = {}) {
       const session = await workspaceStore.getCodeSession(ctx, companyId, sessionId).catch(() => null);
       return session?.mode ?? null;
     },
-    // Until C4b enforces the egress allowlist in the sandbox, network access fails closed here.
-    networkEnforcement: () => process.env.NPATI_SANDBOX_EGRESS_ENFORCED === "true",
+    // C4b: a verified runner readiness report is the only proof of enforcement. The flag is advisory and
+    // can only disable; a missing runner, a failed request or a non-ready report all fail closed.
+    networkEnforcement: () => runnerReadiness
+      ? runnerReadiness.isReadySync()
+      : egressEnforcement.lastReport()?.enforced === true,
     logger: app.log,
   });
   const shellSandboxPort: CodeShellSandboxPort | undefined = projectSandbox ? {
@@ -3130,6 +3171,15 @@ ${localized.next}`;
     runtime: codeToolRuntime,
     assertCompany: async (ctx, companyId) => { await workspaceStore.getCompany(ctx, companyId); },
   });
+  // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
+  registerNetworkRoutes(app, {
+    auth: authProvider,
+    store: workspaceStore,
+    recorder: networkActivity,
+    enforcement: egressEnforcement,
+    allowlist: egressAllowlist,
+    audit: auditLogService,
+  });
   registerProjectDeployRoutes(app, projectDeployService, authProvider);
   registerProjectQaRoutes(app, projectBrowserQaService, authProvider);
   registerCompanyRuntimeRoutes(app, companyRuntime, authProvider, companyRunQueue);
@@ -3239,7 +3289,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();

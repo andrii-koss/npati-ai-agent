@@ -1,5 +1,18 @@
 import { randomUUID, createHmac } from "node:crypto";
 import type { Pool } from "pg";
+import {
+  assertWebhookDeliveryAllowed,
+  validateWebhookDestination,
+  type WebhookDestinationOptions,
+} from "./webhook-destination-policy";
+import type { ResolverPort } from "./ssrf-policy";
+
+/** Production default resolver: the same DNS lookup the shared SSRF policy uses. */
+const defaultResolver: ResolverPort = async (host) => {
+  const { lookup } = await import("node:dns/promises");
+  const entries = await lookup(host, { all: true, verbatim: true });
+  return entries.map((entry) => entry.address);
+};
 
 export interface WebhookSubscription {
   id: string;
@@ -26,10 +39,22 @@ export interface WebhookDispatchResult {
 export class OutboundWebhookDispatcher {
   private readonly inMemorySubs = new Map<string, WebhookSubscription>();
 
-  constructor(private readonly pool?: Pool) {}
+  constructor(
+    private readonly pool?: Pool,
+    private readonly options: { resolve?: ResolverPort } = {},
+  ) {}
+
+  private get resolve(): ResolverPort {
+    return this.options.resolve ?? defaultResolver;
+  }
 
   /**
-   * Register a new outbound webhook subscription
+   * Register a new outbound webhook subscription.
+   *
+   * The destination goes through the webhook destination policy **before** it is stored: an
+   * internal, metadata, literal-IP or otherwise private target can never become a stored endpoint.
+   * The stored scheme is authoritative here, so an operator may deliberately store an `http://`
+   * endpoint (recorded in the C1c audit trail from C5a); ad-hoc delivery still requires https.
    */
   async registerSubscription(params: {
     companyId: string;
@@ -39,6 +64,9 @@ export class OutboundWebhookDispatcher {
   }): Promise<WebhookSubscription> {
     const id = `whsub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const now = new Date().toISOString();
+
+    const policy: WebhookDestinationOptions = { resolve: this.resolve, allowInsecureHttp: true };
+    await validateWebhookDestination(params.url, policy);
 
     const sub: WebhookSubscription = {
       id,
@@ -106,6 +134,28 @@ export class OutboundWebhookDispatcher {
     for (const sub of matching) {
       const start = Date.now();
       const signature = createHmac("sha256", sub.secret).update(payloadString).digest("hex");
+
+      // Delivery re-validates the destination every time, including DNS: the stored decision is never
+      // trusted, because the hostname may now resolve into a private network. A refused destination
+      // never reaches the sender.
+      try {
+        await assertWebhookDeliveryAllowed(sub.url, {
+          resolve: this.resolve,
+          storedEndpoints: [sub.url],
+          allowInsecureHttp: true,
+        });
+      } catch (error) {
+        results.push({
+          subscriptionId: sub.id,
+          url: sub.url,
+          event,
+          delivered: false,
+          signature,
+          durationMs: Date.now() - start,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
 
       try {
         let statusCode = 200;
