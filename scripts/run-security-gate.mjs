@@ -105,6 +105,25 @@ export const SECURITY_GATE_TESTS = [
   // metadata-only Activity); the second pins every stop condition with its reason and summary.
   "tests/coding-agent-c6-runner.test.ts",
   "tests/coding-agent-c6-runner-stop-conditions.test.ts",
+  // C6a: the reaper. Pins that a dry run mutates nothing, that a second pass over already cleaned targets
+  // is a no-op rather than an error, that orphan work is only cleaned when its owner is provably gone
+  // (live/active/unlabelled targets are left alone, advisory migration locks are never released blind),
+  // that one failing step cannot take the other steps down, and that metrics carry counts — never content.
+  "tests/coding-agent-c6a-reaper.test.ts",
+  // C6a: the run state log and the reconciler. Pins the durable per-turn/per-tool-call state, the lease
+  // and heartbeat semantics, that a run without a live lease becomes `interrupted`, that recovery starts
+  // at a turn boundary, that a read-only tool call may be repeated while a write/shell call is never
+  // repeated (its result becomes `unknown_outcome` with a workspace diff against the last checkpoint),
+  // and that a dry run and a repeated pass change nothing.
+  "tests/coding-agent-c6a-run-state.test.ts",
+  "tests/coding-agent-c6a-reconciler.test.ts",
+  // C6a security: database migrations. Pins that a production, external or unidentified target is a hard
+  // deny that no mode, role, standing rule or `approved: true` claim can lift; that a development
+  // DataBackend is only reachable through the Data Studio migration engine; that destructive work
+  // (DROP/TRUNCATE/DELETE without WHERE/column removal/type change) requires a snapshot as well as an
+  // approval; that a migration hidden inside a project script is detected; that the agent never sees a
+  // production connection string; and that a revoked/denied verdict never reaches the engine at all.
+  "tests/coding-agent-c6a-migration-safety.test.ts",
 ];
 
 /**

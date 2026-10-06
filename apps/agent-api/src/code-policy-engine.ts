@@ -4,6 +4,14 @@ import { assertCapabilityGranted, CodeCapabilityError } from "./code-capability-
 import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
 import { hasAdminPermission, type CodeCanonicalSessionMode } from "./code-rbac";
 import { detectGitWriteAttempts } from "./code-shell-classifier";
+import {
+  evaluateMigrationSafety,
+  inferMigrationTargetFromCommand,
+  resolveMigrationTarget,
+  type MigrationDiffFile,
+  type MigrationSafetyVerdict,
+  type MigrationTargetInput,
+} from "./code-migration-safety";
 
 /**
  * C4: centralized server-side policy engine.
@@ -95,6 +103,19 @@ export interface PolicyRequest {
    * repository content is refused in the `trust` phase and never applied, trusted project or not.
    */
   repositoryInstructions?: { policyMutationAttempts?: number; notes?: string[] } | null;
+  /**
+   * C6a: database-migration context. The engine derives the migration *action* from `command` itself
+   * (`code-migration-safety.ts`); this field carries what the command text cannot know — the resolved
+   * target, the migration files in the diff, whether the call is routed through the Data Studio migration
+   * engine, whether a rollback plan exists, and whether the database is the ephemeral sandbox one.
+   */
+  migration?: {
+    target?: MigrationTargetInput | null;
+    files?: MigrationDiffFile[];
+    dataStudioEngine?: boolean;
+    rollbackPlan?: boolean;
+    sandboxEphemeral?: boolean;
+  };
 }
 
 export interface PolicyResult {
@@ -450,6 +471,51 @@ export class PolicyEngine {
         reasons.push(`protected_branch:${decision.branch}=not_protected`);
       }
     }
+    // Phase 4c — migration safety (C6a). Running a database migration is a privileged operation, so this
+    // phase runs with the other hard-deny checks: before the session mode, the project rules, the network
+    // gate and the approval phase. Three things are refused outright and cannot be lifted by any mode,
+    // role, standing rule or `approved: true` claim:
+    //   - a production target (host/environment), including a connection string that resolves to prod;
+    //   - an external target that is not a known development DataBackend;
+    //   - an unknown target — fail closed, because "we could not tell" is not evidence of safety.
+    // A development DataBackend is only reachable through the Data Studio migration engine (advisory lock,
+    // checksum, snapshot-before-destructive, history); a hand-written SQL path is refused. Destructive
+    // work (DROP/TRUNCATE/DELETE without WHERE/column removal/type change) requires a snapshot *and* an
+    // approval, and a migration is never an implicit allow in any mode.
+    let migrationVerdict: MigrationSafetyVerdict | undefined;
+    if (request.command !== undefined || request.migration) {
+      // The host/URL named **inside the command** wins over the target the caller declares: a command like
+      // `psql -h db.prod.internal` must be judged by that host even when the call runs in the sandbox.
+      const declared = request.migration?.target ?? {};
+      const inferred = request.command ? inferMigrationTargetFromCommand(request.command) : null;
+      const targetInput: MigrationTargetInput = inferred
+        ? { ...declared, ...inferred }
+        : {
+          ...declared,
+          ...(request.migration?.sandboxEphemeral === true ? { sandboxEphemeral: true } : {}),
+          ...(request.migration?.dataStudioEngine === true ? { dataStudioBackend: true } : {}),
+        };
+      const hasTargetSignal = inferred !== null
+        || declared.databaseUrl !== undefined || declared.host !== undefined || declared.environment !== undefined
+        || declared.sandboxEphemeral === true || declared.dataStudioBackend === true;
+      migrationVerdict = evaluateMigrationSafety({
+        command: request.command,
+        target: hasTargetSignal ? resolveMigrationTarget(targetInput) : null,
+        ...(request.migration?.files ? { files: request.migration.files } : {}),
+        ...(request.migration?.dataStudioEngine === true ? { dataStudioEngine: true } : {}),
+        ...(request.migration?.rollbackPlan === true ? { rollbackPlan: true } : {}),
+        ...(request.migration?.sandboxEphemeral === true ? { sandboxEphemeral: true } : {}),
+      });
+      if (migrationVerdict) {
+        reasons.push(`migration:${migrationVerdict.target}:${migrationVerdict.decision}:${migrationVerdict.code}`);
+        if (migrationVerdict.decision === "deny") {
+          return {
+            ...deny(migrationVerdict.code, migrationVerdict.reason, 403, "hard_deny"),
+            risk: "hard_deny",
+          };
+        }
+      }
+    }
     let risk: PolicyRisk | undefined;
     if (request.command !== undefined) {
       const classifier = this.deps.classifier;
@@ -535,6 +601,22 @@ export class PolicyEngine {
       }
     }
 
+    // C6a: a migration verdict of `require_approval` is applied here — after the mode, the project rules
+    // and the network gate, but **before** the mode x risk matrix, so `full_auto_sandbox` cannot turn a
+    // migration into an automatic allow. The destructive/snapshot detail travels into the approval payload
+    // so the reviewer sees what the migration would do.
+    if (migrationVerdict) {
+      reasons.push(`migration:${migrationVerdict.code}`);
+      return this.requireApproval(request, reasons, risk ?? "approval", "approval", {
+        target: migrationVerdict.target,
+        destructive: migrationVerdict.destructive,
+        requiresSnapshot: migrationVerdict.requiresSnapshot,
+        executionPath: migrationVerdict.executionPath,
+        codes: migrationVerdict.codes,
+        ...(migrationVerdict.planCommand ? { plan: migrationVerdict.planCommand } : {}),
+      });
+    }
+
     // Phase 8 — approval and the mode x risk matrix. `hard_deny` already returned in phase 4, and the
     // matrix below is the only place that decides safe/controlled/approval for a classified command.
     const capabilityRequiresConfirmation =
@@ -563,6 +645,7 @@ export class PolicyEngine {
 
   private async requireApproval(
     request: PolicyRequest, reasons: string[], risk: PolicyRisk | undefined, phase: PolicyPhase,
+    details?: Record<string, unknown>,
   ): Promise<PolicyResult> {
     const approvals = this.deps.approvals;
     if (!approvals) return deny("approval_unavailable", "Approval system is not configured", 503, phase);
@@ -609,6 +692,9 @@ export class PolicyEngine {
         approvalScope: request.approvalScope ?? "once",
         approvalTimeoutMs: request.approvalTimeoutMs ?? null,
         digest: digestOf(request.command ?? request.paths?.join(",") ?? request.tool),
+        // C6a: what a migration would do (target, destructive, snapshot, plan). Metadata only — no SQL,
+        // no connection string and no credentials.
+        ...(details ? { migration: details } : {}),
       });
       return {
         decision: "require_approval", phase, reasons: [...reasons, "approval:required"],

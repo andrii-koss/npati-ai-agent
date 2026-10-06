@@ -3,10 +3,148 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C6 — the agent loop (`CodingAgentRunner`)** (after C0, C1, C1c, C1a, C1b, C2, C3, C4, C4a, C4b, C5, C5a, C5b)
-- Next: **C6a — persistence, run/turn entities, event log, reconciler and recovery**, then **C6b — ExecutionSnapshot**, per `00-audit.md` section 13.
-- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–074** and the
-  C4b live Docker egress E2E. They do not block C6a, but **production-ready status is forbidden without them**.
+- Last completed: **C6a — recovery, cleanup, rollback and safe DB migrations** (after C0…C6)
+- Next: **C6b — ExecutionSnapshot**, per `00-audit.md` section 13.
+- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–075** and the
+  C4b live Docker egress E2E. They do not block C6b, but **production-ready status is forbidden without them**.
+
+## Implemented (C6a, latest step)
+- **Run state as an event log** (migration `075_code_run_state`): `code_run_states` with `status`
+  (`running|interrupted|completed|failed|cancelled`), `turn_index`, `last_event_seq`, `lease_owner`,
+  `lease_expires_at`, `heartbeat_at`, `revision`, plus `code_run_turns` holding the messages, tool calls
+  (with `tool_call_id`), results, `checkpoint_id` and `outcome` (`ok|failed|unknown_outcome`). State is
+  written **after every turn and every tool call**, not at the end; `last_event_seq` is monotonic and every
+  append is idempotent. Heartbeat and lease use the limits from `resolveCodeAgentLimits()`
+  (`runHeartbeatMs` 15 s, `runLeaseMs` 60 s) — those constants were **dead configuration** before this step.
+- **Reconciler** (`code-run-reconciler.ts`), run at server start and periodically with `unref()`: a `running`
+  run without a live lease becomes **`interrupted`**, and recovery proceeds **only from a turn boundary**. The
+  asymmetry that matters: a **read-only** tool call that was in flight is **repeated**; a **write, shell or
+  unknown** call is **never repeated** — its result is marked **`unknown_outcome`**, the workspace is
+  **diffed against the last checkpoint**, and that diff plus the list of unknown-outcome calls is handed to
+  the model *and* the user before continuing. Idempotency is keyed by `tool_call_id`. The reconciler follows
+  the existing `storage-reconciler` pattern (single reconciliation lease, grace period) and supports
+  `dryRun`; a second run is a no-op.
+- **Reaper** (`code-reaper.ts`) is an **orchestrator over the existing `reap*` implementations**
+  (`code-secret-lease.reap`, `code-process-manager.reapIdle`, `code-shell-runtime.reap`) rather than a fourth
+  reimplementation. Eleven steps, each with metrics: secret leases, process records, orphan processes, shell
+  sessions, stuck tool calls, overdue runs, stale approvals, orphan sandboxes, temp dirs, stale locks and disk
+  pressure. Invariants proven by tests: **`dryRun` calls no mutating API** (steps without a preview are
+  reported as `dry_run_preview_unavailable` rather than "clean"), **re-running is safe** (already-cleaned
+  targets are a no-op), one failing step cannot take down the server, **migration advisory locks are never
+  released**, a lock with a live owner is skipped and logged, long-running tasks are not killed, runs stop
+  only after `maxRunMinutes` **plus grace**, and a temp directory whose ownership cannot be proven is not
+  deleted. **Real defect found:** `SecretLeaseProvider.startReaper()` was **called nowhere**, so in the live
+  server expired SecretLeases were never revoked — the reaper now calls the existing `reap()` each pass.
+- **Admission gate**: the reaper's `isRefusingNewRuns()` (disk pressure) is now consumed by the runner through
+  an **optional** port at run start, after RBAC and before image admission and any model call; a refusing gate
+  returns the existing `failed`/`refused` stop with an additive `code` (`disk_pressure`), and a gate that
+  **throws** also refuses (`admission_gate_unavailable`) — "the gate did not answer" must never mean "let it
+  run". Without the port behaviour is unchanged.
+- **Safe DB migrations** (`code-migration-safety.ts`, phase **4c** immediately after protected branches):
+  migration runners (prisma/drizzle/alembic/django/rails/artisan/knex/typeorm/sequelize/flyway/liquibase/goose/
+  sqlx/dbmate) and direct SQL clients against a non-local database are **approval class**; targets are
+  classified by **host/URL, not by variable name**. **Production, external and unknown targets are hard deny**
+  (`migration_target_production_denied`, `…_external_denied`, `…_unknown_denied`) and this hard deny is not
+  lifted by `full_auto_sandbox`, `approved: true` or a standing rule. Only an **ephemeral sandbox database**
+  or a **dev DataBackend through the existing Data Studio engine** may execute (otherwise
+  `migration_execution_path_required`), and on a `deny` verdict the engine is **not called at all**. Destructive
+  changes — in the command (`prisma migrate reset`, `db push --force-reset`, `flyway clean`, `goose reset`,
+  `typeorm schema:drop`, `alembic downgrade base`) or in the migration **diff** (`DROP TABLE/COLUMN`,
+  `TRUNCATE`, `DELETE` without `WHERE`, type changes, renames, dropped indexes/constraints) — require
+  **approval plus snapshot**; hidden migrations in `package.json` scripts (`prestart`, `dev`, `postinstall`,
+  `prepare`, `start`, `test`), `Makefile` targets and entrypoints are detected and require approval; a
+  migration without a rollback plan is approval with an explicit warning; a failed migration is **not
+  retried** (exactly one `apply`). **Real bypass found and closed:** declaring an ephemeral sandbox target
+  would have masked a production host **inside the command text** (`psql -h db.prod.internal`), so the order is
+  now **inferred → declared → sandbox default** and a test proves that `approved: true` does not help.
+- **Production credentials**: `assertNoProductionCredentialsVisible` is now actually **called** in the shell
+  path after environment assembly and **before** the lease and the sandbox (`production_credentials_visible_
+  denied`, 403, with `details.leakedKeys`); it fires only when a value points at a **configured** production
+  host/URL or a variable name is explicitly listed in `productionSecretKeys`, so dev and local values pass.
+  Approval does not bypass it (independent checks, tested).
+- **Checkpoints and rollback** stay with the existing `code-workspace-checkpoint.ts`, which deliberately does
+  not re-implement anything: checkpoints go through `ProjectGitService.createCheckpoint`/`restoreCheckpoint`
+  (commit of the dirty worktree, tag `refs/npati/checkpoints/<id>`, mandatory pre-restore safety checkpoint)
+  and approvals through the existing repository.
+- **Store additions** (additive, both implementations): run-state methods plus keyset-paginated scans
+  `listStuckToolCalls` and `listOverdueRuns` for the reaper. `longRunning` is **not guessed from the tool
+  name**: it derives from the same limits table the tool runtime enforces (`code.deps.*` → 600 s, otherwise
+  120 s) and `declaredTimeoutMs` is returned so the log explains the decision; `lastProgressAt` is measured
+  from the run's heartbeat; overdue grace is 5 minutes. Both scans are read-only (a test compares the full
+  turn JSON and `lastEventSeq`/`revision` before and after), company-scoped (with a documented system scope
+  for the reaper), content-free (exact key list asserted) and paginated (cursor, `limit` clamped to 1…500,
+  at most 20 pages per call).
+- **Approvals expiry**: `expireStaleApprovals({ now })` performs the bulk `pending` → `expired` transition
+  with **audit before each transition** (`company.approval.expired`, `actor: "system"`), fail-closed when the
+  journal is unavailable, idempotent and race-safe (conditional `UPDATE … AND status='pending' AND
+  expires_at < $2`), with no route (system reap). The existing lazy expiry in `decide`/`consumeApproved` is
+  untouched. **A contract mismatch was caught before it shipped:** the reaper port expects
+  `{ now: number }` (epoch ms) returning a **number**, while the first implementation returned
+  `{ expired, ids }` — which would have silently put a number where a `timestamptz` belonged and an object
+  into a numeric metric, invisible to `tsc` because the adapter casts through `unknown`; the method now
+  matches the port and the ids live in `expireStaleApprovalsDetailed`.
+
+## Verification (C6a)
+- `npm run typecheck` → **exit 0** (all workspaces); both builds → **exit 0**.
+- **`npm run security-gate` → exit 0: `passed=905 failed=0 skipped=0 todo=0`** with **59** security-gate
+  suites (`suite files: present=59 missing=0`, unique 59) and all four steps green.
+- Real defects found by running, not reading: `SecretLeaseProvider.startReaper()` called nowhere (expired
+  leases never revoked in the live server); `lastEventSeq` never advanced on turn/tool-call writes, so the
+  "monotonic event cursor" was fiction; the log and the store used **different clocks** for `startedAt`, so
+  "no progress for 300 s" compared two clocks — exactly how the reaper would have killed a healthy run; the
+  final turn had no boundary at all; `finishedAt: null` became `now` through `??`, making a write-ahead record
+  look finished; declaring an ephemeral sandbox target masked a production host in the command text; and the
+  approvals method shape did not match the reaper port (caught before shipping).
+
+## Real E2E status (C6a)
+- Verified in-process with injected stores, clocks, sandbox and engine ports: run-state writes and lease
+  lifecycle, reconciler decisions and `dryRun` idempotency, all eleven reaper steps, the admission gate, the
+  migration safety verdicts (including the positive paths) and the approvals expiry contract.
+- **Not verified here:** migrations **070–075** against a live PostgreSQL, real Postgres SQL for the keyset
+  scans and the bulk expiry, a real sandbox container dying (no Docker), real disk-full and network
+  interruption chaos, the C4b Docker egress E2E, and the GitHub CI job (never executed).
+
+## Known risks / open questions (C6a)
+1. **Workspace inside the sandbox is tmpfs** (`--read-only`, `--tmpfs /workspace`, no host mount), so the
+   container's working copy does **not** survive its death; durable state is host-side plus git checkpoints.
+   Recovery is therefore **git-based**, and anything that lived only in tmpfs (build artifacts, uncommitted
+   files) is lost after a crash. This is a documented limit, not a promise of volume snapshots.
+2. **No budget/quota is set for a code run** (the `quota` port is still unwired) — the only cost protection is
+   the runner's own limits. **Owner decision.**
+3. **`runId` is now real** (`code_run_states`), but `turnId` remains a placeholder in the entry point, and
+   Activity is still a log (`code_run_activity`) until C6b links events to a snapshot.
+4. Six reaper steps depend on other modules and were `skipped: port_unavailable` at first; `stale_approvals`
+   and the tool-call/run scans are now wired, while the sandbox list-by-label scan, the all-processes scan and
+   the temp-dir/file-lock inventory still need provider support. Where ownership cannot be proven the reaper
+   logs instead of deleting.
+5. **Core migrations have no lock, checksum or down migration** (`postgres-store.ts`), unlike the Data Studio
+   engine; the audit already says to reuse that engine for the Core DB. Until then "a failed migration rolls
+   back" holds for Data Studio–managed targets, not for NPATI's own migration runner.
+6. Rollback/atomic-task behaviour is still only partially exercised: "changes stay as Changes with a Revert run
+   proposal" and the optional `atomic task` auto-revert after the repair limit are not covered by a chaos test
+   here.
+7. Migration execution, transactional rollback and snapshots were verified by reading the existing engine plus
+   contract tests — **not** by running against Postgres.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C6b), `docs/coding-agent/00-audit.md` sections 12 and 13, and this
+  file.
+- Execute **only C6b**: `ExecutionSnapshot` — the real provider replacing `NullSnapshotProvider`, the snapshot
+  content and versioning, `snapshotId` on every Activity event and audit entry, and the linkage from run and
+  turn state to the snapshot.
+- Keep every earlier guarantee intact: commands only through the sandbox port, the PolicyEngine decides (hard
+  deny > session mode > project rules > protected branches > migration safety > network gate > approval; the
+  permission is derived from the action), one-shot SecretLease with revocation, no lifecycle scripts without
+  approval, agents never approve and never change policy, nothing reaches a provider outside
+  `ProviderDataGuard`, recovery never repeats write/shell/unknown tool calls, and every new suite goes into
+  `scripts/run-security-gate.mjs`.
+- Carry these open items forward: the code-run budget policy (owner decision), the remaining reaper ports
+  (sandbox list-by-label, all-processes, temp/lock inventory), Core-migration lock/checksum/down, and the
+  sandbox tmpfs limitation.
+- **Before any production promotion:** run migrations 070–075 against a live PostgreSQL and execute the C4b
+  live Docker E2E checklist; then consider `NPATI_SANDBOX_EGRESS_ENFORCED=true` and
+  `NPATI_CODE_PROVIDER_DATA_ENFORCEMENT=true`.
+- Do not start C7 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C6, latest step)
 - **`CodingAgentRunner`** (`coding-agent-runner.ts`) — a loop **separate** from `runChatToolLoop` (which serves

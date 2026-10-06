@@ -46,6 +46,7 @@ interface HarnessOptions {
   quotaAllowed?: boolean;
   onFirstModelCall?: () => void;
   flagsThrow?: boolean;
+  admissionGate?: CodingAgentRunnerPorts["admissionGate"];
 }
 
 function createHarness(options: HarnessOptions) {
@@ -63,6 +64,7 @@ function createHarness(options: HarnessOptions) {
       },
     },
     rbac: { authorize: async () => ({ allowed: true }) },
+    ...(options.admissionGate ? { admissionGate: options.admissionGate } : {}),
     toolRuntime: {
       listTools: () => TOOLS,
       invoke: async (_ctx, input) =>
@@ -194,5 +196,52 @@ describe("security-gate: C6 runner — every stop condition reports a reason and
     const harness = createHarness({ script: [{ content: "done" }] });
     const result = await harness.run();
     expect(result.snapshotId).toBe("");
+  });
+
+  it("starts normally when no deployment admission gate is configured", async () => {
+    const harness = createHarness({ script: [{ content: "done" }] });
+    const result = await harness.run();
+    expect(result.reason).toBe("completed");
+    expect(result.code).toBeUndefined();
+    expect(harness.engineCalls).toHaveLength(1);
+  });
+
+  it("refuses the run with disk_pressure before the first model call when the reaper asks", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      admissionGate: { isRefusingNewRuns: () => true },
+    });
+    const result = await harness.run();
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("refused");
+    expect(result.code).toBe("disk_pressure");
+    expect(result.message).toContain("disk_pressure");
+    expect(harness.engineCalls).toHaveLength(0);
+    expect(result.summary.turns).toBe(0);
+  });
+
+  it("refuses the run when the admission gate cannot answer (fail closed)", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      admissionGate: {
+        isRefusingNewRuns: () => {
+          throw new Error("reaper unreachable");
+        },
+      },
+    });
+    const result = await harness.run();
+    expect(result.reason).toBe("refused");
+    expect(result.code).toBe("admission_gate_unavailable");
+    expect(harness.engineCalls).toHaveLength(0);
+  });
+
+  it("uses the gate's own refusal code when it reports one", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      admissionGate: { isRefusingNewRuns: () => true, refusalCode: () => "run_state_store_pressure" },
+    });
+    const result = await harness.run();
+    expect(result.code).toBe("run_state_store_pressure");
+    expect(harness.engineCalls).toHaveLength(0);
   });
 });

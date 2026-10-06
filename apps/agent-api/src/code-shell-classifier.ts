@@ -5,6 +5,7 @@ import {
 } from "./terminal-command-policy";
 import { detectPackageManager, type PackageManager } from "./code-deps-policy";
 import { DEFAULT_INSTALL_ALLOWLIST } from "./egress-allowlist";
+import { detectMigrationAction, type MigrationActionHint } from "./code-migration-safety";
 
 /**
  * C4: shell command classification for the Coding Agent.
@@ -52,6 +53,13 @@ export interface ShellClassification {
    * PolicyEngine decide about installs without parsing the command a second time.
    */
   deps?: DepsHint;
+  /**
+   * C6a: database-migration hint (runner, action, whether the command itself is destructive). The
+   * PolicyEngine turns it into a hard deny for a production/external/unknown target and into an approval
+   * with a snapshot for destructive work; the classifier only guarantees that a migration command is never
+   * `safe` or `controlled`.
+   */
+  migration?: MigrationActionHint;
 }
 
 /** C4a: what a command does with dependencies, as far as the classifier can tell. */
@@ -542,6 +550,17 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
   let risk: CodeShellRisk = "safe";
   let timeoutClass: "default" | "install" = "default";
   const deps = detectDepsHint(command);
+  // C6a: running a database migration is never `safe` or `controlled`. The target check (production,
+  // external, unknown → hard deny) and the destructive/snapshot decision live in
+  // `code-migration-safety.ts` and are applied by the PolicyEngine, because they need context the command
+  // text does not carry. A local `psql`/`sqlite3` session is deliberately *not* a migration action, so
+  // existing behaviour for local development is unchanged.
+  const migration = detectMigrationAction(command);
+  if (migration) {
+    risk = escalate(risk, "approval");
+    matched.push(`migration:${migration.tool}:${migration.action}`);
+    reasons.push(`running a database migration (${migration.tool} ${migration.action}) requires approval`);
+  }
 
   // 1. Hard-deny rules run against the raw command and against every segment: a rule that only
   //    matches inside a subshell, heredoc or a later segment must still fire.
@@ -558,7 +577,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
           .find((attempt) => attempt.branch !== "" && protectedBranches.includes(attempt.branch));
         if (!target) { risk = escalate(risk, "approval"); matched.push(`${rule.id}:unprotected_branch`); reasons.push(`${rule.reason} (branch not protected)`); continue; }
       }
-      return { risk: "hard_deny", reasons: [...reasons, rule.reason], matched: [...matched, rule.id], segments: parsed.segments, parsed, timeoutClass, deps };
+      return { risk: "hard_deny", reasons: [...reasons, rule.reason], matched: [...matched, rule.id], segments: parsed.segments, parsed, timeoutClass, deps, migration };
     }
   }
 
@@ -605,7 +624,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     }
     if (executable === "rm" && hasRecursiveForce(args)) {
       if (targetsOutsideWorkspace(args, options.workspaceRoot)) {
-        return { risk: "hard_deny", reasons: [...reasons, "recursive delete outside the workspace"], matched: [...matched, "rm_outside_workspace"], segments: parsed.segments, parsed, timeoutClass, deps };
+        return { risk: "hard_deny", reasons: [...reasons, "recursive delete outside the workspace"], matched: [...matched, "rm_outside_workspace"], segments: parsed.segments, parsed, timeoutClass, deps, migration };
       }
       segmentRisk = escalate(segmentRisk, "approval");
       matched.push("rm_recursive_inside_workspace");
@@ -625,7 +644,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
       }
       else { segmentRisk = escalate(segmentRisk, "approval"); matched.push("network_not_allowlisted"); reasons.push(`network host ${host ?? "(unknown)"} is not allowlisted`); }
       if (/(?:\|\s*(?:sh|bash|zsh)\b)/.test(command)) {
-        return { risk: "hard_deny", reasons: [...reasons, "piping a download into a shell"], matched: [...matched, "curl_pipe_sh"], segments: parsed.segments, parsed, timeoutClass, deps };
+        return { risk: "hard_deny", reasons: [...reasons, "piping a download into a shell"], matched: [...matched, "curl_pipe_sh"], segments: parsed.segments, parsed, timeoutClass, deps, migration };
       }
     }
     if (executable === "git") {
@@ -701,7 +720,7 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
   }
 
   if (!reasons.length) reasons.push("read-only command");
-  return { risk, reasons, matched, segments: parsed.segments, parsed, timeoutClass, deps };
+  return { risk, reasons, matched, segments: parsed.segments, parsed, timeoutClass, deps, migration };
 }
 
 /** Convenience for callers that only need the level (kept separate from the richer classification). */
