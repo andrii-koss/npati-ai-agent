@@ -573,28 +573,36 @@ export class ProjectGitService {
   }
 
   /**
-   * C7: revert **only the named paths** back to a commit (default `HEAD`, or a checkpoint's commit).
+   * C7: revert **only the named paths** to the state they had at a checkpoint (or an explicit revision).
    *
-   * Why this exists as its own method instead of reusing `restoreCheckpoint`: `restoreCheckpoint` performs
-   * `git reset --hard` + `git clean -fd`, which is correct for "revert everything" and catastrophic for "revert
-   * this one file" — it would discard unrelated work that the caller never asked to touch. This method therefore
-   * issues a path-scoped `git checkout <commit> -- <paths>` and never a workspace-wide reset.
+   * The semantics are "make these paths look like the checkpoint", which is not the same as "restore whatever HEAD
+   * has":
+   *  - a path that **existed in the checkpoint** is restored from it — this covers a modified file, a file deleted
+   *    after the checkpoint, and the old side of a rename;
+   *  - a path that **did not exist in the checkpoint** but exists now was created afterwards, so it is **removed** —
+   *    the new side of a rename disappears, and the pair of paths ends up in the checkpoint state;
+   *  - the target is always a checkpoint commit (or an explicit revision), never a bare `HEAD`: anchoring on HEAD
+   *    would keep the changes the run committed after the checkpoint.
    *
-   * Guards, all enforced **before** any git process starts:
+   * Why this is its own method instead of `restoreCheckpoint`: that one reverts everything with `git reset --hard` +
+   * `git clean -fd`, which is right for "revert all" and destructive for "revert this one file" — it would discard
+   * unrelated work nobody asked to touch. Nothing here resets the workspace.
+   *
+   * Guards, all enforced **before** any filesystem or git change:
    *  - every path goes through the canonical `safeProjectPath` (refuses `..`, absolute paths, drive letters,
    *    backslashes, protected/secret paths) and `~`-prefixed paths are refused outright;
-   *  - each path component is checked with `lstat`, so a symlink anywhere along the path aborts the call rather
-   *    than letting git write through a link into somewhere else;
-   *  - a mandatory pre-restore safety checkpoint is taken first, so the revert itself is reversible;
-   *  - per-file outcomes are collected, so one path that cannot be restored does not silently mark the others as
-   *    done — the caller receives both lists.
+   *  - each path component is checked with `lstat` **and** `realpath`, because a Windows junction is a reparse point
+   *    that `lstat().isSymbolicLink()` does not report — and since this method can now **delete**, a link that
+   *    resolves outside the workspace must abort the call rather than let the deletion follow it;
+   *  - a mandatory pre-revert safety checkpoint is taken first, so the revert itself is reversible;
+   *  - per-path outcomes are collected, so one path that cannot be reverted never marks the others as done.
    */
   async restorePaths(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     input: { files: string[]; checkpointId?: string; commitHash?: string },
-  ): Promise<{ restored: string[]; failed: Array<{ path: string; reason: string }>; targetCommit: string; safetyCheckpointId: string | null }> {
+  ): Promise<{ restored: string[]; removed: string[]; failed: Array<{ path: string; reason: string }>; targetCommit: string; safetyCheckpointId: string | null }> {
     this.requireWrite(ctx);
     const requested = Array.isArray(input?.files) ? input.files : [];
     if (requested.length === 0) throw new GitError("FILES_REQUIRED", "List of files to restore is required", 400);
@@ -612,19 +620,7 @@ export class ProjectGitService {
     const dir = await this.ensureRepository(ctx, companyId, projectId);
     await this.assertNoSymlinkPath(dir, safeFiles);
 
-    let targetCommit: string;
-    if (input.checkpointId) {
-      const checkpoint = await this.getCheckpoint(ctx, companyId, projectId, input.checkpointId);
-      if (!checkpoint.commitHash) throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint does not have an associated commit hash", 400);
-      targetCommit = checkpoint.commitHash;
-    } else if (input.commitHash) {
-      if (!/^[0-9a-fA-F]{7,64}$/.test(input.commitHash)) throw new GitError("INVALID_COMMIT", "Invalid commit hash", 400);
-      targetCommit = input.commitHash;
-    } else {
-      const { stdout } = await this.runGit(dir, ["rev-parse", "HEAD"]);
-      targetCommit = stdout.trim();
-      if (!targetCommit) throw new GitError("NO_COMMIT", "The project has no commit to restore to", 400);
-    }
+    const targetCommit = await this.resolveRevertTarget(ctx, companyId, projectId, input);
 
     // MANDATORY SAFETY: the same pre-restore checkpoint `restoreCheckpoint` takes, so a path revert is undoable.
     const safety = await this.createCheckpoint(ctx, companyId, projectId, {
@@ -634,18 +630,94 @@ export class ProjectGitService {
     });
 
     const restored: string[] = [];
+    const removed: string[] = [];
     const failed: Array<{ path: string; reason: string }> = [];
     for (const file of safeFiles) {
       try {
-        // Path-scoped checkout. `--` separates paths from revisions so a path can never be read as an option.
-        await this.runGit(dir, ["checkout", targetCommit, "--", file]);
-        restored.push(file);
+        const existedInTarget = await this.pathExistsInCommit(dir, targetCommit, file);
+        if (existedInTarget) {
+          // Path-scoped checkout. `--` separates paths from revisions so a path can never be read as an option.
+          await this.runGit(dir, ["checkout", targetCommit, "--", file]);
+          restored.push(file);
+        } else {
+          await this.removePathForRevert(dir, file);
+          removed.push(file);
+        }
       } catch (error) {
         failed.push({ path: file, reason: error instanceof Error ? error.message : "restore_failed" });
       }
     }
 
-    return { restored, failed, targetCommit, safetyCheckpointId: safety?.id ?? null };
+    return { restored, removed, failed, targetCommit, safetyCheckpointId: safety?.id ?? null };
+  }
+
+  /**
+   * The commit a path revert is anchored on: an explicit revision, else the newest `pre_run` checkpoint (falling back
+   * to the newest checkpoint). A bare `HEAD` is deliberately **not** a fallback — anchoring on HEAD would silently
+   * keep whatever the run committed after the checkpoint, which is the opposite of "revert to the checkpoint state".
+   */
+  private async resolveRevertTarget(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    input: { checkpointId?: string; commitHash?: string },
+  ): Promise<string> {
+    if (input.checkpointId) {
+      const checkpoint = await this.getCheckpoint(ctx, companyId, projectId, input.checkpointId);
+      if (!checkpoint.commitHash) throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint does not have an associated commit hash", 400);
+      return checkpoint.commitHash;
+    }
+    if (input.commitHash) {
+      if (!/^[0-9a-fA-F]{7,64}$/.test(input.commitHash)) throw new GitError("INVALID_COMMIT", "Invalid commit hash", 400);
+      return input.commitHash;
+    }
+    const checkpoints = await this.listCheckpoints(ctx, companyId, projectId, 50);
+    const target = checkpoints.find((checkpoint) => checkpoint.trigger === "pre_run") ?? checkpoints[0];
+    if (!target?.commitHash) throw new GitError("NO_CHECKPOINT", "There is no checkpoint to revert these paths to", 409);
+    return target.commitHash;
+  }
+
+  /** Whether a path exists at a commit. `cat-file -e` exits non-zero for a path that is not in that tree. */
+  private async pathExistsInCommit(dir: string, commit: string, file: string): Promise<boolean> {
+    try {
+      await this.runGit(dir, ["cat-file", "-e", `${commit}:${file}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Removes a path that did not exist at the checkpoint, which is how "revert a path that was created afterwards"
+   * reaches the checkpoint state. Every safety check happens before the deletion, and only the named path is touched:
+   * parents are never pruned, so a revert can never take a directory with it.
+   */
+  private async removePathForRevert(dir: string, file: string): Promise<void> {
+    const resolvedDir = path.resolve(dir);
+    const absolute = path.join(resolvedDir, ...file.split("/"));
+    const resolvedTarget = path.resolve(absolute);
+    if (resolvedTarget !== resolvedDir && !resolvedTarget.startsWith(resolvedDir + path.sep)) {
+      throw new GitError("INVALID_PATH", "Restore path escapes the project workspace", 403);
+    }
+    const entry = await lstat(absolute).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    // Already absent: the checkpoint state is reached and there is nothing to delete.
+    if (!entry) return;
+    if (entry.isSymbolicLink()) throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
+    const realDir = await realpath(dir).catch(() => undefined);
+    if (realDir) {
+      const real = await realpath(absolute).catch(() => undefined);
+      if (real && !samePath(real, path.join(realDir, ...file.split("/")))) {
+        // A junction or mount point that `lstat` did not flag: deleting through it would delete the target.
+        throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
+      }
+    }
+    await rm(absolute, { recursive: entry.isDirectory(), force: true });
+    // Best-effort index bookkeeping so a tracked file does not stay staged as present. A path that is not tracked
+    // simply matches nothing, and index bookkeeping must never fail the revert.
+    await this.runGit(dir, ["rm", "--cached", "--ignore-unmatch", "-r", "--", file]).catch(() => undefined);
   }
 
   /** Refuse a path that is, or traverses, a symlink: git must never write through a link out of the workspace. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AuthContext, Project, ProjectCheckpoint, WorkspaceStore } from "@npati/workspace";
@@ -36,7 +36,7 @@ interface Harness {
   cleanup: () => Promise<void>;
 }
 
-async function harness(options: { failOn?: (args: string[]) => boolean; checkpointCommit?: string; clean?: boolean } = {}): Promise<Harness> {
+async function harness(options: { failOn?: (args: string[]) => boolean; checkpointCommit?: string; clean?: boolean; inCheckpoint?: string[]; noCheckpoints?: boolean } = {}): Promise<Harness> {
   const root = await mkdtemp(path.join(tmpdir(), "npati-c7-revert-"));
   const dir = path.join(root, COMPANY, PROJECT);
   await mkdir(path.join(dir, ".git"), { recursive: true });
@@ -53,6 +53,14 @@ async function harness(options: { failOn?: (args: string[]) => boolean; checkpoi
     if (head === "rev-parse") return { stdout: COMMIT, stderr: "" };
     if (head === "status") return { stdout: options.clean === false ? "## main\n M src/a.ts\n" : "## main\n", stderr: "" };
     if (head === "diff") return { stdout: "", stderr: "" };
+    // `cat-file -e <commit>:<path>` decides restore-versus-remove, so the double has to model it: a path is in the
+    // checkpoint when listed, and by default everything is (which keeps the argv assertions above readable).
+    if (head === "cat-file") {
+      const spec = String(args[2] ?? "");
+      const target = spec.slice(spec.indexOf(":") + 1);
+      if (options.inCheckpoint && !options.inCheckpoint.includes(target)) throw new Error("path not in checkpoint");
+      return { stdout: "", stderr: "" };
+    }
     return { stdout: "", stderr: "" };
   };
 
@@ -62,6 +70,8 @@ async function harness(options: { failOn?: (args: string[]) => boolean; checkpoi
       return { id: `cp-${checkpoints.length}`, name: input.name, commitHash: input.commitHash, trigger: input.trigger ?? "manual" } as unknown as ProjectCheckpoint;
     },
     getProjectCheckpoint: async () => ({ id: "cp-target", name: "target", commitHash: options.checkpointCommit ?? "def5678aaaa", trigger: "pre_run" }) as unknown as ProjectCheckpoint,
+    // The revert target is resolved from the checkpoint list, never from HEAD.
+    listProjectCheckpoints: async () => (options.noCheckpoints ? [] : [{ id: "cp-latest", name: "pre run", commitHash: COMMIT, trigger: "pre_run" }]) as unknown as ProjectCheckpoint[],
   } as unknown as WorkspaceStore;
 
   const project = { id: PROJECT, companyId: COMPANY, workspaceId: "ws-1", status: "ready" } as unknown as Project;
@@ -206,6 +216,182 @@ describe("[C7] [security-gate] path-scoped revert never resets the workspace", (
     try {
       expect((await rejection(harnessed.service.restorePaths(context(["workspace:read"]), COMPANY, PROJECT, { files: ["src/a.ts"] }))).includes("enied")).toBe(true);
       expect(harnessed.calls.length).toBe(0);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+});
+
+/** `stat` that answers "is this path there?" instead of throwing. */
+async function existsOnDisk(target: string): Promise<boolean> {
+  return stat(target).then(() => true).catch(() => false);
+}
+
+/**
+ * Checkpoint-state semantics, verified with **real filesystem state**.
+ *
+ * A note on what is and is not proven here. The confining sandbox forbids spawning processes with piped stdio
+ * (`spawn EPERM`), so a suite cannot run the real `git` binary. What is therefore asserted is the decision and its
+ * filesystem effect: a path that the checkpoint contains produces a path-scoped `checkout <checkpoint> -- <path>`
+ * (git's own guarantee is that this recreates a deleted file and rewinds a modified one), and a path the checkpoint
+ * does **not** contain is really deleted from disk — that part runs for real and is checked with `stat`, not inferred
+ * from an argument list.
+ */
+describe("[C7] [security-gate] path revert reaches the checkpoint state, not the HEAD state", () => {
+  it("restores a path that existed in the checkpoint instead of deleting it", async () => {
+    const harnessed = await harness({ inCheckpoint: ["src/keep.ts"] });
+    try {
+      await writeFile(path.join(harnessed.dir, "src", "keep.ts"), "keep v2 (run)\n", "utf8");
+
+      const outcome = await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/keep.ts"] });
+
+      expect(outcome.restored.join(",")).toBe("src/keep.ts");
+      expect(outcome.removed.length).toBe(0);
+      const checkout = harnessed.calls.filter((args) => args[0] === "checkout");
+      expect(checkout.length).toBe(1);
+      // Anchored on the checkpoint commit, never on HEAD.
+      expect(checkout[0]!.join(" ")).toBe(`checkout ${COMMIT} -- src/keep.ts`);
+      expect(await existsOnDisk(path.join(harnessed.dir, "src", "keep.ts"))).toBe(true);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("really removes a path that was created after the checkpoint", async () => {
+    const harnessed = await harness({ inCheckpoint: [] });
+    try {
+      const created = path.join(harnessed.dir, "src", "created-after.ts");
+      await writeFile(created, "created by the run\n", "utf8");
+      expect(await existsOnDisk(created)).toBe(true);
+
+      const outcome = await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/created-after.ts"] });
+
+      expect(outcome.removed.join(",")).toBe("src/created-after.ts");
+      expect(outcome.restored.length).toBe(0);
+      // The checkpoint state is observed on disk, not assumed from the plan.
+      expect(await existsOnDisk(created)).toBe(false);
+      expect(harnessed.calls.filter((args) => args[0] === "checkout").length).toBe(0);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("restores a path that was deleted after the checkpoint", async () => {
+    const harnessed = await harness({ inCheckpoint: ["src/remove-me.ts"] });
+    try {
+      // The run deleted it; reverting must ask git for the checkpoint version rather than treat it as new.
+      const outcome = await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/remove-me.ts"] });
+
+      expect(outcome.restored.join(",")).toBe("src/remove-me.ts");
+      expect(outcome.removed.length).toBe(0);
+      const checkout = harnessed.calls.filter((args) => args[0] === "checkout");
+      expect(checkout[0]!.join(" ")).toBe(`checkout ${COMMIT} -- src/remove-me.ts`);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("returns both sides of a rename to the checkpoint state", async () => {
+    // At the checkpoint only the old name existed, so the old name is restored and the new one is removed.
+    const harnessed = await harness({ inCheckpoint: ["src/old-name.ts"] });
+    try {
+      const renamed = path.join(harnessed.dir, "src", "new-name.ts");
+      await writeFile(renamed, "rename me\n", "utf8");
+
+      const outcome = await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/new-name.ts", "src/old-name.ts"] });
+
+      expect(outcome.removed.join(",")).toBe("src/new-name.ts");
+      expect(outcome.restored.join(",")).toBe("src/old-name.ts");
+      expect(await existsOnDisk(renamed)).toBe(false);
+      expect(harnessed.calls.filter((args) => args[0] === "checkout")[0]!.join(" ")).toBe(`checkout ${COMMIT} -- src/old-name.ts`);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("leaves a modified sibling alone while reverting its neighbour", async () => {
+    const harnessed = await harness({ inCheckpoint: [] });
+    try {
+      const sibling = path.join(harnessed.dir, "src", "unrelated.ts");
+      const target = path.join(harnessed.dir, "src", "created-after.ts");
+      await writeFile(sibling, "run's own work\n", "utf8");
+      await writeFile(target, "created by the run\n", "utf8");
+
+      await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/created-after.ts"] });
+
+      expect(await existsOnDisk(target)).toBe(false);
+      expect(await readFile(sibling, "utf8")).toBe("run's own work\n");
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+});
+
+describe("[C7] [security-gate] removal stays guarded", () => {
+  it("removes a directory created after the checkpoint without touching its parent", async () => {
+    const harnessed = await harness({ inCheckpoint: [] });
+    try {
+      await mkdir(path.join(harnessed.dir, "src", "newdir"), { recursive: true });
+      await writeFile(path.join(harnessed.dir, "src", "newdir", "inside.txt"), "x\n", "utf8");
+
+      const outcome = await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/newdir"] });
+
+      expect(outcome.removed.join(",")).toBe("src/newdir");
+      expect(await existsOnDisk(path.join(harnessed.dir, "src", "newdir"))).toBe(false);
+      expect(await existsOnDisk(path.join(harnessed.dir, "src"))).toBe(true);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("refuses to remove a path reached through a junction and leaves the target intact", async () => {
+    const harnessed = await harness({ inCheckpoint: [] });
+    const outside = await mkdtemp(path.join(tmpdir(), "npati-c7-outside-"));
+    try {
+      await writeFile(path.join(outside, "precious.txt"), "precious\n", "utf8");
+      await symlink(outside, path.join(harnessed.dir, "src", "linked"), "junction");
+
+      const refused = await rejection(harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/linked/precious.txt"] }));
+
+      expect(refused.toLowerCase().includes("symlink")).toBe(true);
+      expect(await readFile(path.join(outside, "precious.txt"), "utf8")).toBe("precious\n");
+      // Nothing was restored and nothing was deleted: the guard runs before any mutation.
+      expect(harnessed.calls.filter((args) => args[0] === "checkout").length).toBe(0);
+      expect(harnessed.calls.filter((args) => args[0] === "rm").length).toBe(0);
+    } finally {
+      await harnessed.cleanup();
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses when there is no checkpoint to anchor the revert on", async () => {
+    const harnessed = await harness({ inCheckpoint: [], noCheckpoints: true });
+    try {
+      const refused = await rejection(harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/a.ts"] }));
+      expect(refused.toLowerCase().includes("checkpoint")).toBe(true);
+      // A revert anchored on HEAD would silently keep the run's commits, so it refuses instead.
+      expect(harnessed.calls.filter((args) => args[0] === "checkout").length).toBe(0);
+    } finally {
+      await harnessed.cleanup();
+    }
+  });
+
+  it("keeps 'revert all' on the checkpoint service and independent of the path-scoped revert", async () => {
+    const harnessed = await harness();
+    try {
+      // `all` is unchanged: it still resets the workspace to the checkpoint, which is why it must never be reused
+      // for a single file.
+      await harnessed.service.restoreCheckpoint(context(), COMPANY, PROJECT, "cp-target");
+      const allArgs = harnessed.calls.map((entry) => entry.join(" "));
+      expect(allArgs.includes("reset --hard def5678aaaa")).toBe(true);
+      expect(allArgs.includes("clean -fd")).toBe(true);
+
+      harnessed.calls.length = 0;
+      await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/a.ts"], commitHash: "def5678aaaa" });
+
+      const pathArgs = harnessed.calls.map((entry) => entry.join(" "));
+      expect(pathArgs.some((line) => line.includes("reset") || line.includes("clean"))).toBe(false);
+      expect(pathArgs.includes("checkout def5678aaaa -- src/a.ts")).toBe(true);
     } finally {
       await harnessed.cleanup();
     }

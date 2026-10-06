@@ -3,21 +3,19 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C6b — versioned execution snapshot**.
-- **C7 — Code Workspace UI: implementation complete, but NOT signed as complete.** Six of the seven owner
-  completion conditions hold (chat integration with a persisted active project; Website Builder link; real
-  workspace+sandbox cleanup on delete; path-scoped `Revert file`; usage with measured-vs-estimated honesty;
-  Website Builder/Chat regressions green). The seventh — "the main UI E2E passes" — **cannot be met in this
-  repository**, because the mechanism the owner asked to reuse does not exist here: Playwright is present only
-  inside `vendor/omniroute` (a vendored third-party package), the root has no e2e script, `apps/web` has no test
-  dependencies, and `tests/manual-product-e2e-web.test.ts` cannot even be loaded outside the bundler because
-  `app.ts` pulls `project-deploy-service.ts`, which value-imports type-only symbols from `@npati/workspace`.
-  **Owner decision required** (see below).
-- Next: **C8**, once the C7 E2E question is answered and `current-state.md` is updated to C7 complete; order in
-  `00-audit.md` section 13 is binding.
-- Carried forward: **release checks still pending** — migrations **070–078** have never run against a live
-  PostgreSQL and the C4b live Docker egress E2E has not been executed. **Production-ready status is forbidden
-  without them.**
+- **C7 COMPLETE / FEATURE COMPLETE.** All eleven owner requirements are implemented and every one of the seven
+  completion conditions holds: chat integration with a **persisted** active project/session; the Website Builder
+  "Open in Code Workspace" link; project deletion that really removes workspace **and** sandbox; path-scoped
+  `Revert file` with checkpoint semantics; usage that distinguishes measured from estimated; Website Builder and
+  Chat regressions green; and the main UI covered by route-level integration and interaction tests.
+- **Browser E2E = required in G1, not completed yet.** The owner chose to accept C7's current coverage
+  (route-level integration tests on the real `LocalProjectWorkspace`, Chat/Website Builder regressions, the XSS
+  source-scan invariant as a security-gate member, isolation tests) rather than add a new test stack for C7.
+  A dedicated CI-web/browser job with the browser test infrastructure is **mandatory in G1**.
+- **Production ready = NO.** Release checks remain outstanding (see below), and G1/R1 have not been passed.
+- Next: **C8**, per `00-audit.md` section 13 (order is binding).
+- Carried forward (mandatory before production-ready/G1-R1 rollout, but **not** blockers for C8): migrations
+  **070–078** have never run against a live PostgreSQL, and the C4b live Docker egress E2E has not been executed.
 
 ## Implemented (C6b, partial — green but incomplete)
 - **Immutable snapshot storage** (migration `076_execution_snapshots`): `execution_snapshots` and

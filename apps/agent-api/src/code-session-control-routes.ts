@@ -126,6 +126,8 @@ export interface CodeChangesView {
 export interface CodeRevertOutcome {
   restored: boolean;
   files: string[];
+  /** Additive: paths removed because they did not exist at the checkpoint (created after it). */
+  removed?: string[];
   safetyCheckpointId: string | null;
   reason?: string;
 }
@@ -524,9 +526,10 @@ export async function registerCodeSessionControlRoutes(instance: FastifyInstance
   });
 
   /**
-   * Revert through the existing checkpoint service (its pre-restore safety checkpoint is mandatory). A per-file
-   * revert needs a git path-restore that does not exist yet, so it is refused explicitly rather than silently
-   * turning into an all-files hard reset.
+   * Revert: `all` goes through the existing checkpoint service (its pre-restore safety checkpoint is mandatory), and
+   * `files` through the path-scoped restore — which makes the named paths match the **checkpoint** state, restoring
+   * what existed there and removing what was created afterwards. A deployment without the `files` port refuses
+   * explicitly (501) rather than silently turning a per-file revert into an all-files hard reset.
    */
   instance.post<{ Params: SessionParams; Body: { all?: boolean; files?: unknown } }>(
     "/companies/:companyId/code/sessions/:sessionId/changes/revert",
@@ -543,7 +546,7 @@ export async function registerCodeSessionControlRoutes(instance: FastifyInstance
           if (!deps.revert.files) {
             throw new CodeSessionControlError(
               "changes_revert_file_unsupported",
-              "Reverting individual files needs a path-scoped git restore that is not implemented yet",
+              "This deployment has no path-scoped restore configured for individual files",
               501,
               { reason: "requires_git_checkout_paths", files: revert.files },
             );
@@ -564,6 +567,9 @@ export async function registerCodeSessionControlRoutes(instance: FastifyInstance
           sessionId,
           projectId: session.projectId,
           files: outcome.files,
+          // Additive: paths that had to be *removed* to reach the checkpoint state (a file created after it). A
+          // caller that only looks at `files` still sees them, but the distinction is available.
+          ...(outcome.removed === undefined ? {} : { removed: outcome.removed }),
           safetyCheckpointId: outcome.safetyCheckpointId,
           ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
         }));
