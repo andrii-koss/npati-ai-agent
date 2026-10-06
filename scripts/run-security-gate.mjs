@@ -84,6 +84,14 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c5b-routing-eligibility.test.ts",
   "tests/coding-agent-c5b-policy-resolver.test.ts",
   "tests/coding-agent-c5b-policy-store.test.ts",
+  // C6: the chat entry point must choose between chat and the coding agent deterministically (and a
+  // disabled agent must not change chat), and the eval harness must prove the real tool path works while a
+  // wrong transcript fails.
+  "tests/coding-agent-c6-intent-routing.test.ts",
+  "tests/coding-agent-c6-eval.test.ts",
+  // C6: model profiles (configuration, not code) and the provider tool-call normalisation layer.
+  "tests/coding-agent-c6-model-profiles.test.ts",
+  "tests/coding-agent-c6-tool-call-adapter.test.ts",
   // C5b: policy administration — who may change what may leave NPATI (owner-level authority, versions,
   // audit before apply, tenant isolation, eligibility reporting).
   "tests/coding-agent-c5b-policy-management.test.ts",
@@ -92,6 +100,11 @@ export const SECURITY_GATE_TESTS = [
   // secret is refused for delivery channels and redacted (never sent raw) for retrieval channels, and the
   // transport is asserted never to have been called with the sensitive value.
   "tests/coding-agent-c5b-outbound-guard.test.ts",
+  // C6: the agent loop itself. The first suite pins the model/tool contract (policyContext on every call,
+  // read-only waves, sequential mutations, truncated arguments never executed, reminders, cancellation,
+  // metadata-only Activity); the second pins every stop condition with its reason and summary.
+  "tests/coding-agent-c6-runner.test.ts",
+  "tests/coding-agent-c6-runner-stop-conditions.test.ts",
 ];
 
 /**

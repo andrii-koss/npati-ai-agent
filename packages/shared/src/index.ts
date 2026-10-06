@@ -184,6 +184,7 @@ export * from "./capabilities";
 export * from "./capability-catalog";
 export * from "./effective-capabilities";
 export * from "./hybrid-router";
+export * from "./code-intents";
 export * from "./risk-approval";
 export * from "./run-trace";
 export * from "./capability-matrix";

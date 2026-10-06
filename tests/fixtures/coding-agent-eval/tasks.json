@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "description": "C6 deterministic coding-agent eval tasks. Each task ships its own tiny repository, a scripted model transcript and a post-run verification. No network, no Docker, no live model: the eval runs identically in CI.",
+  "tasks": [
+    {
+      "id": "fix-bug-arithmetic",
+      "title": "Fix an arithmetic bug so the sum is correct",
+      "intent": "DEBUG_CODE",
+      "files": {
+        "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/sum.js" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/sum.js", "old_string": "return a - b;", "new_string": "return a + b;" } },
+        { "kind": "message", "text": "Fixed the operator in src/sum.js." }
+      ],
+      "verify": { "type": "file_contains", "path": "src/sum.js", "contains": "return a + b;" }
+    },
+    {
+      "id": "add-function-multiply",
+      "title": "Add a multiply helper",
+      "intent": "CREATE_CODE",
+      "files": {
+        "src/math.js": "export function add(a, b) {\n  return a + b;\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/math.js" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/math.js", "old_string": "export function add(a, b) {", "new_string": "export function multiply(a, b) {\n  return a * b;\n}\n\nexport function add(a, b) {" } },
+        { "kind": "message", "text": "Added multiply to src/math.js." }
+      ],
+      "verify": { "type": "file_contains", "path": "src/math.js", "contains": "export function multiply" }
+    },
+    {
+      "id": "refactor-rename-parser",
+      "title": "Refactor: rename the parser and keep behaviour",
+      "intent": "REFACTOR_CODE",
+      "files": {
+        "src/legacy.js": "export function cfg(x) {\n  return JSON.parse(x);\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/legacy.js" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/legacy.js", "content": "export function parseConfig(x) {\n  return JSON.parse(x);\n}\n" } },
+        { "kind": "message", "text": "Renamed cfg to parseConfig." }
+      ],
+      "verify": { "type": "file_contains", "path": "src/legacy.js", "contains": "export function parseConfig" }
+    },
+    {
+      "id": "write-unit-test",
+      "title": "Write a unit test for the sum helper",
+      "intent": "TEST_CODE",
+      "files": {
+        "src/sum.js": "export function sum(a, b) {\n  return a + b;\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/sum.js" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "tests/sum.test.js", "content": "import { sum } from \"../src/sum.js\";\n\ntest(\"sum adds numbers\", () => {\n  expect(sum(2, 3)).toBe(5);\n});\n" } },
+        { "kind": "message", "text": "Added tests/sum.test.js." }
+      ],
+      "verify": { "type": "file_contains", "path": "tests/sum.test.js", "contains": "test(\"sum adds numbers\"" }
+    },
+    {
+      "id": "fix-build-config",
+      "title": "Fix a broken package.json so the build can read it",
+      "intent": "DEBUG_CODE",
+      "files": {
+        "package.json": "{\n  \"name\": \"fixture\"\n  \"version\": \"1.0.0\"\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "package.json" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "package.json", "content": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\"\n}\n" } },
+        { "kind": "message", "text": "Fixed the JSON syntax in package.json." }
+      ],
+      "verify": { "type": "file_contains", "path": "package.json", "contains": "\"name\": \"fixture\"," }
+    },
+    {
+      "id": "fix-failing-test",
+      "title": "Fix a failing test by correcting the assertion",
+      "intent": "DEBUG_CODE",
+      "files": {
+        "tests/assert.js": "expect(sum(1, 1)).toBe(3);\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "tests/assert.js" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "tests/assert.js", "old_string": "toBe(3)", "new_string": "toBe(2)" } },
+        { "kind": "message", "text": "Corrected the assertion; the suite is re-run by the verification step." }
+      ],
+      "verify": { "type": "command_succeeds", "command": "npm test" }
+    },
+    {
+      "id": "fix-typescript-type",
+      "title": "Fix a TypeScript type error",
+      "intent": "DEBUG_CODE",
+      "files": {
+        "src/types.ts": "export function label(id: number): number {\n  return id;\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/types.ts" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/types.ts", "old_string": "): number {", "new_string": "): string {\n  return String(id);" } },
+        { "kind": "message", "text": "label now returns a string." }
+      ],
+      "verify": { "type": "file_contains", "path": "src/types.ts", "contains": "return String(id);" }
+    },
+    {
+      "id": "update-tsconfig",
+      "title": "Enable strict mode in the TypeScript config",
+      "intent": "EDIT_CODE",
+      "files": {
+        "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"es2022\"\n  }\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "tsconfig.json" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "tsconfig.json", "old_string": "\"target\": \"es2022\"", "new_string": "\"target\": \"es2022\",\n    \"strict\": true" } },
+        { "kind": "message", "text": "Enabled strict in tsconfig.json." }
+      ],
+      "verify": { "type": "file_contains", "path": "tsconfig.json", "contains": "\"strict\": true" }
+    }
+  ]
+}
