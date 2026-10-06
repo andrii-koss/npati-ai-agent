@@ -7,6 +7,29 @@ import type {
 
 type Json = Record<string, unknown>;
 
+/**
+ * C5b: the seam the agent API injects so every outbound web request is inspected before it leaves NPATI.
+ *
+ * The package cannot import the API's policy store, so the port is deliberately narrow: the implementation
+ * decides and throws on a refusal (`allow` returns normally). When no guard is injected the package behaves
+ * as before — the only production composition (`createWebResearch` in the API) always injects one.
+ */
+export interface OutboundGuardInput {
+  channel: "web_search" | "web_fetch" | "web_crawl";
+  parts: Array<{ kind: "text" | "url" | "code" | "query" | "metadata"; value: string; label?: string }>;
+  /** The tenant/project this request belongs to, when the caller knows it. */
+  context?: { companyId?: string; projectId?: string; sessionId?: string; dataClassification?: string };
+}
+
+export interface OutboundGuardPort {
+  assertOutboundAllowed(input: OutboundGuardInput): void;
+}
+
+function guardOutbound(guard: OutboundGuardPort | undefined, input: OutboundGuardInput): void {
+  if (!guard) return;
+  guard.assertOutboundAllowed(input);
+}
+
 function contentString(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (value && typeof value === "object") {
@@ -33,9 +56,15 @@ function objectArray(value: unknown): Array<Record<string, unknown>> {
 }
 
 export class OmniRouteSearchProvider {
-  constructor(private readonly engine: OmniRouteEngine) {}
+  constructor(private readonly engine: OmniRouteEngine, private readonly outboundGuard?: OutboundGuardPort) {}
   async search(input: SearchInput): Promise<WebSearchResult[]> {
     const country = input.country?.trim();
+    // C5b: the query itself is outbound data — it can carry a fragment of the private code an agent is
+    // looking up, so it is inspected before the engine forwards it to a search provider.
+    guardOutbound(this.outboundGuard, {
+      channel: "web_search",
+      parts: [{ kind: "query", value: input.query, label: "search_query" }],
+    });
     return (await this.engine.webSearch({
       query: input.query, maxResults: input.maxResults,
       country: country && /^[a-z]{2}$/i.test(country) ? country.toUpperCase() : undefined,
@@ -45,9 +74,17 @@ export class OmniRouteSearchProvider {
 }
 
 export class OmniRouteFetchProvider {
-  constructor(private readonly engine: OmniRouteEngine, private readonly validator: SafeUrlValidator) {}
+  constructor(
+    private readonly engine: OmniRouteEngine,
+    private readonly validator: SafeUrlValidator,
+    private readonly outboundGuard?: OutboundGuardPort,
+  ) {}
   async fetch(input: FetchInput): Promise<WebPageResult> {
     const safe = await this.validator.validate(input.url);
+    guardOutbound(this.outboundGuard, {
+      channel: "web_fetch",
+      parts: [{ kind: "url", value: safe.toString(), label: "fetch_url" }],
+    });
     const result = await this.engine.webFetch({ url: safe.toString(), format: "markdown", includeMetadata: true });
     await this.validator.validateRedirect(safe.toString(), result.finalUrl);
     return result;
@@ -64,6 +101,7 @@ export class Crawl4AIProvider {
     private readonly validator: SafeUrlValidator,
     private readonly limits: WebResearchLimits,
     private readonly apiToken?: string,
+    private readonly outboundGuard?: OutboundGuardPort,
   ) {}
 
   private headers(extra?: Record<string, string>) {
@@ -99,6 +137,11 @@ export class Crawl4AIProvider {
 
   private async crawlPage(url: string): Promise<CrawledPage> {
     const safe = await this.validator.validate(url);
+    // C5b: the crawler is a separate service, so this request is outbound data even though it is "ours".
+    guardOutbound(this.outboundGuard, {
+      channel: "web_crawl",
+      parts: [{ kind: "url", value: safe.toString(), label: "crawl_url" }],
+    });
     await this.pace([safe.hostname]);
     await this.acquire();
     try {
@@ -150,6 +193,14 @@ export class Crawl4AIProvider {
   private async advancedCrawl(input: CrawlBatchInput): Promise<CrawlResult> {
     const startedAt = new Date().toISOString();
     const safeUrls = await Promise.all(input.urls.map((url) => this.validator.validate(url)));
+    // C5b: the advanced crawl ships the URLs **and the user's query** to the crawler service.
+    guardOutbound(this.outboundGuard, {
+      channel: "web_crawl",
+      parts: [
+        ...safeUrls.map((url, index) => ({ kind: "url" as const, value: url.toString(), label: `crawl_url_${index}` })),
+        { kind: "query", value: input.query ?? "", label: "crawl_query" },
+      ],
+    });
     await this.pace(safeUrls.map((url) => url.hostname));
     await this.acquire();
     try {

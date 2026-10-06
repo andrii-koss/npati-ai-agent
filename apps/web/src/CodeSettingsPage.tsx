@@ -6,6 +6,7 @@ import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
 import { CodeFlagsPanel } from "./CodeFlagsPanel";
 import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
+import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
 
 // --- Types -------------------------------------------------------------------
 
@@ -823,6 +824,14 @@ export function CodeSettingsPage() {
 
           {companyId && (
             <CodeSandboxImagesPanel
+              companyId={companyId}
+              isUk={isUk}
+              notify={(type, message) => setFeedback({ type, message })}
+            />
+          )}
+
+          {companyId && (
+            <CodeDataPolicyPanel
               companyId={companyId}
               isUk={isUk}
               notify={(type, message) => setFeedback({ type, message })}

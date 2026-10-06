@@ -322,6 +322,21 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   // Production: the privileged permission and the operation name are one and the same surface.
   "code.prod.operate": "code.prod.operate",
   "code.deploy.production": "code.prod.operate",
+  // C5b: provider data policy. Reading the policy is ordinary read access; **changing** it decides what
+  // may leave NPATI, so the write surfaces are mapped to the privileged `code.policy.manage` — the plan
+  // puts ProviderDataPolicy changes at owner level — and the inherited wildcard (`*`, `admin:all`,
+  // `owner`) deliberately does not grant it (see `permissionsForRole`). Raising a project's data
+  // classification narrows what may be sent and is an ordinary workspace write; **lowering** it widens
+  // the surface, so it is the owner-level action and has its own name.
+  "provider.data_policy.read": "workspace:read",
+  "provider.data_policy.versions": "workspace:read",
+  "provider.data_policy.eligibility": "workspace:read",
+  "project.data_policy.read": "workspace:read",
+  "provider.data_policy.upsert": "code.policy.manage",
+  "project.data_policy.upsert": "workspace:write",
+  "project.data_policy.lower_classification": "code.policy.manage",
+  "provider.hosted_consent.grant": "code.policy.manage",
+  "provider.hosted_consent.revoke": "code.policy.manage",
 });
 
 /**

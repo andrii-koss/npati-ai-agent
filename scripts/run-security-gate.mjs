@@ -78,6 +78,20 @@ export const SECURITY_GATE_TESTS = [
   // unattended automations run as.
   "tests/coding-agent-c5a-prod-operations.test.ts",
   "tests/coding-agent-c5a-automations-identity.test.ts",
+  // C5b (SG-3): provider data policy — private code and secrets must not leave NPATI towards a provider
+  // that has no permission for them, and routing must skip (or stop on) providers the policy forbids.
+  "tests/coding-agent-c5b-provider-guard.test.ts",
+  "tests/coding-agent-c5b-routing-eligibility.test.ts",
+  "tests/coding-agent-c5b-policy-resolver.test.ts",
+  "tests/coding-agent-c5b-policy-store.test.ts",
+  // C5b: policy administration — who may change what may leave NPATI (owner-level authority, versions,
+  // audit before apply, tenant isolation, eligibility reporting).
+  "tests/coding-agent-c5b-policy-management.test.ts",
+  "tests/coding-agent-c5b-policy-rbac.test.ts",
+  // C5b: the non-model outbound channels (web search/fetch/crawl, MCP, email, messaging, webhooks) — a
+  // secret is refused for delivery channels and redacted (never sent raw) for retrieval channels, and the
+  // transport is asserted never to have been called with the sensitive value.
+  "tests/coding-agent-c5b-outbound-guard.test.ts",
 ];
 
 /**

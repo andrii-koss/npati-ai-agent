@@ -1,5 +1,6 @@
 import type { AuthContext, Company } from "@npati/workspace";
 import type { EmailInboxRepository } from "./email-inbox-repository";
+import { assertOutboundAllowed } from "./outbound-exfiltration-guard";
 
 export interface LinkSecurityCheckResult {
   url: string;
@@ -33,6 +34,22 @@ export class EmailAgentTools {
     if (!input.to || !input.subject || !input.body) {
       throw new Error("to, subject, and body are required to send email");
     }
+
+    // C5b: email leaves NPATI for a human inbox, so a secret here is a refusal (never a redaction) and
+    // private repository code is an approval-class event. This runs before any quota or account lookup so
+    // a refused message cannot consume quota or thread state.
+    assertOutboundAllowed({
+      channel: "email",
+      parts: [
+        { kind: "metadata", value: input.to, label: "to" },
+        { kind: "metadata", value: input.cc?.join(", ") ?? "", label: "cc" },
+        { kind: "text", value: input.subject, label: "subject" },
+        { kind: "text", value: input.body, label: "body" },
+      ],
+      // C5b: the tenant is known here, so the policy is resolved for this company rather than for whatever
+      // context the process-wide snapshot happens to hold.
+      context: { companyId: company.id },
+    });
 
     const accounts = await this.repo.listAccounts(context, company.id);
     const account = input.fromEmail

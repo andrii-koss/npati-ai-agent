@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
-  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, isCompanyRole, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast } from "./types";
+  CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
+  ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
+  UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS } from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -24,6 +26,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeToolManifests = new Map<number, CodeToolManifest>();
   private readonly sandboxImages = new Map<string, SandboxImage>();
   private readonly codeApprovalRules = new Map<string, CodeApprovalRule>();
+  // C5b: ProviderDataPolicy. Keys are tenant-scoped, and the empty-tenant marker keeps a platform default
+  // (`companyId === null`) from ever colliding with a real company id, mirroring the SQL `COALESCE` index.
+  private readonly providerDataPolicies = new Map<string, ProviderDataPolicyRecord>();
+  private readonly providerDataPolicyVersions: ProviderDataPolicyVersionRecord[] = [];
+  private readonly projectDataPolicies = new Map<string, ProjectDataPolicyRecord>();
+  private readonly hostedProviderConsent = new Map<string, ProviderHostedConsentRecord>();
   private readonly projectCreateRequests = new Map<string, string>();
   private readonly projectCheckpoints = new Map<string, ProjectCheckpoint>();
   private readonly projectDeployments = new Map<string, ProjectDeployment>();
@@ -1664,6 +1672,283 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       );
     }
     this.companyMembers.delete(key);
+  }
+
+  // --- C5b: ProviderDataPolicy ------------------------------------------------------------------
+  // The in-memory mirror of the postgres implementation: same validation, same monotonic versioning,
+  // same history snapshot, same tenant scoping. A platform default (`companyId === null`) never shares a
+  // key with a company row, which is what the SQL `COALESCE(company_id,'')` unique index enforces.
+
+  private providerPolicyKey(companyId: string | null, providerId: string, modelPattern: string | null): string {
+    return `${companyId ?? "\u0000platform"}\u0000${providerId}\u0000${modelPattern ?? "\u0000provider"}`;
+  }
+
+  /**
+   * Validation is duplicated here on purpose: a direct store call (bypassing the app-side service) must be
+   * as safe as one that went through it. The codes match `ProviderDataPolicyError` so one route mapper
+   * can handle both.
+   */
+  private assertValidProviderPolicy(input: UpsertProviderDataPolicyStoreInput): void {
+    if (!isProviderDataPolicyKind(input.kind)) {
+      throw new ProviderDataPolicyStoreError("invalid_policy_field", `Unsupported provider kind: ${String(input.kind)}`, {
+        httpStatus: 400, details: { field: "kind" },
+      });
+    }
+    if (!isClassificationAtLeast(input.maxDataClassification, "public")) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_classification",
+        `Unsupported classification: ${String(input.maxDataClassification)}`,
+        { httpStatus: 400, details: { field: "maxDataClassification" } },
+      );
+    }
+    if (!isProviderTrainingPolicy(input.trainingPolicy)) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_field",
+        `Unsupported training policy: ${String(input.trainingPolicy)}`,
+        { httpStatus: 400, details: { field: "trainingPolicy" } },
+      );
+    }
+    if (!isExternalRetention(input.externalRetention)) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_retention",
+        `Unsupported external retention: ${String(input.externalRetention)}`,
+        { httpStatus: 400, details: { field: "externalRetention" } },
+      );
+    }
+    const redactions = input.requiredRedactions ?? MANDATORY_PROVIDER_REDACTIONS;
+    for (const kind of redactions) {
+      if (!isProviderRedactionKind(kind)) {
+        throw new ProviderDataPolicyStoreError("invalid_policy_field", `Unsupported redaction kind: ${String(kind)}`, {
+          httpStatus: 400, details: { field: "requiredRedactions" },
+        });
+      }
+    }
+    // Mandatory redaction is not configurable, for any provider kind.
+    const missing = MANDATORY_PROVIDER_REDACTIONS.filter((kind) => !redactions.includes(kind));
+    if (missing.length > 0) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_field",
+        `Required redactions must include: ${missing.join(", ")}`,
+        { httpStatus: 400, details: { field: "requiredRedactions", missing } },
+      );
+    }
+    for (const contentType of input.allowedContentTypes ?? ["metadata"]) {
+      if (!isProviderContentType(contentType)) {
+        throw new ProviderDataPolicyStoreError(
+          "invalid_policy_field",
+          `Unsupported content type: ${String(contentType)}`,
+          { httpStatus: 400, details: { field: "allowedContentTypes" } },
+        );
+      }
+    }
+  }
+
+  async getProviderDataPolicy(input: {
+    companyId: string | null;
+    providerId: string;
+    modelPattern: string | null;
+  }): Promise<ProviderDataPolicyRecord | null> {
+    return structuredClone(
+      this.providerDataPolicies.get(this.providerPolicyKey(input.companyId, input.providerId, input.modelPattern)) ?? null,
+    );
+  }
+
+  async listProviderDataPolicies(companyId: string | null): Promise<ProviderDataPolicyRecord[]> {
+    return structuredClone([...this.providerDataPolicies.values()]
+      .filter((policy) => policy.companyId === companyId)
+      .sort((a, b) => a.providerId.localeCompare(b.providerId) || (a.modelPattern ?? "").localeCompare(b.modelPattern ?? "")));
+  }
+
+  /**
+   * Versioning: a new row starts at 1, an existing one is bumped by exactly one, and the accepted policy is
+   * snapshotted into the history with the acting `actor`. A stale `expectedPolicyVersion` is refused before
+   * anything is written, so two writers cannot silently overwrite each other.
+   */
+  async upsertProviderDataPolicy(input: UpsertProviderDataPolicyStoreInput): Promise<ProviderDataPolicyRecord> {
+    this.assertValidProviderPolicy(input);
+    const key = this.providerPolicyKey(input.companyId, input.providerId, input.modelPattern);
+    const existing = this.providerDataPolicies.get(key) ?? null;
+    if (input.expectedPolicyVersion === null && existing) {
+      throw new ProviderDataPolicyStoreError("data_policy_revision_conflict", "A policy for this provider already exists", {
+        httpStatus: 409, details: { expectedPolicyVersion: null, actualPolicyVersion: existing.policyVersion },
+      });
+    }
+    if (typeof input.expectedPolicyVersion === "number") {
+      if (!existing) {
+        throw new ProviderDataPolicyStoreError("data_policy_not_found", "No policy to update for this provider", {
+          httpStatus: 404, details: { expectedPolicyVersion: input.expectedPolicyVersion },
+        });
+      }
+      if (existing.policyVersion !== input.expectedPolicyVersion) {
+        throw new ProviderDataPolicyStoreError(
+          "data_policy_revision_conflict",
+          "Provider data policy changed by another request. Reload and try again.",
+          { httpStatus: 409, details: { expectedPolicyVersion: input.expectedPolicyVersion, actualPolicyVersion: existing.policyVersion } },
+        );
+      }
+    }
+
+    const now = new Date();
+    const record: ProviderDataPolicyRecord = {
+      id: existing?.id ?? `pdp_${randomUUID()}`,
+      companyId: input.companyId,
+      providerId: input.providerId,
+      modelPattern: input.modelPattern,
+      policyVersion: (existing?.policyVersion ?? 0) + 1,
+      kind: input.kind,
+      allowPrivateRepoCode: input.allowPrivateRepoCode,
+      maxDataClassification: input.maxDataClassification,
+      allowPromptCaching: input.allowPromptCaching,
+      externalRetention: input.externalRetention,
+      trainingPolicy: input.trainingPolicy,
+      region: input.region ?? null,
+      jurisdiction: input.jurisdiction ?? null,
+      // The mandatory redactions are always present in what is stored, whatever the caller listed.
+      requiredRedactions: [...new Set([...MANDATORY_PROVIDER_REDACTIONS, ...(input.requiredRedactions ?? [])])],
+      allowedContentTypes: [...new Set<ProviderContentType>(input.allowedContentTypes ?? ["metadata"])],
+      termsUrl: input.termsUrl ?? null,
+      lastReviewedAt: input.lastReviewedAt ?? null,
+      reviewedBy: input.reviewedBy ?? null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.providerDataPolicies.set(key, record);
+    this.providerDataPolicyVersions.push({
+      id: `pdpv_${randomUUID()}`,
+      companyId: record.companyId,
+      providerId: record.providerId,
+      modelPattern: record.modelPattern,
+      policyVersion: record.policyVersion,
+      payload: structuredClone(record),
+      actor: input.actor,
+      createdAt: now,
+    });
+    return structuredClone(record);
+  }
+
+  async listProviderDataPolicyVersions(
+    companyId: string | null,
+    providerId?: string,
+  ): Promise<ProviderDataPolicyVersionRecord[]> {
+    return structuredClone(this.providerDataPolicyVersions
+      .filter((version) => version.companyId === companyId && (providerId === undefined || version.providerId === providerId))
+      .sort((a, b) => a.policyVersion - b.policyVersion || a.createdAt.getTime() - b.createdAt.getTime()));
+  }
+
+  async getProjectDataPolicy(companyId: string, projectId: string): Promise<ProjectDataPolicyRecord | null> {
+    return structuredClone(this.projectDataPolicies.get(`${companyId}\u0000${projectId}`) ?? null);
+  }
+
+  /** An unconfigured project is `confidential`, never `public`: the default lives here, not in the caller. */
+  async upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord> {
+    const key = `${input.companyId}\u0000${input.projectId}`;
+    const existing = this.projectDataPolicies.get(key) ?? null;
+    if (input.expectedPolicyVersion === null && existing) {
+      throw new ProviderDataPolicyStoreError("data_policy_revision_conflict", "A project data policy already exists", {
+        httpStatus: 409, details: { expectedPolicyVersion: null, actualPolicyVersion: existing.policyVersion },
+      });
+    }
+    if (typeof input.expectedPolicyVersion === "number" && existing
+      && existing.policyVersion !== input.expectedPolicyVersion) {
+      throw new ProviderDataPolicyStoreError(
+        "data_policy_revision_conflict",
+        "Project data policy changed by another request. Reload and try again.",
+        { httpStatus: 409, details: { expectedPolicyVersion: input.expectedPolicyVersion, actualPolicyVersion: existing.policyVersion } },
+      );
+    }
+    const classification = input.dataClassification ?? existing?.dataClassification ?? DEFAULT_DATA_CLASSIFICATION;
+    if (!isClassificationAtLeast(classification, "public")) {
+      throw new ProviderDataPolicyStoreError("invalid_classification", `Unsupported classification: ${String(classification)}`, {
+        httpStatus: 400, details: { field: "dataClassification" },
+      });
+    }
+    const pathRules: ProjectDataPolicyPathRule[] = (input.pathRules ?? existing?.pathRules ?? [])
+      .map((rule) => this.assertValidPathRule(rule));
+    const now = new Date();
+    const record: ProjectDataPolicyRecord = {
+      companyId: input.companyId,
+      projectId: input.projectId,
+      dataClassification: classification,
+      pathRules,
+      policyVersion: (existing?.policyVersion ?? 0) + 1,
+      updatedBy: input.actor,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.projectDataPolicies.set(key, record);
+    return structuredClone(record);
+  }
+
+  /** A rule that could point outside the project is refused, never normalised into something safe-looking. */
+  private assertValidPathRule(rule: ProjectDataPolicyPathRule): ProjectDataPolicyPathRule {
+    const pattern = typeof rule?.pattern === "string" ? rule.pattern.trim() : "";
+    const escapes = pattern.length === 0 || pattern.startsWith("/") || pattern.startsWith("~")
+      || pattern.includes("\\") || pattern.split("/").some((segment) => segment === "..");
+    if (escapes) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_policy_path_rule",
+        `Path rule must stay inside the project: ${String(rule?.pattern)}`,
+        { httpStatus: 400, details: { field: "pathRules", pattern: rule?.pattern } },
+      );
+    }
+    if (!isClassificationAtLeast(rule.classification, "public")) {
+      throw new ProviderDataPolicyStoreError(
+        "invalid_classification",
+        `Unsupported classification in path rule: ${String(rule.classification)}`,
+        { httpStatus: 400, details: { field: "classification", pattern } },
+      );
+    }
+    return { pattern, classification: rule.classification };
+  }
+
+  async grantHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    grantedBy: string;
+    grantedAt: Date;
+  }): Promise<ProviderHostedConsentRecord> {
+    const record: ProviderHostedConsentRecord = {
+      companyId: input.companyId,
+      projectId: input.projectId,
+      providerId: input.providerId,
+      grantedBy: input.grantedBy,
+      grantedAt: input.grantedAt,
+      // A fresh grant clears any previous revocation: consent is explicit, and re-granting is the only way
+      // back from a revocation.
+      revokedAt: null,
+    };
+    this.hostedProviderConsent.set(`${input.companyId}\u0000${input.projectId}\u0000${input.providerId}`, record);
+    return structuredClone(record);
+  }
+
+  async revokeHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+    revokedAt: Date;
+  }): Promise<ProviderHostedConsentRecord> {
+    const key = `${input.companyId}\u0000${input.projectId}\u0000${input.providerId}`;
+    const existing = this.hostedProviderConsent.get(key);
+    if (!existing) {
+      throw new ProviderDataPolicyStoreError("data_policy_not_found", "No hosted provider consent to revoke", {
+        httpStatus: 404, details: { providerId: input.providerId },
+      });
+    }
+    const record: ProviderHostedConsentRecord = { ...existing, revokedAt: input.revokedAt };
+    this.hostedProviderConsent.set(key, record);
+    return structuredClone(record);
+  }
+
+  /** The row is returned whatever its state; a caller must treat `revokedAt !== null` as no consent. */
+  async getHostedProviderConsent(input: {
+    companyId: string;
+    projectId: string;
+    providerId: string;
+  }): Promise<ProviderHostedConsentRecord | null> {
+    return structuredClone(
+      this.hostedProviderConsent.get(`${input.companyId}\u0000${input.projectId}\u0000${input.providerId}`) ?? null,
+    );
   }
 
   private findInviteByTokenHash(tokenHash: string): CompanyInvite | undefined {

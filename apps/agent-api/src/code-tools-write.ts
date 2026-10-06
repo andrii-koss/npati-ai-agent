@@ -4,6 +4,7 @@ import {
 import { decideSensitiveRead, isSensitivePath, resolveSensitivePolicy } from "./code-tools-sensitive";
 import { resolveCodeAgentLimits } from "./code-agent-config";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
+import { assertNoPlaceholderInWrite } from "./provider-data-guard";
 
 /**
  * C3: write-side engine for the editing tools.
@@ -266,6 +267,9 @@ export async function applyEdit(
   const nextBody = replaceAll ? body.split(oldString).join(newString) : body.replace(oldString, newString);
   const nextContent = encoding.bom ? `\uFEFF${nextBody}` : nextBody;
   assertEditSize(nextContent, tool, limits);
+  // C5b: a redaction placeholder is a reference to a value the model never saw, so it must never reach
+  // disk. This runs before the write (and before hooks) so a refused edit leaves the file untouched.
+  assertNoPlaceholderInWrite(nextContent, { tool, path: guarded.path });
   const diff = buildUnifiedDiff(toEol(body, "lf"), toEol(nextBody, "lf"), guarded.path);
   const written = await port.writeFile(guarded.path, nextContent, {
     encoding: encoding.encoding,
@@ -314,6 +318,9 @@ export async function writeFileSafe(
   const createDirectories = input.createDirectories !== false;
   const overwrite = input.overwrite !== false;
   assertEditSize(input.content, tool, limits);
+  // C5b: never persist a redaction placeholder — it references a value the model never received. Checked
+  // before any stat/read so a refused write has no side effects at all.
+  assertNoPlaceholderInWrite(input.content, { tool, path: guarded.path });
   const existing = await port.stat(guarded.path);
   if (existing.exists && existing.type === "dir") {
     throw new CodeToolError("not_a_file", `"${guarded.path}" is a directory`, tool);

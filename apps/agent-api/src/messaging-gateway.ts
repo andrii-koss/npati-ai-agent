@@ -1,4 +1,5 @@
 import { messagingCommandDefinitions } from "./messaging-commands";
+import { assertOutboundAllowed } from "./outbound-exfiltration-guard";
 export type GatewayAttachment = { kind: "image" | "audio" | "document" | "file"; name: string; mimeType: string; dataBase64: string };
 export type GatewayOutboundAttachment = GatewayAttachment & { caption?: string };
 export type GatewayReplyContext = { messageId: string; text: string; externalUserId?: string };
@@ -252,9 +253,53 @@ export class TelegramMessagingAdapter implements MessagingAdapter {
   }
 }
 
+/**
+ * C5b: every outbound message passes the exfiltration guard exactly once, at the gateway.
+ *
+ * Wrapping here rather than in each of the four adapters (Telegram, Slack, WhatsApp, Discord) means a new
+ * adapter cannot forget the check: `adapter()`/`optionalAdapter()` always hand back the guarded view. A
+ * messenger delivers to a third-party endpoint, so a secret is a refusal (never a redaction) and private
+ * repository code is an approval-class event.
+ */
+function assertMessagingTextOutbound(text: string | undefined, label: string): void {
+  if (typeof text !== "string" || text.length === 0) return;
+  assertOutboundAllowed({ channel: "messaging", parts: [{ kind: "text", value: text, label }] });
+}
+
+function guardedAdapter(adapter: MessagingAdapter): MessagingAdapter {
+  return new Proxy(adapter, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      // The wrappers are `async` on purpose: adapters return promises and call sites chain `.catch(...)`,
+      // so the refusal has to arrive as a rejected promise. A synchronous throw here would escape those
+      // `.catch` handlers and break the caller's error path.
+      if (property === "sendText") {
+        return async (credential: string, chatId: string, text: string, ...rest: unknown[]) => {
+          assertMessagingTextOutbound(text, "sendText");
+          return (value as (...args: unknown[]) => unknown).apply(target, [credential, chatId, text, ...rest]);
+        };
+      }
+      if (property === "editText") {
+        return async (credential: string, chatId: string, messageId: string, text: string) => {
+          assertMessagingTextOutbound(text, "editText");
+          return (value as (...args: unknown[]) => unknown).apply(target, [credential, chatId, messageId, text]);
+        };
+      }
+      if (property === "sendAttachment") {
+        return async (credential: string, chatId: string, attachment: GatewayOutboundAttachment, ...rest: unknown[]) => {
+          assertMessagingTextOutbound(attachment?.caption, "sendAttachment");
+          return (value as (...args: unknown[]) => unknown).apply(target, [credential, chatId, attachment, ...rest]);
+        };
+      }
+      return (value as (...args: unknown[]) => unknown).bind(target);
+    },
+  });
+}
+
 export class MessagingGateway {
   private readonly adapters = new Map<string, MessagingAdapter>();
   register(adapter: MessagingAdapter) { this.adapters.set(adapter.channel, adapter); return this; }
-  adapter(channel: string) { const adapter=this.adapters.get(channel); if(!adapter)throw new Error(`Messaging adapter ${channel} is unavailable`); return adapter; }
-  optionalAdapter(channel:string){return this.adapters.get(channel);}
+  adapter(channel: string) { const adapter=this.adapters.get(channel); if(!adapter)throw new Error(`Messaging adapter ${channel} is unavailable`); return guardedAdapter(adapter); }
+  optionalAdapter(channel:string){const adapter=this.adapters.get(channel);return adapter?guardedAdapter(adapter):undefined;}
 }

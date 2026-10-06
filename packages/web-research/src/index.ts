@@ -7,6 +7,7 @@ export * from "./jobs";
 
 import type { OmniRouteEngine } from "@npati/omniroute-adapter";
 import { Crawl4AIProvider, DefaultWebResearchProvider, OmniRouteFetchProvider, OmniRouteSearchProvider } from "./providers";
+import type { OutboundGuardPort } from "./providers";
 import { RedisResearchCache } from "./cache";
 import { InMemoryResearchJobStore, PostgresResearchJobStore } from "./jobs";
 import { SafeUrlValidator } from "./safe-url-validator";
@@ -39,18 +40,24 @@ export interface WebResearchOptions {
    * crawls go through exactly the same rules as every other NPATI-side outbound request.
    */
   validator?: SafeUrlValidator;
+  /**
+   * C5b: optional exfiltration guard. The agent API injects it so a search query, a fetched URL or a crawl
+   * request carrying private repository content is refused (or sent for approval) before it leaves NPATI.
+   */
+  outboundGuard?: OutboundGuardPort;
 }
 
 export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl?: string, environment: NodeJS.ProcessEnv = process.env, options: WebResearchOptions = {}) {
   const limits = webResearchLimits(environment);
   const validator = options.validator ?? new SafeUrlValidator();
+  const outboundGuard = options.outboundGuard;
   const crawler = crawlerBaseUrl
-    ? new Crawl4AIProvider(crawlerBaseUrl, validator, limits, environment.CRAWL4AI_API_TOKEN)
+    ? new Crawl4AIProvider(crawlerBaseUrl, validator, limits, environment.CRAWL4AI_API_TOKEN, outboundGuard)
     : undefined;
   const cache = environment.REDIS_URL ? new RedisResearchCache(environment.REDIS_URL) : undefined;
   const provider = new DefaultWebResearchProvider(
-    new OmniRouteSearchProvider(engine),
-    new OmniRouteFetchProvider(engine, validator),
+    new OmniRouteSearchProvider(engine, outboundGuard),
+    new OmniRouteFetchProvider(engine, validator, outboundGuard),
     crawler,
     limits,
     cache,

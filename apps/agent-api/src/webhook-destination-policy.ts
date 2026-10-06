@@ -11,6 +11,7 @@ import {
   type SsrfPolicyOptions,
 } from "./ssrf-policy";
 import { EGRESS_FORBIDDEN_HOSTS } from "./egress-allowlist";
+import { assertOutboundAllowed } from "./outbound-exfiltration-guard";
 import { ssrfSafeFetch, type SsrfFetchOptions, type SsrfFetchResult, type SsrfTransportPort } from "./ssrf-safe-http";
 
 /**
@@ -252,6 +253,8 @@ export interface DeliverWebhookOptions extends WebhookDestinationOptions {
   timeoutMs?: number;
   maxBytes?: number;
   transport?: SsrfTransportPort;
+  /** C5b: the tenant/project this payload belongs to, so the exfiltration guard resolves *its* policy. */
+  policyContext?: { companyId?: string; projectId?: string; dataClassification?: "public" | "internal" | "confidential" | "restricted" };
   /** Test seam only; delivery always runs through the shared SSRF-safe client by default. */
   fetchImpl?: (url: string, options: SsrfFetchOptions) => Promise<SsrfFetchResult>;
 }
@@ -262,6 +265,22 @@ export interface DeliverWebhookOptions extends WebhookDestinationOptions {
  */
 export async function deliverWebhook(input: string, options: DeliverWebhookOptions = {}): Promise<SsrfFetchResult> {
   const verdict = await assertWebhookDeliveryAllowed(input, options);
+  // C5b: the destination policy above answers "may we talk to this host?"; the exfiltration guard answers
+  // "may this payload leave NPATI at all?". A webhook delivers to a third-party endpoint, so a secret is a
+  // refusal (never a redaction) and private repository code is an approval-class event.
+  const bodyText = typeof options.body === "string"
+    ? options.body
+    : options.body instanceof Uint8Array
+      ? Buffer.from(options.body).toString("utf8")
+      : "";
+  assertOutboundAllowed({
+    channel: "webhook",
+    parts: [
+      { kind: "url", value: input, label: "webhook_url" },
+      { kind: "text", value: bodyText, label: "webhook_body" },
+    ],
+    ...(options.policyContext ? { context: options.policyContext } : {}),
+  });
   const fetchImpl = options.fetchImpl ?? ssrfSafeFetch;
   try {
     return await fetchImpl(input, {
