@@ -343,6 +343,17 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "project.data_policy.lower_classification": "code.policy.manage",
   "provider.hosted_consent.grant": "code.policy.manage",
   "provider.hosted_consent.revoke": "code.policy.manage",
+  // C6b: replay. Running a replay executes the loop again — it may edit files and run commands — so it is a
+  // workspace write surface, and reading a replay record is ordinary read access. Both are named actions, so
+  // a caller cannot authorize a replay by handing in a convenient label (`permission_action_mismatch`), and
+  // the shared gate's principal invariants (an agent never approves, a service never operates production)
+  // apply unchanged.
+  "code.replay.run": "workspace:write",
+  "code.replay.read": "workspace:read",
+  // C6b: reading the execution snapshot and the Activity trace of a run. Both are read surfaces, but they
+  // get their own names so a caller cannot authorize a replay or a write with a read action's label.
+  "code.snapshot.read": "workspace:read",
+  "code.activity.read": "workspace:read",
 });
 
 /**

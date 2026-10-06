@@ -25,7 +25,7 @@ import type {
   ChatToolCall,
   ChatToolDefinition,
 } from "@npati/omniroute-adapter";
-import type { AuthContext, CodeSession, DataClassification } from "@npati/workspace";
+import type { AuthContext, CodeSession, DataClassification, RetentionClass } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import {
   executableToolCalls,
@@ -38,8 +38,15 @@ import {
 } from "./code-tool-call-adapter";
 import { resolveEffectiveToolCallingMode, resolveModelProfile, type CodeModelProfile } from "./code-model-profiles";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
+import { MODE_RISK_MATRIX } from "./code-policy-engine";
+import { DEFAULT_CODE_SESSION_MODE_MATRIX } from "./code-rbac";
 import { CODE_TOOL_SCHEMAS } from "./code-tool-registry";
-import { validateArguments, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";
+import { sha256Hex, validateArguments, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";
+import {
+  bundleHash,
+  canonicalizeSettledToolResult,
+  type ReplayBundleStepPayload,
+} from "./code-replay-bundle";
 import {
   EMPTY_SNAPSHOT_ID,
   resolveExecutionSnapshotProvider,
@@ -225,6 +232,171 @@ export interface CodeRunActivityEvent {
   snapshotId?: string;
 }
 
+/**
+ * Per-run environment facts read by the snapshot sources. The provider is constructed once per process,
+ * while the digest and the policy composition only exist for a single run.
+ */
+export interface CodeRunEnvironmentHolder {
+  setSandboxImage(image: { digest: string | null; sbomRef?: string | null } | null): void;
+  setPolicyComposition(composition: Record<string, unknown> | null): void;
+  sandboxImage(): { digest: string | null; sbomRef?: string | null } | null;
+  policyComposition(): Record<string, unknown> | null;
+  /** Resolved feature flags (not the raw configured list) in force for this run. */
+  setFeatureFlags(value: Record<string, unknown> | null): void;
+  featureFlags(): Record<string, unknown> | null;
+  /** Effective provider data policy for this run: version plus the classification actually applied. */
+  setProviderDataPolicy(value: { version: number | null; classification: string | null } | null): void;
+  providerDataPolicy(): { version: number | null; classification: string | null } | null;
+  setBaseCommit(value: { branch: string | null; commit: string | null; dirty: boolean } | null): void;
+  baseCommit(): { branch: string | null; commit: string | null; dirty: boolean } | null;
+  setToolchain(value: Record<string, unknown> | null): void;
+  toolchain(): Record<string, unknown> | null;
+  /** Which model the run asked for; `parameters` stay absent because no generation parameters are passed. */
+  setModelSelection(value: { provider: string; model: string } | null): void;
+  modelSelection(): { provider: string; model: string } | null;
+  /** The version registry reference of the exact system prompt sent for this run. */
+  setSystemPrompt(value: { version: number | null; contentHash: string | null } | null): void;
+  systemPrompt(): { version: number | null; contentHash: string | null } | null;
+  /** The version registry reference of the resolved model profiles. */
+  setModelProfileVersion(value: string | number | null): void;
+  modelProfileVersion(): string | number | null;
+}
+
+export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
+  let image: { digest: string | null; sbomRef?: string | null } | null = null;
+  let composition: Record<string, unknown> | null = null;
+  let flags: Record<string, unknown> | null = null;
+  let policy: { version: number | null; classification: string | null } | null = null;
+  let commit: { branch: string | null; commit: string | null; dirty: boolean } | null = null;
+  let toolchain: Record<string, unknown> | null = null;
+  let modelSelection: { provider: string; model: string } | null = null;
+  let systemPrompt: { version: number | null; contentHash: string | null } | null = null;
+  let modelProfileVersion: string | number | null = null;
+  return {
+    setSandboxImage(next) { image = next; },
+    setPolicyComposition(next) { composition = next; },
+    sandboxImage() { return image; },
+    policyComposition() { return composition; },
+    setFeatureFlags(next) { flags = next; },
+    featureFlags() { return flags; },
+    setProviderDataPolicy(next) { policy = next; },
+    providerDataPolicy() { return policy; },
+    setBaseCommit(next) { commit = next; },
+    baseCommit() { return commit; },
+    setToolchain(next) { toolchain = next; },
+    toolchain() { return toolchain; },
+    setModelSelection(next) { modelSelection = next; },
+    modelSelection() { return modelSelection; },
+    setSystemPrompt(next) { systemPrompt = next; },
+    systemPrompt() { return systemPrompt; },
+    setModelProfileVersion(next) { modelProfileVersion = next; },
+    modelProfileVersion() { return modelProfileVersion; },
+  };
+}
+
+/**
+ * Readers for the per-run snapshot facts. Every reader is optional and fail-soft: when one cannot answer,
+ * only **its** field is `null` — never the whole environment, and never a fabricated value.
+ */
+export interface CodeRunPolicyCompositionSources {
+  projectPolicyVersion?(input: { ctx: AuthContext; companyId: string; projectId: string }): Promise<number | null>;
+  approvalRulesRevision?(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId?: string }): Promise<number | null>;
+  companyMembershipRevision?(input: { ctx: AuthContext; companyId: string }): Promise<number | null>;
+  /** Resolved flags that affect this run (master + sub-flags); the raw configured list is not a snapshot. */
+  featureFlags?(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; model?: string }): Promise<Record<string, unknown> | null>;
+  /** Effective provider data policy for the run's provider plus the classification actually applied. */
+  providerDataPolicy?(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; model?: string }): Promise<{ version: number | null; classification: string | null } | null>;
+  /** Branch, dirty flag and the **real** HEAD hash (never derived from `status`). */
+  baseCommit?(input: { ctx: AuthContext; companyId: string; projectId: string }): Promise<{ branch: string | null; commit: string | null; dirty: boolean } | null>;
+  /** The project's detected toolchain (`Project.toolchain`). */
+  toolchain?(input: { ctx: AuthContext; companyId: string; projectId: string }): Promise<Record<string, unknown> | null>;
+}
+
+/**
+ * C6b: the two pieces of configuration a snapshot references **only by hash**. The real implementations are
+ * `ensureSystemPromptVersion`/`ensureModelProfilesVersion`, which dedupe identical content by hash — so two
+ * runs with the same prompt and profile get the same version, and a change gets a new one.
+ */
+export interface CodeRunSnapshotConfigVersions {
+  ensureSystemPromptVersion(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    workspaceId: string;
+    sessionId?: string;
+    promptText: string;
+    profileId: string;
+  }): Promise<{ version: number | null; contentHash: string | null } | null>;
+  ensureModelProfilesVersion(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    workspaceId: string;
+    sessionId?: string;
+    profile: CodeModelProfile;
+  }): Promise<string | number | null>;
+}
+
+/**
+ * C6b: what the runner tells the recorder at run start. The app-side wiring adds deployment facts it owns
+ * (runner version from the build info, the project/session classification and retention class).
+ */
+export interface CodeRunReplayStartInput {
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  workspaceId: string;
+  runId: string;
+  snapshotId?: string;
+  modelSelection?: { provider: string; model: string } | null;
+  systemPrompt?: { version: number | null; contentHash: string | null } | null;
+  modelProfileVersion?: string | number | null;
+  /** Tool name → schema version, so a replay can tell the tool contract itself changed. */
+  toolVersions?: Record<string, number>;
+  /** Classification/retention of the recorded material: inherited from the session, never invented. */
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+}
+
+export interface CodeRunReplayRecorderPort {
+  recordModelStep(step: {
+    turnIndex: number;
+    request: {
+      /** The model the run asked for; `null` when the caller requested none (the engine then picks). */
+      model: string | null;
+      messageCount: number;
+      toolNames: string[];
+      idempotencyKey?: string;
+      dataClassification?: string;
+    };
+    response: {
+      content: string;
+      finishReason?: string | null;
+      model?: string | null;
+      provider?: string | null;
+      usage?: { totalTokens?: number; promptTokens?: number; completionTokens?: number } | null;
+      toolCalls: Array<{ id: string; name: string; argumentsHash: string }>;
+    };
+  }): void;
+  recordToolCall(step: {
+    turnIndex: number;
+    toolCallId: string;
+    tool: string;
+    toolVersion?: string | number | null;
+    argumentsHash: string;
+    settledResult: string;
+    outcome: "ok" | "failed";
+    errorCode?: string;
+    truncated?: boolean;
+    durationMs?: number;
+  }): void;
+  finalize(input: { terminalStatus: string; terminalReason: string }): Promise<{ written: boolean; bundleId?: string; errorCode?: string }>;
+}
+
+export interface CodeRunReplayPort {
+  start(input: CodeRunReplayStartInput): CodeRunReplayRecorderPort;
+}
+
 export interface CodingAgentRunnerPorts {
   flags: {
     assertEnabled(ctx: AuthContext, flagKey: string, options?: { companyId?: string; userId?: string }): Promise<unknown>;
@@ -238,7 +410,15 @@ export interface CodingAgentRunnerPorts {
   /** Tool schemas (defaults to the published registry) — needed for the model's tool definitions. */
   schemas?: readonly CodeRunToolSchemaLike[];
   imageAdmission?: {
-    admit(ctx: AuthContext, input: { companyId: string; reference: string }): Promise<{ reference: string; dev: boolean }>;
+    /**
+     * C1b admission. `digest`/`sbomRef` are additive: the real `SandboxImagePolicy.admit` returns them, and
+     * the C6b snapshot records them as the run's `sandbox_image_digest` — without them the environment would
+     * be unreproducible from the snapshot itself.
+     */
+    admit(
+      ctx: AuthContext,
+      input: { companyId: string; reference: string },
+    ): Promise<{ reference: string; dev: boolean; digest?: string | null; sbomRef?: string | null }>;
   };
   quota?: CodeRunQuotaPort;
   /** C6a: durable run state (turn boundaries, write-ahead tool calls, lease/heartbeat). */
@@ -246,6 +426,18 @@ export interface CodingAgentRunnerPorts {
   /** Lease identity of this process. Defaults to a per-run id derived from the pid and a random suffix. */
   runStateOwner?: string;
   snapshot?: ExecutionSnapshotProvider | null;
+  /**
+   * Per-run environment facts the snapshot reads. The C6b provider is built once per process, so the facts
+   * that only exist per run (the admitted image digest, the policy composition) travel through this holder.
+   */
+  environment?: CodeRunEnvironmentHolder;
+  /**
+   * Readers for the policy **composition** recorded in the snapshot. Each part is optional and read
+   * defensively: a deployment that cannot tell records `null`, never a guessed version.
+   */
+  policyCompositionSources?: CodeRunPolicyCompositionSources;
+  /** C6b: system-prompt and model-profile version registries (deduplicated by content hash). */
+  snapshotConfigVersions?: CodeRunSnapshotConfigVersions;
   activity?: { record(event: CodeRunActivityEvent): Promise<void> };
   /** Existing run lifecycle events. C6 uses the existing types only; tool detail goes through `activity`. */
   runEvents?: {
@@ -265,6 +457,15 @@ export interface CodingAgentRunnerPorts {
     /** Optional refusal code; defaults to `disk_pressure` (the reaper's own reason). */
     refusalCode?(): string | undefined;
   };
+  /**
+   * C6b: records the exchange a deterministic replay needs — every model answer and the **canonical,
+   * model-visible, settled** tool result. Optional: without it no bundle is written and the run is unchanged.
+   * Recording never gates a run, with one deliberate exception: a bundle containing a secret is refused
+   * loudly (the write is rejected) instead of being silently redacted.
+   */
+  replayBundle?: CodeRunReplayPort;
+  /** Diagnostics only. Missing logger means a failed bundle write is simply not reported. */
+  logger?: { warn(message: string, meta?: Record<string, unknown>): void };
   limits?: Partial<CodeAgentLimits>;
   /**
    * Model profiles are **configuration**, not code: a caller may inject the registry, the operator
@@ -360,6 +561,74 @@ export function assertMetadataOnly(event: Record<string, unknown>, label = "acti
 /** True when the tool may run in parallel with other read-only tools. Unknown tools are sequential. */
 export function isReadOnlyRunTool(name: string): boolean {
   return CODE_RUN_READ_ONLY_TOOLS.has(name);
+}
+
+/** Stable serialisation used only for hashing policy matrices, so key order cannot change the hash. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
+}
+
+/**
+ * The policy matrices are **code**, so they have no version number: a hash is the only honest way to record
+ * "which policy was in force for this run". Both matrices are hashed separately so a diff names the one that
+ * changed.
+ */
+export function codePolicyMatrixHashes(): { modeRiskMatrixHash: string; sessionModeMatrixHash: string } {
+  return {
+    modeRiskMatrixHash: `sha256:${sha256Hex(stableStringify(MODE_RISK_MATRIX))}`,
+    sessionModeMatrixHash: `sha256:${sha256Hex(stableStringify(DEFAULT_CODE_SESSION_MODE_MATRIX))}`,
+  };
+}
+
+/**
+ * The build identity of the process that runs the loop. `build-info.ts` is the single source of truth; the
+ * snapshot records this string as `runnerVersion` so "which build ran this" is answerable.
+ */
+export function buildRunnerVersion(info: { version: string; commit: string; fingerprint: string }): string {
+  return `${info.version}+${info.commit}+${info.fingerprint}`;
+}
+
+/**
+ * Reads the policy composition for one run. There is deliberately no single `policy_version`: each part is
+ * recorded separately (a failed reader yields `null`), together with the matrix hashes above.
+ */
+export function createCodeRunPolicyComposition(input: {
+  ctx: AuthContext;
+  companyId: string;
+  projectId: string;
+  sessionId?: string;
+  sources?: CodeRunPolicyCompositionSources;
+}): Promise<Record<string, unknown>> {
+  const read = async (reader: (() => Promise<number | null>) | undefined): Promise<number | null> => {
+    if (!reader) return null;
+    try {
+      const value = await reader();
+      return typeof value === "number" ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  return (async () => ({
+    ...codePolicyMatrixHashes(),
+    projectPolicyVersion: await read(
+      input.sources?.projectPolicyVersion
+        ? () => input.sources!.projectPolicyVersion!({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId })
+        : undefined,
+    ),
+    approvalRulesRevision: await read(
+      input.sources?.approvalRulesRevision
+        ? () => input.sources!.approvalRulesRevision!({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, ...(input.sessionId ? { sessionId: input.sessionId } : {}) })
+        : undefined,
+    ),
+    companyMembershipRevision: await read(
+      input.sources?.companyMembershipRevision
+        ? () => input.sources!.companyMembershipRevision!({ ctx: input.ctx, companyId: input.companyId })
+        : undefined,
+    ),
+  }))();
 }
 
 /**
@@ -484,6 +753,11 @@ export class CodingAgentRunner {
       remaining: "",
     };
     let snapshotId: string = EMPTY_SNAPSHOT_ID;
+    /**
+     * C6b: the replay recorder, assigned once the run id, the snapshot id and the environment facts exist.
+     * Declared here (not inside the `try`) because `stop` closes it on every terminal path.
+     */
+    let replayRecorder: CodeRunReplayRecorderPort | undefined;
     let model: string | undefined;
     let provider: string | undefined;
 
@@ -542,6 +816,19 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
+      // C6b: every terminal exit goes through here, so the bundle is always closed with a status and reason.
+      // A bundle failure (including a refused secret) is reported but never turns into a failed run: the
+      // recording is evidence about the run, not a gate for it.
+      if (replayRecorder) {
+        try {
+          await replayRecorder.finalize({ terminalStatus: status, terminalReason: reason });
+        } catch (error) {
+          this.ports.logger?.warn("replay_bundle_refused", {
+            code: (error as { code?: string })?.code ?? "replay_bundle_error",
+            runId: stateRunId ?? input.runId,
+          });
+        }
+      }
       if (stateRunId && this.ports.runState) {
         const stateStatus = status === "cancelled"
           ? "cancelled"
@@ -610,18 +897,60 @@ export class CodingAgentRunner {
         if (!this.ports.imageAdmission) {
           return finish("failed", "refused", "Sandbox image admission policy is not configured; the run was not started.");
         }
-        await this.ports.imageAdmission.admit(ctx, { companyId, reference: input.imageReference });
+        const admitted = await this.ports.imageAdmission.admit(ctx, { companyId, reference: input.imageReference });
+        // C6b: the admitted digest is the only reproducible identity of the environment, so it is handed to
+        // the snapshot sources (the provider is per-process, the digest is per-run).
+        this.ports.environment?.setSandboxImage({
+          digest: admitted.digest ?? null,
+          ...(admitted.sbomRef !== undefined ? { sbomRef: admitted.sbomRef } : {}),
+        });
       }
-      // (4) ExecutionSnapshot seam (C6b replaces the provider; C6 only threads the id).
-      const snapshot = await this.snapshot.create({
+      // (3b) Policy composition + per-run environment facts for the snapshot. Every reader is fail-soft: a
+      // reader that cannot answer leaves **its own** field null, never the whole environment.
+      const readerInput = {
+        ctx,
         companyId,
         projectId,
-        sessionId,
-        ...(input.runId ? { runId: input.runId } : {}),
-        actor: ctx.userId,
-        ...(input.agentId ? { agentId: input.agentId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(input.model ? { model: input.model } : {}),
+      };
+      const readFact = async <T>(read: (() => Promise<T | null>) | undefined): Promise<T | null> => {
+        if (!read) return null;
+        try {
+          return await read();
+        } catch {
+          return null;
+        }
+      };
+      const policyComposition = await createCodeRunPolicyComposition({
+        ctx,
+        companyId,
+        projectId,
+        ...(sessionId ? { sessionId } : {}),
+        ...(this.ports.policyCompositionSources ? { sources: this.ports.policyCompositionSources } : {}),
       });
-      snapshotId = snapshot.snapshotId;
+      this.ports.environment?.setPolicyComposition(policyComposition);
+      const factSources = this.ports.policyCompositionSources;
+      this.ports.environment?.setFeatureFlags(
+        await readFact(factSources?.featureFlags ? () => factSources.featureFlags!(readerInput) : undefined),
+      );
+      this.ports.environment?.setProviderDataPolicy(
+        await readFact(
+          factSources?.providerDataPolicy ? () => factSources.providerDataPolicy!(readerInput) : undefined,
+        ),
+      );
+      this.ports.environment?.setBaseCommit(
+        await readFact(
+          factSources?.baseCommit
+            ? () => factSources.baseCommit!({ ctx, companyId, projectId })
+            : undefined,
+        ),
+      );
+      this.ports.environment?.setToolchain(
+        await readFact(
+          factSources?.toolchain ? () => factSources.toolchain!({ ctx, companyId, projectId }) : undefined,
+        ),
+      );
     } catch (error) {
       const failure = error as { code?: string; message?: string };
       return finish("failed", "refused", failure.message ?? `The run was refused (${failure.code ?? "refused"}).`);
@@ -712,11 +1041,73 @@ export class CodingAgentRunner {
       ...(input.extraSystemPromptLines ? { extraLines: input.extraSystemPromptLines } : {}),
     });
 
+    // (6) C6b: the configuration facts only exist now that the prompt and the profile are resolved, so they are
+    // published first; the snapshot that references them is created immediately after. The snapshot is created
+    // **after** the run row exists (its `run_id` is the durable run id and `getSnapshotForRun` finds it), and
+    // before the first model call. A failure here never aborts the run: the empty id is honest.
+    const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
+    this.ports.environment?.setModelSelection({ provider: modelProviderHint, model: modelName });
+    if (this.ports.snapshotConfigVersions) {
+      const configVersions = this.ports.snapshotConfigVersions;
+      const configInput = { ctx, companyId, projectId, workspaceId: session.workspaceId, ...(sessionId ? { sessionId } : {}) };
+      try {
+        const ref = await configVersions.ensureSystemPromptVersion({ ...configInput, promptText: systemPrompt, profileId: profile.id });
+        this.ports.environment?.setSystemPrompt(ref ? { version: ref.version, contentHash: ref.contentHash } : null);
+      } catch {
+        this.ports.environment?.setSystemPrompt(null);
+      }
+      try {
+        this.ports.environment?.setModelProfileVersion(
+          await configVersions.ensureModelProfilesVersion({ ...configInput, profile }),
+        );
+      } catch {
+        this.ports.environment?.setModelProfileVersion(null);
+      }
+    }
+    try {
+      const snapshot = await this.snapshot.create({
+        companyId,
+        projectId,
+        sessionId,
+        workspaceId: session.workspaceId,
+        runId: stateRunId ?? input.runId,
+        actor: ctx.userId,
+        ...(input.agentId ? { agentId: input.agentId } : {}),
+      });
+      snapshotId = snapshot.snapshotId;
+    } catch {
+      snapshotId = EMPTY_SNAPSHOT_ID;
+    }
+
+    /**
+     * C6b: the replay recorder is created here, after the run id and the snapshot id exist and after the
+     * environment facts were published, so the bundle names the exact environment the run executed in.
+     */
+    replayRecorder = this.ports.replayBundle?.start({
+      companyId,
+      projectId,
+      sessionId,
+      workspaceId: session.workspaceId,
+      runId: stateRunId ?? input.runId ?? "",
+      ...(snapshotId ? { snapshotId } : {}),
+      modelSelection: this.ports.environment?.modelSelection() ?? null,
+      systemPrompt: this.ports.environment?.systemPrompt() ?? null,
+      modelProfileVersion: this.ports.environment?.modelProfileVersion() ?? null,
+      toolVersions: Object.fromEntries(
+        this.toolDescriptors(session).map((tool) => [tool.name, tool.version]),
+      ),
+      dataClassification: session.dataClassification,
+      retentionClass: session.retentionClass,
+    });
+    /** Tool schema versions, so a recorded call carries the contract it was made under. */
+    const toolVersionByName = new Map(
+      this.toolDescriptors(session).map((tool) => [tool.name, tool.version] as const),
+    );
+
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       { role: "user", content: input.prompt },
     ];
-
     const repeatedSignatures: string[] = [];
     const repeatedErrors: string[] = [];
     const argumentCorrections = new Map<string, number>();
@@ -833,6 +1224,37 @@ export class CodingAgentRunner {
         // Always injected: text mode without a validator executes nothing (`validator_not_configured`).
         validate: validateArguments,
       });
+      // C6b: the recorded answer is the answer that actually came back — content, finish reason, usage and the
+      // tool calls with a hash of their arguments (the arguments themselves live in the canonical tool result).
+      replayRecorder?.recordModelStep({
+        turnIndex: steps,
+        request: {
+          model: input.model ?? null,
+          messageCount: messages.length,
+          toolNames: definitions.map((definition) => definition.function.name),
+          idempotencyKey: `${sessionId}:${turnId}:${steps}`,
+          dataClassification: session.dataClassification,
+        },
+        response: {
+          content: result.content ?? "",
+          finishReason: result.finishReason ?? null,
+          model: result.model ?? null,
+          provider: result.telemetry?.provider ?? null,
+          usage: result.usage
+            ? {
+              totalTokens: result.usage.totalTokens,
+              promptTokens: result.usage.promptTokens,
+              completionTokens: result.usage.completionTokens,
+            }
+            : null,
+          toolCalls: (result.toolCalls ?? []).map((call) => ({
+            id: call.id,
+            name: call.function?.name ?? "",
+            argumentsHash: bundleHash(call.function?.arguments ?? ""),
+          })),
+        },
+      });
+
       // `normalized.reasoning` is a pass-through only: the wire types carry no reasoning field and `stream()`
       // returns text alone, so C6 never fabricates one. It is deliberately not echoed into `messages`.
 
@@ -1009,10 +1431,30 @@ export class CodingAgentRunner {
 
       /** Appends one tool result and feeds the repeated-error detector. */
       const appendToolResult = (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): void => {
-        const payload = outcome.result.ok
-          ? { ok: true, tool: outcome.call.name, result: outcome.result.result, truncated: outcome.result.truncated }
-          : { ok: false, error: outcome.result.error };
-        const { text } = bounded(JSON.stringify(payload), this.limits.toolOutputChars);
+        /**
+         * C6b: one canonicalisation, shared with the recorder. The text appended here **is** the model-visible
+         * settled result, so recording it from a second code path would let the bundle and the conversation
+         * drift apart — and replay would then reproduce a different conversation than the one that ran.
+         */
+        const text = canonicalizeSettledToolResult({
+          ok: outcome.result.ok,
+          tool: outcome.call.name,
+          ...(outcome.result.ok ? { result: outcome.result.result } : {}),
+          ...(outcome.result.ok ? { truncated: outcome.result.truncated } : {}),
+          ...(outcome.result.ok ? {} : { error: outcome.result.error }),
+          limit: this.limits.toolOutputChars,
+        });
+        replayRecorder?.recordToolCall({
+          turnIndex: steps,
+          toolCallId: outcome.call.id,
+          tool: outcome.call.name,
+          toolVersion: toolVersionByName.get(outcome.call.name) ?? null,
+          argumentsHash: bundleHash(outcome.call.arguments ?? {}),
+          settledResult: text,
+          outcome: outcome.result.ok ? "ok" : "failed",
+          ...(outcome.result.ok ? {} : { errorCode: outcome.result.error.code }),
+          ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
+        });
         messages.push({ role: "tool", tool_call_id: outcome.call.id, content: text });
         if (!outcome.result.ok) {
           turnHadFailure = true;

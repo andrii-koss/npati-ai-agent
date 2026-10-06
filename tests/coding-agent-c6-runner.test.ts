@@ -3,11 +3,14 @@ import type { ChatResult } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
 import type { CodeToolInvokeFailure, CodeToolInvokeResult } from "../apps/agent-api/src/code-tool-runtime";
+import type { ExecutionSnapshotCreateInput } from "../apps/agent-api/src/execution-snapshot";
 import {
   assertMetadataOnly,
+  buildRunnerVersion,
   buildSystemPrompt,
   CODE_RUN_START_ACTION,
   CodingAgentRunner,
+  createCodeRunEnvironmentHolder,
   isReadOnlyRunTool,
   type CodeRunActivityEvent,
   type CodeRunToolDescriptor,
@@ -72,10 +75,48 @@ interface HarnessOptions {
   };
   cancelAfterChecks?: number;
   modelProfiles?: CodingAgentRunnerPorts["modelProfiles"];
+  runState?: { runId: string; extra?: Record<string, unknown> };
+  snapshotId?: string;
+  policyCompositionSources?: CodingAgentRunnerPorts["policyCompositionSources"];
+  snapshotConfigVersions?: CodingAgentRunnerPorts["snapshotConfigVersions"];
+}
+
+/**
+ * A content-addressed fake of the C6b version registries: identical content reuses its version, changed
+ * content mints a new one. Mirrors `ensureSystemPromptVersion`/`ensureModelProfilesVersion` semantics.
+ */
+function fakeConfigVersions(overrides: { systemPromptThrows?: boolean; profilesThrow?: boolean } = {}) {
+  const versions = new Map<string, number>();
+  // Versions are per kind, exactly like the real registry: prompt v1 and profiles v1 are separate rows.
+  const counters = new Map<string, number>();
+  const ensure = (kind: string, content: unknown): number => {
+    const hash = `${kind}:${JSON.stringify(content)}`;
+    const existing = versions.get(hash);
+    if (existing !== undefined) return existing;
+    const next = (counters.get(kind) ?? 0) + 1;
+    counters.set(kind, next);
+    versions.set(hash, next);
+    return next;
+  };
+  const provider: NonNullable<CodingAgentRunnerPorts["snapshotConfigVersions"]> = {
+    ensureSystemPromptVersion: async ({ promptText, profileId }) => {
+      if (overrides.systemPromptThrows) throw new Error("prompt registry down");
+      const version = ensure("system_prompt", { promptText, profileId });
+      return { version, contentHash: `sha256:prompt-${version}` };
+    },
+    ensureModelProfilesVersion: async ({ profile }) => {
+      if (overrides.profilesThrow) throw new Error("profile registry down");
+      return ensure("model_profiles", profile);
+    },
+  };
+  return { provider, versionCount: () => versions.size };
 }
 
 function createHarness(options: HarnessOptions = {}) {
   const engineCalls: CodingAgentChatRequest[] = [];
+  const environmentHolder = createCodeRunEnvironmentHolder();
+  const snapshotRequests: ExecutionSnapshotCreateInput[] = [];
+  const order: string[] = [];
   const invocations: Array<{ tool: string; toolCallId: string; args: unknown; companyId: string; projectId: string; sessionId?: string }> = [];
   const activity: CodeRunActivityEvent[] = [];
   const runEvents: Array<{ eventKey: string; eventType: string; runStatus: string; message: string }> = [];
@@ -148,7 +189,12 @@ function createHarness(options: HarnessOptions = {}) {
     imageAdmission: {
       admit: async () => {
         if (options.imageAdmissionThrow) throw Object.assign(new Error("Image refused"), { code: "sandbox_image_unverified" });
-        return { reference: "npati/sandbox-node-1@sha256:abc", dev: false };
+        return {
+          reference: "npati/sandbox-node-1@sha256:abc",
+          dev: false,
+          digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          sbomRef: "sbom/sandbox-node-1.json",
+        };
       },
     },
     quota: {
@@ -161,6 +207,31 @@ function createHarness(options: HarnessOptions = {}) {
     limits: { maxStepsPerRun: 10, maxRunMinutes: 5, parallelReadOnlyCalls: 8, ...(options.limits ?? {}) },
     ...(options.modelProfiles ? { modelProfiles: options.modelProfiles } : {}),
     ...(options.now ? { now: options.now } : {}),
+    environment: environmentHolder,
+    ...(options.runState
+      ? {
+          runState: {
+            startRun: async () => {
+              order.push("startRun");
+              return { runId: options.runState!.runId };
+            },
+            renewLease: async () => ({ held: true }),
+            markFinished: async () => undefined,
+            recordTurn: async () => undefined,
+            recordToolCall: async () => undefined,
+            ...(options.runState.extra ?? {}),
+          } as unknown as CodingAgentRunnerPorts["runState"],
+        }
+      : {}),
+    snapshot: {
+      create: async (request) => {
+        order.push("snapshot");
+        snapshotRequests.push(request);
+        return { snapshotId: options.snapshotId ?? "snap-1" };
+      },
+    },
+    ...(options.policyCompositionSources ? { policyCompositionSources: options.policyCompositionSources } : {}),
+    ...(options.snapshotConfigVersions ? { snapshotConfigVersions: options.snapshotConfigVersions } : {}),
   };
 
   const runner = new CodingAgentRunner(ports);
@@ -172,6 +243,9 @@ function createHarness(options: HarnessOptions = {}) {
     runEvents,
     releases,
     authorizedActions,
+    environmentHolder,
+    snapshotRequests,
+    order,
     get maxActiveReads() { return maxActiveReads; },
     get overlapViolation() { return overlapViolation; },
     cancelRequested: () => {
@@ -402,6 +476,175 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(harness.invocations[0]?.companyId).toBe("company-9");
     expect(harness.invocations[0]?.projectId).toBe("project-9");
     expect(harness.invocations[0]?.sessionId).toBe("session-9");
+  });
+});
+
+describe("security-gate: C6 runner — C6b snapshot binding", () => {
+  it("publishes the admitted image digest so the snapshot's sandbox image is not empty", async () => {
+    const harness = createHarness({ script: [{ content: "done" }] });
+    const result = await harness.run({ imageReference: "npati/sandbox-node-1@sha256:abc" });
+    expect(result.status).toBe("completed");
+    expect(harness.environmentHolder.sandboxImage()).toEqual({
+      digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      sbomRef: "sbom/sandbox-node-1.json",
+    });
+  });
+
+  it("creates the snapshot after the run row exists and passes the durable run id", async () => {
+    const harness = createHarness({ script: [{ content: "done" }], runState: { runId: "state-run-9" } });
+    const result = await harness.run();
+    expect(harness.order).toEqual(["startRun", "snapshot"]);
+    expect(harness.snapshotRequests).toHaveLength(1);
+    expect(harness.snapshotRequests[0]?.runId).toBe("state-run-9");
+    // The session's own workspace travels with the request, so a run is filed under its tenant.
+    expect(harness.snapshotRequests[0]?.workspaceId).toBe("ws-1");
+    expect(result.snapshotId).toBe("snap-1");
+  });
+
+  it("falls back to the caller's run id when there is no run-state store", async () => {
+    const harness = createHarness({ script: [{ content: "done" }] });
+    await harness.run({ runId: "caller-run-1" });
+    expect(harness.order).toEqual(["snapshot"]);
+    expect(harness.snapshotRequests[0]?.runId).toBe("caller-run-1");
+  });
+
+  it("records the policy composition as its parts, including hashes of the code matrices", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      policyCompositionSources: {
+        projectPolicyVersion: async () => 7,
+        approvalRulesRevision: async () => 3,
+        companyMembershipRevision: async () => 12,
+      },
+    });
+    await harness.run();
+    const composition = harness.environmentHolder.policyComposition() as Record<string, unknown>;
+    expect(composition.projectPolicyVersion).toBe(7);
+    expect(composition.approvalRulesRevision).toBe(3);
+    expect(composition.companyMembershipRevision).toBe(12);
+    expect(String(composition.modeRiskMatrixHash)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(String(composition.sessionModeMatrixHash)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // Hashes are stable across runs: the same code must produce the same value, or "policy changed" lies.
+    const second = createHarness({ script: [{ content: "done" }] });
+    await second.run();
+    expect((second.environmentHolder.policyComposition() as Record<string, unknown>).modeRiskMatrixHash)
+      .toBe(composition.modeRiskMatrixHash);
+  });
+
+  it("records a part as null when its reader fails instead of inventing a version", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      policyCompositionSources: {
+        projectPolicyVersion: async () => {
+          throw new Error("policy store down");
+        },
+        approvalRulesRevision: async () => 4,
+      },
+    });
+    await harness.run();
+    const composition = harness.environmentHolder.policyComposition() as Record<string, unknown>;
+    expect(composition.projectPolicyVersion).toBeNull();
+    expect(composition.approvalRulesRevision).toBe(4);
+    expect(composition.companyMembershipRevision).toBeNull();
+  });
+
+  it("publishes the five environment facts for a normal run", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      policyCompositionSources: {
+        projectPolicyVersion: async () => 7,
+        approvalRulesRevision: async () => 2,
+        companyMembershipRevision: async () => 5,
+        featureFlags: async () => ({
+          master: { key: "coding_agent.enabled", enabled: true, scope: "company", source: "company" },
+          flags: [{ key: "code.write", enabled: true, scope: "company", source: "company" }],
+          darkLaunch: false,
+        }),
+        providerDataPolicy: async () => ({ version: 4, classification: "confidential" }),
+        baseCommit: async () => ({ branch: "feature/x", commit: "abc123def456", dirty: true }),
+        toolchain: async () => ({ languages: ["typescript"], packageManagers: ["npm"], source: "detected" }),
+      },
+    });
+    await harness.run({ imageReference: "npati/sandbox-node-1@sha256:abc" });
+
+    const flags = harness.environmentHolder.featureFlags() as { master?: { enabled?: boolean }; darkLaunch?: boolean } | null;
+    expect(flags).not.toBeNull();
+    expect(flags?.master?.enabled).toBe(true);
+    expect(flags?.darkLaunch).toBe(false);
+
+    expect(harness.environmentHolder.providerDataPolicy()).toEqual({ version: 4, classification: "confidential" });
+    expect(harness.environmentHolder.baseCommit()).toEqual({ branch: "feature/x", commit: "abc123def456", dirty: true });
+    const toolchain = harness.environmentHolder.toolchain() as { languages?: string[] } | null;
+    expect(toolchain?.languages).toEqual(["typescript"]);
+    // The image digest completes "in which environment did this run happen".
+    expect(harness.environmentHolder.sandboxImage()?.digest).toMatch(/^sha256:/);
+  });
+
+  it("nulls only the failing fact and keeps the others", async () => {
+    const harness = createHarness({
+      script: [{ content: "done" }],
+      policyCompositionSources: {
+        featureFlags: async () => {
+          throw new Error("flag store down");
+        },
+        providerDataPolicy: async () => ({ version: 9, classification: "internal" }),
+        baseCommit: async () => ({ branch: "main", commit: "deadbeef", dirty: false }),
+        toolchain: async () => ({ languages: ["go"] }),
+      },
+    });
+    await harness.run();
+    expect(harness.environmentHolder.featureFlags()).toBeNull();
+    expect(harness.environmentHolder.providerDataPolicy()).toEqual({ version: 9, classification: "internal" });
+    expect(harness.environmentHolder.baseCommit()).toEqual({ branch: "main", commit: "deadbeef", dirty: false });
+    expect(harness.environmentHolder.toolchain()).toEqual({ languages: ["go"] });
+  });
+
+  it("records a runner build that matches build-info", async () => {
+    const { buildInfo } = await import("../apps/agent-api/src/build-info");
+    const version = buildRunnerVersion(buildInfo);
+    expect(buildInfo.fingerprint.length).toBeGreaterThan(0);
+    expect(version).toContain(buildInfo.version);
+    expect(version).toContain(buildInfo.commit);
+    expect(version).toContain(buildInfo.fingerprint);
+    expect(version.split("+")).toHaveLength(3);
+  });
+
+  it("records the system prompt version/hash and the model profile version", async () => {
+    const registry = fakeConfigVersions();
+    const harness = createHarness({ script: [{ content: "done" }], snapshotConfigVersions: registry.provider });
+    await harness.run();
+    const prompt = harness.environmentHolder.systemPrompt();
+    expect(prompt?.version).toBe(1);
+    expect(prompt?.contentHash).toMatch(/^sha256:prompt-1$/);
+    expect(harness.environmentHolder.modelProfileVersion()).toBe(1);
+    expect(harness.environmentHolder.modelSelection()).toEqual({ provider: "auto", model: "auto" });
+  });
+
+  it("shares a version for identical configuration and mints a new one when it changes", async () => {
+    const registry = fakeConfigVersions();
+    const first = createHarness({ script: [{ content: "done" }], snapshotConfigVersions: registry.provider });
+    await first.run();
+    const second = createHarness({ script: [{ content: "done" }], snapshotConfigVersions: registry.provider });
+    await second.run();
+    // Identical prompt + identical profile ⇒ the same version (dedupe by content hash), not a new call.
+    expect(second.environmentHolder.systemPrompt()?.version).toBe(first.environmentHolder.systemPrompt()?.version);
+    expect(second.environmentHolder.modelProfileVersion()).toBe(first.environmentHolder.modelProfileVersion());
+    expect(registry.versionCount()).toBe(2);
+
+    const changed = createHarness({
+      script: [{ content: "done" }],
+      snapshotConfigVersions: registry.provider,
+    });
+    await changed.run({ extraSystemPromptLines: ["Changed project instructions"] });
+    expect(changed.environmentHolder.systemPrompt()?.version).toBeGreaterThan(first.environmentHolder.systemPrompt()?.version as number);
+  });
+
+  it("nulls only the config fact whose registry failed", async () => {
+    const registry = fakeConfigVersions({ systemPromptThrows: true });
+    const harness = createHarness({ script: [{ content: "done" }], snapshotConfigVersions: registry.provider });
+    await harness.run();
+    expect(harness.environmentHolder.systemPrompt()).toBeNull();
+    expect(harness.environmentHolder.modelProfileVersion()).toBe(1);
   });
 });
 

@@ -3,10 +3,184 @@
 Update this file after every completed step.
 
 ## Current step
-- Last completed: **C6a — recovery, cleanup, rollback and safe DB migrations** (after C0…C6)
-- Next: **C6b — ExecutionSnapshot**, per `00-audit.md` section 13.
-- Carried forward: **release checks still pending** — the live-PostgreSQL run of migrations **070–075** and the
-  C4b live Docker egress E2E. They do not block C6b, but **production-ready status is forbidden without them**.
+- Last completed: **C6b — versioned execution snapshot** (after C0…C6a). All seven owner completion
+  conditions are met: the snapshot is immutable; Activity and Audit events carry `snapshot_id` where
+  applicable; recorded deterministic replay is proven by test; live replay is explicitly best-effort with the
+  owner's notice verbatim; the snapshot/diff API works; a minimal read-only view lives in the existing Run
+  Trace; and a secret canary cannot reach snapshot or replay artifacts.
+- Next: **C7 — UI/Code Workspace** (and then C8…), per `00-audit.md` section 13.
+- Carried forward: **release checks still pending** — migrations **070–078** have never run against a live
+  PostgreSQL (SQL and the append-only triggers were verified by reading plus contract tests) and the C4b live
+  Docker egress E2E has not been executed. **Production-ready status is forbidden without them.**
+
+## Implemented (C6b, partial — green but incomplete)
+- **Immutable snapshot storage** (migration `076_execution_snapshots`): `execution_snapshots` and
+  `code_snapshot_config_versions`, both **append-only by repeating the `audit_log` pattern from 066** —
+  `BEFORE UPDATE OR DELETE` trigger raising `insufficient_privilege`, `REVOKE UPDATE, DELETE, TRUNCATE`, and an
+  `INSERT` trigger validating the per-session chain (`prev_snapshot_id`/`prev_payload_hash` must equal the
+  head), so history can neither be edited nor spliced. `createExecutionSnapshot` **refuses** a repeated id
+  (it is not an upsert — a snapshot is evidence, and overwriting would destroy exactly what it exists for).
+- **Canonical hashing and content-safe diff** (`execution-snapshot-hash.ts`): canonical JSON with sorted keys
+  (structurally identical configurations hash identically, any real change hashes differently),
+  `snapshotPayloadHash` as `sha256:…`, and `diffSnapshotPayloads` which **cannot leak content** — long strings
+  render as `string(N)`, objects as their key list, and a nested change is addressed by path
+  (`featureFlags.code.write`) rather than "the whole object changed".
+- **Real provider replacing `NullSnapshotProvider`**, with two deliberate properties: an unreadable source is
+  recorded as an explicit `{unavailable: reason}` **and listed**, so "we could not read it" can never be read
+  as "nothing was configured"; and `assertNoSecretsInSnapshot` scans the **serialised payload** rather than
+  trusting the field list, refusing creation with `snapshot_secret_detected` instead of silently stripping.
+- **Run/snapshot ordering fixed**: the snapshot is created **after** `runState.startRun` and carries the real
+  `runId` (`stateRunId ?? input.runId`), plus `workspaceId` from the session — previously the snapshot was
+  created before the run id existed, so `run_id` would have been `null` and `getSnapshotForRun` would never
+  have found it. Failure to create a snapshot does **not** stop the run (an empty id is an honest answer).
+- **`sandbox_image_digest` is real**: the `imageAdmission` port was extended additively to
+  `{ reference, dev, digest?, sbomRef? }`, the admitted result is published into a holder, and the snapshot
+  source reads it — so the field contains **the digest the policy actually admitted**, not an empty string.
+- **Policy composition as its own source** (`policyComposition`): `modeRiskMatrixHash` and
+  `sessionModeMatrixHash` are `sha256` of the stably sorted JSON of `MODE_RISK_MATRIX` and
+  `DEFAULT_CODE_SESSION_MODE_MATRIX` (they are **code**, so a hash is the only honest "version number"), plus
+  `projectPolicyVersion`, `approvalRulesRevision` and `companyMembershipRevision`; every reader is fail-soft
+  (a failing reader yields `null` for **that component only**, never an invented number). There is deliberately
+  **no single `policy_version` number**, so a diff names the concrete changed component.
+- **`snapshot_id` in every Activity event** (migration `077_code_activity_events` with `kind` restricted to five
+  families, `snapshot_id`/`run_id`, `data_classification` and `retention_class` NOT NULL with a CHECK
+  vocabulary, four indexes): added to tool activity, policy decisions, network decisions and run/reconcile
+  events, plus `PolicyRequest.snapshotId`, and `app.ts` now writes them through **one shared sink** instead of
+  five scattered `app.log.info` calls. `invoke` in the tool runtime carries `snapshotId` into both Activity and
+  the audit — and **never fabricates** it: without a value the store gets `NULL` (tested).
+  Three properties worth keeping: content keys are **rejected**, not silently stripped (silent removal would
+  hide the leak from the caller); secrets are caught **by value**, not only by key (`{"note": "ghp_…"}` is
+  refused — that is exactly how a secret reaches a log); and a failing write **does not change the decision**
+  (`{persisted:false, errorCode}` plus a log), throwing only on the two programmer errors that must be loud.
+- `runnerVersion` came for free from an existing source (`build-info.ts`: `version`, `commit`, `builtAt`,
+  `fingerprint`) — only the wiring is missing (see the blocker).
+
+## OPEN BLOCKER (C6b acceptance criterion — partially closed)
+**Closed:** `featureFlags` (resolved values from `featureFlagService.describe`), `providerDataPolicy`
+(`resolveForCompany(...).policyVersion` **plus** the effective classification from `getProjectPolicy`),
+`baseCommit` (branch/dirty from `status`, **HEAD hash from `log(..., 1)`** — never invented from `status`),
+`toolchain` (the project's `ProjectCodeSettings.toolchain`) and `runnerVersion`
+(`buildRunnerVersion(buildInfo)` = `version+commit+fingerprint`, with a test importing `buildInfo` directly).
+Each reader is fail-soft in its own `try/catch`: a failing reader nulls **only its own field** (tested), and
+each of the five is asserted non-empty for an ordinary run.
+
+**Still open (both explicitly required by the C6b spec):**
+1. `systemPrompt` — **CLOSED**: the holder publishes `{ version, contentHash }` from
+   `ensureSystemPromptVersion(...)`, so the snapshot now says **with which prompt** the run executed (the
+   registry de-duplicates by content hash, so an identical prompt reuses the same version — tested).
+2. `modelProfileVersion` — **CLOSED**: same mechanism via `ensureModelProfilesVersion(...)` /
+   `resolveModelProfile(...)`, so the snapshot says **with which profile** the run executed.
+
+Every snapshot source named by the spec is now populated: `toolManifestVersion`, `policyVersion` components
+(via `policyComposition`), `modelProfileVersion`, `modelSelection`, `systemPrompt`, `runnerVersion`,
+`sandboxImage` (digest + SBOM), `featureFlags`, `providerDataPolicy`, `baseCommit`, `toolchain`,
+`projectInstructions` (trust + `null` hash), initiator/role and time.
+
+**Deliberate `null`s (accepted, not debt):** `projectInstructions.contentHash` belongs to **C8** (the source
+already accepts `string | null`), and `modelSelection.temperature` does not exist because the runner does not
+pass generation parameters to `engine.chat` — recording a value that does not exist would be worse than `null`.
+
+## Replay, API and Run Trace (C6b, closed)
+- **`ReplayBundle`** (migration `078_replay_bundles` + `code_replay_bundle_steps`, both **append-only at the
+  database level** with the 076/066 trigger pattern — a bundle is evidence of what the model actually saw, and
+  a row that can be rewritten after the run proves nothing): header with `execution_snapshot_id`,
+  `bundle_version` (**format** version, per rule 13), `runner_version`, `system_prompt_version` +
+  `content_hash`, `model_profile_version`, provider/model, `replay_mode`, `source_run_id`/`source_snapshot_id`,
+  `terminal_status`/`terminal_reason`, `payload_hash` + `replay_input_hash`, classification and retention NOT
+  NULL; steps ordered by `seq` with `kind` `model_step|tool_call`. Header and steps are written **in one
+  transaction**, so there can be no header promising steps that do not exist; uniqueness gives idempotency per
+  `(run_id, turn, tool_call_id)`.
+- **`replayInput` excludes `rawArtifact`** — the owner's rule ("raw must not change replay input") is a
+  property of the data, not a convention, and the engine consumes `replayInput`, never `steps`.
+  **Defect found by running:** canonicalising the settled tool result by sorting keys **changed the text the
+  model sees** (`{ok,tool,result,truncated}` → `{ok,result,tool,truncated}`); sorting is now used **for hashes
+  only**, the model-visible text stays byte-for-byte identical, and a test pins it.
+- **Deterministic replay**: `RecordedReplayDeps` has **no engine and no tool runtime at all**, so "no provider
+  call, no tool execution" is **structural**; `providerCalls`/`toolExecutions` are returned as hard zeros so
+  the property can be asserted rather than believed. What it verifies is the recorded model output against the
+  recorded execution (two independent records): order, `tool_call_id`, tool name, **schema version against the
+  live registry**, argument hash, settled-result presence, and `outcome:"failed"` ↔ `errorCode` consistency —
+  returning metadata-only divergences (`{reason, turn, toolCallId, expected, actual}`) as **409
+  `replay_diverged`**. The author **discarded** his first approach (re-running the real loop through replay
+  ports) on discovering the bundle records only argument **hashes**, so reconstructing the assistant message is
+  impossible and a replay comparing a recording with itself proves nothing.
+- **Live replay**: creates a genuinely **new** run, keeps `source_run_id`/`source_snapshot_id`, stores
+  `replay_mode = live_best_effort`, carries the owner's notice **verbatim**, and `assertNotDeterministic`
+  inspects the **serialised** result, throwing `replay_wording_violation` if the word "deterministic" appears
+  anywhere — the promise cannot leak into a response by accident.
+- **Read-only API** (`code-snapshot-routes.ts`, five routes, `apiVersion: v1`, tenant-scoped, deny by default
+  through the shared C5a gate with **named** actions `code.snapshot.read`/`code.activity.read` plus the
+  existing `code.replay.read`): snapshot for a run (with identity: version, `payloadHash`, chain, `trigger`,
+  `createdBy`), one snapshot by id, `compare?a=&b=` via the existing `diffExecutionSnapshots`, run activity
+  events with keyset pagination, and replay status/metadata. **`legacy_no_snapshot` and `no_bundle` return
+  200 without an error envelope**, decided by the same reader the runner uses, so writer and reader cannot
+  diverge — old history stays readable instead of becoming a 500.
+- **Minimal Run Trace view**: `CodeSnapshotPanel.tsx` inserted into the **existing** `ActivityPage.tsx` (not a
+  new screen), using existing style classes and no new dependencies: model/provider, profile, system prompt,
+  runner version, tool manifest, image digest + SBOM, provider data policy, **resolved** flags, base commit with
+  dirty state, project trust, toolchain and policy components, plus "Compare snapshot" and replay status.
+- **Two real defects found by the API stream's own tests**: a pagination cursor was issued on a page not proven
+  full (`events.length === (limit ?? events.length)` was true when `limit` was absent, so the client saw "there
+  is more" when there was not — now an explicit default of 50 and a cursor only on a full page); and a
+  malformed cursor returned **403 instead of 400**, because an explicit error `status` overrode the code
+  contract, making a client error look like a permissions problem.
+- **Three deliberate decisions**: an event whose stored payload contains a content key is refused **loudly**
+  (`activity_payload_invalid`, 500) and never copied into the response (silent stripping would hide the leak
+  from whoever wrote it); the diff is checked both for forbidden keys and for every element being a **path**
+  (`^[A-Za-z][A-Za-z0-9_.]*$`) rather than a value, with a canary proving no secret appears; and
+  `{unavailable: reason}` renders as "could not read", never as "empty".
+- **By-id replay read is not an existence oracle**: `getReplayBundleById` returns `no_bundle` for **both** an
+  unknown and a foreign id, so the endpoint cannot be used to probe whether another tenant's data exists. The
+  store method was added **additively** to the existing port (no second store in the routes), and by-id and
+  by-run share one `assembleBundleRead`, so the two read paths cannot diverge (proven by a test asserting
+  identical `steps` and `replayInputHash`).
+
+## Verification (C6b, as far as it goes)
+- `npm run typecheck` → **exit 0**; `npm run security-gate` → **exit 0: `passed=946 failed=0 skipped=0`** with
+  **61** suites (`suite files: present=61 missing=0`) and all four steps green; both workspace builds exit 0.
+- Three of the five traps found by recon were closed in code (port extension for the digest, snapshot-after-
+  `startRun` ordering, run→snapshot linkage via `run_id` rather than the overwritten `details` column), and one
+  was resolved by **not inventing** a composite `policy_version`.
+
+## Real E2E status (C6b)
+- Verified in-process with injected stores, clocks, services and holders: immutability and chain validation at
+  the store contract level, hash sensitivity, content-safe diff, version de-duplication, `legacy_no_snapshot`,
+  secret refusal by canary, ordering, digest publication, activity persistence and metadata-only enforcement.
+- **Not verified here:** migrations **070–077** against a live PostgreSQL (the DB triggers were verified by
+  reading, not by running), the real `code_activity_events` SQL and keyset cursor, deterministic replay and
+  live replay (not implemented yet in this step's scope), the C4b Docker E2E and the GitHub CI job.
+
+## Known risks / open questions (C6b)
+1. **`code_activity_events` has no DB-level append-only trigger** (deliberate: it is derived telemetry with no
+   hash chain; immutability rests on the absence of mutating methods — only create + read). If evidence-grade
+   immutability is required for Activity, this needs an additive trigger change.
+2. `NPATI.md` content hash is intentionally `null` until **C8** (the source accepts
+   `{ contentHash: string | null, trustStatus }`), and `modelSelection`/`temperature` is `null` because the
+   runner does not pass generation parameters to `engine.chat` — recording a value that does not exist would be
+   worse than recording nothing.
+3. Deterministic replay is **not implemented**: the recorded data (C6a `code_run_turns`) is enough for a
+   structural re-run, but provider responses are only kept as assistant messages (no provider/model/usage per
+   turn), the runner's `idempotencyKey` is not persisted, the system prompt lives only as the first message, and
+   tool results are truncated — so replay needs those recordings added first.
+4. The "why did the agent act this way" API/UI (snapshot view plus diff between two runs) is not implemented.
+5. Snapshot retention follows the Activity policy (R1) — but there is still **no retention sweeper** anywhere,
+   so without one this data grows forever.
+
+## Next-session handoff
+- Read `docs/coding-agent/PLAN.md` (section C6b), `docs/coding-agent/00-audit.md` sections 12 and 13, and this
+  file.
+- **First: close the five null snapshot sources** listed in the blocker, with tests proving each field is
+  non-empty for an ordinary run and that a failing reader nulls only its own component. Then implement
+  deterministic replay (recorded provider responses per turn + tool results + the system prompt as a versioned
+  hash, then replay against a mock provider) and clearly label live replay as best-effort reproducibility; then
+  the "why did the agent act this way" API/UI with snapshot diff.
+- Keep every earlier guarantee intact: commands only through the sandbox port, the PolicyEngine decides (hard
+  deny > session mode > project rules > protected branches > migration safety > network gate > approval), agents
+  never approve and never change policy, recovery never repeats write/shell/unknown tool calls, nothing reaches
+  a provider outside `ProviderDataGuard`, and every new suite goes into `scripts/run-security-gate.mjs`.
+- **Before any production promotion:** run migrations 070–077 against a live PostgreSQL and execute the C4b live
+  Docker E2E checklist.
+- Do not start C7 in that session; the order in `00-audit.md` section 13 is binding.
 
 ## Implemented (C6a, latest step)
 - **Run state as an event log** (migration `075_code_run_state`): `code_run_states` with `status`

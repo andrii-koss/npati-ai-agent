@@ -1,0 +1,503 @@
+/**
+ * C6b: the replay engine.
+ *
+ * Two modes, and they must never be confused with each other:
+ *
+ *  - **`recorded`** — deterministic. It consumes the recorded bundle (`code-replay-bundle.ts`, the sibling
+ *    module that owns recording, the format version and canonicalisation) and verifies that the recorded
+ *    **model output** and the recorded **execution** are the same run: every tool call the model asked for was
+ *    executed, in order, with the same tool, the same schema version and the same canonical argument hash, and
+ *    the recording ends with the same terminal status. It makes **no** provider call and executes **no** tool:
+ *    there is no port through which a live engine or tool runtime could reach it, so the guarantee is
+ *    architectural rather than a promise (`providerCalls`/`toolExecutions` are reported as zero because they
+ *    are structurally zero).
+ *  - **`live_best_effort`** — starts a **new** run, really calls the model and the tools, keeps the source
+ *    run/snapshot as the baseline and is labelled best-effort everywhere. It is never called deterministic,
+ *    and the notice is the exact wording the owner fixed.
+ *
+ * The engine adds no hashing of its own: it compares recorded hashes with recorded hashes and with the
+ * **current** tool schema versions, which is how a changed tool contract is detected.
+ */
+
+import type { AuthContext, CodeSession } from "@npati/workspace";
+import {
+  REPLAY_BUNDLE_FORMAT_VERSION,
+  replayModelSteps,
+  replayToolResults,
+  type ReplayBundleReadResult,
+  type ReplayBundleStepPayload,
+} from "./code-replay-bundle";
+
+/** Shape version of the payloads this engine writes. Bumped when the meaning changes. */
+export const CODE_REPLAY_SCHEMA_VERSION = 1;
+
+export type CodeReplayMode = "recorded" | "live_best_effort";
+
+/**
+ * The exact wording the owner requires for live replay. It is a constant so no caller can paraphrase it, and
+ * tests assert it appears **verbatim** in the result and in the API response.
+ */
+export const LIVE_REPLAY_REPRODUCIBILITY_NOTICE =
+  "Best-effort reproducibility. External models, registries and services may have changed.";
+
+// ---------------------------------------------------------------------------------------------------------
+// Errors and divergence
+// ---------------------------------------------------------------------------------------------------------
+
+export class CodeReplayError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly httpStatus: number,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(`[${code}] ${message}`);
+    this.name = "CodeReplayError";
+  }
+}
+
+export const CODE_REPLAY_CODES = Object.freeze({
+  bundleUnavailable: "replay_bundle_unavailable",
+  bundleVersionUnsupported: "replay_bundle_version_unsupported",
+  integrityFailed: "replay_integrity_failed",
+  bundleTruncated: "replay_bundle_truncated",
+  requiresRecordedData: "replay_requires_recorded_data",
+  toolVersionsRequired: "replay_tool_versions_required",
+  sessionUnavailable: "replay_session_unavailable",
+  diverged: "replay_diverged",
+  sourceRunUnavailable: "replay_source_run_unavailable",
+  liveUnavailable: "replay_live_unavailable",
+  notFound: "replay_not_found",
+  invalidMode: "replay_invalid_mode",
+});
+
+export type ReplayDivergenceReason =
+  | "tool_call_order"
+  | "tool_name"
+  | "arguments_hash"
+  | "tool_version"
+  | "tool_version_unknown"
+  | "unexpected_tool_call"
+  | "missing_tool_call"
+  | "inconsistent_outcome"
+  | "terminal_status";
+
+/**
+ * A structured explanation of a divergence. Every field is metadata: ids, names, versions, hashes, counts and
+ * the turn number. Arguments and results never travel here — a divergence report cannot leak a payload.
+ */
+export interface ReplayDivergence {
+  reason: ReplayDivergenceReason;
+  turn: number;
+  toolCallId?: string;
+  expected?: string | number | null;
+  actual?: string | number | null;
+}
+
+const FORBIDDEN_DIVERGENCE_KEYS = [
+  "args", "arguments", "argumentsjson", "content", "command", "diff", "result", "settledresult",
+  "stdout", "stderr", "prompt", "token", "secret", "password",
+] as const;
+
+/** Throws when a divergence (or any replay record) starts carrying payload instead of metadata. */
+export function assertReplayMetadataOnly(value: Record<string, unknown>, label = "replay record"): void {
+  for (const key of Object.keys(value)) {
+    if ((FORBIDDEN_DIVERGENCE_KEYS as readonly string[]).includes(key.toLowerCase())) {
+      throw new CodeReplayError("replay_metadata_violation", `${label} must not carry "${key}"`, 500, { reason: key });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Deterministic (recorded) replay
+// ---------------------------------------------------------------------------------------------------------
+
+export interface ReplayComparison {
+  modelSteps: { matched: number; expected: number };
+  toolCalls: { matched: number; expected: number };
+  terminalStatus: { matched: boolean; expected: string | null; actual: string };
+  integrity: { replayInputHashMatched: boolean; truncated: boolean };
+}
+
+export interface RecordedReplayResult {
+  replayId: string;
+  mode: "recorded";
+  ok: boolean;
+  status: "replayed" | "diverged";
+  runId: string;
+  terminalStatus: string;
+  recordedTerminalStatus: string | null;
+  divergences: ReplayDivergence[];
+  comparison: ReplayComparison;
+  /**
+   * The recorded mode makes no live call at all: these are structurally zero, reported so a caller (and a
+   * test) can assert it rather than take it on faith.
+   */
+  providerCalls: number;
+  toolExecutions: number;
+  /** How many recorded steps the verification walk actually inspected. */
+  stepsVerified: number;
+  durationMs: number;
+}
+
+export interface RecordedReplayDeps {
+  recording: ReplayBundleReadResult;
+  /**
+   * The current schema version per tool name (the published registry in production). Required: without it a
+   * changed tool contract could not be detected, so the replay refuses instead of verifying less.
+   */
+  toolVersions?(toolName: string): number | null;
+  /**
+   * The bundle format version when the caller has the header; an unsupported one refuses the replay. The
+   * recorded terminal status comes from the same header (the read result does not carry it), so it is passed
+   * in rather than guessed.
+   */
+  bundleVersion?: number | null;
+  recordedTerminalStatus?: string | null;
+  onActivity?(event: Record<string, unknown> & { kind: string }): void | Promise<void>;
+  now?(): number;
+}
+
+interface PendingCall {
+  toolCallId: string;
+  toolName: string;
+  argumentsHash: string;
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+function divergence(reason: ReplayDivergenceReason, turn: number, fields: Partial<ReplayDivergence> = {}): ReplayDivergence {
+  const value: ReplayDivergence = { reason, turn, ...fields };
+  assertReplayMetadataOnly(value as unknown as Record<string, unknown>, "replay divergence");
+  return value;
+}
+
+/**
+ * Deterministic replay: verify the recorded run against its own two records (model output and execution).
+ *
+ * Divergences are returned, not thrown, so a caller can show the whole comparison and the API can answer
+ * `409 replay_diverged` with the first divergence's details (`assertReplayClean` does that conversion).
+ */
+export async function replayRecorded(deps: RecordedReplayDeps): Promise<RecordedReplayResult> {
+  const started = (deps.now ?? Date.now)();
+  const recording = deps.recording;
+
+  if (!recording || recording.kind !== "bundle") {
+    throw new CodeReplayError(CODE_REPLAY_CODES.bundleUnavailable, "No recorded bundle exists for this run", 404, {
+      reason: "replay_bundle_unavailable",
+      runId: recording?.runId ?? null,
+    });
+  }
+  if (typeof deps.bundleVersion === "number" && deps.bundleVersion !== REPLAY_BUNDLE_FORMAT_VERSION) {
+    throw new CodeReplayError(
+      CODE_REPLAY_CODES.bundleVersionUnsupported,
+      `Replay bundle version ${deps.bundleVersion} is not supported`,
+      409,
+      { reason: "replay_bundle_version_unsupported", expected: REPLAY_BUNDLE_FORMAT_VERSION, actual: deps.bundleVersion },
+    );
+  }
+  if (recording.integrityFailure) {
+    throw new CodeReplayError(
+      CODE_REPLAY_CODES.integrityFailed,
+      "The recorded replay input does not match its stored hash; the bundle was altered or truncated",
+      409,
+      { reason: "replay_integrity_failed", runId: recording.runId },
+    );
+  }
+  if (recording.truncated) {
+    throw new CodeReplayError(
+      CODE_REPLAY_CODES.bundleTruncated,
+      "The bundle claims more steps than were recorded; a partial recording cannot be replayed",
+      409,
+      { reason: "replay_bundle_truncated", runId: recording.runId },
+    );
+  }
+  if (!deps.toolVersions) {
+    throw new CodeReplayError(
+      CODE_REPLAY_CODES.toolVersionsRequired,
+      "Recorded replay needs the current tool schema versions to verify the recording",
+      500,
+      { reason: "replay_tool_versions_required" },
+    );
+  }
+
+  const steps = recording.replayInput;
+  const modelStepCount = replayModelSteps(steps).length;
+  const toolStepCount = replayToolResults(steps).length;
+
+  const divergences: ReplayDivergence[] = [];
+  const pending: PendingCall[] = [];
+  let modelMatched = 0;
+  let toolMatched = 0;
+  let lastModelHadToolCalls = false;
+  let stepsVerified = 0;
+
+  for (const step of steps as Array<ReplayBundleStepPayload & Record<string, unknown>>) {
+    stepsVerified += 1;
+    const turn = numberOrNull(step.turnIndex) ?? 0;
+
+    if (step.kind === "model_step") {
+      const response = (step.response ?? {}) as { toolCalls?: Array<Record<string, unknown>> };
+      const calls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
+      modelMatched += 1;
+      lastModelHadToolCalls = calls.length > 0;
+      for (const call of calls) {
+        pending.push({
+          toolCallId: String(call.id ?? ""),
+          toolName: String(call.name ?? ""),
+          argumentsHash: String(call.argumentsHash ?? ""),
+        });
+      }
+      continue;
+    }
+
+    if (step.kind !== "tool_call") continue;
+
+    const actualId = String(step.toolCallId ?? "");
+    const actualTool = String(step.tool ?? "");
+    const actualHash = String(step.argumentsHash ?? "");
+    const recordedVersion = numberOrNull(step.toolVersion);
+    const expected = pending[0];
+
+    if (!expected) {
+      divergences.push(divergence("unexpected_tool_call", turn, { toolCallId: actualId, actual: actualTool }));
+      continue;
+    }
+    if (expected.toolCallId !== actualId) {
+      divergences.push(
+        divergence("tool_call_order", turn, { toolCallId: actualId, expected: expected.toolCallId, actual: actualId }),
+      );
+      continue;
+    }
+    if (expected.toolName !== actualTool) {
+      divergences.push(
+        divergence("tool_name", turn, { toolCallId: actualId, expected: expected.toolName, actual: actualTool }),
+      );
+      continue;
+    }
+    if (expected.argumentsHash !== actualHash) {
+      divergences.push(
+        divergence("arguments_hash", turn, { toolCallId: actualId, expected: expected.argumentsHash, actual: actualHash }),
+      );
+      continue;
+    }
+    // The tool contract itself must not have moved: a changed schema version is a divergence, not a warning.
+    const currentVersion = deps.toolVersions(actualTool);
+    if (currentVersion === null || currentVersion === undefined) {
+      divergences.push(
+        divergence("tool_version_unknown", turn, { toolCallId: actualId, expected: recordedVersion, actual: null }),
+      );
+      continue;
+    }
+    if (recordedVersion === null || recordedVersion !== currentVersion) {
+      divergences.push(
+        divergence("tool_version", turn, { toolCallId: actualId, expected: recordedVersion, actual: currentVersion }),
+      );
+      continue;
+    }
+    // An outcome that claims failure without a code is not a usable recording.
+    if (step.outcome === "failed" && !step.errorCode) {
+      divergences.push(divergence("inconsistent_outcome", turn, { toolCallId: actualId, actual: "failed" }));
+      continue;
+    }
+    // The settled result is what the model saw; a call recorded without one cannot be replayed.
+    if (typeof step.settledResult !== "string" || step.settledResult.length === 0) {
+      throw new CodeReplayError(
+        CODE_REPLAY_CODES.requiresRecordedData,
+        "The recording has no settled result for a tool call it executed",
+        500,
+        { reason: "replay_requires_recorded_data", toolCallId: actualId },
+      );
+    }
+
+    pending.shift();
+    toolMatched += 1;
+  }
+
+  if (pending.length) {
+    const missing = pending[0]!;
+    divergences.push(
+      divergence("missing_tool_call", numberOrNull((steps[steps.length - 1] as ReplayBundleStepPayload)?.turnIndex) ?? 0, {
+        toolCallId: missing.toolCallId,
+        expected: missing.toolName,
+        actual: null,
+      }),
+    );
+  }
+
+  // The terminal status: a recording that ends with a model step that asked for no tool call ended normally,
+  // so `completed` is derived and a header claiming otherwise is a divergence. A recording that ends
+  // mid-flight (calls still pending) cannot derive a status, so the recorded one is reported as-is.
+  const recordedTerminalStatus = deps.recordedTerminalStatus ?? null;
+  const headerStatus = recordedTerminalStatus;
+  const derivedTerminalStatus = lastModelHadToolCalls || pending.length ? "incomplete" : "completed";
+  const terminalStatus = derivedTerminalStatus === "completed" ? "completed" : headerStatus ?? "incomplete";
+  const terminalMatched =
+    derivedTerminalStatus === "completed" ? headerStatus === null || headerStatus === "completed" : true;
+  if (!terminalMatched && headerStatus !== null) {
+    divergences.push(
+      divergence("terminal_status", 0, { expected: headerStatus, actual: derivedTerminalStatus }),
+    );
+  }
+
+  const result: RecordedReplayResult = {
+    replayId: recording.bundleId ?? recording.runId,
+    mode: "recorded",
+    ok: divergences.length === 0,
+    status: divergences.length === 0 ? "replayed" : "diverged",
+    runId: recording.runId,
+    terminalStatus,
+    recordedTerminalStatus: recordedTerminalStatus ?? headerStatus,
+    divergences,
+    comparison: {
+      modelSteps: { matched: modelMatched, expected: modelStepCount },
+      toolCalls: { matched: toolMatched, expected: toolStepCount },
+      terminalStatus: { matched: terminalMatched, expected: headerStatus, actual: terminalStatus },
+      integrity: { replayInputHashMatched: !recording.integrityFailure, truncated: Boolean(recording.truncated) },
+    },
+    // Structurally zero: no provider is called and no tool runs in the recorded mode.
+    providerCalls: 0,
+    toolExecutions: 0,
+    stepsVerified,
+    durationMs: (deps.now ?? Date.now)() - started,
+  };
+
+  await deps.onActivity?.({
+    kind: divergences.length ? "replay_diverged" : "replay_finished",
+    replayId: result.replayId,
+    runId: result.runId,
+    mode: "recorded",
+    divergences: divergences.length,
+    providerCalls: 0,
+    toolExecutions: 0,
+    stepsVerified,
+  });
+  return result;
+}
+
+/** Route-facing conversion: a clean replay passes, a diverged one becomes `409 replay_diverged`. */
+export function assertReplayClean(result: RecordedReplayResult): RecordedReplayResult {
+  if (result.ok) return result;
+  const first = result.divergences[0];
+  throw new CodeReplayError(CODE_REPLAY_CODES.diverged, "The replay diverged from the recorded run", 409, {
+    reason: first?.reason ?? "replay_diverged",
+    turn: first?.turn ?? 0,
+    ...(first?.toolCallId ? { toolCallId: first.toolCallId } : {}),
+    ...(first?.expected !== undefined ? { expected: first.expected } : {}),
+    ...(first?.actual !== undefined ? { actual: first.actual } : {}),
+    divergences: result.divergences.length,
+    comparison: result.comparison,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Live replay (best effort)
+// ---------------------------------------------------------------------------------------------------------
+
+export interface LiveReplaySourceRun {
+  companyId: string;
+  projectId: string;
+  runId: string;
+  snapshotId?: string | null;
+  sessionId?: string | null;
+  prompt?: string | null;
+}
+
+export interface LiveReplayDeps {
+  source: LiveReplaySourceRun;
+  /** Starts a **new** run, really calling the model and the tools, with the source snapshot as baseline. */
+  startRun(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    session: CodeSession;
+    prompt: string;
+    sourceRunId: string;
+    sourceSnapshotId: string | null;
+  }): Promise<{ runId: string; snapshotId?: string | null; status: string; reason?: string }>;
+  ctx: AuthContext;
+  session: CodeSession | null;
+  prompt?: string;
+  /** Persists the replay record (mode and the source references). Storage of the record is a port. */
+  recordReplay?(record: LiveReplayRecord): Promise<void>;
+}
+
+export interface LiveReplayRecord {
+  replayId: string;
+  mode: "live_best_effort";
+  replayMode: "live_best_effort";
+  sourceRunId: string;
+  sourceSnapshotId: string | null;
+  runId: string;
+  snapshotId: string | null;
+  requestedBy: string;
+  createdAt: string;
+  reproducibility: "best_effort";
+  notice: string;
+}
+
+export interface LiveReplayResult extends LiveReplayRecord {
+  status: string;
+  reason?: string;
+  attempt: number;
+}
+
+const FORBIDDEN_LIVE_WORDING = /deterministic/i;
+
+/**
+ * Guard against the one wording mistake that would mislead a user: a live replay is never deterministic.
+ * It is applied to the serialised result, so a nested field cannot smuggle the word in either.
+ */
+export function assertNotDeterministic(value: unknown, label = "live replay result"): void {
+  if (FORBIDDEN_LIVE_WORDING.test(JSON.stringify(value ?? null))) {
+    throw new CodeReplayError("replay_wording_violation", `${label} must not claim deterministic replay`, 500, {
+      reason: "replay_wording_violation",
+    });
+  }
+}
+
+export async function replayLive(deps: LiveReplayDeps): Promise<LiveReplayResult> {
+  if (!deps.session) {
+    throw new CodeReplayError(CODE_REPLAY_CODES.sessionUnavailable, "The source session is required", 404, {
+      reason: "replay_session_unavailable",
+      sessionId: deps.source.sessionId ?? null,
+    });
+  }
+  const prompt = deps.prompt ?? deps.source.prompt ?? "";
+  const started = await deps.startRun({
+    ctx: deps.ctx,
+    companyId: deps.source.companyId,
+    projectId: deps.source.projectId,
+    session: deps.session,
+    prompt,
+    sourceRunId: deps.source.runId,
+    sourceSnapshotId: deps.source.snapshotId ?? null,
+  });
+
+  const record: LiveReplayRecord = {
+    replayId: `${deps.source.runId}:live:${Date.now().toString(36)}`,
+    mode: "live_best_effort",
+    replayMode: "live_best_effort",
+    sourceRunId: deps.source.runId,
+    sourceSnapshotId: deps.source.snapshotId ?? null,
+    runId: started.runId,
+    snapshotId: started.snapshotId ?? null,
+    requestedBy: deps.ctx.userId,
+    createdAt: new Date().toISOString(),
+    reproducibility: "best_effort",
+    notice: LIVE_REPLAY_REPRODUCIBILITY_NOTICE,
+  };
+  const result: LiveReplayResult = {
+    ...record,
+    status: started.status,
+    ...(started.reason ? { reason: started.reason } : {}),
+    attempt: CODE_REPLAY_SCHEMA_VERSION,
+  };
+  assertNotDeterministic(result);
+  await deps.recordReplay?.(record);
+  return result;
+}

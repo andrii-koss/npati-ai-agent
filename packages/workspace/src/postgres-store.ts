@@ -9,8 +9,14 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
   CodeRunStateRecord, CodeRunTurnRecord, CodeRunTurnStatus, CreateCodeRunStateInput, ApplyCodeRunStateEventInput,
-  UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput, CodeRunScanPage } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
+  UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput, CodeRunScanPage,
+  CreateExecutionSnapshotInput, ExecutionSnapshotRecord, ExecutionSnapshotTrigger, ExecutionSnapshotDiff,
+  ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
+  CreateSnapshotConfigVersionInput, CodeActivityEventKind, CodeActivityEventRecord,
+  CreateCodeActivityEventInput, ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord,
+  ReplayMode, ReplayStepKind, CreateReplayBundleInput, ListReplayBundlesInput } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError } from "./types";
+import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
@@ -56,6 +62,24 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   correlation_id AS "correlationId", snapshot_id AS "snapshotId", action, resource_type AS "resourceType",
   resource_id AS "resourceId", project_id AS "projectId", decision, payload_hash AS "payloadHash",
   prev_hash AS "prevHash", entry_hash AS "entryHash", metadata`;
+  const codeActivityEventColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  project_id AS "projectId", session_id AS "sessionId", run_id AS "runId", snapshot_id AS "snapshotId",
+  kind, payload, data_classification AS "dataClassification", retention_class AS "retentionClass",
+  created_at AS "createdAt"`;
+  const replayBundleColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  project_id AS "projectId", session_id AS "sessionId", run_id AS "runId",
+  execution_snapshot_id AS "executionSnapshotId", bundle_version AS "bundleVersion",
+  runner_version AS "runnerVersion", system_prompt_version AS "systemPromptVersion",
+  system_prompt_content_hash AS "systemPromptContentHash",
+  model_profile_version AS "modelProfileVersion", provider, model, replay_mode AS "replayMode",
+  source_run_id AS "sourceRunId", source_snapshot_id AS "sourceSnapshotId",
+  terminal_status AS "terminalStatus", terminal_reason AS "terminalReason", payload,
+  payload_hash AS "payloadHash", replay_input_hash AS "replayInputHash",
+  data_classification AS "dataClassification", retention_class AS "retentionClass",
+  created_at AS "createdAt"`;
+  const replayBundleStepColumns = `id, bundle_id AS "bundleId", company_id AS "companyId", seq, kind,
+  turn_index AS "turnIndex", tool_call_id AS "toolCallId", payload, payload_hash AS "payloadHash",
+  created_at AS "createdAt"`;
   const auditAnchorColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", day::text AS day,
   sequence, entry_count AS "entryCount", head_hash AS "headHash", anchor_path AS "anchorPath",
   signature, created_at AS "createdAt"`;
@@ -1011,6 +1035,48 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration075 } = await import("./migration-075");
         await runMigration075(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('075_code_run_state')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C6b: immutable execution snapshots and the versioned system prompt / model profiles they reference.
+    // Additive: 076 creates its own two tables, indexes and append-only triggers; no existing table is touched.
+    const executionSnapshotMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='076_execution_snapshots'");
+    if (!executionSnapshotMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration076 } = await import("./migration-076");
+        await runMigration076(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('076_execution_snapshots')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C6b: durable Activity events with their `snapshot_id` (requirement 19).
+    // Additive: 077 creates its own table and four indexes and touches no existing table, row or query.
+    const codeActivityEventsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='077_code_activity_events'");
+    if (!codeActivityEventsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration077 } = await import("./migration-077");
+        await runMigration077(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('077_code_activity_events')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C6b: versioned replay bundles (header + ordered steps) for deterministic replay.
+    // Additive: 078 creates its own two tables, indexes and append-only triggers; no existing table is touched.
+    const replayBundlesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='078_replay_bundles'");
+    if (!replayBundlesMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration078 } = await import("./migration-078");
+        await runMigration078(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('078_replay_bundles')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -3344,6 +3410,401 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: last.turnIndex,
         })
         : null,
+    };
+  }
+
+  // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
+
+  private mapExecutionSnapshotRow(row: Record<string, unknown>): ExecutionSnapshotRecord {
+    return {
+      id: String(row.id),
+      workspaceId: String(row.workspace_id),
+      companyId: String(row.company_id),
+      projectId: String(row.project_id),
+      sessionId: String(row.session_id),
+      runId: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
+      snapshotVersion: Number(row.snapshot_version),
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      payloadHash: String(row.payload_hash),
+      prevSnapshotId: row.prev_snapshot_id ? String(row.prev_snapshot_id) : null,
+      prevPayloadHash: row.prev_payload_hash ? String(row.prev_payload_hash) : null,
+      trigger: String(row["trigger"]) as ExecutionSnapshotTrigger,
+      legacy: row.legacy === true,
+      createdAt: row.created_at as Date,
+      createdBy: String(row.created_by),
+    };
+  }
+
+  private mapSnapshotConfigVersionRow(row: Record<string, unknown>): SnapshotConfigVersionRecord {
+    return {
+      id: String(row.id),
+      workspaceId: String(row.workspace_id),
+      companyId: String(row.company_id),
+      kind: String(row.kind) as SnapshotConfigKind,
+      version: Number(row.version),
+      contentHash: String(row.content_hash),
+      content: (row.content ?? {}) as Record<string, unknown>,
+      createdAt: row.created_at as Date,
+      createdBy: String(row.created_by),
+    };
+  }
+
+  private async insertExecutionSnapshot(record: ExecutionSnapshotRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO execution_snapshots(id, workspace_id, company_id, project_id, session_id, run_id,
+         snapshot_version, payload, payload_hash, prev_snapshot_id, prev_payload_hash, "trigger", legacy,
+         created_at, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)`,
+      [record.id, record.workspaceId, record.companyId, record.projectId, record.sessionId, record.runId,
+        record.snapshotVersion, JSON.stringify(record.payload), record.payloadHash, record.prevSnapshotId,
+        record.prevPayloadHash, record.trigger, record.legacy, record.createdAt, record.createdBy],
+    );
+  }
+
+  async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
+    const id = input.id ?? randomUUID();
+    const attempted = await this.pool.query("SELECT 1 FROM execution_snapshots WHERE id=$1", [id]);
+    // A snapshot is evidence: reusing an id would overwrite history, so this is a refusal, not an upsert.
+    if (attempted.rowCount) throw new ExecutionSnapshotImmutableError(`create with existing id ${id}`);
+
+    const head = await this.pool.query<{ id: string; payload_hash: string; snapshot_version: number }>(
+      `SELECT id, payload_hash, snapshot_version FROM execution_snapshots
+        WHERE company_id=$1 AND session_id=$2 ORDER BY snapshot_version DESC LIMIT 1`,
+      [input.companyId, input.sessionId],
+    );
+    const previous = head.rows[0] ?? null;
+    const record: ExecutionSnapshotRecord = {
+      id,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      runId: input.runId ?? null,
+      snapshotVersion: (previous?.snapshot_version ?? 0) + 1,
+      payload: input.payload,
+      payloadHash: snapshotPayloadHash(input.payload),
+      prevSnapshotId: previous?.id ?? null,
+      prevPayloadHash: previous?.payload_hash ?? null,
+      trigger: input.trigger,
+      legacy: input.legacy === true,
+      createdAt: input.now ?? new Date(),
+      createdBy: input.createdBy,
+    };
+    await this.insertExecutionSnapshot(record);
+    return record;
+  }
+
+  async getExecutionSnapshot(companyId: string, snapshotId: string): Promise<ExecutionSnapshotRecord | null> {
+    const result = await this.pool.query(
+      "SELECT * FROM execution_snapshots WHERE company_id=$1 AND id=$2", [companyId, snapshotId],
+    );
+    const row = result.rows[0];
+    return row ? this.mapExecutionSnapshotRow(row) : null;
+  }
+
+  async getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM execution_snapshots WHERE company_id=$1 AND session_id=$2
+        ORDER BY snapshot_version DESC LIMIT 1`, [companyId, sessionId],
+    );
+    const row = result.rows[0];
+    return row ? this.mapExecutionSnapshotRow(row) : null;
+  }
+
+  async getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM execution_snapshots WHERE company_id=$1 AND run_id=$2
+        ORDER BY snapshot_version DESC LIMIT 1`, [companyId, runId],
+    );
+    const row = result.rows[0];
+    return row ? this.mapExecutionSnapshotRow(row) : null;
+  }
+
+  async listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]> {
+    const limit = Math.min(Math.max(input.limit, 1), 500);
+    const result = await this.pool.query(
+      `SELECT * FROM execution_snapshots
+        WHERE company_id=$1 AND ($2::text IS NULL OR session_id=$2) AND ($3::text IS NULL OR project_id=$3)
+        ORDER BY created_at DESC LIMIT $4`,
+      [input.companyId, input.sessionId ?? null, input.projectId ?? null, limit],
+    );
+    return result.rows.map((row) => this.mapExecutionSnapshotRow(row));
+  }
+
+  diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff {
+    const { changes, unchanged } = diffSnapshotPayloads(a.payload, b.payload);
+    return {
+      fromSnapshotId: a.id, toSnapshotId: b.id,
+      fromVersion: a.snapshotVersion, toVersion: b.snapshotVersion,
+      changes, unchanged,
+    };
+  }
+
+  async createSnapshotConfigVersion(input: CreateSnapshotConfigVersionInput): Promise<SnapshotConfigVersionRecord> {
+    const existing = await this.findSnapshotConfigVersionByHash(input.companyId, input.kind, input.contentHash);
+    // Identical content must reuse its version: a new row per call would make every snapshot point at a
+    // different "version" of the same text and destroy the meaning of the number.
+    if (existing) return existing;
+    const head = await this.pool.query<{ next: number }>(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM code_snapshot_config_versions
+        WHERE company_id=$1 AND kind=$2`, [input.companyId, input.kind],
+    );
+    const record: SnapshotConfigVersionRecord = {
+      id: input.id ?? `scv_${randomUUID()}`,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      kind: input.kind,
+      version: head.rows[0]?.next ?? 1,
+      contentHash: input.contentHash,
+      content: input.content,
+      createdAt: input.now ?? new Date(),
+      createdBy: input.createdBy,
+    };
+    await this.pool.query(
+      `INSERT INTO code_snapshot_config_versions(id, workspace_id, company_id, kind, version, content_hash,
+         content, created_at, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
+      [record.id, record.workspaceId, record.companyId, record.kind, record.version, record.contentHash,
+        JSON.stringify(record.content), record.createdAt, record.createdBy],
+    );
+    return record;
+  }
+
+  async getSnapshotConfigVersion(
+    companyId: string, kind: SnapshotConfigKind, version: number,
+  ): Promise<SnapshotConfigVersionRecord | null> {
+    const result = await this.pool.query(
+      "SELECT * FROM code_snapshot_config_versions WHERE company_id=$1 AND kind=$2 AND version=$3",
+      [companyId, kind, version],
+    );
+    const row = result.rows[0];
+    return row ? this.mapSnapshotConfigVersionRow(row) : null;
+  }
+
+  async findSnapshotConfigVersionByHash(
+    companyId: string, kind: SnapshotConfigKind, contentHash: string,
+  ): Promise<SnapshotConfigVersionRecord | null> {
+    const result = await this.pool.query(
+      "SELECT * FROM code_snapshot_config_versions WHERE company_id=$1 AND kind=$2 AND content_hash=$3",
+      [companyId, kind, contentHash],
+    );
+    const row = result.rows[0];
+    return row ? this.mapSnapshotConfigVersionRow(row) : null;
+  }
+
+  async listSnapshotConfigVersions(companyId: string, kind: SnapshotConfigKind): Promise<SnapshotConfigVersionRecord[]> {
+    const result = await this.pool.query(
+      "SELECT * FROM code_snapshot_config_versions WHERE company_id=$1 AND kind=$2 ORDER BY version DESC",
+      [companyId, kind],
+    );
+    return result.rows.map((row) => this.mapSnapshotConfigVersionRow(row));
+  }
+
+  /**
+   * C6b: durable Activity events. Append-only — there is deliberately no update or delete method, and the
+   * service layer rejects content-like payload keys before calling this (`code-run-activity-sink.ts`).
+   */
+  async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
+    const result = await this.pool.query(
+      `INSERT INTO code_activity_events
+        (id, workspace_id, company_id, project_id, session_id, run_id, snapshot_id, kind, payload,
+         data_classification, retention_class, created_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING ${codeActivityEventColumns}`,
+      [input.id ?? randomUUID(), input.workspaceId, input.companyId, input.projectId ?? null,
+        input.sessionId ?? null, input.runId ?? null, input.snapshotId ?? null, input.kind,
+        JSON.stringify(input.payload),
+        input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+        input.retentionClass ?? DEFAULT_RETENTION_CLASS,
+        input.now ?? new Date()],
+    );
+    return this.mapCodeActivityEventRow(result.rows[0]!);
+  }
+
+  async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+    const result = await this.pool.query(
+      `SELECT ${codeActivityEventColumns} FROM code_activity_events
+        WHERE company_id=$1
+          AND ($2::text IS NULL OR session_id=$2)
+          AND ($3::text IS NULL OR run_id=$3)
+          AND ($4::text IS NULL OR snapshot_id=$4)
+          AND ($5::timestamptz IS NULL OR (created_at, id) < ($5::timestamptz, $6::text))
+        ORDER BY created_at DESC, id DESC LIMIT $7`,
+      [input.companyId, input.sessionId ?? null, input.runId ?? null, input.snapshotId ?? null,
+        input.cursor ? new Date(decodeCodeActivityCursor(input.cursor).createdAt) : null,
+        input.cursor ? decodeCodeActivityCursor(input.cursor).id : null, limit],
+    );
+    return result.rows.map((row) => this.mapCodeActivityEventRow(row));
+  }
+
+  private mapCodeActivityEventRow(row: Record<string, unknown>): CodeActivityEventRecord {
+    return {
+      id: String(row.id),
+      workspaceId: String(row.workspaceId),
+      companyId: String(row.companyId),
+      projectId: row.projectId === null || row.projectId === undefined ? null : String(row.projectId),
+      sessionId: row.sessionId === null || row.sessionId === undefined ? null : String(row.sessionId),
+      runId: row.runId === null || row.runId === undefined ? null : String(row.runId),
+      snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
+      kind: String(row.kind) as CodeActivityEventKind,
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      dataClassification: String(row.dataClassification) as DataClassification,
+      retentionClass: String(row.retentionClass) as RetentionClass,
+      createdAt: new Date(row.createdAt as string | Date),
+    };
+  }
+
+  /**
+   * C6b: the bundle header and its ordered steps are written in **one transaction**, so a run never leaves a
+   * header claiming steps that are not there. Idempotent by `(run_id, bundle_version)`: a second recording of
+   * the same run returns the stored bundle (the unique index is the arbiter, not a pre-read, which would race).
+   * Append-only: there is deliberately no update or delete method.
+   */
+  async createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord> {
+    const now = input.now ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const inserted = await client.query(
+        `INSERT INTO code_replay_bundles
+          (id, workspace_id, company_id, project_id, session_id, run_id, execution_snapshot_id, bundle_version,
+           runner_version, system_prompt_version, system_prompt_content_hash, model_profile_version, provider,
+           model, replay_mode, source_run_id, source_snapshot_id, terminal_status, terminal_reason, payload,
+           payload_hash, replay_input_hash, data_classification, retention_class, created_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         ON CONFLICT (run_id, bundle_version) DO NOTHING
+         RETURNING ${replayBundleColumns}`,
+        [input.id ?? randomUUID(), input.workspaceId, input.companyId, input.projectId, input.sessionId,
+          input.runId, input.executionSnapshotId ?? null, input.bundleVersion, input.runnerVersion ?? null,
+          input.systemPromptVersion ?? null, input.systemPromptContentHash ?? null,
+          input.modelProfileVersion ?? null, input.provider ?? null, input.model ?? null, input.replayMode,
+          input.sourceRunId ?? null, input.sourceSnapshotId ?? null, input.terminalStatus ?? null,
+          input.terminalReason ?? null, JSON.stringify(input.payload), input.payloadHash,
+          input.replayInputHash, input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+          input.retentionClass ?? DEFAULT_RETENTION_CLASS, now],
+      );
+      if (!inserted.rowCount) {
+        // The bundle already exists: return it instead of appending a second one (idempotency contract).
+        await client.query("COMMIT");
+        const existing = await this.getReplayBundle(input.companyId, input.runId, input.bundleVersion);
+        if (existing) return existing;
+        throw new WorkspaceAccessError("Replay bundle conflict");
+      }
+      const bundle = this.mapReplayBundleRow(inserted.rows[0]!);
+      let seq = 0;
+      for (const step of input.steps) {
+        seq += 1;
+        await client.query(
+          `INSERT INTO code_replay_bundle_steps
+            (id, bundle_id, company_id, seq, kind, turn_index, tool_call_id, payload, payload_hash, created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT DO NOTHING`,
+          [step.id ?? randomUUID(), bundle.id, input.companyId, seq, step.kind, step.turnIndex,
+            step.toolCallId ?? null, JSON.stringify(step.payload), step.payloadHash, step.createdAt ?? now],
+        );
+      }
+      await client.query("COMMIT");
+      return bundle;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getReplayBundle(companyId: string, runId: string, bundleVersion?: number): Promise<ReplayBundleRecord | null> {
+    const result = await this.pool.query(
+      `SELECT ${replayBundleColumns} FROM code_replay_bundles
+        WHERE company_id=$1 AND run_id=$2 AND ($3::integer IS NULL OR bundle_version=$3)
+        ORDER BY bundle_version DESC LIMIT 1`,
+      [companyId, runId, bundleVersion ?? null],
+    );
+    const row = result.rows[0];
+    return row ? this.mapReplayBundleRow(row) : null;
+  }
+
+  /**
+   * C6b: by-id read, tenant-scoped. A replay status endpoint and the UI address a replay by its own id, so the
+   * store answers that directly instead of forcing each caller to query `code_replay_bundles` itself.
+   */
+  async getReplayBundleById(companyId: string, bundleId: string): Promise<ReplayBundleRecord | null> {
+    const result = await this.pool.query(
+      `SELECT ${replayBundleColumns} FROM code_replay_bundles WHERE company_id=$1 AND id=$2 LIMIT 1`,
+      [companyId, bundleId],
+    );
+    const row = result.rows[0];
+    return row ? this.mapReplayBundleRow(row) : null;
+  }
+
+  async listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]> {    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
+    const result = await this.pool.query(
+      `SELECT ${replayBundleColumns} FROM code_replay_bundles
+        WHERE company_id=$1
+          AND ($2::text IS NULL OR run_id=$2)
+          AND ($3::text IS NULL OR session_id=$3)
+          AND ($4::text IS NULL OR execution_snapshot_id=$4)
+        ORDER BY created_at DESC, id DESC LIMIT $5`,
+      [input.companyId, input.runId ?? null, input.sessionId ?? null, input.executionSnapshotId ?? null, limit],
+    );
+    return result.rows.map((row) => this.mapReplayBundleRow(row));
+  }
+
+  async listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]> {
+    const result = await this.pool.query(
+      `SELECT ${replayBundleStepColumns} FROM code_replay_bundle_steps
+        WHERE company_id=$1 AND bundle_id=$2 ORDER BY seq ASC`,
+      [companyId, bundleId],
+    );
+    return result.rows.map((row) => this.mapReplayBundleStepRow(row));
+  }
+
+  private mapReplayBundleRow(row: Record<string, unknown>): ReplayBundleRecord {
+    const nullable = (value: unknown): string | null =>
+      value === null || value === undefined ? null : String(value);
+    const nullableNumber = (value: unknown): number | null =>
+      value === null || value === undefined ? null : Number(value);
+    return {
+      id: String(row.id),
+      workspaceId: String(row.workspaceId),
+      companyId: String(row.companyId),
+      projectId: String(row.projectId),
+      sessionId: String(row.sessionId),
+      runId: String(row.runId),
+      executionSnapshotId: nullable(row.executionSnapshotId),
+      bundleVersion: Number(row.bundleVersion),
+      runnerVersion: nullable(row.runnerVersion),
+      systemPromptVersion: nullableNumber(row.systemPromptVersion),
+      systemPromptContentHash: nullable(row.systemPromptContentHash),
+      modelProfileVersion: nullableNumber(row.modelProfileVersion),
+      provider: nullable(row.provider),
+      model: nullable(row.model),
+      replayMode: String(row.replayMode) as ReplayMode,
+      sourceRunId: nullable(row.sourceRunId),
+      sourceSnapshotId: nullable(row.sourceSnapshotId),
+      terminalStatus: nullable(row.terminalStatus),
+      terminalReason: nullable(row.terminalReason),
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      payloadHash: String(row.payloadHash),
+      replayInputHash: String(row.replayInputHash),
+      dataClassification: String(row.dataClassification) as DataClassification,
+      retentionClass: String(row.retentionClass) as RetentionClass,
+      createdAt: new Date(row.createdAt as string | Date),
+    };
+  }
+
+  private mapReplayBundleStepRow(row: Record<string, unknown>): ReplayBundleStepRecord {
+    return {
+      id: String(row.id),
+      bundleId: String(row.bundleId),
+      companyId: String(row.companyId),
+      seq: Number(row.seq),
+      kind: String(row.kind) as ReplayStepKind,
+      turnIndex: Number(row.turnIndex),
+      toolCallId: row.toolCallId === null || row.toolCallId === undefined ? null : String(row.toolCallId),
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      payloadHash: String(row.payloadHash),
+      createdAt: new Date(row.createdAt as string | Date),
     };
   }
 }
