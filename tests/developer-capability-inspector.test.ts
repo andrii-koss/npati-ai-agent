@@ -9,24 +9,24 @@ describe("Section 15: Developer / Capability Inspector", () => {
   const inspector = new CapabilityInspectorService();
 
   describe("Capabilities Overview & Filter Views (All 13 Slices)", () => {
-    it("returns correct aggregate counts matching the extended 370-item catalog", () => {
+    it("returns correct aggregate counts matching the extended 373-item catalog", () => {
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(370);
-      expect(report.counts.agentCallable).toBe(106);
+      expect(report.counts.all).toBe(373);
+      expect(report.counts.agentCallable).toBe(109);
       expect(report.counts.runtimeOnly).toBe(264);
-      expect(report.counts.userVisible).toBe(106);
+      expect(report.counts.userVisible).toBe(109);
       expect(report.counts.automatic).toBeGreaterThan(0);
       expect(report.counts.requiresApproval).toBeGreaterThan(0);
       expect(report.counts.destructive).toBeGreaterThan(0);
       expect(report.counts.missingTest).toBe(0);
       expect(report.counts.missingUi).toBe(264);
-      expect(report.items.length).toBe(370);
+      expect(report.items.length).toBe(373);
     });
 
-    it("filters precisely by agent-callable slice (97 tools)", () => {
+    it("filters precisely by agent-callable slice (109 tools)", () => {
       const report = inspector.inspect("agent-callable");
-      expect(report.items.length).toBe(106);
+      expect(report.items.length).toBe(109);
       for (const item of report.items) {
         expect(item.agentCallable).toBe(true);
       }
@@ -172,9 +172,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
-      expect(body.counts.all).toBe(370);
-      expect(body.counts.agentCallable).toBe(106);
-      expect(body.items.length).toBe(106);
+      expect(body.counts.all).toBe(373);
+      expect(body.counts.agentCallable).toBe(109);
+      expect(body.items.length).toBe(109);
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
@@ -185,6 +185,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
     const READ_IDS = ["code.fs.list", "code.fs.read", "code.fs.grep", "code.fs.tree", "code.symbols.outline", "code.project.info", "code.shell.process.list", "code.shell.process.logs", "code.deps.inspect"];
     const WRITE_IDS = ["code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop", "code.verify.run", "code.deps.audit", "code.deps.add"];
     const CODE_IDS = [...READ_IDS, ...WRITE_IDS];
+    /** C9: session metadata — a plan draft, the todo list and the user question. All three are `low` risk. */
+    const PLAN_AND_QUESTION_IDS = ["code.plan.propose", "code.plan.update", "code.ask_user"];
+    const ALL_CODE_IDS = [...CODE_IDS, ...PLAN_AND_QUESTION_IDS];
     const EXPECTED_RISK: Record<string, string> = {
       "code.fs.list": "low", "code.fs.read": "low", "code.fs.grep": "low", "code.fs.tree": "low",
       "code.symbols.outline": "low", "code.project.info": "low", "code.fs.diff": "low",
@@ -193,16 +196,19 @@ describe("Section 15: Developer / Capability Inspector", () => {
       "code.fs.move": "medium", "code.fs.undo_last_turn": "medium", "code.fs.delete": "high",
       "code.shell.exec": "high", "code.shell.process.start": "high", "code.shell.process.stop": "medium",
       "code.verify.run": "medium", "code.deps.audit": "medium", "code.deps.add": "high",
+      "code.plan.propose": "low", "code.plan.update": "low", "code.ask_user": "low",
     };
 
     it("registers every code capability with the expected contract and unique inventory ids", () => {
       const report = inspector.inspect("all");
       const codeItems = report.items.filter((item) => item.domain === "code");
 
-      expect(codeItems.map((item) => item.capabilityId).sort()).toEqual([...CODE_IDS].sort());
-      const expectedIds = Array.from({ length: CODE_IDS.length }, (_, index) => 349 + index);
+      expect(codeItems.map((item) => item.capabilityId).sort()).toEqual([...ALL_CODE_IDS].sort());
+      // The code inventory ids are contiguous from 349, so a group that is appended (never renumbered) keeps
+      // every earlier id — which is the property the whole registry depends on.
+      const expectedIds = Array.from({ length: ALL_CODE_IDS.length }, (_, index) => 349 + index);
       expect(codeItems.map((item) => item.id).sort((a, b) => a - b)).toEqual(expectedIds);
-      expect(new Set(codeItems.map((item) => item.id)).size).toBe(CODE_IDS.length);
+      expect(new Set(codeItems.map((item) => item.id)).size).toBe(ALL_CODE_IDS.length);
       for (const item of codeItems) {
         expect(item.risk, `${item.capabilityId} risk`).toBe(EXPECTED_RISK[item.capabilityId]);
         expect(item.agentCallable).toBe(true);
@@ -213,8 +219,8 @@ describe("Section 15: Developer / Capability Inspector", () => {
       const byDomain = report.items.reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.domain]: (acc[item.domain] ?? 0) + 1 }), {});
       // The code domain is additive and grows with every Coding Agent step: assert the invariant
     // (the registered set matches the contract lists) instead of a hardcoded step number.
-    expect(byDomain.code).toBe(CODE_IDS.length);
-      expect(report.counts.all).toBe(370);
+    expect(byDomain.code).toBe(ALL_CODE_IDS.length);
+      expect(report.counts.all).toBe(373);
     });
 
     it("never reports a code capability as allowed when no flag source is available", () => {
@@ -253,8 +259,8 @@ describe("Section 15: Developer / Capability Inspector", () => {
         expect(["off", "unknown"], `${item.capabilityId} must not be on when its flag is missing`).toContain(item.flagState);
       }
       // Dark launch default: the flags are off, and the capability list itself is unchanged.
-      expect(off.counts.all).toBe(370);
-      expect(on.counts.all).toBe(370);
+      expect(off.counts.all).toBe(373);
+      expect(on.counts.all).toBe(373);
     });
   });
 });

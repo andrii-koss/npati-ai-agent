@@ -25,7 +25,9 @@ export type ReaperStep =
   | "orphan_sandboxes"
   | "temp_dirs"
   | "stale_locks"
-  | "disk_pressure";
+  | "disk_pressure"
+  /** C9: questions past their TTL, which release the run they were holding as `ask_user_timeout`. */
+  | "expire_user_questions";
 
 export interface ReaperCleanedCounts {
   secretLeases: number;
@@ -38,6 +40,7 @@ export interface ReaperCleanedCounts {
   orphanSandboxes: number;
   tempDirs: number;
   staleLocks: number;
+  expiredUserQuestions: number;
 }
 
 export interface ReaperSkip {
@@ -170,6 +173,19 @@ export interface CodeReaperPorts {
   staleApprovals?: {
     expireStaleApprovals(input: { now: number }): Promise<number>;
   };
+  /**
+   * C9: pending user questions whose TTL passed. The port has a genuine preview (the questions themselves), so a
+   * dry run reports exactly what a real pass would expire instead of claiming the step is unavailable — a step
+   * that cannot be previewed is reported as `dry_run_preview_unavailable`, never as "nothing to clean".
+   *
+   * Expiring is the only honest outcome: the question becomes `expired`, the run it paused goes to `interrupted`
+   * with `ask_user_timeout`, and **no answer is written**. A timeout that guessed a default would be the user's
+   * decision made by a clock.
+   */
+  userQuestions?: {
+    previewCodeUserQuestions(input: { now: number }): Promise<Array<{ companyId: string; runId: string; questionId: string }>>;
+    expireCodeUserQuestions(input: { now: number }): Promise<number>;
+  };
   orphanSandboxes?: {
     listOrphans(input: { activeSandboxIds: string[] }): Promise<OrphanSandbox[]>;
     destroyOrphan(sandbox: OrphanSandbox): Promise<void>;
@@ -225,6 +241,7 @@ function emptyCounts(): ReaperCleanedCounts {
     orphanSandboxes: 0,
     tempDirs: 0,
     staleLocks: 0,
+    expiredUserQuestions: 0,
   };
 }
 
@@ -510,6 +527,26 @@ export class CodeReaper {
             "code_reaper_disk_pressure",
           );
         }
+      });
+    }
+
+    // 12. Expired user questions. A run paused on `code.ask_user` is held by a question row with a TTL, so a
+    //     question nobody answered must release the run instead of leaving it waiting forever. This is the one
+    //     step whose "cleanup" is a deliberate *non*-action on the interesting field: the question becomes
+    //     `expired`, the run becomes `interrupted` with reason `ask_user_timeout`, and no answer is written.
+    //     Guessing a choice on the user's behalf is exactly what the owner forbade, so a timeout is reported as a
+    //     timeout and the run stops where the question was asked.
+    if (!this.options.userQuestions) skipped.push({ step: "expire_user_questions", reason: "port_unavailable" });
+    else {
+      await step("expire_user_questions", async () => {
+        const now = this.now();
+        if (dryRun) {
+          // A real preview: the expired questions are listed, so a dry run reports the count it would release.
+          const expired = await this.options.userQuestions!.previewCodeUserQuestions({ now });
+          cleaned.expiredUserQuestions = expired.length;
+          return;
+        }
+        cleaned.expiredUserQuestions = await this.options.userQuestions!.expireCodeUserQuestions({ now });
       });
     }
 

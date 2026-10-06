@@ -176,8 +176,14 @@ export class CodeRunReconciler {
   /**
    * A run is reconcilable when it claims to be running and its lease is gone. A live run of our own process is
    * never touched, even if it happened to be listed.
+   *
+   * C9 added `waiting_for_user`, and the check below is written as an explicit refusal rather than relying on the
+   * `status !== "running"` line, because that state is the one case where "no live lease" means something other
+   * than a crash: the run is paused on a question, a human is expected to answer, and the question row is what
+   * keeps it alive. Recovering it would replay work and discard the answer that is on its way.
    */
   private isReconcilable(state: CodeRunStateRecord, now: Date): boolean {
+    if (state.status === "waiting_for_user") return false;
     if (state.status !== "running") return false;
     const leased = state.leaseExpiresAt !== null && state.leaseExpiresAt.getTime() >= now.getTime();
     if (!leased) return true;

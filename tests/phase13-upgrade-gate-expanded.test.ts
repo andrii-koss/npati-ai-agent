@@ -199,9 +199,9 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   // 4. Capability Registry Diff (306 Baseline Check)
   // -------------------------------------------------------------
   describe("4. Capability Registry Diff & Zero Disappearance", () => {
-    it("proves the 306 baseline remains and the catalog includes 370 capabilities", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(370);
-      expect(CAPABILITY_CATALOG.length).toBe(370);
+    it("proves the 306 baseline remains and the catalog includes 373 capabilities", () => {
+      expect(CAPABILITY_MATRIX.length).toBe(373);
+      expect(CAPABILITY_CATALOG.length).toBe(373);
 
       const matrixIds = new Set(CAPABILITY_MATRIX.map((c) => c.id));
       for (let i = 1; i <= 306; i++) {

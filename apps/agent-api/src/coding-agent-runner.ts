@@ -47,10 +47,35 @@ import {
 } from "./code-conversation-compaction";
 import { COMPANY_MEMORY_HEADER, PROJECT_CONTEXT_HEADER, renderContextBlocks } from "./code-context-memory";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
-import { MODE_RISK_MATRIX } from "./code-policy-engine";
+import { MODE_RISK_MATRIX, isPlanSafeTool } from "./code-policy-engine";
 import { DEFAULT_CODE_SESSION_MODE_MATRIX } from "./code-rbac";
 import { CODE_TOOL_SCHEMAS } from "./code-tool-registry";
 import { sha256Hex, validateArguments, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";
+import {
+  VERIFICATION_APPROVAL_REQUIRED,
+  VERIFICATION_REPAIR_EXHAUSTED,
+  VERIFICATION_UNAVAILABLE,
+  createVerificationLoop,
+  formatRepairInstruction,
+  type VerificationCheckReport,
+  type VerificationLoop,
+  type VerificationReport,
+  type VerificationStatus,
+} from "./code-verification-loop";
+import { analyzeTestIntegrity, type TestIntegrityVerdict } from "./code-test-integrity-guard";
+import { evaluateScopeGuard, type ScopeGuardResult } from "./code-scope-guard";
+import {
+  SELF_REVIEW_SCHEMA_VERSION,
+  createSelfReview,
+  describeSelfReview,
+  selfReviewStopMessage,
+  toPersistedSelfReview,
+  type SelfReviewFinding,
+  type SelfReviewPersisted,
+  type SelfReviewState,
+  type SelfReviewStatus,
+  type SelfReviewVerdict,
+} from "./code-self-review";
 import {
   bundleHash,
   canonicalizeSettledToolResult,
@@ -93,9 +118,36 @@ export type CodingAgentStopReason =
   | "tool_failure"
   /** C6a: the lease was lost (another process owns the run, or it expired), so this process stopped. */
   | "interrupted"
+  /** C9: verification never passed within the repair budget; the run stopped and says which checks failed. */
+  | "verification_failed"
+  /**
+   * C9 (requirement 4): the single self-review pass left blocking findings that the single fix iteration did
+   * not resolve. The run stopped rather than reporting work it knows is not clean.
+   */
+  | "self_review_unresolved"
+  /**
+   * C9 (requirement 4): the self-review pass could not be completed (provider error, unusable answer, or a
+   * policy refusal of the review request). "We did not check" is never reported as "clean".
+   */
+  | "self_review_unavailable"
+  /** C9: the run asked the user a question and stopped on purpose. Not a failure and not a completion. */
+  | "waiting_for_user"
   | "refused";
 
-export type CodingAgentRunStatus = "completed" | "stopped" | "failed" | "cancelled" | "interrupted";
+/**
+ * C9: `waiting_for_user` is a run status, not a stop reason, because the run has **not** stopped being
+ * continuable: a human answers and it resumes from the turn boundary. It is deliberately not `stopped`,
+ * `completed` or `failed` — each of those is terminal, and a terminal status would make the answer arrive for a
+ * run nothing is waiting on.
+ */
+export type CodingAgentRunStatus = "completed" | "stopped" | "failed" | "cancelled" | "interrupted" | "waiting_for_user";
+
+/**
+ * C9: the one tool that pauses a run. Named here (and not in `CODE_RUN_READ_ONLY_TOOLS`) because its call has
+ * to run **alone** and its result has to stop the loop: as a read-only tool it would be batched into a wave
+ * with other calls and the run would keep going after the question was asked.
+ */
+export const CODE_ASK_USER_TOOL = "code.ask_user";
 
 export interface CodingAgentPolicyContext {
   companyId: string;
@@ -150,7 +202,20 @@ export interface CodeRunToolRuntimePort {
     files: number;
     linesAdded: number;
     linesRemoved: number;
-    changes: Array<{ path: string; tool: string }>;
+    /**
+     * C9 widened this structurally (all new fields optional) so the scope and test-integrity guards can see
+     * *what kind* of change each file is without a second port: `CodeTurnTracker` already carries the status
+     * and the diff, and re-deriving them elsewhere would let the two disagree.
+     */
+    changes: Array<{
+      path: string;
+      tool: string;
+      status?: string;
+      diff?: string;
+      sha256?: string | null;
+      linesAdded?: number;
+      linesRemoved?: number;
+    }>;
   };
 }
 
@@ -227,7 +292,41 @@ export interface CodeRunStatePort {
      * provider reports it and falls back to estimated per-call constants otherwise), which the persistence layer
      * stamps as `estimated: true`.
      */
-    estimate?: { tokenCount: number; costUsd: number | null; turns: number; toolCalls: number; filesChanged: number; diffStats: { files: number; linesAdded: number; linesRemoved: number } };
+    estimate?: {
+      tokenCount: number;
+      costUsd: number | null;
+      turns: number;
+      toolCalls: number;
+      filesChanged: number;
+      diffStats: { files: number; linesAdded: number; linesRemoved: number };
+      /**
+       * C9: the verification/scope outcome travels with the estimate so "did this run verify, and did it
+       * weaken the tests?" is answerable after the fact. Both sub-objects carry their own version, so this
+       * additive extension does not change the meaning of the existing fields (rule 13).
+       */
+      verification?: CodingAgentRunSummary["verification"];
+      scope?: CodingAgentRunSummary["scope"];
+      /**
+       * C9 (requirement 4): the self-review outcome, in its **metadata-only** form (`toPersistedSelfReview`):
+       * status, counts, categories/severities/paths and the input flags. A finding's `reason` and
+       * `suggested_fix` are reviewer prose that can quote file content, so they stay on the run result and in
+       * the model's conversation — never in the durable run-state record.
+       */
+      selfReview?: SelfReviewPersisted;
+    };
+  }): Promise<unknown>;
+  /**
+   * C9: the run pauses on a question. **Non-terminal**: it stamps no `finished_at` and does not end the run, so
+   * the reconciler (which ignores this status) neither recovers nor replays it, and the answer can still be
+   * applied when it arrives. Optional so an older composition keeps working; a port that cannot record the pause
+   * is logged as a warning, because the alternative — writing a terminal state — would end a run a human is
+   * about to continue.
+   */
+  markWaitingForUser?(input: {
+    companyId: string;
+    runId: string;
+    questionId: string;
+    toolCallId: string;
   }): Promise<unknown>;
 }
 
@@ -543,6 +642,25 @@ export interface CodingAgentRunnerPorts {
     ): Promise<{ text: string; changed: boolean; bytes: number }>;
   };
   /**
+   * C9 (requirement 4): the approved plan of this session, loaded for the self-review's second input. Optional
+   * and fail-soft by the same reasoning as `projectInstructions`: an unreadable plan yields **no plan block**
+   * (`null`), and the review records `inputs.approvedPlan: false` rather than being told a plan exists. A plan
+   * that could stop a run would make reviewing optional in practice.
+   */
+  sessionPlan?: {
+    load(input: {
+      ctx: AuthContext;
+      companyId: string;
+      projectId: string;
+      sessionId: string;
+    }): Promise<{
+      revision: number;
+      status: string;
+      executionMode?: string | null;
+      plan: { files: readonly string[]; steps: readonly string[]; risks: readonly string[]; testStrategy: string };
+    } | null>;
+  };
+  /**
    * C8: the values of the secret leases issued to this session, so a compaction summary can be checked against
    * them before it is stored or inserted. Optional and metadata-shaped on purpose: the lease object itself still
    * never carries a value, and a deployment that cannot name them keeps the pattern-based checks as its floor.
@@ -590,6 +708,24 @@ export interface CodingAgentRunnerPorts {
     overrides?: readonly CodeModelProfile[];
     enabledProfileIds?: readonly string[];
   };
+  /**
+   * C9 (requirement 4): the self-review call. It is the **same engine call** the loop makes (`chat`) with a
+   * different prompt — never a subagent (that is C12) and never a tool the model can choose.
+   *
+   * The port exists so a deployment can route the review to another model/profile without touching the loop,
+   * and so a test can drive the review answer deterministically. `profileId` is recorded in Activity for
+   * traceability. Absent means the run's own model is used, which is the conservative default: a review by a
+   * different model than the author is better, but inventing a model the deployment never named is worse.
+   */
+  selfReview?: {
+    profileId?: string;
+    /** Overrides the configured fix-iteration budget; the module still clamps it to one. */
+    maxFixIterations?: number;
+    /** `false` disables the pass; it is then reported as `not_run`, never as `clean`. */
+    enabled?: boolean;
+  };
+  /** Bounds the diff text handed to the review. The review reads text, so this is a cost/latency bound. */
+  selfReviewDiffChars?: number;
   now?: () => number;
   /** Provider tokens per call are unknown before the call; this is the conservative pre-flight estimate. */
   estimatedTokensPerCall?: number;
@@ -613,6 +749,12 @@ export interface CodingAgentRunInput {
   runStateOwner?: string;
   /** Extra system-prompt lines from the caller (profiles, project context). Never from file contents. */
   extraSystemPromptLines?: readonly string[];
+  /**
+   * C9: which verification kinds to run after the change (`lint`/`typecheck`/`test`/`build`). Absent means
+   * the conservative default (`typecheck`, `test`); an empty array disables the automatic verification loop
+   * for this run, which is how a caller opts out without a new flag.
+   */
+  verificationTools?: readonly string[];
 }
 
 export interface CodingAgentRunSummary {
@@ -624,6 +766,99 @@ export interface CodingAgentRunSummary {
   tokens: number;
   costUsd: number;
   remaining: string;
+  /**
+   * C9: what verification actually concluded, plus whether the change set reduced the suite's detection
+   * power. Additive and optional so every existing reader keeps working; the shape below is versioned by
+   * `VERIFICATION_REPORT_SCHEMA_VERSION`, so a later change to it must bump that number (rule 13).
+   */
+  verification?: CodingAgentVerificationSummary;
+  /** C9: scope-guard warnings. A warning never changes the run's status. */
+  scope?: CodingAgentScopeSummary;
+  /**
+   * C9 (requirement 4): the self-review outcome. Additive and optional, so every existing reader keeps
+   * working, and versioned by `SELF_REVIEW_SCHEMA_VERSION` (rule 13). It is present whenever the pass was
+   * considered at all — including `not_run` and `unavailable`, because those are exactly the states a reader
+   * must not mistake for a clean review.
+   */
+  selfReview?: CodingAgentSelfReviewSummary;
+}
+
+export interface CodingAgentSelfReviewSummary {
+  schemaVersion: number;
+  /** `clean` is the only status an empty `findings` list can carry; `unavailable`/`not_run` never are. */
+  status: SelfReviewStatus;
+  /** Why the pass did not produce a review (`not_run`/`unavailable`). Absent when it did. */
+  reason?: string;
+  /** A bounded, content-free explanation of `reason`. */
+  detail?: string;
+  ran: boolean;
+  /** How many times the review was requested of the model. 0 or 1, ever. */
+  reviewRuns: number;
+  /** Fix iterations spent after the review, and the hard cap. Both 0/1 by construction. */
+  iterationsUsed: number;
+  maxIterations: number;
+  fixApplied: boolean;
+  /** Counts, so a reader can see the shape of the verdict before reading the findings. */
+  findingsCount: number;
+  blocking: number;
+  /** Findings nobody resolved. Non-empty exactly when the run must not be presented as clean. */
+  unresolved: number;
+  /** The full findings, including `reason` and `suggested_fix`. */
+  findings: CodingAgentSelfReviewFinding[];
+  inputs: SelfReviewVerdict["inputs"];
+  reviewHash: string;
+}
+
+/**
+ * A finding as the run result carries it. The persisted form (`SelfReviewPersisted`) drops `reason` and
+ * `suggested_fix`; this one keeps them because the run result is conversation-facing, not a state record.
+ */
+export interface CodingAgentSelfReviewFinding {
+  id: string;
+  category: SelfReviewFinding["category"];
+  severity: SelfReviewFinding["severity"];
+  file: string | null;
+  reason: string;
+  suggestedFix: string | null;
+  blocking: boolean;
+}
+
+export interface CodingAgentVerificationSummary {
+  schemaVersion: number;
+  /** `passed` means every requested check ran and passed — with the test-change caveat applied below. */
+  status: VerificationStatus | "passed_with_unjustified_test_changes";
+  attemptsUsed: number;
+  maxAttempts: number;
+  verificationRuns: number;
+  requestedTools: string[];
+  /**
+   * Only the tool and its failure code: this object is persisted with the run state, so it must not carry a
+   * verifier's message, which can quote file content.
+   */
+  failedChecks: Array<{ tool: string; code?: string }>;
+  /**
+   * A verification that passed over a weakened suite is not a clean pass. The run reports the finding and the
+   * fact that no justification was seen; it does not attempt to parse one out of prose.
+   */
+  testIntegrity?: {
+    flagged: boolean;
+    requiresJustification: boolean;
+    justificationProvided: boolean;
+    findings: Array<{ path: string; kind: string; detail: string }>;
+    testFilesTouched: string[];
+    testFilesDeleted: string[];
+  };
+}
+
+export interface CodingAgentScopeSummary {
+  changedFiles: number;
+  limit: number;
+  exceeded: boolean;
+  severity: "info" | "warn" | "critical";
+  unrelatedPaths: string[];
+  /** True when there was no stated focus, so relatedness could not be judged at all. */
+  relatednessUnknown: boolean;
+  warnings: Array<{ code: string; message: string; severity: string; paths: string[] }>;
 }
 
 export interface CodingAgentRunResult {
@@ -654,6 +889,18 @@ export interface CodingAgentRunResult {
   };
   startedAt: number;
   finishedAt: number;
+  /**
+   * C9: what verification concluded for this run, and what the scope guard warned about. Present only when
+   * the loop actually reached verification — a refused run reports neither, which is the honest answer.
+   */
+  verification?: CodingAgentVerificationSummary;
+  scope?: CodingAgentScopeSummary;
+  /**
+   * C9 (requirement 4): the self-review outcome, present whenever the pass was considered — including
+   * `not_run` and `unavailable`, because those are exactly the states a reader must not mistake for a clean
+   * review. It is also inside `summary`, where a caller that keeps only the summary still sees it.
+   */
+  selfReview?: CodingAgentSelfReviewSummary;
 }
 
 /** The permission a run start requires. Added to `CODE_ACTION_PERMISSIONS` so it is never unmapped. */
@@ -668,6 +915,17 @@ const REMINDER_MESSAGE =
   "Reminder: the last attempts repeated the same call or the same error. Change your approach: use a different tool, narrow the arguments, or inspect the failing output before retrying.";
 
 const CHECK_TOOL_PREFIXES = ["code.verify.", "code.deps.audit"];
+
+/** C9: verification kinds attempted after a change when the caller states none. */
+const DEFAULT_VERIFICATION_TOOLS: readonly string[] = ["typecheck", "test"];
+
+/**
+ * C9 (requirement 4): how much diff text the self-review is shown. A bound, not a policy: the review reads text
+ * and a whole repository diff is neither affordable nor useful, so the tail of the change set is what a
+ * reviewer sees. The truncation is stated in the text itself, so a review that found nothing in a truncated
+ * diff knows it saw a truncated diff.
+ */
+const DEFAULT_SELF_REVIEW_DIFF_CHARS = 60_000;
 
 /** Metadata-only guard: an Activity event may never carry file/command content or secrets. */
 const FORBIDDEN_EVENT_KEYS = [
@@ -887,6 +1145,11 @@ export class CodingAgentRunner {
   private readonly now: () => number;
   private readonly estimatedTokensPerCall: number;
   private readonly estimatedCostPerCallUsd: number;
+  /**
+   * C9 (requirement 4): how much diff text the self-review sees. A bound, not a policy — the review reads text,
+   * and a whole repository diff is neither affordable nor useful.
+   */
+  private readonly selfReviewDiffChars: number;
 
   constructor(private readonly ports: CodingAgentRunnerPorts) {
     this.limits = { ...resolveCodeAgentLimits(), ...ports.limits };
@@ -894,12 +1157,18 @@ export class CodingAgentRunner {
     this.now = ports.now ?? (() => Date.now());
     this.estimatedTokensPerCall = ports.estimatedTokensPerCall ?? DEFAULT_ESTIMATED_TOKENS_PER_CALL;
     this.estimatedCostPerCallUsd = ports.estimatedCostPerCallUsd ?? DEFAULT_ESTIMATED_COST_PER_CALL_USD;
+    this.selfReviewDiffChars = Math.max(1_000, ports.selfReviewDiffChars ?? DEFAULT_SELF_REVIEW_DIFF_CHARS);
   }
 
   /** Tool definitions offered to the model. In `plan` mode only read-only tools are offered at all. */
   toolDescriptors(session: CodeSession): CodeRunToolDescriptor[] {
     const available = this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
-    if (session.mode === "plan") return available.filter((tool) => isReadOnlyRunTool(tool.name));
+    // `plan` mode offers read/search tools plus the narrow, explicit planning list — never a workspace,
+    // sandbox or git mutation. The list is separate from the read-only set on purpose: a new read tool must
+    // not become available in `plan` just because it is read-only (see PLAN_SAFE_TOOLS).
+    if (session.mode === "plan") {
+      return available.filter((tool) => isReadOnlyRunTool(tool.name) || isPlanSafeTool(tool.name));
+    }
     return available;
   }
 
@@ -963,6 +1232,45 @@ export class CodingAgentRunner {
      */
     let lastBudget: ModelRequestPressure | null = null;
     let compactionCount = 0;
+    /**
+     * C9: the verification/repair state machine. Built here, **above** `finish`, for exactly the reason
+     * `lastBudget` is: every terminal path reports it, and the refusal paths (feature flag, RBAC, admission
+     * gate, image admission) return through `finish` before the loop is ever reached. Declaring this below
+     * those returns would put every refusal into the temporal dead zone — the C8 defect that turned a refusal
+     * into a thrown exception.
+     */
+    const verificationTools = Object.freeze([...(input.verificationTools ?? DEFAULT_VERIFICATION_TOOLS)]);
+    const verificationLoop: VerificationLoop = createVerificationLoop({
+      maxRepairAttempts: this.limits.repairLoopAttempts,
+      requestedTools: verificationTools,
+    });
+    /** True when the caller explicitly opted out (an empty list) — then the loop must not fabricate a run. */
+    const verificationDisabled = verificationTools.length === 0;
+    let testIntegrity: TestIntegrityVerdict | null = null;
+    let scopeGuard: ScopeGuardResult | null = null;
+    /**
+     * C9 (requirement 4): the self-review. Declared here, above `finish`, for exactly the reason
+     * `verificationLoop` is: every terminal path reports it, and the refusal paths return through `finish`
+     * before the loop is reached. Declaring it lower would put those paths into the temporal dead zone and
+     * turn a refusal into a thrown exception — the C8 defect this ordering already exists to prevent.
+     *
+     * `selfReviewState` is created **once** per run and the pass is executed at most once. `selfReviewVerdict`
+     * is the frozen verdict every summary reads, so a later reader cannot observe a different verdict than the
+     * one the review produced.
+     */
+    let selfReviewState: SelfReviewState | null = null;
+    let selfReviewVerdict: SelfReviewVerdict | null = null;
+    /** How many times the review-of-the-change was attempted. The cap is one, enforced in the module. */
+    let selfReviewPasses = 0;
+    /**
+     * The change-set signature recorded by the **last** verification. If the review-driven fix leaves the
+     * change set identical to this, running the checks again would re-verify bytes that were already verified,
+     * so the runner skips it and says so. If it differs, verification runs **again** — that branch is mandatory,
+     * not an optimisation, which is why it is a comparison of the tree rather than a claim by the model.
+     */
+    let verifiedSignature: string | null = null;
+    /** True while the single self-review-driven fix iteration is in flight. */
+    let selfReviewFixPending = false;
 
     // C6a: durable run state. `stateRunId` stays undefined until the run is admitted, so a refused run
     // leaves no state row behind; from then on every exit path writes a terminal state.
@@ -1008,6 +1316,13 @@ export class CodingAgentRunner {
               },
             }
           : {}),
+        // C9: reported on every terminal path once verification ran, so a caller never has to read the log to
+        // learn that the change was never verified.
+        ...(summary.verification ? { verification: summary.verification } : {}),
+        ...(summary.scope ? { scope: summary.scope } : {}),
+        // C9 (requirement 4): the self-review travels at the top level as well as in the summary, so a caller
+        // that reads only one of the two still learns that the review was unavailable or left findings open.
+        ...(summary.selfReview ? { selfReview: summary.selfReview } : {}),
       };
     };
 
@@ -1026,7 +1341,7 @@ export class CodingAgentRunner {
      * finishes a run never leaves it looking like it is still running.
      */
     const stop = async (
-      status: CodingAgentRunStatus,
+      status: Exclude<CodingAgentRunStatus, "waiting_for_user">,
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
@@ -1044,6 +1359,9 @@ export class CodingAgentRunner {
         }
       }
       if (stateRunId && this.ports.runState) {
+        // `waiting_for_user` is excluded from this parameter on purpose (see the signature): it is the one status
+        // that must never be written by the terminal path, so the mapping below cannot silently turn a pause into
+        // a completion.
         const stateStatus = status === "cancelled"
           ? "cancelled"
           : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
@@ -1058,10 +1376,81 @@ export class CodingAgentRunner {
             toolCalls: summary.toolCalls,
             filesChanged: summary.filesChanged.length,
             diffStats: summary.diffStats,
+            // C9: additive, and each part carries its own schema version.
+            ...(summary.verification ? { verification: summary.verification } : {}),
+            ...(summary.scope ? { scope: summary.scope } : {}),
+            /**
+             * C9 (requirement 4): the self-review travels in its metadata-only form. `writeSelfReviewSummary`
+             * has already run on every terminal path that reached the review, so this is the same verdict the
+             * run result carries — only without the reviewer's prose, which is conversation, not state.
+             */
+            ...(selfReviewVerdict ? { selfReview: toPersistedSelfReview(selfReviewVerdict) } : {}),
           },
         }));
       }
       return finish(status, reason, message);
+    };
+
+    /**
+     * C9: the non-terminal exit. The run asked the user a question, so it stops **without finishing**:
+     *
+     *   - `markFinished` is never called. A paused run has no outcome, and stamping `finished_at` would make the
+     *     answer — which arrives later, from another process — apply to a run that no longer exists as live work.
+     *   - `markWaitingForUser` is written here rather than left to the tool service, because the runner is what
+     *     owns the run state and the lease, and because the pause must be recorded on the same path that stops the
+     *     loop: a deployment that wires the service without a run-state port must still produce `waiting_for_user`,
+     *     or C6a would later "recover" a run that is simply waiting.
+     *   - the turn is closed (`finished`) before returning. Every turn that opened must close, otherwise a waiting
+     *     run leaves an unfinished turn behind and the resume in C10 would treat the question as re-runnable.
+     *   - the replay bundle is deliberately **not** finalized: the run is not over, so its recording is not either.
+     *
+     * The sandbox is released (the pause can last hours and a held sandbox is a leaked one); a resume takes a
+     * fresh one.
+     */
+    const pauseForUser = async (question: { questionId: string; toolCallId: string }): Promise<CodingAgentRunResult> => {
+      if (stateRunId && this.ports.runState) {
+        if (this.ports.runState.markWaitingForUser) {
+          await writeState(() => this.ports.runState!.markWaitingForUser!({
+            companyId, runId: stateRunId!, questionId: question.questionId, toolCallId: question.toolCallId,
+          }));
+        } else {
+          // No terminal state is written instead: a run that cannot be marked waiting must be visible as such.
+          this.ports.logger?.warn("run_state_pause_unsupported", {
+            runId: stateRunId, questionId: question.questionId,
+          });
+        }
+        await writeState(() => this.ports.runState!.appendTurn({
+          companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
+        }));
+      }
+      stopHeartbeat();
+      await release("waiting_for_user");
+      await this.ports.runEvents?.append({
+        eventKey: `code-run-waiting-for-user:${turnId}`,
+        eventType: "waiting_for_user",
+        runStatus: "waiting_for_user",
+        message: "Coding Agent run is waiting for the user to answer a question",
+      });
+      summary.turns = steps;
+      summary.remaining = "The run is waiting for the user to answer a question.";
+      return finish("waiting_for_user", "waiting_for_user", `Waiting for the user to answer question ${question.questionId}.`);
+    };
+
+    /**
+     * Reads the question id out of a settled `code.ask_user` result. Only the envelope's `data` is consulted —
+     * never `code_run_states.details`, which is written with `COALESCE` and can therefore hold an earlier
+     * snapshot — and the shape is checked here rather than trusted, because this value decides whether the loop
+     * stops. `null` means "this call asked nothing", which the caller turns into a refusal.
+     */
+    const questionIdFrom = (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): { questionId: string; toolCallId: string } | null => {
+      if (outcome.call.name !== CODE_ASK_USER_TOOL || !outcome.result.ok) return null;
+      const envelope = outcome.result.result;
+      if (!envelope || typeof envelope !== "object") return null;
+      const data = (envelope as { data?: unknown }).data;
+      if (!data || typeof data !== "object") return null;
+      const questionId = (data as { questionId?: unknown }).questionId;
+      if (typeof questionId !== "string" || questionId.length === 0) return null;
+      return { questionId, toolCallId: outcome.call.id };
     };
 
     const release = async (reason: string): Promise<void> => {
@@ -1082,6 +1471,662 @@ export class CodingAgentRunner {
       } catch {
         // Swallowed on purpose; the metadata-only property is asserted directly in the security-gate suite.
       }
+    };
+
+    /**
+     * C9: the run's change set, as the per-turn tracker knows it.
+     *
+     * Best effort by design: a missing tracker means "no changes are known", which disables the guards for
+     * this run rather than failing it. The alternative — treating an unreadable tracker as a change set — would
+     * make the guards fire on no evidence.
+     */
+    const runChanges = (): Array<{ path: string; tool: string; status?: string; diff?: string }> => {
+      if (!this.ports.toolRuntime.turnSummary) return [];
+      try {
+        const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, turnId);
+        return (summaryForTurn.changes ?? []).map((change) => ({
+          path: change.path,
+          tool: change.tool,
+          ...(change.status !== undefined ? { status: change.status } : {}),
+          ...(change.diff !== undefined ? { diff: change.diff } : {}),
+        }));
+      } catch {
+        return [];
+      }
+    };
+
+    /** C9: one-line, metadata-only description of a finding — never the diff itself. */
+    const describeFindings = (findings: ReadonlyArray<{ path: string; kind: string }>): string =>
+      findings.slice(0, 5).map((finding) => `${finding.path}:${finding.kind}`).join(", ");
+
+    /**
+     * C9: evaluates the change set against the scope guard and the test-integrity guard.
+     *
+     * Both are pure functions of the change set, so this is reproducible and cannot depend on the model's own
+     * description of what it did. The result is written into the run summary and, when something was found,
+     * into Activity — where a human reviewing the run will actually see it.
+     */
+    const evaluateChangeSet = async (): Promise<void> => {
+      const changes = runChanges();
+      if (!changes.length) return;
+      testIntegrity = analyzeTestIntegrity(changes);
+      scopeGuard = evaluateScopeGuard({
+        changedPaths: changes.map((change) => change.path),
+        requestText: input.prompt,
+        maxChangedFiles: this.limits.maxChangedFiles,
+      });
+      summary.scope = {
+        changedFiles: scopeGuard.changedFiles,
+        limit: scopeGuard.limit,
+        exceeded: scopeGuard.exceeded,
+        severity: scopeGuard.severity,
+        unrelatedPaths: scopeGuard.unrelatedPaths,
+        relatednessUnknown: scopeGuard.relatednessUnknown,
+        warnings: scopeGuard.warnings.map((warning) => ({
+          code: warning.code,
+          message: warning.message,
+          severity: warning.severity,
+          paths: warning.paths,
+        })),
+      };
+      for (const warning of scopeGuard.warnings) {
+        // `turn` is reused rather than adding a new event kind: the Activity kind vocabulary is constrained by
+        // the C6b table's CHECK constraint, and a telemetry kind is not worth a migration.
+        await record({
+          kind: "turn",
+          companyId, projectId, sessionId,
+          runId: input.runId,
+          turn: steps,
+          ok: warning.severity !== "critical",
+          reason: warning.code,
+        });
+      }
+      if (testIntegrity.flagged) {
+        await record({
+          kind: "turn",
+          companyId, projectId, sessionId,
+          runId: input.runId,
+          turn: steps,
+          ok: false,
+          reason: "test_integrity_flagged",
+        });
+      }
+    };
+
+    /** Maps the verify tool's result onto per-check reports without inventing detail it did not provide. */
+    const toCheckReports = (outcome: CodeToolInvokeResult | CodeToolInvokeFailure): VerificationCheckReport[] => {
+      if (!outcome.ok) {
+        const code = String(outcome.error.code);
+        /**
+         * Only "the check could not be run at all" is `unavailable`; everything else is a failure. The
+         * conservative reading matters here: calling an unknown failure "unavailable" would let a genuine
+         * broken build be reported as a deployment gap.
+         */
+        const state = code === "approval_required"
+          ? "approval_required"
+          : code === "tool_not_configured" || code === "feature_disabled"
+            ? "unavailable"
+            : "failed";
+        return verificationTools.map((tool) => ({
+          tool,
+          state,
+          code,
+          message: outcome.error.message,
+        }));
+      }
+      const payload = outcome.result as { checks?: unknown } | null | undefined;
+      const reported = Array.isArray(payload?.checks) ? payload.checks : [];
+      const mapped: VerificationCheckReport[] = [];
+      for (const entry of reported) {
+        if (!entry || typeof entry !== "object") continue;
+        const value = entry as Record<string, unknown>;
+        const tool = typeof value.tool === "string" ? value.tool : typeof value.name === "string" ? value.name : "unknown";
+        const passed = value.ok === true || value.passed === true || value.state === "passed" || value.status === "passed";
+        mapped.push({
+          tool,
+          state: passed ? "passed" : value.state === "unavailable" ? "unavailable" : "failed",
+          ...(typeof value.code === "string" ? { code: value.code } : {}),
+        });
+      }
+      if (mapped.length) return mapped;
+      // The runner reported success without per-check detail; recording the requested kinds as passed is the
+      // truthful reading of `ok: true` and nothing more.
+      return verificationTools.map((tool) => ({ tool, state: "passed" }));
+    };
+
+    /**
+     * C9: runs the requested checks through the **canonical** tool runtime rather than a private path, so the
+     * PolicyEngine, RBAC, approval handling and audit all still apply to an automatically triggered
+     * verification. A check that needs approval is reported as `approval_required` and stops the loop: the
+     * runner must never work around a human decision.
+     */
+    const runVerification = async (): Promise<void> => {
+      const attempt = verificationLoop.report().verificationRuns + 1;
+      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
+      try {
+        outcome = await this.ports.toolRuntime.invoke(ctx, {
+          companyId,
+          projectId,
+          sessionId,
+          tool: "code.verify.run",
+          args: { tools: [...verificationTools], changedOnly: true },
+          toolCallId: `verify:${turnId}:${attempt}`,
+          turnId,
+          ...(input.runId ? { runId: input.runId } : {}),
+          ...(stateRunId ? { runId: stateRunId } : {}),
+        });
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        outcome = {
+          ok: false,
+          error: {
+            code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
+            status: 500,
+            message: failure.message ?? "Verification failed to run",
+            tool: "code.verify.run",
+            step: "execute",
+            retryable: false,
+          },
+        };
+      }
+      const checks = toCheckReports(outcome);
+      verificationLoop.record(checks);
+      await record({
+        kind: "tool_call",
+        companyId, projectId, sessionId,
+        runId: input.runId,
+        turn: steps,
+        tool: "code.verify.run",
+        toolCallId: `verify:${turnId}:${attempt}`,
+        ok: outcome.ok,
+        ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
+      });
+    };
+
+    /**
+     * C9: writes the verification outcome into the run summary.
+     *
+     * The one judgement made here: a verification that passed over a change set that removed or weakened tests
+     * is **not** reported as a clean pass. It is `passed_with_unjustified_test_changes`, because a green check
+     * mark over a weakened suite is exactly the outcome this guard exists to prevent. Nothing tries to parse a
+     * justification out of the model's prose — the flag records that none was seen.
+     */
+    const writeVerificationSummary = (): void => {
+      if (verificationDisabled) return;
+      const report: VerificationReport = verificationLoop.report();
+      if (report.status === "not_run" && !testIntegrity) return;
+      const integrity = testIntegrity;
+      const unjustified = integrity?.requiresJustification === true && report.status === "passed";
+      summary.verification = {
+        schemaVersion: report.schemaVersion,
+        status: unjustified ? "passed_with_unjustified_test_changes" : report.status,
+        attemptsUsed: report.attemptsUsed,
+        maxAttempts: report.maxAttempts,
+        verificationRuns: report.verificationRuns,
+        requestedTools: [...report.requestedTools],
+        failedChecks: report.failedChecks.map((check) => ({
+          tool: check.tool,
+          ...(check.code ? { code: check.code } : {}),
+          /**
+           * The check's own message is deliberately **not** copied here. The summary is persisted into the run
+           * state, and a verifier's message can quote file content; the model-facing repair instruction carries
+           * it instead, where it is conversation and not a metadata record.
+           */
+        })),
+        ...(integrity
+          ? {
+              testIntegrity: {
+                flagged: integrity.flagged,
+                requiresJustification: integrity.requiresJustification,
+                // No justification was observed. Claiming one was seen would be the fabrication this whole
+                // step is about.
+                justificationProvided: false,
+                findings: integrity.findings.map((finding) => ({
+                  path: finding.path,
+                  kind: finding.kind,
+                  detail: finding.detail,
+                })),
+                testFilesTouched: [...integrity.testFilesTouched],
+                testFilesDeleted: [...integrity.testFilesDeleted],
+              },
+            }
+          : {}),
+      };
+    };
+
+    /** C9: the message a human reads when verification never passed. Metadata only: tools and codes. */
+    const verificationStopMessage = (): string => {
+      const failed = verificationLoop.report().failedChecks;
+      const detail = failed.length
+        ? failed.map((check) => `${check.tool}${check.code ? ` (${check.code})` : ""}`).join(", ")
+        : "verification did not run";
+      return `Stopped: verification still fails after ${verificationLoop.attemptsUsed()} repair attempt(s): ${detail}.`;
+    };
+
+    // ---------------------------------------------------------------------------------------------------
+    // C9 (requirement 4): the self-review pass
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * A stable signature of the current change set: every path with its status and the hash of its diff. It is
+     * the input to the one decision the post-review path has to make — "did the fix actually change anything?"
+     * — and it is computed from the same tracker the guards read, so it cannot disagree with them.
+     */
+    const currentChangeSignature = (): string => {
+      const changes = runChanges().slice().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return changes.map((change) => `${change.path}:${change.status ?? ""}:${sha256Hex(change.diff ?? "")}`).join("|");
+    };
+
+    /** The diff text handed to the review: bounded, with the truncation stated rather than hidden. */
+    const boundedDiff = (limit: number): string => {
+      const parts = runChanges()
+        .filter((change) => typeof change.diff === "string" && change.diff.length > 0)
+        .map((change) => `--- ${change.path}\n${change.diff ?? ""}`);
+      const joined = parts.join("\n");
+      const bound = bounded(joined, limit);
+      return bound.truncated ? `${bound.text}\n[the diff shown to this review was truncated at ${limit} characters]` : bound.text;
+    };
+
+    /** The plan block for the review. `null` (no block) is what an absent or unreadable plan yields. */
+    const loadApprovedPlan = async (): Promise<string | null> => {
+      const port = this.ports.sessionPlan;
+      if (!port) return null;
+      try {
+        const plan = await port.load({ ctx, companyId, projectId, sessionId });
+        if (!plan) return null;
+        const lines = [
+          `revision: ${plan.revision} (status: ${plan.status})`,
+          `execution mode chosen by the user: ${plan.executionMode ?? "not recorded"}`,
+          "files:",
+          ...(plan.plan.files.length ? plan.plan.files.map((file) => `- ${file}`) : ["- (none listed)"]),
+          "steps:",
+          ...(plan.plan.steps.length ? plan.plan.steps.map((step, index) => `${index + 1}. ${step}`) : ["(none listed)"]),
+          "risks:",
+          ...(plan.plan.risks.length ? plan.plan.risks.map((risk) => `- ${risk}`) : ["- (none listed)"]),
+          `test strategy: ${plan.plan.testStrategy || "(not stated)"}`,
+        ];
+        return lines.join("\n");
+      } catch {
+        // Fail-soft with an honest record: the review is told it has no plan (`inputs.approvedPlan: false`)
+        // rather than being handed a fabricated one, and an unreadable plan never stops a run.
+        return null;
+      }
+    };
+
+    /** The verification input as text for the review. Metadata only: tools, codes and counts. */
+    const verificationForReview = (): string => {
+      const report = verificationLoop.report();
+      if (!summary.verification && report.verificationRuns === 0) return "verification did not run for this change";
+      const status = summary.verification?.status ?? report.status;
+      const failed = report.failedChecks.map((check) => `${check.tool}${check.code ? ` (${check.code})` : ""}`);
+      return [
+        `status: ${status}`,
+        `verification runs: ${report.verificationRuns}`,
+        `repair attempts used: ${report.attemptsUsed} of ${report.maxAttempts}`,
+        `requested checks: ${report.requestedTools.join(", ") || "(none)"}`,
+        `failing checks: ${failed.join(", ") || "(none)"}`,
+      ].join("\n");
+    };
+
+    /** The test-integrity input as text for the review. Metadata only: paths, kinds and counts. */
+    const testIntegrityForReview = (): string => {
+      const integrity = testIntegrity;
+      if (!integrity) return "test integrity did not run (no change set was inspected)";
+      return [
+        `flagged: ${integrity.flagged}`,
+        `requires justification: ${integrity.requiresJustification}`,
+        `test files touched: ${integrity.testFilesTouched.join(", ") || "(none)"}`,
+        `test files deleted: ${integrity.testFilesDeleted.join(", ") || "(none)"}`,
+        `findings: ${integrity.findings.map((finding) => `${finding.path}:${finding.kind}`).join(", ") || "(none)"}`,
+      ].join("\n");
+    };
+
+    const toFindingSummary = (finding: SelfReviewFinding): CodingAgentSelfReviewFinding => ({
+      id: finding.id,
+      category: finding.category,
+      severity: finding.severity,
+      file: finding.file,
+      reason: finding.reason,
+      suggestedFix: finding.suggested_fix,
+      blocking: finding.blocking,
+    });
+
+    /** Writes the verdict into the run summary. Every terminal path calls this once verification ran. */
+    const writeSelfReviewSummary = (): void => {
+      const verdict = selfReviewVerdict;
+      if (!verdict) return;
+      summary.selfReview = {
+        schemaVersion: SELF_REVIEW_SCHEMA_VERSION,
+        status: verdict.status,
+        ...(verdict.reason ? { reason: verdict.reason } : {}),
+        ...(verdict.detail ? { detail: verdict.detail } : {}),
+        ran: verdict.ran,
+        reviewRuns: verdict.reviewRuns,
+        iterationsUsed: verdict.iterationsUsed,
+        maxIterations: verdict.maxIterations,
+        fixApplied: verdict.fixApplied,
+        findingsCount: verdict.findings.length,
+        blocking: verdict.blocking,
+        unresolved: verdict.unresolved.length,
+        findings: verdict.findings.map(toFindingSummary),
+        inputs: verdict.inputs,
+        reviewHash: verdict.reviewHash,
+      };
+    };
+
+    /**
+     * Runs the one self-review pass of this run.
+     *
+     * `selfReviewPasses` is checked **here in addition to** the module's own single-pass guard. Both are
+     * deliberate: the module makes a second pass impossible, and this counter makes it observable — a test can
+     * assert that the runner only ever asked once, rather than having to reason about the module's internals.
+     *
+     * The pass is never gated on verification passing. The verification result is one of its six inputs, so a
+     * review of a change whose checks failed is exactly what the input is for; what the review must never do is
+     * run before verification, because then it would review a change nobody checked.
+     */
+    const runSelfReview = async (): Promise<void> => {
+      const state = selfReviewState;
+      if (!state) return;
+      const verdict = await state.execute({
+        input: {
+          originalGoal: input.prompt,
+          approvedPlan: await loadApprovedPlan(),
+          finalDiff: boundedDiff(this.selfReviewDiffChars),
+          changedFiles: runChanges().map((change) => ({
+            path: change.path,
+            tool: change.tool,
+            ...(change.status !== undefined ? { status: change.status } : {}),
+          })),
+          verification: verificationForReview(),
+          testIntegrity: testIntegrityForReview(),
+        },
+        reviewRequest: state.request(),
+        chat: async (request) => {
+          try {
+            const result = await this.ports.engine.chat({
+              messages: request.messages,
+              // No tools: the review reads and reports. Offering the tool list would let the review act, and
+              // the whole point of this pass is that its output is data.
+              model: input.model,
+              ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
+              signal: input.signal,
+              idempotencyKey: request.idempotencyKey,
+              policyContext: {
+                companyId,
+                projectId,
+                sessionId,
+                dataClassification: session.dataClassification,
+              },
+            });
+            return { ok: true as const, content: result.content ?? "" };
+          } catch (error) {
+            const failure = error as { code?: string; message?: string };
+            return { ok: false as const, code: failure.code ?? "review_call_failed", message: failure.message };
+          }
+        },
+        // The review request is provider-bound content, so it passes the **existing** C5b guard — the same
+        // policy resolution, classification ceiling, content-type rules, private-code rule and redaction list
+        // as a real call. There is deliberately no second scanner here, and a refused text is refused rather
+        // than sanitised: the guard's whole contract is that a placeholder must never be substituted in.
+        ...(this.ports.providerDataGuard
+          ? {
+              guardPrompt: async (text: string) => {
+                await this.ports.providerDataGuard!.guardProviderBoundText(text, {
+                  model: input.model,
+                  policyContext: {
+                    companyId,
+                    projectId,
+                    sessionId,
+                    dataClassification: session.dataClassification,
+                  },
+                });
+              },
+            }
+          : {}),
+      });
+      selfReviewVerdict = verdict;
+      writeSelfReviewSummary();
+      await record({
+        kind: "turn",
+        companyId, projectId, sessionId,
+        runId: input.runId,
+        turn: steps,
+        // A metadata-only line: counts, categories, status and the profile that produced them. `describeSelfReview`
+        // never carries a finding's reason, and the reason vocabulary is closed, so nothing content-shaped can
+        // reach the Activity table.
+        ok: verdict.status === "clean" || verdict.status === "repaired",
+        reason: `${describeSelfReview(verdict)} profile=${this.ports.selfReview?.profileId ?? "run-default"}`,
+      });
+    };
+
+    /**
+     * Creates the run's **single** review state. Called exactly twice in this method, and both call sites are
+     * mutually exclusive: the "nothing to verify and nothing to review" exit, and the one pass that follows
+     * verification. `selfReviewPasses` makes a third call impossible even by accident, and the state's own
+     * `execute` is a no-op after its first call — belt and braces, because this is the property the owner asked
+     * for in so many words.
+     */
+    const beginSelfReviewState = (): SelfReviewVerdict | null => {
+      if (selfReviewPasses > 0 && selfReviewState) return selfReviewState.report();
+      selfReviewPasses += 1;
+      selfReviewState = createSelfReview({
+        input: { finalDiff: boundedDiff(this.selfReviewDiffChars) },
+        ...(this.ports.selfReview?.maxFixIterations !== undefined
+          ? { maxFixIterations: this.ports.selfReview.maxFixIterations }
+          : { maxFixIterations: this.limits.selfReviewFixIterations }),
+        ...(this.ports.selfReview?.enabled !== undefined ? { enabled: this.ports.selfReview.enabled } : {}),
+      });
+      return selfReviewState.report();
+    };
+
+    /**
+     * Runs the checks once and turns the loop's decision into the outcomes the caller has to tell apart:
+     *
+     * - `repair` — a repair round is available; the instruction has been pushed onto the transcript.
+     * - `approval_required` — a check needs a human; the run stops without reviewing, because the review cannot
+     *   change an approval-gated outcome.
+     * - `unavailable` — the checks could not run at all; the run stops without reviewing, because reviewing a
+     *   change nobody could check would not make the check happen.
+     * - `exhausted` — the repair budget is gone and the checks still fail; the caller goes on to review and then
+     *   stops with `verification_failed`.
+     * - `passed` — the checks passed (with the test-integrity caveat already applied to the summary).
+     */
+    const verifyAndDecide = async (): Promise<"passed" | "repair" | "approval_required" | "unavailable" | "exhausted"> => {
+      await runVerification();
+      /**
+       * The signature is recorded from the change set that the checks just saw. It is the baseline the
+       * post-review comparison uses, so "the review fix changed nothing" is measured against the exact tree
+       * that was verified rather than against a tree captured at some other moment.
+       */
+      verifiedSignature = currentChangeSignature();
+      writeVerificationSummary();
+      const decision = verificationLoop.decide();
+      if (decision.decision === "repair") {
+        messages.push({ role: "system", content: formatRepairInstruction(verificationLoop.report()) });
+        await record({
+          kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps,
+          reason: "verification_repair",
+        });
+        return "repair";
+      }
+      if (decision.decision === "complete") return "passed";
+      if (decision.code === VERIFICATION_APPROVAL_REQUIRED) return "approval_required";
+      if (decision.code === VERIFICATION_UNAVAILABLE) return "unavailable";
+      return "exhausted";
+    };
+
+    /**
+     * The single self-review pass. Runs the state's one `execute`, which rebuilds the request from the sources
+     * known now and calls the model once.
+     *
+     * `selfReviewPasses` is incremented by `beginSelfReviewState` before this runs, so a hypothetical second
+     * call would still go through the state — whose `execute` returns the first verdict without a model call.
+     * Two independent mechanisms, one outcome: one pass per run.
+     */
+    const beginSelfReview = async (): Promise<void> => {
+      beginSelfReviewState();
+      await runSelfReview();
+    };
+
+    /**
+     * The post-review path, and the only place a self-review-driven fix can be started.
+     *
+     * The order is the owner's, exactly: implement → verify → repair (≤3) → **self-review once** → optionally
+     * **one** fix iteration → **re-verify if the review changed the code** → finish. Everything that could
+     * re-open the review is absent by construction: there is no second `beginSelfReview` call on this path, and
+     * `selfReviewState.execute` is a no-op after its first call.
+     */
+    const afterSelfReview = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string } | { action: "continue" }> => {
+      const verdict = selfReviewVerdict;
+      if (!verdict) return { action: "complete" };
+
+      if (verdict.status === "unavailable") {
+        // "We did not check" is never "clean". The run stops and says why; the summary keeps the reason.
+        return { action: "stop", reason: "self_review_unavailable", message: selfReviewStopMessage(verdict) };
+      }
+
+      if (verdict.status === "findings") {
+        const instruction = selfReviewState?.applyFix() ?? null;
+        if (instruction) {
+          // The single fix iteration. The instruction goes back to the model as conversation, and the run
+          // continues so the model can act on it.
+          messages.push({ role: "system", content: instruction });
+          selfReviewFixPending = true;
+          await record({
+            kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps,
+            reason: "self_review_fix",
+          });
+          return { action: "continue" };
+        }
+        // No fix iteration available (the budget is zero, or findings are non-blocking only). Findings that
+        // nobody may fix are reported as unresolved rather than quietly completed.
+        const blocking = verdict.findings.filter((finding) => finding.blocking);
+        if (blocking.length) {
+          selfReviewState?.noteFixOutcome(false);
+          selfReviewVerdict = selfReviewState?.report() ?? verdict;
+          writeSelfReviewSummary();
+          return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(selfReviewVerdict) };
+        }
+        return { action: "complete" };
+      }
+
+      if (verdict.status === "unresolved") {
+        return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(verdict) };
+      }
+
+      return { action: "complete" };
+    };
+
+    /**
+     * Closes the fix iteration once the model has stopped calling tools again.
+     *
+     * The comparison against `verifiedSignature` is what decides whether a second verification runs, and it is a
+     * fact about the tree rather than the model's claim about it. A fix that changed nothing must not silently
+     * pass for "verified after the review": it is reported as `unresolved` instead, because the findings the
+     * review raised are still standing over exactly the tree that was already checked.
+     */
+    const afterSelfReviewFix = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> => {
+      const changed = currentChangeSignature() !== verifiedSignature;
+      selfReviewFixPending = false;
+      if (!changed) {
+        /**
+         * The model answered the review without changing anything. The findings stand, and a run whose review
+         * found something blocking is not allowed to call itself complete — so no re-verification is run for a
+         * tree that was already checked, and the verdict is closed against the findings.
+         */
+        selfReviewState?.noteFixOutcome(false);
+        selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
+        writeSelfReviewSummary();
+        const outstanding = (selfReviewVerdict?.unresolved ?? []).filter((finding) => finding.blocking);
+        if (outstanding.length) {
+          return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(selfReviewVerdict ?? undefined) };
+        }
+        return { action: "complete" };
+      }
+
+      /**
+       * The review changed the code, so the checks run **again** — unconditionally, and before anything else is
+       * concluded. This is the mandatory re-verification, and it is deliberately not the same decision as the
+       * pre-review one: there is no repair budget consumed here, because the review fix is not a repair round
+       * and a run must not be able to buy repairs by looping through reviews.
+       *
+       * The verdict is closed only **after** this run, because "the fix resolved the blocking findings" is a
+       * claim the checks have to support: `noteFixOutcome(true)` is what turns the review's findings into
+       * `repaired`, and it is called only when the re-verification passes.
+       */
+      const runAttempt = verificationLoop.report().verificationRuns + 1;
+      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
+      try {
+        outcome = await this.ports.toolRuntime.invoke(ctx, {
+          companyId,
+          projectId,
+          sessionId,
+          tool: "code.verify.run",
+          args: { tools: [...verificationTools], changedOnly: true },
+          toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
+          turnId,
+          ...(input.runId ? { runId: input.runId } : {}),
+          ...(stateRunId ? { runId: stateRunId } : {}),
+        });
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        outcome = {
+          ok: false,
+          error: {
+            code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
+            status: 500,
+            message: failure.message ?? "Verification failed to run",
+            tool: "code.verify.run",
+            step: "execute",
+            retryable: false,
+          },
+        };
+      }
+      const checks = toCheckReports(outcome);
+      // The loop records the checks so the summary reports what the checks said after the review fix. Its repair
+      // budget is deliberately **not** consumable here: the single self-review fix is not a repair round, so a
+      // failed re-verification stops the run instead of buying another round. The loop is closed for repairs
+      // before anything else can ask it for one.
+      verificationLoop.record(checks);
+      verificationLoop.blockFurtherRepairs();
+      writeVerificationSummary();
+      await record({
+        kind: "tool_call",
+        companyId, projectId, sessionId,
+        runId: input.runId,
+        turn: steps,
+        tool: "code.verify.run",
+        toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
+        ok: outcome.ok,
+        ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
+        reason: "self_review_reverify",
+      });
+
+      const failed = checks.filter((check) => check.state !== "passed");
+      if (failed.length) {
+        /**
+         * Still failing after the review-driven change: the fixing pass did not resolve the findings, so the
+         * verdict is closed **against** them (`noteFixOutcome(false)`) and the run stops rather than looping.
+         * There is no second self-review and no further fix iteration, so this is the honest end of the road —
+         * and the blocking findings the review raised stay visible in the summary next to the verification
+         * failure, instead of being dropped because a fix was attempted.
+         */
+        selfReviewState?.noteFixOutcome(false);
+        selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
+        writeSelfReviewSummary();
+        return {
+          action: "stop",
+          reason: "verification_failed",
+          message: `Stopped: the checks still fail after the self-review fix (${failed.map((check) => check.tool).join(", ")}).`,
+        };
+      }
+      // The checks passed again over the changed tree, so the blocking findings were acted on. This is what turns
+      // the verdict into `repaired`; it is called after the checks, never before them.
+      selfReviewState?.noteFixOutcome(true);
+      selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
+      writeSelfReviewSummary();
+      return { action: "complete" };
     };
 
     try {
@@ -1691,9 +2736,138 @@ export class CodingAgentRunner {
             companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
           }));
         }
+        // The sandbox is **not** released here any more: C9 may still need it for the verification run and for
+        // the repair turns that follow a failed check. Releasing before the decision would leave the repair
+        // loop with nothing to run in, and it would announce completion for a run that is about to stop.
+        this.applyTurnSummary(summary, sessionId, turnId);
+
+        /**
+         * C9: the model has stopped asking for tools, which in C6 meant "done". It is not done until the change
+         * verifies and the run has reviewed its own work. The order is deliberate — inspect the change set first
+         * (scope and test integrity, both pure functions of it), then run the checks, then decide — because the
+         * decision must not depend on the model's account of what it changed.
+         *
+         * Requirement 4 adds the last two stages and nothing else: **one** self-review pass after verification
+         * settles, and **one** fix iteration if it found something blocking. Both are structural: the review
+         * state is created once per run and its `execute` is a no-op afterwards, and `applyFix` consumes its
+         * single budget on first use.
+         */
+        await evaluateChangeSet();
+        const changeSet = runChanges();
+        /**
+         * The caller's opt-out (`verificationTools: []`) turns off the whole verify-and-review stage. The review
+         * is not silently skipped in that case: its verdict is computed and says `not_run`, which is what the
+         * summary reports — "we did not review this" is visible, never dressed up as clean.
+         */
+        if (verificationDisabled || changeSet.length === 0) {
+          // The state exists so the verdict is explicit rather than an absent field: `not_run` with its reason
+          // ("no changes to review", "disabled by configuration"). "We did not review this" is visible, never
+          // dressed up as clean.
+          selfReviewVerdict = beginSelfReviewState();
+          writeSelfReviewSummary();
+          await release("completed");
+          await this.ports.runEvents?.append({ eventKey: `code-run-completed:${turnId}`, eventType: "completed", runStatus: "completed", message: "Coding Agent run completed" });
+          summary.remaining = "The model finished without further tool calls.";
+          return stop("completed", "completed", assistantText || "The run finished.");
+        }
+
+        /**
+         * The settle stage. There are exactly two ways to arrive here, and the branch is what keeps the repair
+         * budget and the review budget apart:
+         *
+         * - a **model turn** (the ordinary case): the checks run, the repair loop may ask for one more round, and
+         *   the self-review pass then runs once;
+         * - the **single review-driven fix turn** (`selfReviewFixPending`): the checks already ran on the
+         *   pre-review tree, so they are not run a third time here — `afterSelfReviewFix` compares the tree and
+         *   re-verifies exactly once if the fix changed it, then re-reads the review's own verdict. Running the
+         *   repair loop here instead would let the review buy extra repair rounds, which is precisely what the
+         *   owner's "at most one fix iteration" rule forbids.
+         */
+        let verificationExhausted = false;
+        if (selfReviewFixPending) {
+          const outcome = await afterSelfReviewFix();
+          if (outcome.action === "stop") {
+            summary.remaining = outcome.reason;
+            summary.turns = steps;
+            await release(outcome.reason);
+            return stop("stopped", outcome.reason, outcome.message);
+          }
+        } else {
+          const failing = await verifyAndDecide();
+          if (failing === "repair") {
+            /**
+             * The failure goes back to the model with the failing checks named, and the run continues. The
+             * instruction also states the two things that are not allowed: weakening a test, and claiming a pass
+             * that is not there.
+             *
+             * The sandbox is released here exactly as it was before this step existed: the run state is durable,
+             * a repair turn is a new turn, and the release is idempotent. What matters is the *order* — the repair
+             * instruction is already in the transcript and the run is still live.
+             */
+            await release("verification_repair");
+            continue;
+          }
+          if (failing === "approval_required") {
+            /**
+             * A check needs a human decision. The review has nothing to add — the change cannot be accepted
+             * whatever a reviewer thinks of it — and running it would spend a model call to reach a conclusion
+             * that is already settled. This is exactly the C9 behaviour the existing suite pins, and
+             * requirement 4 does not change it: self-review is the *last* stage of a run that is otherwise ready
+             * to finish.
+             */
+            summary.remaining = VERIFICATION_APPROVAL_REQUIRED;
+            summary.turns = steps;
+            await release(VERIFICATION_APPROVAL_REQUIRED);
+            return stop("stopped", "verification_failed", verificationStopMessage());
+          }
+          if (failing === "unavailable") {
+            /**
+             * The checks could not be run at all (no verification runner, or a disabled check). This is the one
+             * settled outcome the review does not follow, and deliberately so: the review's whole point is to
+             * look at a **checked** change, and spending a model call to review a tree nobody could check would
+             * not make the verification happen. The stop reason is the existing `verification_failed`, so this
+             * is byte-for-byte the behaviour C9 already had.
+             */
+            summary.remaining = VERIFICATION_UNAVAILABLE;
+            summary.turns = steps;
+            await release(VERIFICATION_UNAVAILABLE);
+            return stop("stopped", "verification_failed", verificationStopMessage());
+          }
+          /**
+           * `failing === "exhausted"` keeps going into the review on purpose: it is the run's last chance to say
+           * *what* is wrong in its own words before stopping, and its verdict travels with the verification
+           * failure in the summary. The stop reason stays `verification_failed`, so nothing about an exhausted
+           * repair loop changes because a review also ran.
+           */
+          verificationExhausted = failing === "exhausted";
+          if (verificationExhausted) summary.remaining = VERIFICATION_REPAIR_EXHAUSTED;
+          await beginSelfReview();
+
+          const outcome = await afterSelfReview();
+          if (outcome.action === "stop") {
+            summary.remaining = outcome.reason;
+            summary.turns = steps;
+            await release(outcome.reason);
+            return stop("stopped", outcome.reason, outcome.message);
+          }
+          if (outcome.action === "continue") {
+            // The single review-driven fix iteration: the model acts on the findings and the loop resumes.
+            continue;
+          }
+        }
+
+        /**
+         * A settled verification failure still stops the run after the review — the review is extra reporting,
+         * never a way to overturn the checks.
+         */
+        if (verificationExhausted) {
+          summary.turns = steps;
+          await release("verification_failed");
+          return stop("stopped", "verification_failed", verificationStopMessage());
+        }
+
         await release("completed");
         await this.ports.runEvents?.append({ eventKey: `code-run-completed:${turnId}`, eventType: "completed", runStatus: "completed", message: "Coding Agent run completed" });
-        this.applyTurnSummary(summary, sessionId, turnId);
         summary.remaining = "The model finished without further tool calls.";
         return stop("completed", "completed", assistantText || "The run finished.");
       }
@@ -1884,10 +3058,53 @@ export class CodingAgentRunner {
           }
           for (const wave of planToolCallWaves(group, waveLimit)) {
             const waveOutcomes = await Promise.all(wave.map((call) => execute(call)));
-            for (const outcome of waveOutcomes) appendToolResult(outcome);
+            for (const outcome of waveOutcomes) {
+              appendToolResult(outcome);
+              // `code.ask_user` is not read-only, so it never lands in a wave today; the check is here anyway so
+              // that a future classification mistake cannot turn the pause into "ask and keep going".
+              const asked = questionIdFrom(outcome);
+              if (asked) return await pauseForUser(asked);
+            }
           }
         } else {
-          appendToolResult(await execute(head));
+          const outcome = await execute(head);
+          appendToolResult(outcome);
+          /**
+           * C9: the pause. The question row and the run state already exist by the time the tool result is
+           * settled, so the only decision left here is the loop's: it stops **before** the next model call. Nothing
+           * after this point runs — no further tool call of this turn, no next turn — which is what makes
+           * "the model cannot answer its own question" structural rather than a convention.
+           *
+           * A successful `code.ask_user` whose result carries no question id is refused rather than treated as an
+           * ordinary result: continuing would run the model past a question nobody can find or answer.
+           */
+          if (outcome.call.name === CODE_ASK_USER_TOOL && outcome.result.ok) {
+            const asked = questionIdFrom(outcome);
+            if (!asked) {
+              await release("tool_failure");
+              return stop("failed", "tool_failure", "Stopped: code.ask_user reported success without a question id, so the run could not be paused safely.");
+            }
+            /**
+             * A turn can carry several calls, and the assistant message above already announced all of them, so
+             * the ones the pause stopped still need a result — otherwise the transcript would carry an
+             * unanswered tool call that no replay could reconstruct. They are reported as **not executed**; the
+             * point of the pause is that nothing else runs.
+             */
+            for (const rest of pending) {
+              appendToolResult({
+                call: rest,
+                result: {
+                  ok: false,
+                  error: {
+                    code: "tool_failed", status: 409, tool: rest.name, step: "execute", retryable: true,
+                    message: "Not executed: the run paused to ask the user a question.",
+                  },
+                },
+              });
+            }
+            pending.length = 0;
+            return await pauseForUser(asked);
+          }
         }
 
         if (repeatedErrors.length === LOOP_REPEAT_THRESHOLD && new Set(repeatedErrors).size === 1) {

@@ -380,6 +380,19 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.active_context.write": "workspace:write",
   "code.project.archive": "business:manage",
   "code.project.delete": "business:manage",
+  // C9: goals and plans. Reading goals, the current plan and the todo list are read surfaces. Creating a goal,
+  // moving it, verifying an acceptance criterion and deciding a plan revision are workspace writes — they
+  // change session state, not the workspace. None of them can complete a goal on its own: the store refuses
+  // `completed` while acceptance criteria are unverified, so authorisation here cannot buy a false finish.
+  "code.goal.read": "workspace:read",
+  "code.plan.read": "workspace:read",
+  "code.goal.write": "workspace:write",
+  "code.plan.decide": "workspace:write",
+  // C9 `code.ask_user`. Reading the question is a read; answering it releases a paused run, so it needs write —
+  // and the service additionally refuses every non-human principal, because an agent that could answer the
+  // question it asked would have found a way to grant itself what it asked for.
+  "code.question.read": "workspace:read",
+  "code.question.answer": "workspace:write",
 });
 
 /**

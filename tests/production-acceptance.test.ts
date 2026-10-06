@@ -389,8 +389,8 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
 
   describe("Phase 14 Acceptance Criteria Verification", () => {
     it("verifies no critical security or isolation failures across 306 capabilities", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(370);
-      expect(CAPABILITY_CATALOG.length).toBe(370);
+      expect(CAPABILITY_MATRIX.length).toBe(373);
+      expect(CAPABILITY_CATALOG.length).toBe(373);
 
       const highRisk = CAPABILITY_MATRIX.filter((c) => c.risk === "high" || c.risk === "critical");
       expect(highRisk.length).toBeGreaterThan(0);

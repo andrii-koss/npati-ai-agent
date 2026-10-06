@@ -1,3 +1,80 @@
+import type {
+  CodeGoalRecord,
+  CodeGoalWithCriteria,
+  CodeSessionPlanRecord,
+  CodeSessionTodoRecord,
+  CreateCodeGoalInput,
+  CreateCodeSessionPlanInput,
+  DecideCodeSessionPlanInput,
+  ReplaceCodeSessionTodosInput,
+  SetCodeGoalCriterionStatusInput,
+  UpdateCodeGoalInput,
+} from "./code-goal-types";
+import type {
+  AnswerCodeUserQuestionInput,
+  CodeUserQuestionRecord,
+  CreateCodeUserQuestionInput,
+} from "./code-question-store";
+
+/**
+ * C9 types are defined in `code-goal-types.ts` and `code-question-store.ts` and re-exported here so the store
+ * interface can name them without this file growing another few hundred lines. The dependency is type-only in
+ * both directions, so there is no runtime cycle.
+ */
+export type {
+  CodeGoalCriterionRecord,
+  CodeGoalCriterionStatus,
+  CodeGoalRecord,
+  CodeGoalStatus,
+  CodeGoalWithCriteria,
+  CodePlanBody,
+  CodePlanExecutionMode,
+  CodeSessionPlanRecord,
+  CodeSessionPlanStatus,
+  CodeSessionTodoRecord,
+  CodeSessionTodoStatus,
+  CreateCodeGoalInput,
+  CreateCodeSessionPlanInput,
+  DecideCodeSessionPlanInput,
+  ReplaceCodeSessionTodosInput,
+  SetCodeGoalCriterionStatusInput,
+  UpdateCodeGoalInput,
+} from "./code-goal-types";
+export {
+  CODE_GOAL_CRITERION_STATUSES,
+  CODE_GOAL_STATUSES,
+  CODE_PLAN_EXECUTION_MODES,
+  CODE_SESSION_PLAN_STATUSES,
+  CODE_SESSION_TODO_STATUSES,
+  CodeGoalAcceptanceUnverifiedError,
+  CodeSessionPlanRevisionConflictError,
+  CodeSessionTodosInvalidError,
+  isCodePlanExecutionMode,
+} from "./code-goal-types";
+export type {
+  AnswerCodeUserQuestionInput,
+  CodeUserQuestionAnswer,
+  CodeUserQuestionChoice,
+  CodeUserQuestionRecord,
+  CodeUserQuestionStatus,
+  CreateCodeUserQuestionInput,
+} from "./code-question-store";
+export {
+  CODE_USER_QUESTION_STATUSES,
+  CodeUserQuestionAnswerInvalidError,
+  CodeUserQuestionNotFoundError,
+  CodeUserQuestionRevisionConflictError,
+  CodeUserQuestionStateError,
+  DEFAULT_QUESTION_TTL_MS,
+  MAX_QUESTION_ANSWER_CHARS,
+  MAX_QUESTION_CHOICES,
+  MAX_QUESTION_PROMPT_CHARS,
+  MAX_QUESTION_TTL_MS,
+  questionTtlMs,
+  validateQuestionAnswer,
+  validateQuestionRequest,
+} from "./code-question-store";
+
 export interface AuthContext {
   userId: string;
   externalSubject?: string;
@@ -895,7 +972,15 @@ export interface ProviderHostedConsentRecord {
 // --- C6a: durable Coding Agent run state ---------------------------------------------------------
 
 /** Coarse state of one code run. `interrupted` means "the process that owned it stopped answering". */
-export type CodeRunStateStatus = "running" | "interrupted" | "completed" | "failed" | "cancelled";
+/**
+ * C6a statuses, extended by C9 with `waiting_for_user`.
+ *
+ * `waiting_for_user` is a valid **non-terminal** state: the run is paused on a question the user has to answer.
+ * It exists as its own value precisely because C6a treats "running without a live lease" as a crash — a paused
+ * run that stayed `running` would be "recovered" by every restart, replayed, and would lose the answer that was
+ * on its way. Migration 081 widens the database CHECK to match.
+ */
+export type CodeRunStateStatus = "running" | "waiting_for_user" | "interrupted" | "completed" | "failed" | "cancelled";
 
 /**
  * Turn status. A turn that was mid-flight when its process died stays `running` in storage — the reconciler
@@ -1468,6 +1553,69 @@ export interface WorkspaceStore {
   createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord>;
   /** Newest first, tenant-scoped; filters by session or run when given. */
   listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]>;
+
+  // --- C9: goals, plan revisions and session todos ------------------------------------------------------
+  /**
+   * Creates a goal together with its acceptance criteria as separate rows. A goal with no criteria is
+   * refused: completion is defined as "every criterion verified", so a goal without criteria could never be
+   * completed honestly.
+   */
+  createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria>;
+  getCodeGoal(companyId: string, goalId: string): Promise<CodeGoalWithCriteria | null>;
+  /** Newest first, tenant-scoped. */
+  listCodeGoals(input: { companyId: string; sessionId?: string; projectId?: string; limit?: number }): Promise<CodeGoalRecord[]>;
+  /**
+   * Optimistic update by `expectedRevision`. Transitioning to `completed` is refused with
+   * `CodeGoalAcceptanceUnverifiedError` unless every acceptance criterion is verified — the service refuses
+   * first so callers get a structured reason, and migration 080 enforces the same rule in the database.
+   */
+  updateCodeGoal(input: UpdateCodeGoalInput): Promise<CodeGoalWithCriteria>;
+  setCodeGoalCriterionStatus(input: SetCodeGoalCriterionStatusInput): Promise<CodeGoalWithCriteria>;
+  /** Creates the next revision of the session plan (revisions are never edited in place). */
+  createCodeSessionPlan(input: CreateCodeSessionPlanInput): Promise<CodeSessionPlanRecord>;
+  getLatestCodeSessionPlan(companyId: string, sessionId: string): Promise<CodeSessionPlanRecord | null>;
+  listCodeSessionPlans(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionPlanRecord[]>;
+  /**
+   * Approves or rejects the current revision. `executionMode` is taken from the caller, never from the plan
+   * body: a plan is model-produced data and must not choose the mode it runs in.
+   */
+  decideCodeSessionPlan(input: DecideCodeSessionPlanInput): Promise<CodeSessionPlanRecord>;
+  /**
+   * Replaces the whole todo list of a session. Replace semantics make the tool idempotent by construction: the
+   * same call replayed produces the same list instead of appending duplicates. More than one `in_progress` is
+   * refused with `CodeSessionTodosInvalidError` (a partial unique index enforces it in the database too).
+   */
+  replaceCodeSessionTodos(input: ReplaceCodeSessionTodosInput): Promise<CodeSessionTodoRecord[]>;
+  listCodeSessionTodos(input: { companyId: string; sessionId: string }): Promise<CodeSessionTodoRecord[]>;
+
+  // --- C9: `code.ask_user` — the question a run waits on ------------------------------------------------
+  /**
+   * Creates the question, or returns the one the same tool call already asked. Idempotent by
+   * `(companyId, runId, toolCallId)`: repeating the call must not produce a second question the user would have
+   * to answer twice, which is also what makes the pause safe to observe after a restart.
+   */
+  createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord>;
+  /** Tenant-scoped: a question of another company is not found, and looks exactly like a question that never existed. */
+  getCodeUserQuestion(companyId: string, questionId: string): Promise<CodeUserQuestionRecord | null>;
+  /** The oldest still-pending question of a run — what a resumed run (or the UI) looks for first. */
+  getPendingCodeUserQuestionForRun(companyId: string, runId: string): Promise<CodeUserQuestionRecord | null>;
+  /**
+   * Records the user's decision. A repeat of the *same* answer by the *same* user is an idempotent no-op, so a
+   * retrying client cannot resume a run twice; a different answer, a stale revision or an expired question is
+   * refused. The answer is never guessed: there is no default, and expiry never fills one in.
+   */
+  answerCodeUserQuestion(input: AnswerCodeUserQuestionInput): Promise<CodeUserQuestionRecord>;
+  /** Moves pending questions past their TTL to `expired`; returns how many moved. Nothing is auto-answered. */
+  expireCodeUserQuestions(input?: { now?: Date; companyId?: string; runId?: string }): Promise<number>;
+  /**
+   * The pending questions a given instant has already outlived, so the reaper can report what it would expire
+   * (dry run) and release each held run with `ask_user_timeout`. Read-only: it changes no state, and the run each
+   * question is holding comes back with it because expiring a question without releasing its run would leave a
+   * run waiting on a question nobody can answer any more.
+   */
+  listExpiredCodeUserQuestions(input?: { now?: Date; limit?: number }): Promise<CodeUserQuestionRecord[]>;
+  /** Cancels the pending questions of a run (a stopped or cancelled run can no longer be answered). */
+  cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number>;
 
   // --- C6b: versioned replay bundles -------------------------------------------------------------------
   /**

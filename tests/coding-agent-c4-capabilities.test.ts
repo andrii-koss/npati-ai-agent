@@ -95,10 +95,10 @@ describe("security-gate: C4 sandbox execution capabilities", () => {
     const callable = CAPABILITY_CATALOG.filter((capability) => capability.agentCallable);
     // C2 (6 reads) + C3 (7 file tools) + C4 (6 sandbox tools) + C4a (3 dependency tools) = 22 code tools,
     // all agent-callable.
-    expect(CODE_CAPABILITIES).toHaveLength(22);
-    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(22);
-    expect(CAPABILITY_CATALOG.length).toBe(370);
-    expect(callable.length).toBe(106);
+    expect(CODE_CAPABILITIES).toHaveLength(25); // C9 added code.plan.propose, code.plan.update and code.ask_user
+    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(25);
+    expect(CAPABILITY_CATALOG.length).toBe(373);
+    expect(callable.length).toBe(109);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
     expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
   });

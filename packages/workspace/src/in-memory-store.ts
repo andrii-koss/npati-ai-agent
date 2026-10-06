@@ -14,6 +14,19 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   ListReplayBundlesInput } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, ExecutionSnapshotImmutableError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
+// C9: goals, plan revisions and session todos — shared rule implementation for both backends.
+import { InMemoryCodeGoalStore } from "./code-goal-store";
+import {
+  InMemoryCodeUserQuestionStore,
+  type AnswerCodeUserQuestionInput,
+  type CodeUserQuestionRecord,
+  type CreateCodeUserQuestionInput,
+} from "./code-question-store";
+import type {
+  CodeGoalRecord, CodeGoalWithCriteria, CodeSessionPlanRecord, CodeSessionTodoRecord,
+  CreateCodeGoalInput, CreateCodeSessionPlanInput, DecideCodeSessionPlanInput,
+  ReplaceCodeSessionTodosInput, SetCodeGoalCriterionStatusInput, UpdateCodeGoalInput,
+} from "./types";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
@@ -79,6 +92,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeContextSummaries = new Map<string, CodeContextSummaryRecord>();
   private readonly replayBundles = new Map<string, ReplayBundleRecord>();
   private readonly replayBundleSteps = new Map<string, ReplayBundleStepRecord[]>();
+  // C9: goals, plan revisions and session todos. The rules live in `code-goal-store.ts` and are shared with the
+  // Postgres backend, so "the database enforces it" cannot become "nothing enforces it" on this path.
+  private readonly codeGoalState = new InMemoryCodeGoalStore();
+  // C9: `code.ask_user`. Same rules as the Postgres backend — the answer validation lives in the shared module.
+  private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -2296,6 +2314,84 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
    * C8: append-only context summaries. Mirrors the postgres ordering (`created_at DESC, id DESC`) so a read
    * written against one store behaves identically on the other; there is deliberately no update or delete.
    */
+  // --- C9: goals, plan revisions and session todos --------------------------------------------------
+  // Thin delegations: every rule (verified acceptance criteria before completion, revisioned plans, at most one
+  // todo in progress) is implemented once in `code-goal-store.ts` and shared with the Postgres backend.
+
+  // --- C9: `code.ask_user` — the persistent question ---------------------------------------------------
+
+  async createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
+    return this.codeUserQuestionState.createQuestion(input);
+  }
+
+  async getCodeUserQuestion(companyId: string, questionId: string): Promise<CodeUserQuestionRecord | null> {
+    return this.codeUserQuestionState.getQuestion(companyId, questionId);
+  }
+
+  async getPendingCodeUserQuestionForRun(companyId: string, runId: string): Promise<CodeUserQuestionRecord | null> {
+    return this.codeUserQuestionState.getPendingQuestionForRun(companyId, runId);
+  }
+
+  async answerCodeUserQuestion(input: AnswerCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
+    return this.codeUserQuestionState.answerQuestion(input);
+  }
+
+  async expireCodeUserQuestions(input: { now?: Date; companyId?: string; runId?: string } = {}): Promise<number> {
+    return this.codeUserQuestionState.expireQuestions(input);
+  }
+
+  async listExpiredCodeUserQuestions(input: { now?: Date; limit?: number } = {}): Promise<CodeUserQuestionRecord[]> {
+    return this.codeUserQuestionState.listExpiredQuestions(input);
+  }
+
+  async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
+    return this.codeUserQuestionState.cancelPendingQuestions(input);
+  }
+
+  async createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return this.codeGoalState.createGoal(input);
+  }
+
+  async getCodeGoal(companyId: string, goalId: string): Promise<CodeGoalWithCriteria | null> {
+    return this.codeGoalState.getGoal(companyId, goalId);
+  }
+
+  async listCodeGoals(input: { companyId: string; sessionId?: string; projectId?: string; limit?: number }): Promise<CodeGoalRecord[]> {
+    return this.codeGoalState.listGoals(input);
+  }
+
+  async updateCodeGoal(input: UpdateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return this.codeGoalState.updateGoal(input);
+  }
+
+  async setCodeGoalCriterionStatus(input: SetCodeGoalCriterionStatusInput): Promise<CodeGoalWithCriteria> {
+    return this.codeGoalState.setCriterionStatus(input);
+  }
+
+  async createCodeSessionPlan(input: CreateCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
+    return this.codeGoalState.createPlan(input);
+  }
+
+  async getLatestCodeSessionPlan(companyId: string, sessionId: string): Promise<CodeSessionPlanRecord | null> {
+    return this.codeGoalState.getLatestPlan(companyId, sessionId);
+  }
+
+  async listCodeSessionPlans(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionPlanRecord[]> {
+    return this.codeGoalState.listPlans(input);
+  }
+
+  async decideCodeSessionPlan(input: DecideCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
+    return this.codeGoalState.decidePlan(input);
+  }
+
+  async replaceCodeSessionTodos(input: ReplaceCodeSessionTodosInput): Promise<CodeSessionTodoRecord[]> {
+    return this.codeGoalState.replaceTodos(input);
+  }
+
+  async listCodeSessionTodos(input: { companyId: string; sessionId: string }): Promise<CodeSessionTodoRecord[]> {
+    return this.codeGoalState.listTodos(input.companyId, input.sessionId);
+  }
+
   async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
     const record: CodeContextSummaryRecord = {
       id: input.id ?? randomUUID(),

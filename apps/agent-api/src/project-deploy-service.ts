@@ -1,15 +1,16 @@
-import { AuthContext, WorkspaceStore } from "@npati/workspace";
+// Both are types here, so they are imported as types: the plain-Node spec harness
+// (`artifacts/c5b-policy-probe`) strips types but resolves every named import at load time, and an interface
+// imported as a value makes the whole module graph fail to load with "does not provide an export named …".
+// `tsc`/esbuild elide these either way, so this is purely about which loaders can read the file.
+import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import { ProjectService } from "./project-service";
 import { ProjectGitService } from "./project-git-service";
-import {
-  DeployProvider,
-  DokployDeployProvider,
-  DeployTargetConfig,
-  DeployPreflightSummary,
-  DeployResult,
-  DeployError,
-} from "./deploy-provider";
-
+// Types are imported as types on purpose: the plain-Node spec harness
+// (`artifacts/c5b-policy-probe`) strips types but resolves every named import at load time, so an interface
+// imported as a value makes the whole module graph fail to load with "does not provide an export named …".
+// `tsc`/esbuild elide these either way, so this is purely about which loaders can read the file.
+import type { DeployProvider, DeployTargetConfig, DeployPreflightSummary, DeployResult } from "./deploy-provider";
+import { DeployError, DokployDeployProvider } from "./deploy-provider";
 export interface DeployOptions {
   target?: DeployTargetConfig;
   credentialId?: string;

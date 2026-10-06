@@ -1,5 +1,7 @@
 import React from "react";
-import type { AgentStreamItem, AgentToolCallItem, ChangedFile } from "./types";
+import type { AgentStreamItem, AgentToolCallItem, AskUserAnswer, ChangedFile } from "./types";
+import { PlanTodoBlock } from "./PlanTodoBlock";
+import { AskUserCard } from "./AskUserCard";
 
 /**
  * C7: the agent stream — messages, tool calls, the plan and changed files.
@@ -109,9 +111,19 @@ function ChangedFiles({ files, isUk }: { files: readonly ChangedFile[]; isUk: bo
 export function AgentStreamView({
   items,
   isUk = false,
+  onAskUserAnswer,
+  askUserDisabled = false,
+  askUserDisabledNotice,
 }: {
   items: readonly AgentStreamItem[];
   isUk?: boolean;
+  /**
+   * C9: wired by the page once the `ask_user` answer route exists. Left undefined the card shows disabled
+   * controls with a visible reason rather than a button that appears to submit and does not.
+   */
+  onAskUserAnswer?: (questionId: string, answer: AskUserAnswer) => void;
+  askUserDisabled?: boolean;
+  askUserDisabledNotice?: string;
 }): React.ReactElement {
   return (
     <section className="ds-section-title" aria-label={isUk ? "Стрім агента" : "Agent stream"}>
@@ -130,15 +142,21 @@ export function AgentStreamView({
           return <ToolCall item={item} isUk={isUk} key={`tool-${item.toolCallId}`} />;
         }
         if (item.kind === "plan") {
+          // The C9 goal/verification/self-review fields render inside this same block.
+          return <PlanTodoBlock item={item} isUk={isUk} key={`plan-${index}`} />;
+        }
+        if (item.kind === "ask_user") {
           return (
-            <div className="data-studio-alert info" key={`plan-${index}`} role="status" data-kind="plan">
-              <div>{item.title ?? (isUk ? "План" : "Plan")}</div>
-              <ul>
-                {item.steps.map((step, stepIndex) => (
-                  <li key={`step-${stepIndex}`}>{`${step.done ? "✓" : "•"} ${step.text}`}</li>
-                ))}
-              </ul>
-            </div>
+            <AskUserCard
+              card={item.card}
+              isUk={isUk}
+              key={`ask-${item.card.questionId}`}
+              disabled={askUserDisabled}
+              disabledNotice={askUserDisabledNotice}
+              onAnswer={
+                onAskUserAnswer ? (answer) => onAskUserAnswer(item.card.questionId, answer) : undefined
+              }
+            />
           );
         }
         return <ChangedFiles files={item.files} isUk={isUk} key={`files-${index}`} />;

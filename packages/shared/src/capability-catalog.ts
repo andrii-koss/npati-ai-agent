@@ -7265,8 +7265,12 @@ CAPABILITY_CATALOG.push(...PROJECT_DATA_CAPABILITIES);
 // C2: read-only Coding Agent tools (domain "code", inventory ids 349-354).
 // C3: mutating Coding Agent tools (inventory ids 355-361).
 // C4: sandbox execution tools (inventory ids 362-367). C4a: dependency tools (368-370).
-import { CODE_READ_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_DEPS_CAPABILITIES } from "./code-capabilities";
+// C9: planning tools (371-372) and the user question (373) — session metadata, appended last so the earlier
+// groups keep their ids.
+import { CODE_READ_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_DEPS_CAPABILITIES, CODE_PLAN_CAPABILITIES, CODE_ASK_USER_CAPABILITIES } from "./code-capabilities";
 CAPABILITY_CATALOG.push(...CODE_READ_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_WRITE_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_SHELL_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_DEPS_CAPABILITIES);
+CAPABILITY_CATALOG.push(...CODE_PLAN_CAPABILITIES);
+CAPABILITY_CATALOG.push(...CODE_ASK_USER_CAPABILITIES);

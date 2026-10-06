@@ -20,6 +20,20 @@ import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationA
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+// C9: goals, plan revisions and session todos. The logic lives in its own module so the Postgres and
+// in-memory backends share one implementation of the rules instead of two that drift apart.
+import { PostgresCodeGoalStore } from "./code-goal-store";
+import {
+  PostgresCodeUserQuestionStore,
+  type AnswerCodeUserQuestionInput,
+  type CodeUserQuestionRecord,
+  type CreateCodeUserQuestionInput,
+} from "./code-question-store";
+import type {
+  CodeGoalRecord, CodeGoalWithCriteria, CodeSessionPlanRecord, CodeSessionTodoRecord,
+  CreateCodeGoalInput, CreateCodeSessionPlanInput, DecideCodeSessionPlanInput,
+  ReplaceCodeSessionTodosInput, SetCodeGoalCriterionStatusInput, UpdateCodeGoalInput,
+} from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
@@ -1102,6 +1116,135 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    // C9: goals, plan revisions and session todos.
+    // Additive: 080 creates its own four tables, indexes and two acceptance triggers; no existing table is
+    // touched, and it deliberately adds no foreign key to `company_agent_runs` (a code run has no row there).
+    const goalsAndPlansMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='080_code_goals_and_plans'");
+    if (!goalsAndPlansMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration080 } = await import("./migration-080");
+        await runMigration080(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('080_code_goals_and_plans')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C9: `code.ask_user` — the question a run waits on.
+    // Additive: 081 creates one new table and widens the `code_run_states.status` CHECK with
+    // `waiting_for_user`. Widening an allowed set is expand-only: an older application never writes the new
+    // value and keeps working against the new schema.
+    const userQuestionsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='081_code_user_questions'");
+    if (!userQuestionsMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration081 } = await import("./migration-081");
+        await runMigration081(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('081_code_user_questions')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+  }
+
+  // --- C9: `code.ask_user` — the persistent question --------------------------------------------------
+  // The rules (only an offered choice is accepted, an answered question is never re-answered, an unanswered one
+  // never carries an answer) live in `code-question-store.ts` and are shared with the in-memory backend. The
+  // database repeats the two structural ones as CHECK constraints in migration 081.
+
+  private codeUserQuestionStoreInstance?: PostgresCodeUserQuestionStore;
+
+  private questions(): PostgresCodeUserQuestionStore {
+    if (!this.codeUserQuestionStoreInstance) {
+      this.codeUserQuestionStoreInstance = new PostgresCodeUserQuestionStore(this.pool);
+    }
+    return this.codeUserQuestionStoreInstance;
+  }
+
+  async createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
+    return this.questions().createQuestion(input);
+  }
+
+  async getCodeUserQuestion(companyId: string, questionId: string): Promise<CodeUserQuestionRecord | null> {
+    return this.questions().getQuestion(companyId, questionId);
+  }
+
+  async getPendingCodeUserQuestionForRun(companyId: string, runId: string): Promise<CodeUserQuestionRecord | null> {
+    return this.questions().getPendingQuestionForRun(companyId, runId);
+  }
+
+  async answerCodeUserQuestion(input: AnswerCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
+    return this.questions().answerQuestion(input);
+  }
+
+  async expireCodeUserQuestions(input: { now?: Date; companyId?: string; runId?: string } = {}): Promise<number> {
+    return this.questions().expireQuestions(input);
+  }
+
+  async listExpiredCodeUserQuestions(input: { now?: Date; limit?: number } = {}): Promise<CodeUserQuestionRecord[]> {
+    return this.questions().listExpiredQuestions(input);
+  }
+
+  async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
+    return this.questions().cancelPendingQuestions(input);
+  }
+
+  // --- C9: goals, plan revisions and session todos --------------------------------------------------
+  // The rules (goal completion needs verified criteria, plans are revisioned, at most one todo in progress)
+  // live in `code-goal-store.ts` and are shared with the in-memory backend, so the two cannot drift. The
+  // database additionally enforces them with the triggers and partial unique indexes of migration 080.
+
+  private codeGoalStoreInstance?: PostgresCodeGoalStore;
+
+  private goals(): PostgresCodeGoalStore {
+    if (!this.codeGoalStoreInstance) this.codeGoalStoreInstance = new PostgresCodeGoalStore(this.pool);
+    return this.codeGoalStoreInstance;
+  }
+
+  async createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return this.goals().createGoal(input);
+  }
+
+  async getCodeGoal(companyId: string, goalId: string): Promise<CodeGoalWithCriteria | null> {
+    return this.goals().getGoal(companyId, goalId);
+  }
+
+  async listCodeGoals(input: { companyId: string; sessionId?: string; projectId?: string; limit?: number }): Promise<CodeGoalRecord[]> {
+    return this.goals().listGoals(input);
+  }
+
+  async updateCodeGoal(input: UpdateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return this.goals().updateGoal(input);
+  }
+
+  async setCodeGoalCriterionStatus(input: SetCodeGoalCriterionStatusInput): Promise<CodeGoalWithCriteria> {
+    return this.goals().setCriterionStatus(input);
+  }
+
+  async createCodeSessionPlan(input: CreateCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
+    return this.goals().createPlan(input);
+  }
+
+  async getLatestCodeSessionPlan(companyId: string, sessionId: string): Promise<CodeSessionPlanRecord | null> {
+    return this.goals().getLatestPlan(companyId, sessionId);
+  }
+
+  async listCodeSessionPlans(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionPlanRecord[]> {
+    return this.goals().listPlans(input);
+  }
+
+  async decideCodeSessionPlan(input: DecideCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
+    return this.goals().decidePlan(input);
+  }
+
+  async replaceCodeSessionTodos(input: ReplaceCodeSessionTodosInput): Promise<CodeSessionTodoRecord[]> {
+    return this.goals().replaceTodos(input);
+  }
+
+  async listCodeSessionTodos(input: { companyId: string; sessionId: string }): Promise<CodeSessionTodoRecord[]> {
+    return this.goals().listTodos(input.companyId, input.sessionId);
   }
 
   // --- C1b: sandbox image supply chain ------------------------------------------------------

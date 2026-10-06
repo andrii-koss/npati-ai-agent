@@ -266,6 +266,20 @@ const READ_TOOLS = new Set([
   "code.symbols.outline", "code.project.info", "code.fs.diff",
   "code.shell.process.list", "code.shell.process.logs",
 ]);
+
+/**
+ * C9 narrow planning allowance — an explicit **name list**, deliberately not a membership in `READ_TOOLS`.
+ *
+ * These tools carry session metadata (a plan draft, the todo list) or a question to the user. None of them
+ * can touch the workspace, the sandbox or the network, which is why `plan` mode has to allow them. But
+ * read-only is a *broad* class that grows every time a read tool is published, and plan mode must not
+ * inherit that growth: with `isReadOnlyTool` as the gate, any future read tool would silently become
+ * available in the one mode whose entire purpose is to plan without touching code. The owner's decision is
+ * therefore a narrow, reviewable list, read by the same three places that used to read the class — the
+ * `plan` branch below, the runner's offered-tool filter, and the sub-flag/permission mapping.
+ */
+export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update", "code.ask_user"]);
+
 const SHELL_TOOLS = new Set(["code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 const WRITE_TOOLS = new Set([
   "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move",
@@ -279,13 +293,20 @@ export function subFlagForTool(tool: string): string {
   if (tool.startsWith("code.shell.")) return SHELL_FLAG;
   if (SHELL_TOOLS.has(tool)) return SHELL_FLAG;
   if (READ_TOOLS.has(tool)) return READ_FLAG;
+  // Plan/question tools never touch the workspace, so they follow the read flag rather than the write flag:
+  // gating a *question* behind "writes allowed" would push the agent to guess instead of asking.
+  if (PLAN_SAFE_TOOLS.has(tool)) return READ_FLAG;
   return WRITE_FLAG;
 }
 export function permissionForTool(tool: string): "workspace:read" | "workspace:write" {
-  return READ_TOOLS.has(tool) ? "workspace:read" : "workspace:write";
+  // Plan/question tools act on session metadata only, so the minimum workspace permission is a read — the
+  // same level their capability records declare. Requiring `workspace:write` here would be stricter than
+  // the tool's blast radius and would contradict the catalogue.
+  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) ? "workspace:read" : "workspace:write";
 }
 export function isReadOnlyTool(tool: string): boolean { return READ_TOOLS.has(tool); }
 export function isShellTool(tool: string): boolean { return SHELL_TOOLS.has(tool); }
+export function isPlanSafeTool(tool: string): boolean { return PLAN_SAFE_TOOLS.has(tool); }
 
 export function isAdmin(ctx: AuthContext): boolean {
   // C5a: one definition of the admin vocabulary, shared with `code-rbac.ts`.
@@ -548,8 +569,12 @@ export class PolicyEngine {
     // File mutations are not risk-classified, so the read-only rule of `plan` applies to them here;
     // shell commands in `plan` are decided by the mode x risk matrix further down (safe is allowed,
     // controlled and approval are denied there).
-    if (mode === "plan" && !isShellTool(tool) && !isReadOnlyTool(tool)) {
-      return deny("session_mode_denied", "Session mode plan allows read-only tools only", 403, "session_mode");
+    if (mode === "plan" && !isShellTool(tool) && !isReadOnlyTool(tool) && !isPlanSafeTool(tool)) {
+      // Allowed in `plan`: read/search tools plus the narrow `PLAN_SAFE_TOOLS` name list — nothing else. A new
+      // read tool does not widen this (that is the point of keeping the list separate from `READ_TOOLS`), and
+      // no workspace, sandbox or git mutation is ever allowed here: those are neither read-only nor plan-safe,
+      // so they fall through to this denial.
+      return deny("session_mode_denied", "Session mode plan allows read-only and planning tools only", 403, "session_mode");
     }
     if (mode !== null && mode !== undefined) reasons.push(`mode:${mode}`, `matrix_mode:${matrixMode}`);
 

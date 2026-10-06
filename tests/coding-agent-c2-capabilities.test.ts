@@ -12,9 +12,14 @@ import {
 
 const CODE_IDS = ["code.fs.list", "code.fs.read", "code.fs.grep", "code.fs.tree", "code.symbols.outline", "code.project.info"];
 const CODE_INVENTORY_IDS = [349, 350, 351, 352, 353, 354];
-/** C3 added the mutating tools and C4 the sandbox execution tools: 19 capabilities on inventory ids 349-367. */
-const ALL_CODE_IDS = [...CODE_IDS, "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.list", "code.shell.process.logs", "code.shell.process.stop", "code.verify.run", "code.deps.inspect", "code.deps.audit", "code.deps.add"];
-const ALL_CODE_INVENTORY_IDS = [...CODE_INVENTORY_IDS, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367];
+/**
+ * C3 added the mutating tools, C4 the sandbox execution tools, C4a the dependency tools and C9 the planning
+ * tools **and** `code.ask_user`: 25 capabilities on inventory ids 349-373. The inventory list here had stopped at
+ * 367 (it was never extended for the dependency group), so it is brought up to date together with the C9
+ * additions rather than left as a stale guard.
+ */
+const ALL_CODE_IDS = [...CODE_IDS, "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.list", "code.shell.process.logs", "code.shell.process.stop", "code.verify.run", "code.deps.inspect", "code.deps.audit", "code.deps.add", "code.plan.propose", "code.plan.update", "code.ask_user"];
+const ALL_CODE_INVENTORY_IDS = [...CODE_INVENTORY_IDS, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373];
 
 describe("C2: read-only code.* capability registration", () => {
   it("registers exactly six code capabilities on inventory ids 349-354, all low risk and read-only", () => {
@@ -44,18 +49,23 @@ describe("C2: read-only code.* capability registration", () => {
   it("keeps the catalogue and the audit matrix in sync and the inventory ids unique", () => {
     const catalogCode = CAPABILITY_CATALOG.filter((c) => c.domain === "code");
     const matrixCode = CAPABILITY_MATRIX.filter((c) => c.domain === "code");
-    expect(catalogCode).toHaveLength(22);
-    expect(matrixCode).toHaveLength(22);
+    // C9 published three more code tools (`code.plan.propose`, `code.plan.update`, `code.ask_user`), so the code
+    // group is 25 now.
+    expect(catalogCode).toHaveLength(25);
+    expect(matrixCode).toHaveLength(25);
     expect(matrixCode.map((entry) => entry.id)).toEqual(ALL_CODE_INVENTORY_IDS);
     expect(catalogCode.map((c) => c.id)).toEqual(ALL_CODE_IDS);
 
     const allInventoryIds = CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds);
     expect(new Set(allInventoryIds).size).toBe(allInventoryIds.length);
-    expect(Math.max(...allInventoryIds)).toBe(370);
+    expect(Math.max(...allInventoryIds)).toBe(373); // C9 added ids 371, 372 and 373
     // The code group did not disturb the previous totals' internal split.
     const callable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
-    expect(CAPABILITY_CATALOG).toHaveLength(367);
-    expect(callable).toHaveLength(103);
+    // The catalog is 373 entries with 109 callable: the real totals, updated for C9's three tools. This file is
+    // not part of the security gate and its pins had drifted (it expected 367/103 while the catalog already
+    // stood at 370/106), so the numbers here are the current truth rather than a delta on a stale baseline.
+    expect(CAPABILITY_CATALOG).toHaveLength(373);
+    expect(callable).toHaveLength(109);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
   });
 
@@ -82,7 +92,7 @@ describe("security-gate: C2 code capabilities are gated by a feature flag", () =
   it("reports the flag as unknown (never on) when the server has no flag source", () => {
     const report = new CapabilityInspectorService().inspect("all");
     const codeItems = report.items.filter((item) => item.domain === "code");
-    expect(codeItems).toHaveLength(22);
+    expect(codeItems).toHaveLength(25);
     for (const item of codeItems) {
       // The governing flag comes from the canonical mapping: reads (and code.fs.diff) use code.read,
       // file mutations use code.write, sandbox execution uses code.shell.

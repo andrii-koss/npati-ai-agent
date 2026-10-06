@@ -190,6 +190,16 @@ export interface CodeToolExecutionContext {
   sessionId?: string;
   /** C3: the turn this call belongs to, so executors can scope their output to it. */
   turnId?: string;
+  /**
+   * C9: the run this call belongs to. `code.ask_user` pauses that run, so a call with no run has nothing to
+   * pause and the executor refuses it instead of pretending a question was asked.
+   */
+  runId?: string;
+  /**
+   * C9: the model's tool-call id. It is the idempotency key of a question (`company, run, tool_call_id` is
+   * unique), so a replayed call finds the question it already asked instead of asking the user twice.
+   */
+  toolCallId?: string;
   tool: CodeToolSchema;
   args: Record<string, unknown>;
   limits: CodeAgentLimits;
@@ -704,6 +714,10 @@ export class CodeToolRuntime {
       try {
         raw = await executor({
           ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, turnId,
+          // C9: the run and the tool-call id travel to the executor because `code.ask_user` pauses the run and
+          // is idempotent per tool call; both come from the invocation envelope, never from a model argument.
+          ...(input.runId ? { runId: input.runId } : {}),
+          toolCallId: input.toolCallId,
           tool, args, limits: this.limits, port,
           guards: { path: (value: unknown) => this.guardPath(value), sensitive: (value: string) => this.guardSensitive(value) },
           turnChanges: turnChanges.map((change) => ({ path: change.path, tool: change.tool, sha256: change.sha256, linesAdded: change.linesAdded, linesRemoved: change.linesRemoved })),

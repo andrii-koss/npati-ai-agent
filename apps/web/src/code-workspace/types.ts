@@ -79,6 +79,168 @@ export interface AgentPlanItem {
   kind: "plan";
   title?: string;
   steps: readonly { text: string; done?: boolean }[];
+  /**
+   * C9: the goal-driven fields of the same Plan/Todo block, all optional so a C1–C8 session that has none
+   * of them renders exactly as before. Kept on this item rather than a second item kind on purpose: the
+   * owner asked for one Plan/Todo block, and a separate block would let the two disagree about the plan.
+   */
+  goal?: GoalView | null;
+  verification?: VerificationView | null;
+  selfReview?: SelfReviewView | null;
+}
+
+/**
+ * C9: one acceptance criterion of a goal. Status lives per criterion, never as a single "done" flag —
+ * the server refuses to complete a goal while any criterion is unverified, so the UI must be able to show
+ * *which* one is outstanding rather than just that something is.
+ */
+export type GoalCriterionStatus = "pending" | "verified" | "failed";
+
+export interface GoalCriterion {
+  id: string;
+  /** Rendered as text. */
+  text: string;
+  status: GoalCriterionStatus;
+  note?: string;
+}
+
+export type CodingGoalStatus = "planned" | "running" | "blocked" | "verifying" | "completed" | "failed";
+
+export type GoalTaskStatus = "pending" | "in_progress" | "completed";
+
+export interface GoalTask {
+  taskId: string;
+  /** Rendered as text. */
+  content: string;
+  status: GoalTaskStatus;
+  /** Why this task is blocked; rendered as text, never interpreted. */
+  blockedReason?: string;
+}
+
+export interface GoalView {
+  goalId: string;
+  /** Rendered as text. */
+  objective: string;
+  status: CodingGoalStatus;
+  criteria: readonly GoalCriterion[];
+  /** 0..1, derived by the server from verified criteria — never from "the code was written". */
+  progress: number;
+  tasks: readonly GoalTask[];
+  /**
+   * Present only while the run is waiting for a human. Deliberately separate from `status`: a goal that is
+   * `blocked` for a technical reason and one that is `blocked` on a question look different to the user
+   * because they need different actions.
+   */
+  blockedReason?: string;
+  /** True when the server says the goal is blocked *and* a question is pending. */
+  awaitingAnswer?: boolean;
+}
+
+export type VerificationStatus =
+  | "not_run"
+  | "passed"
+  | "failed"
+  | "unavailable"
+  | "passed_with_unjustified_test_changes";
+
+export interface VerificationCheckView {
+  /** `lint` / `typecheck` / `test` / `build`, or a project-defined command name. */
+  check: string;
+  status: "passed" | "failed" | "skipped";
+  errorCode?: string;
+  /** Rendered as text. */
+  message?: string;
+}
+
+/** C9: a diff that removed or weakened tests — the answer to "did verify go green by deleting a test?". */
+export type TestIntegrityFindingKind =
+  | "file_removed"
+  | "case_count_reduced"
+  | "skip_added"
+  | "only_added"
+  | "assertion_weakened"
+  | "each_block_removed";
+
+export interface TestIntegrityFinding {
+  /** Rendered as text. */
+  path: string;
+  kind: TestIntegrityFindingKind;
+  /** Rendered as text. */
+  reason: string;
+  /** True only when the agent's summary justified the change; false is shown, not hidden. */
+  justified?: boolean;
+}
+
+export interface VerificationView {
+  status: VerificationStatus;
+  checks: readonly VerificationCheckView[];
+  /** Repair attempts consumed so far. Shown even when verification passed, because 0 attempts is a fact. */
+  attemptsUsed: number;
+  /** The configured limit (`repairLoopAttempts`); `null` when the server did not report one. */
+  maxAttempts: number | null;
+  /** Set instead of a status when the server has no report — never rendered as "passed". */
+  unavailable?: string;
+  testIntegrityFindings?: readonly TestIntegrityFinding[];
+}
+
+export type SelfReviewStatus = "not_run" | "clean" | "findings" | "unavailable";
+
+export type SelfReviewSeverity = "info" | "warning" | "error";
+
+export interface SelfReviewFindingView {
+  severity: SelfReviewSeverity;
+  /** Rendered as text. */
+  path?: string;
+  /** Rendered as text. */
+  reason: string;
+  suggestedFix?: string;
+}
+
+export interface SelfReviewView {
+  status: SelfReviewStatus;
+  findings: readonly SelfReviewFindingView[];
+  /** How many fix iterations the review used; the limit is one. */
+  iterationsUsed?: number;
+  unavailable?: string;
+}
+
+/** C9: `ask_user` — a structured question that pauses the run until a human answers or it expires. */
+export type AskUserStatus = "pending" | "answered" | "expired" | "cancelled";
+
+export interface AskUserChoice {
+  id: string;
+  /** Rendered as text. */
+  label: string;
+}
+
+export interface AskUserCardData {
+  questionId: string;
+  /** Rendered as text. */
+  prompt: string;
+  choices: readonly AskUserChoice[];
+  /** Whether the server accepts a free-form answer in addition to (or instead of) the choices. */
+  allowFreeAnswer: boolean;
+  status: AskUserStatus;
+  /** Optimistic-concurrency revision the answer call must echo back. */
+  revision: number;
+  answeredBy?: string;
+  answeredAt?: string;
+  /** The recorded answer; rendered as text. */
+  answer?: string;
+  expiresAt?: string;
+  /** Why it expired or was cancelled; rendered as text. */
+  reason?: string;
+}
+
+export interface AgentAskUserItem {
+  kind: "ask_user";
+  card: AskUserCardData;
+}
+
+/** One answer a human gives to an `ask_user` card: a choice, or a free-form answer, never both. */
+export interface AskUserAnswer {
+  choiceId?: string;
+  freeAnswer?: string;
 }
 
 export interface AgentChangedFilesItem {
@@ -90,7 +252,8 @@ export type AgentStreamItem =
   | AgentMessageItem
   | AgentToolCallItem
   | AgentPlanItem
-  | AgentChangedFilesItem;
+  | AgentChangedFilesItem
+  | AgentAskUserItem;
 
 export interface ChangedFile {
   path: string;

@@ -289,6 +289,81 @@ export const SECURITY_GATE_TESTS = [
   // service's own protections still hold for the new consumer: `invalid_path` for traversal and `secret_path`
   // for `.env`/`.ssh`/`credentials`/`*.pem`.
   "tests/website-builder-regression.test.ts",
+  // C9: the verification/repair loop. Pins that the repair budget is the configured limit and that exhausting
+  // it **stops** with a code instead of looping or reporting success, that a failing check reaches the model as
+  // an actionable instruction naming the check and stating the two prohibitions (do not weaken a test, do not
+  // claim a pass), that an approval-gated or unconfigured check stops the loop rather than being worked around,
+  // that asking for a decision twice cannot double-spend the budget, and that a check which never ran is a
+  // failure rather than a pass. `NPATI_CODE_REPAIR_LOOP` existed since C1 and nothing read it; the
+  // environment-driven test is what makes it a live handle instead of a dead configuration key.
+  "tests/coding-agent-c9-verification-loop.test.ts",
+  // C9: the test-integrity guard — "make it green" by weakening the suite. Pins detection of a deleted test
+  // file, removed cases, `.skip`, `.only` (worse than a skip: it silently disables the rest), a specific
+  // assertion replaced by an existence check, removed assertions and a removed table-driven block, from full
+  // contents **and** from a unified diff; that adding tests is never flagged; that an uninspectable change is
+  // reported as nothing rather than guessed at; and that the verdict carries no diff text.
+  "tests/coding-agent-c9-test-integrity.test.ts",
+  // C9: the scope guard. Pins that it warns rather than blocks, that the threshold is configuration, that a
+  // gross overrun is escalated instead of tolerated, that files outside the stated focus are named together
+  // with the focus used, that docs/config changes are never "unrelated", that it admits it cannot judge
+  // relatedness when there is no stated focus (rather than inventing a finding nobody can act on), and that the
+  // reported path list is bounded.
+  "tests/coding-agent-c9-scope-guard.test.ts",
+  // C9: the loop end to end. Pins that a run which changed files is verified through the **canonical** tool
+  // runtime, that a failure is fed back and the run then stops at the configured limit, that an approval-gated
+  // or unconfigured verification stops instead of being bypassed, that a green check over a changed test set is
+  // reported as `passed_with_unjustified_test_changes` (never as a clean pass) with the finding in Activity,
+  // that the caller can opt out, and that the argument-correction loop and the repair loop stay separate: a
+  // model sending unusable arguments exhausts *its* budget and does not consume a verification attempt.
+  "tests/coding-agent-c9-runner-verification.test.ts",
+  // C9: the planning tools. Pins that a plan is data — `validatePlanBody` keeps only files/steps/risks/
+  // testStrategy, so a plan cannot smuggle an `executionMode` or an invented permission field into storage —
+  // that two `in_progress` tasks, a duplicate task id and an oversized list are **refused rather than
+  // normalised**, and that both tools are idempotent, which is what C6a recovery depends on: a repeated
+  // read-only call must not append a second plan revision or duplicate the todo list.
+  "tests/coding-agent-c9-plan-tool.test.ts",
+  // C9: plan mode and the plan decision. Pins that the approved execution mode comes from the decision
+  // request (the user) and never from the stored plan row, that approving without a mode is refused instead
+  // of defaulting, that a stale or already-decided revision changes nothing, and that the three pre-existing
+  // layers which block writes in plan mode still hold while the two new tools are reachable there — the mode
+  // that exists to produce a plan.
+  "tests/coding-agent-c9-plan-mode.test.ts",
+  // C9: goals and acceptance criteria. Pins that a goal cannot be created without criteria, that `completed`
+  // is refused while any criterion is unverified and allowed once all are, that illegal transitions use the
+  // transition table, that `blocked` requires the question and clears it on resume, that progress is derived
+  // rather than supplied, that a foreign goal is indistinguishable from a missing one, and that every
+  // mutation on the surface is journalled before it is applied.
+  "tests/coding-agent-c9-goal.test.ts",
+  // C9: `code.ask_user` — the pause is a state, not a process. Pins that the question row survives a restart
+  // (answered through a second service instance over the same store), that the reconciler never recovers a
+  // `waiting_for_user` run and never replays the call that asked, that an agent or service token can never
+  // answer (checked before the store is touched), that a repeated answer resumes the run exactly once, that
+  // only a choice the question offered is accepted, that expiry releases the run with an explicit
+  // `ask_user_timeout` and leaves no answer behind, and that a journal outage refuses the answer instead of
+  // applying it unrecorded.
+  "tests/coding-agent-c9-ask-user.test.ts",
+  // C9: `code.ask_user` stops the loop. Pins that a run that asks reaches `waiting_for_user` and writes **no**
+  // terminal state (so C6a cannot call the pause a crash), that no further model call and no further tool call
+  // of the same turn happens, that the rest of the turn's calls are reported as not executed instead of running,
+  // that a "successful" ask without a question id fails the run closed rather than continuing, that the tool is
+  // reachable in plan mode through the narrow plan-safe list, and that the executor dispatches to the service
+  // (metadata only, no answer) and fails closed when unwired.
+  "tests/coding-agent-c9-ask-user-runner.test.ts",
+  // C9: the question expires and releases its run. Pins that expiry moves the question to `expired` and the run
+  // to `interrupted`/`ask_user_timeout` while writing **no** answer, that a question inside its TTL is left
+  // alone, that the reaper step has a real dry-run preview and reports an unavailable port as a skip rather
+  // than as clean, and that a restart keeps the question pending and a repeated answer resumes the run once.
+  "tests/coding-agent-c9-ask-user-reaper.test.ts",
+  // C9 (owner requirement 4): the self-review pass. Pins that it is **one** pass per run (a second call cannot
+  // happen), that it reaches the provider through the existing ProviderDataGuard and a refused prompt text is
+  // *not* sanitised and sent (and is never reported as clean), that it sees all six inputs including the
+  // approved plan, that a deliberate secret and an unnecessary out-of-scope change in the diff are both found,
+  // that at most **one** fix iteration follows and a *blocking* finding survives it as `unresolved` rather than
+  // being rounded up to a clean run, that a review which changed the code triggers a second verification while a
+  // review that changed nothing does not, that a failed or unusable review is `unavailable` (never `clean`), and
+  // that a review asking to change a mode/policy/permission stays a `security` finding while the session mode,
+  // the policy and the permissions are observably untouched.
+  "tests/coding-agent-c9-self-review.test.ts",
 ];
 
 /**
