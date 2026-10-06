@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import type { SandboxImageAdmission } from "./sandbox-image-policy";
+import type { EgressEnforcement } from "./sandbox-egress-enforcement";
+import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
 import { randomUUID, createHash } from "node:crypto";
 import { chmod, chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,9 +15,16 @@ import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-co
 interface RunnerLimits {
   cpu: string; memory: string; diskBytes: number; pids: number; image: string; proxyImage: string; maxFiles: number; maxBytes: number; allowedHosts: string;
 }
+/**
+ * C4b: the default egress allowlist comes from the canonical allowlist module, never from a string
+ * literal here. `NPATI_SANDBOX_ALLOWED_HOSTS` remains the operator override. The canonical default is
+ * the approved install set (official registries) plus an **empty** run set, i.e. deny-all for anything
+ * that is not an approved registry — git hosts and vendor mirrors are not implicit.
+ */
+const defaultAllowedHosts = process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({ env: process.env }));
 const defaults: RunnerLimits = {
   cpu: "1", memory: "1536m", diskBytes: 1536 * 1024 * 1024, pids: 128,
-  image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: "registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com",
+  image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: defaultAllowedHosts,
 };
 const DATABASE_HOST_PATTERN = /(^|[.-])(postgres|postgresql|pg|db|database)([.-]|$)/;
 
@@ -108,7 +117,13 @@ export function buildSandboxCreateArgs(input: {
 export class DockerSandboxProvider implements SandboxProvider {  private readonly limits: RunnerLimits;
   private readonly activity = new Map<string, number>();
   private touch(id: string) { this.activity.set(id, Date.now()); }
-  constructor(limits: Partial<RunnerLimits> = {}, /** C1b admission policy; absent means every image is refused. */ private readonly imagePolicy?: SandboxImageAdmission) { this.limits = { ...defaults, ...limits }; if (!this.limits.allowedHosts.split(",").every((host) => /^[a-z0-9.-]+$/.test(host) && !host.startsWith(".") && !host.endsWith("."))) throw new Error("Invalid sandbox allowlist");
+  constructor(limits: Partial<RunnerLimits> = {}, /** C1b admission policy; absent means every image is refused. */ private readonly imagePolicy?: SandboxImageAdmission,
+    /** C4b enforcement probe; absent means every sandbox creation is refused (fail closed). */
+    private readonly egressEnforcement?: EgressEnforcement) { this.limits = { ...defaults, ...limits };
+    // An empty allowlist is a legitimate deny-all state (C4b run phase), not a configuration error.
+    const allowlistEntries = this.limits.allowedHosts.split(",").map((host) => host.trim()).filter(Boolean);
+    const validAllowlistEntry = (host: string) => /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
+    if (!allowlistEntries.every(validAllowlistEntry)) throw new Error("Invalid sandbox allowlist");
     if (!/^(?:0\.[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)$/.test(this.limits.cpu) || !/^[1-9][0-9]*(?:[kmg])?$/i.test(this.limits.memory) || !Number.isSafeInteger(this.limits.diskBytes) || this.limits.diskBytes < 16_000_000 || !Number.isSafeInteger(this.limits.pids) || this.limits.pids < 16) throw new Error("Invalid sandbox resource limits"); }
   private async docker(argsList: string[], timeoutMs = 30_000, stdin?: string | Buffer, outputLimit?: number) {
     const action = [argsList[0], argsList[0] === "network" ? argsList[1] : undefined].filter(Boolean).join(".");
@@ -184,11 +199,29 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     try {
       await this.docker(["network", "create", "--driver", "bridge", "--internal", "--opt", "com.docker.network.bridge.gateway_mode_ipv4=isolated", names.network]);
       phase = "proxy.create";
-      await this.docker(["create", "--name", names.proxy, "--network", "bridge", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "64", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--env", `ALLOWED_HOSTS=${this.limits.allowedHosts}`, this.limits.proxyImage]);
+      await this.docker(["create", "--name", names.proxy, "--network", "bridge", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "64", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
+        "--env", `ALLOWED_HOSTS=${this.limits.allowedHosts}`,
+        // C4b: the proxy enforces the same policy knobs the operator configures for the runner.
+        "--env", `ALLOWED_GIT_HOSTS=${process.env.NPATI_SANDBOX_EGRESS_GIT_HOSTS ?? "github.com,codeload.github.com,gitlab.com,bitbucket.org"}`,
+        "--env", `NPATI_SANDBOX_EGRESS_MAX_REDIRECTS=${process.env.NPATI_SANDBOX_EGRESS_MAX_REDIRECTS ?? "5"}`,
+        "--env", `NPATI_SANDBOX_EGRESS_DNS_TTL_MS=${process.env.NPATI_SANDBOX_EGRESS_DNS_TTL_MS ?? "30000"}`,
+        ...(process.env.NPATI_EGRESS_AUDIT_HOOK ? ["--env", `NPATI_EGRESS_AUDIT_HOOK=${process.env.NPATI_EGRESS_AUDIT_HOOK}`] : []),
+        this.limits.proxyImage]);
       phase = "proxy.network.connect";
       await this.docker(["network", "connect", "--alias", "egress", names.network, names.proxy]);
       phase = "proxy.start";
       await this.docker(["start", names.proxy]);
+      // C4b: enforcement must be PROVEN on this run's network before any workload container exists.
+      // The network is created `--internal` with an isolated gateway, so the only reachable peer is the
+      // proxy; the probe additionally verifies that direct egress and outside DNS are impossible.
+      // The NPATI_SANDBOX_EGRESS_ENFORCED flag alone never authorizes a container (owner decision).
+      if (!this.egressEnforcement) {
+        throw new SandboxProviderError("network_enforcement_unavailable",
+          "Sandbox egress enforcement probe is not configured", 503, "sandbox", "code.shell.exec", true);
+      }
+      this.egressEnforcement.scope = { proxy: names.proxy, network: names.network };
+      phase = "egress.verify";
+      await this.egressEnforcement.assertEnforced();
       phase = "sandbox.create";
       await this.docker(buildSandboxCreateArgs({
         sandboxName: names.sandbox, sandboxId: id, network: names.network, scope, image: admitted.reference,

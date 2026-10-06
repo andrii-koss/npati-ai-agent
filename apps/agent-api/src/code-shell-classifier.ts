@@ -4,6 +4,7 @@ import {
   type TerminalRiskLevel,
 } from "./terminal-command-policy";
 import { detectPackageManager, type PackageManager } from "./code-deps-policy";
+import { DEFAULT_INSTALL_ALLOWLIST } from "./egress-allowlist";
 
 /**
  * C4: shell command classification for the Coding Agent.
@@ -530,7 +531,9 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     }
     if (NETWORK_EXECUTABLES.has(executable)) {
       const host = args.find((value) => /^https?:\/\//.test(value)) ? new URL(args.find((value) => /^https?:\/\//.test(value))!).hostname : undefined;
-      const allowlist = options.allowlist ?? ["registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org", "proxy.golang.org", "crates.io", "github.com", "objects.githubusercontent.com"];
+      // Single source of truth for registry hosts: the canonical egress allowlist module. The install
+      // phase may reach official registries; git hosts and vendor mirrors are never implicit here.
+      const allowlist = options.allowlist ?? [...DEFAULT_INSTALL_ALLOWLIST];
       if (host && isAllowlistedHost(host, allowlist)) {
         // A download from an allowlisted registry is controlled work, not something to review: the
         // base terminal policy returns `approval` for every network call, so the level is set here.

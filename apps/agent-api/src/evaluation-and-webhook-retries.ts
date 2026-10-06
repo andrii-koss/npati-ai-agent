@@ -171,13 +171,16 @@ export class WebhookRetryDeliveryEngine {
   async dispatchWithRetry(
     payload: WebhookDeliveryPayload,
     senderFn: (url: string, data: Record<string, unknown>) => Promise<boolean>,
-    options: { maxRetries?: number; initialDelayMs?: number } = {}
+    options: { maxRetries?: number; initialDelayMs?: number; validateDestination?: (url: string) => Promise<void> } = {}
   ): Promise<{ success: boolean; attempts: number; dlqEntry?: DeadLetterItem }> {
     const maxRetries = options.maxRetries ?? 3;
     let lastError = "";
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        // The destination policy is re-checked on every attempt (C4b): a retry must not reach a host
+        // that has since started resolving into a private network.
+        if (options.validateDestination) await options.validateDestination(payload.url);
         const isOk = await senderFn(payload.url, payload.data);
         if (isOk) {
           return { success: true, attempts: attempt };
@@ -209,11 +212,14 @@ export class WebhookRetryDeliveryEngine {
 
   async replayDlq(
     dlqId: string,
-    senderFn: (url: string, data: Record<string, unknown>) => Promise<boolean>
+    senderFn: (url: string, data: Record<string, unknown>) => Promise<boolean>,
+    options: { validateDestination?: (url: string) => Promise<void> } = {}
   ): Promise<boolean> {
     const item = this.dlq.get(dlqId);
     if (!item) return false;
 
+    // A replay is a fresh delivery, so the destination is validated again rather than trusted.
+    if (options.validateDestination) await options.validateDestination(item.payload.url);
     const isOk = await senderFn(item.payload.url, item.payload.data);
     if (isOk) {
       this.dlq.delete(dlqId);

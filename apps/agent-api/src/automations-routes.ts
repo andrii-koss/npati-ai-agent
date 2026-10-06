@@ -20,6 +20,26 @@ import {
   type WebhookDeliveryPayload,
 } from "./evaluation-and-webhook-retries";
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
+import { validateWebhookDestination } from "./webhook-destination-policy";
+import type { ResolverPort } from "./ssrf-policy";
+
+/** Real DNS resolver used for webhook destination validation inside this route module. */
+const webhookResolver: ResolverPort = async (host) => {
+  const { lookup } = await import("node:dns/promises");
+  const entries = await lookup(host, { all: true, verbatim: true });
+  return entries.map((entry) => entry.address);
+};
+
+/**
+ * Ad-hoc webhook dispatch validates the destination with the webhook destination policy (C4b) on every
+ * attempt and replay: private, internal, metadata, literal-IP and plain-HTTP targets are refused, and
+ * DNS is re-checked each time.
+ * TODO(C5a): once this route has access to the company's stored subscriptions, require the destination
+ * to match a stored endpoint exactly (scheme + hostname + port) instead of only validating it.
+ */
+async function validateAdHocWebhookDestination(url: string): Promise<void> {
+  await validateWebhookDestination(url, { resolve: webhookResolver, allowInsecureHttp: false });
+}
 
 // Shared singletons for in-process automation engines
 export const globalTaskFlowEngine = new TaskFlowEngine();
@@ -494,7 +514,7 @@ export function registerCompanyAutomationsRoutes(
       // Sender function: simulates failure if simulateFailure is true, otherwise performs delivery
       const sender = async () => !simulateFailure;
 
-      const result = await globalWebhookRetryEngine.dispatchWithRetry(payload, sender, { maxRetries });
+      const result = await globalWebhookRetryEngine.dispatchWithRetry(payload, sender, { maxRetries, validateDestination: validateAdHocWebhookDestination });
       return reply.code(200).send({ result });
     } catch (e) {
       return err(reply, e);
@@ -514,7 +534,7 @@ export function registerCompanyAutomationsRoutes(
       }
 
       // Replay sender succeeds
-      const success = await globalWebhookRetryEngine.replayDlq(r.params.dlqId, async () => true);
+      const success = await globalWebhookRetryEngine.replayDlq(r.params.dlqId, async () => true, { validateDestination: validateAdHocWebhookDestination });
       return reply.code(200).send({ replayed: success, dlqId: r.params.dlqId });
     } catch (e) {
       return err(reply, e);

@@ -32,9 +32,18 @@ export function webResearchLimits(environment: NodeJS.ProcessEnv = process.env):
   };
 }
 
-export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl?: string, environment: NodeJS.ProcessEnv = process.env) {
+export interface WebResearchOptions {
+  /**
+   * Optional URL validator. The default is the package-local `SafeUrlValidator`; callers that own a
+   * stronger SSRF policy (for example the agent API's `ssrf-policy`) inject it here so web fetches and
+   * crawls go through exactly the same rules as every other NPATI-side outbound request.
+   */
+  validator?: SafeUrlValidator;
+}
+
+export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl?: string, environment: NodeJS.ProcessEnv = process.env, options: WebResearchOptions = {}) {
   const limits = webResearchLimits(environment);
-  const validator = new SafeUrlValidator();
+  const validator = options.validator ?? new SafeUrlValidator();
   const crawler = crawlerBaseUrl
     ? new Crawl4AIProvider(crawlerBaseUrl, validator, limits, environment.CRAWL4AI_API_TOKEN)
     : undefined;

@@ -5,7 +5,9 @@ import { PluginLifecycleSystem, type NpatiPlugin } from "../apps/agent-api/src/p
 
 describe("Outbound Webhook Dispatcher (OutboundWebhookDispatcher)", () => {
   it("dispatches HMAC-signed event payloads to subscribed endpoints", async () => {
-    const dispatcher = new OutboundWebhookDispatcher();
+    // The dispatcher enforces the webhook destination policy (C4b) on save and delivery, so the test
+    // injects a resolver stub to stay hermetic instead of performing real DNS.
+    const dispatcher = new OutboundWebhookDispatcher(undefined, { resolve: async () => ["93.184.216.34"] });
     const companyId = "comp-webhooks-1";
     const secret = "webhook_secret_key_12345";
 

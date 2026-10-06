@@ -44,6 +44,19 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c4a-registry-allowlist.test.ts",
   "tests/coding-agent-c4a-capabilities.test.ts",
   "tests/coding-agent-c4a-security-gate.test.ts",
+  // C4b: sandbox network policy — activity events, allowlist administration, SSRF client and the
+  // consolidated network acceptance list.
+  "tests/coding-agent-c4b-network-activity.test.ts",
+  "tests/coding-agent-c4b-allowlist.test.ts",
+  "tests/coding-agent-c4b-ssrf-client.test.ts",
+  "tests/coding-agent-c4b-egress.test.ts",
+  "tests/coding-agent-c4b-acceptance.test.ts",
+  // C4b: runner readiness endpoint (probe contract, TTL cache, fail-closed) and the separate
+  // destination policy applied to webhooks.
+  "tests/coding-agent-c4b-readiness.test.ts",
+  "tests/coding-agent-c4b-webhook-policy.test.ts",
+  // C4b: the provider/runner wiring must expose the same enforcement defaults as the policy module.
+  "tests/coding-agent-c4b-allowlist-wiring.test.ts",
 ];
 
 /**
