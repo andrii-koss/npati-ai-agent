@@ -271,7 +271,14 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(result.status).toBe("completed");
     expect(result.reason).toBe("completed");
     expect(result.message).toContain("all tests pass");
-    expect(harness.invocations).toHaveLength(1);
+    /**
+     * C9 update (not a weakening): the run changed a file, so the verification loop now triggers a
+     * `code.verify.run` call of its own after the model stops. The C6 property stays exactly what it was —
+     * the model's own call is executed and counted once — so the assertion names the model's call instead of
+     * counting every invocation, which would have made this test fail for the wrong reason.
+     */
+    expect(harness.invocations.filter((entry) => entry.tool !== "code.verify.run")).toHaveLength(1);
+    expect(harness.invocations.filter((entry) => entry.tool === "code.verify.run")).toHaveLength(1);
     expect(result.summary.toolCalls).toBe(1);
     expect(result.summary.filesChanged).toEqual(["src/a.ts"]);
     expect(result.summary.diffStats).toEqual({ files: 1, linesAdded: 3, linesRemoved: 1 });

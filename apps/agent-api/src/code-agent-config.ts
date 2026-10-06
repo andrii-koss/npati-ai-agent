@@ -6,6 +6,8 @@
  * code path stays behind the existing "off by default" behaviour described in this file.
  */
 
+import { selfReviewFixIterationsFromEnv } from "./code-self-review";
+
 export interface CodeAgentLimits {
   /** Model turns inside one code run. */
   maxStepsPerRun: number;
@@ -32,6 +34,19 @@ export interface CodeAgentLimits {
   maxRedirects: number;
   toolResultRetentionDays: number;
   transcriptRetentionDays: number;
+  /**
+   * C9: how many files one run may change before the scope guard warns. A warning, never a block: a rename
+   * legitimately touches many files, and an approval on the *count* of files would be satisfied by one click
+   * while saying nothing about risk.
+   */
+  maxChangedFiles: number;
+  /**
+   * C9 (owner requirement 4): fix iterations allowed after the single self-review pass. The owner's rule is
+   * "at most one", so this value is **clamped** to 1 by `resolveSelfReviewFixIterations` — configuration may
+   * turn the fix iteration off (0) but never add a second one. The self-review itself is never optional in the
+   * sense of being skippable-by-configuration *and* reported as clean: `not_run` says so.
+   */
+  selfReviewFixIterations: number;
 }
 
 export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
@@ -58,6 +73,8 @@ export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
   maxRedirects: 5,
   toolResultRetentionDays: 30,
   transcriptRetentionDays: 90,
+  maxChangedFiles: 25,
+  selfReviewFixIterations: 1,
 };
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -96,6 +113,11 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     maxRedirects: positiveInt(env.NPATI_CODE_MAX_REDIRECTS, DEFAULT_CODE_AGENT_LIMITS.maxRedirects),
     toolResultRetentionDays: positiveInt(env.NPATI_CODE_TOOL_RESULT_RETENTION_DAYS, DEFAULT_CODE_AGENT_LIMITS.toolResultRetentionDays),
     transcriptRetentionDays: positiveInt(env.NPATI_CODE_TRANSCRIPT_RETENTION_DAYS, DEFAULT_CODE_AGENT_LIMITS.transcriptRetentionDays),
+    maxChangedFiles: positiveInt(env.NPATI_CODE_MAX_CHANGED_FILES, DEFAULT_CODE_AGENT_LIMITS.maxChangedFiles),
+    // The dedicated reader parses the raw value itself (0 is legal here, and `positiveInt` would treat it as
+    // unset), and the result is clamped by the module that owns the cap: the environment can turn the fix
+    // iteration off, never add a second one.
+    selfReviewFixIterations: selfReviewFixIterationsFromEnv(env),
   };
 }
 

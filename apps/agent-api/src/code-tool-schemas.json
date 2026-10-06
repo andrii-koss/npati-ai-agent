@@ -1087,5 +1087,187 @@
         }
       }
     }
+  },
+  {
+    "name": "code.plan.propose",
+    "version": 1,
+    "status": "active",
+    "description": "Record a structured plan for this session as a new draft revision: the files it expects to touch, the ordered steps, the risks and the test strategy. The plan is data produced by the model: it never selects the session mode and nothing is executed until the user approves a revision.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "description": "Workspace-relative paths the plan expects to change, so the reviewer sees the blast radius before approving."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "description": "Ordered steps. When the plan is approved these become the session todo list."
+        },
+        "risks": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 4096 }
+        },
+        "testStrategy": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.plan.propose" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["planRevision", "status", "steps"],
+          "additionalProperties": false,
+          "properties": {
+            "planRevision": { "type": "integer" },
+            "status": { "type": "string" },
+            "steps": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.plan.update",
+    "version": 1,
+    "status": "active",
+    "description": "Replace the todo list of this session. The whole list is sent every time, so a replayed call cannot duplicate tasks. At most one task may be in_progress; a list that breaks this is refused instead of being normalised.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["tasks"],
+      "additionalProperties": false,
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["taskId", "content", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "taskId": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "content": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "status": { "enum": ["pending", "in_progress", "completed"] }
+            }
+          },
+          "description": "The complete todo list. States are exactly pending, in_progress and completed."
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.plan.update" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["tasks", "pending", "inProgress", "completed"],
+          "additionalProperties": false,
+          "properties": {
+            "tasks": { "type": "integer" },
+            "pending": { "type": "integer" },
+            "inProgress": { "type": "integer" },
+            "completed": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.ask_user",
+    "version": 1,
+    "status": "active",
+    "description": "Ask the user a decision question and pause the run until a human answers. The question is stored as a row and the run moves to waiting_for_user, so the pause survives a restart; only the user can answer, no default or timeout ever answers on their behalf, and an unanswered question expires instead of being guessed. Use it when the choice is the user's to make (an ambiguous requirement, a destructive branch, a credential or environment the agent cannot pick), never to ask permission for something the policy already decides.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "The question, in the user's language. State what is being decided and why the answer changes what happens next; the row stores this text verbatim."
+        },
+        "choices": {
+          "type": "array",
+          "maxItems": 10,
+          "description": "Options the user may pick from. Every option needs a stable id (that is what comes back) and a label (that is only displayed). Omit to ask for a free-form answer, which then requires allowFreeAnswer.",
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "label": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "description": { "type": "string", "maxLength": 1000 }
+            }
+          }
+        },
+        "allowFreeAnswer": {
+          "type": "boolean",
+          "description": "Accept a typed answer as well as (or instead of) the offered choices. A question with neither a choice nor this flag is refused, because nobody could answer it and the run would wait forever."
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "How long the question stays answerable, in seconds. Defaults to 24 hours and is capped there: an expired question releases the run as ask_user_timeout without inventing an answer."
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.ask_user" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["questionId", "status", "choices", "allowFreeAnswer", "expiresAt"],
+          "additionalProperties": false,
+          "properties": {
+            "questionId": { "type": "string" },
+            "status": { "type": "string" },
+            "choices": { "type": "integer" },
+            "allowFreeAnswer": { "type": "boolean" },
+            "expiresAt": { "type": "string" }
+          }
+        }
+      }
+    }
   }
 ]

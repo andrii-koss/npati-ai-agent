@@ -117,6 +117,15 @@ import { collectCodeSessionUsage } from "./code-session-usage";
 import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-context-store";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
 import { registerCodeProjectInstructionsRoutes } from "./code-project-instructions-routes";
+// C9: goals, plan revisions and the session todo list. The tools update session metadata only; the routes are
+// the read/decision surface the workspace renders.
+import { proposePlan, updateSessionTodos } from "./code-plan-tool";
+import { registerCodeGoalRoutes } from "./code-goal-routes";
+// C9: `code.ask_user`. The tool service persists the question (the runner owns the run state and the pause); the
+// routes are the surface a person answers on, and the reaper port releases a run whose question timed out.
+import { createCodeAskUserService } from "./code-ask-user-service";
+import { createCodeUserQuestionReaperPort } from "./code-ask-user-reaper";
+import { registerCodeAskUserRoutes } from "./code-ask-user-routes";
 import { registerCodeProjectTrustRoutes } from "./code-project-trust-routes";
 import { isRepositoryInstructionsTrusted } from "./code-project-trust";
 import { CodeRunCancellationRegistry } from "./code-run-cancellation";
@@ -1778,6 +1787,13 @@ export function buildApp(config: AppConfig = {}) {
    * instead of looking like "nothing to clean". Note that `SecretLeaseProvider.startReaper()` was never
    * started before this step, so expired leases were previously never revoked in a running server.
    */
+  /**
+   * C9: the question-expiry port the reaper drives. It is assigned once the run-state log exists — releasing a
+   * timed-out question's run means writing run state — and the closures below **throw** while it is unset, so a
+   * reaper pass that somehow ran too early reports a visible error instead of a false "nothing to expire".
+   * `codeReaper.run()` is only reached near the end of this composition, well after the assignment.
+   */
+  let codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null = null;
   const codeReaper = new CodeReaper({
     intervalMs: config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs,
     toolCallNoProgressMs: config.codeAgentLimits?.toolCallNoProgressMs ?? DEFAULT_CODE_AGENT_LIMITS.toolCallNoProgressMs,
@@ -1794,6 +1810,21 @@ export function buildApp(config: AppConfig = {}) {
     // Detected, not assumed: until the approvals module exposes a bulk expiry (with its own audit) the
     // step is reported as `port_unavailable` rather than reaching into its private pool.
     staleApprovals: asStaleApprovalReaper(approvalsRepo),
+    /**
+     * C9: a question past its TTL releases the run it paused as `ask_user_timeout`, and no answer is invented.
+     * The port is resolved lazily (see the holder above) because it needs the run-state log; a dry run lists the
+     * expired questions for real, so this step is never reported as an unavailable preview.
+     */
+    userQuestions: {
+      previewCodeUserQuestions: async (input) => {
+        if (!codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
+        return codeUserQuestionReaperPort.previewCodeUserQuestions(input);
+      },
+      expireCodeUserQuestions: async (input) => {
+        if (!codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
+        return codeUserQuestionReaperPort.expireCodeUserQuestions(input);
+      },
+    },
     disk: {
       usage: async () => {
         const { statfs } = await import("node:fs/promises");
@@ -2125,6 +2156,54 @@ export function buildApp(config: AppConfig = {}) {
       // C4a: dependency inspection/audit/install go through the dependency port, which itself runs the
       // audit and the install through the shell runtime above (so the PolicyEngine still decides).
       deps: codeDepsPort,
+      /**
+       * C9: `code.ask_user`. This instance is built over the **store only**: it persists the question (and is
+       * idempotent per tool call), while the transition to `waiting_for_user` is written by the runner, which
+       * owns the run state, the lease and the loop. The split is deliberate — the run-state log is created later
+       * in this composition, and a tool service that could not see it would leave a paused question attached to a
+       * run that still claimed to be running. The route service below *does* take the run state, because
+       * answering and expiring are what resume or release a run.
+       *
+       * Without this port the tool would be published and dead — the `runCtags` defect class: visible in the
+       * Capability Inspector, impossible to run. A missing service fails closed with `tool_not_configured`.
+       */
+      codeAskUserService: createCodeAskUserService({ store: workspaceStore }),
+      /**
+       * C9: the planning tools. They change **session metadata** (a plan draft, the todo list) and never the
+       * workspace, which is why the policy layer classifies them read-only and why they stay reachable in
+       * `plan` mode. The classification is also why they must be idempotent: C6a recovery repeats read-only
+       * tool calls, so `proposePlan` de-duplicates by content hash and `updateSessionTodos` replaces the whole
+       * list. Classification and retention come from the session itself rather than being invented here, so a
+       * stored plan or todo carries the same data class as the session it belongs to (rule 18).
+       *
+       * Without this port both tools fail closed with `tool_not_configured`: a published tool that cannot run
+       * is a defect, and saying so is better than appearing to work.
+       */
+      planTool: {
+        propose: async ({ ctx, companyId, projectId, sessionId, plan, createdBy }) => {
+          const session = await codeService.getSession(ctx, companyId, sessionId);
+          return proposePlan(workspaceStore, {
+            companyId,
+            projectId,
+            sessionId,
+            plan,
+            createdBy: createdBy ?? null,
+            dataClassification: session.dataClassification,
+            retentionClass: session.retentionClass,
+          });
+        },
+        updateTodos: async ({ ctx, companyId, projectId, sessionId, tasks }) => {
+          const session = await codeService.getSession(ctx, companyId, sessionId);
+          return updateSessionTodos(workspaceStore, {
+            companyId,
+            projectId,
+            sessionId,
+            tasks,
+            dataClassification: session.dataClassification,
+            retentionClass: session.retentionClass,
+          });
+        },
+      },
       /**
        * C8: `code.symbols.outline` runs `ctags` **inside the sandbox**, through the same single transport every
        * other command uses (`codeSandboxExecPort`) — never on the host, because the rule is that code AI executes
@@ -4489,6 +4568,38 @@ ${localized.next}`;
     logger: app.log,
   });
   /**
+   * C9: goals, plan revisions and the session todo list.
+   *
+   * Three details are deliberate. Reads and decisions go through the shared C5a gate with named actions, so a
+   * permission can never be authorised by handing in a convenient label. Every mutation is journalled **before**
+   * it is applied, so an audit outage refuses the change instead of applying it unrecorded. And approving a plan
+   * applies the mode the **user** chose, through the existing session-mode service — the plan body is model
+   * output and never selects a mode, which is the same boundary C8 draws for repository instructions.
+   */
+  const codeGoalContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/goals(\/|$)|\/code\/sessions\/[^/]+\/(plan|todos)(\/decide)?$/.test(path)) return;
+    codeGoalContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeGoalRoutes(app, {
+    store: workspaceStore,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeGoalContexts.get(request as object) ?? null,
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    applyExecutionMode: async ({ ctx, companyId, sessionId, mode }) => {
+      // The revision comes from the session, so applying a mode after an approval is guarded by the same
+      // lost-update check the mode route uses; a session that moved on refuses instead of being overwritten.
+      const session = await codeService.getSession(ctx, companyId, sessionId);
+      await codeSessionModes.setMode(ctx, companyId, sessionId, {
+        mode: String(mode),
+        expectedRevision: session.revision,
+        reason: "plan_approved",
+      });
+    },
+    logger: app.log,
+  });
+  /**
    * C8: project instructions (`NPATI.md` / `AGENTS.md` / the shared `PROJECT.md`) and project trust.
    *
    * Two facts decided this shape. First, `CodeProjectTrustService.trust()`/`.revoke()` were implemented but
@@ -4536,6 +4647,68 @@ ${localized.next}`;
   });
   // C5: scoped approval rules are visible and revocable; every change is audited before it applies.
   registerCodeApprovalRoutes(app, authProvider, { store: workspaceStore, scope: codeApprovalScope });
+  /**
+   * C9: the surface a person answers a paused run on, plus the reaper port that releases a run whose question
+   * timed out.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
+   * there is no second auth path. `code.question.read` maps to `workspace:read` and `code.question.answer` to
+   * `workspace:write`; the service itself additionally refuses an agent or service principal before it reads
+   * anything, because an agent that could answer its own question would have granted itself the permission it
+   * asked for.
+   *
+   * This service carries the run state (unlike the tool-side instance), because a recorded answer resumes the
+   * run as `interrupted`/`user_answered` and an expiry releases it as `ask_user_timeout`.
+   */
+  const codeQuestionContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/(?:runs\/[^/]+\/question|sessions\/[^/]+\/questions\/[^/]+\/answer)$/.test(path)) return;
+    codeQuestionContexts.set(request, await authProvider.authenticate(request));
+  });
+  const codeQuestionActivity = async (event: {
+    kind: "question_asked" | "question_answered" | "question_expired" | "question_cancelled";
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    runId: string;
+    questionId: string;
+    answeredBy?: string;
+  }): Promise<void> => {
+    // The question **text** is deliberately not recorded: Activity is metadata, and the prompt is user-facing
+    // content that already lives on the question row under the session's classification.
+    await activitySinkForKind<Record<string, unknown>>(codeActivitySink, "run_activity").record({
+      kind: event.kind,
+      companyId: event.companyId,
+      projectId: event.projectId,
+      sessionId: event.sessionId,
+      runId: event.runId,
+      questionId: event.questionId,
+      ...(event.answeredBy ? { answeredBy: event.answeredBy } : {}),
+    });
+  };
+  const codeAskUserRunState = {
+    markWaitingForUser: (input: { companyId: string; runId: string; questionId: string; toolCallId: string }) =>
+      codeRunStateLog.markWaitingForUser(input),
+    resumeAfterAnswer: (input: { companyId: string; runId: string; questionId: string; answeredBy: string }) =>
+      codeRunStateLog.resumeAfterAnswer(input),
+    markInterrupted: (input: { companyId: string; runId: string; reason: string }) =>
+      codeRunStateLog.markInterrupted(input),
+  };
+  registerCodeAskUserRoutes(app, {
+    store: workspaceStore,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeQuestionContexts.get(request as object) ?? null,
+    runState: codeAskUserRunState,
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    onActivity: (event) => { void codeQuestionActivity(event).catch(() => undefined); },
+  });
+  codeUserQuestionReaperPort = createCodeUserQuestionReaperPort({
+    store: workspaceStore,
+    runState: codeAskUserRunState,
+    onActivity: (event) => { void codeQuestionActivity(event).catch(() => undefined); },
+    now: () => Date.now(),
+  });
   // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
   registerNetworkRoutes(app, {
     auth: authProvider,

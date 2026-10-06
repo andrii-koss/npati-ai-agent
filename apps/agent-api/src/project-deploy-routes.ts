@@ -5,7 +5,8 @@ import {
   ProjectDeployService,
   DeployApprovalRequiredError,
 } from "./project-deploy-service";
-import { DeployError, DeployTargetConfig } from "./deploy-provider";
+import type { DeployTargetConfig } from "./deploy-provider";
+import { DeployError } from "./deploy-provider";
 
 interface ProjectParams {
   companyId: string;

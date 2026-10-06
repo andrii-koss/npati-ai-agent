@@ -1,6 +1,17 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CODE_CAPABILITIES, CODE_TOOL_SCHEMA_MIRROR } from "@npati/shared";
-import { CODE_TOOL_SCHEMAS } from "../apps/agent-api/src/code-tool-registry";
+import {
+  CODE_TOOL_MANIFEST_VERSION,
+  CODE_TOOL_SCHEMAS,
+  KNOWN_TOOL_MANIFESTS,
+  PUBLISHED_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
+  V5_TOOL_SCHEMAS,
+  V6_TOOL_SCHEMAS,
+  toolSchemaChecksum,
+} from "../apps/agent-api/src/code-tool-registry";
 
 /**
  * C2 schema parity guard.
@@ -38,6 +49,13 @@ const TOOL_NAMES = [
   "code.deps.inspect",
   "code.deps.audit",
   "code.deps.add",
+  // C9 planning metadata: a plan draft and the session todo list. They mutate session state, never the
+  // workspace — which is why the policy classifies them read-only.
+  "code.plan.propose",
+  "code.plan.update",
+  // C9: the user question. It pauses the run as `waiting_for_user`; a person answers it, and neither the model
+  // nor a timeout ever does.
+  "code.ask_user",
 ] as const;
 
 /**
@@ -73,6 +91,12 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.deps.inspect": "low",
   "code.deps.audit": "medium",
   "code.deps.add": "high",
+  // C9: planning metadata only, so both are low risk and never approve-gated.
+  "code.plan.propose": "low",
+  "code.plan.update": "low",
+  // C9: a question touches session metadata and nothing else. It is *not* approve-gated: asking the user is the
+  // alternative to guessing, so gating it would push the agent to guess.
+  "code.ask_user": "low",
 };
 
 const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
@@ -153,5 +177,72 @@ describe("security-gate: C2 tool schema parity", () => {
       expect(fields).not.toContain("sessionId");
       expect(fields).not.toContain("workspaceId");
     }
+  });
+
+  it("lists every tool exactly once in the parity list and a risk for each", () => {
+    // A duplicate would mask a missing tool: 25 entries with one duplicate are 24 unique names, so the
+    // comparison against a 25-tool source still passes while one tool is never actually checked.
+    expect(new Set(TOOL_NAMES).size, "TOOL_NAMES must not contain duplicates").toBe(TOOL_NAMES.length);
+    // A tool added here without a risk entry would make `EXPECTED_RISK[name]` undefined and silently
+    // weaken the risk assertion below, so the two lists must stay in step.
+    expect(Object.keys(EXPECTED_RISK).sort(), "every tool needs a pinned risk").toEqual([...TOOL_NAMES].sort());
+  });
+
+  it("keeps the registry constants in step with the published manifest artifact", () => {
+    // `scripts/verify-code-tool-schemas.mjs --check` compares the artifacts with each other, so it cannot
+    // see a stale constant in the code. That gap was real: the artifact reported `manifest v6` while the
+    // registry still held `CODE_TOOL_MANIFEST_VERSION = 5`, and a session resolving v5 would simply not
+    // see the newly published tools while the artifact guard stayed green.
+    const published = JSON.parse(
+      readFileSync(new URL("../apps/agent-api/src/code-tool-schemas.published.json", import.meta.url), "utf8"),
+    ) as { manifestVersion: number; checksum: string; tools: { name: string }[] };
+
+    expect(CODE_TOOL_MANIFEST_VERSION, "registry manifest version must equal the published manifest").toBe(published.manifestVersion);
+    expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM, "registry checksum must equal the published manifest").toBe(published.checksum);
+    // Reuse the registry's own hasher instead of a second implementation: two hashers would be two truths
+    // and could disagree exactly when it matters.
+    expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM, "registry checksum must match the schemas it pins").toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
+    expect(published.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+  });
+
+  it("serves exactly one manifest for the published version and keeps the frozen v5 and v6 sets intact", () => {
+    const publishedVersions = KNOWN_TOOL_MANIFESTS.map((manifest) => manifest.version).filter(
+      (version) => version === CODE_TOOL_MANIFEST_VERSION,
+    );
+    expect(publishedVersions, "exactly one manifest per published version").toHaveLength(1);
+
+    const current = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === CODE_TOOL_MANIFEST_VERSION)!;
+    expect(current.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+
+    // Rule 13: an already published version is never rewritten, so a tool published later cannot leak
+    // into v5 — a session created before C9 must keep resolving exactly the 22 tools it started with.
+    const v5 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 5)!;
+    expect(v5.tools, "v5 is frozen at 22 tools").toHaveLength(22);
+    expect(v5.tools.map((tool) => tool.name).sort()).toEqual(
+      TOOL_NAMES.filter((name) => name !== "code.plan.propose" && name !== "code.plan.update" && name !== "code.ask_user").sort(),
+    );
+    expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.propose");
+    expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.update");
+    expect(v5.tools.map((tool) => tool.name)).not.toContain("code.ask_user");
+    expect(v5.checksum, "v5 checksum is frozen").toBe(PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM);
+    expect(toolSchemaChecksum(V5_TOOL_SCHEMAS)).toBe(PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM);
+
+    /**
+     * v6 is the set sessions were pinned to before `code.ask_user` existed, and it is frozen **explicitly**: the
+     * registry lists the 24 names rather than filtering the current schemas, so the newest publication cannot
+     * retroactively join a manifest that was already served. A "everything except the newest tool" rule would
+     * have looked equivalent today and silently rewritten v6 the next time a tool was added.
+     */
+    const v6 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 6)!;
+    expect(v6.tools, "v6 is frozen at 24 tools").toHaveLength(24);
+    expect(v6.tools.map((tool) => tool.name).sort()).toEqual(
+      [...TOOL_NAMES].filter((name) => name !== "code.ask_user").sort(),
+    );
+    expect(v6.tools.map((tool) => tool.name), "the v7 tool must not leak into v6").not.toContain("code.ask_user");
+    expect(v6.checksum, "v6 checksum is frozen").toBe(PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM);
+    expect(toolSchemaChecksum(V6_TOOL_SCHEMAS)).toBe(PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM);
+    // The three frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
+    expect(new Set([PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM, PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM, toolSchemaChecksum(CODE_TOOL_SCHEMAS)]).size).toBe(3);
+    expect(V6_TOOL_SCHEMAS.map((tool) => tool.name)).not.toContain("code.ask_user");
   });
 });

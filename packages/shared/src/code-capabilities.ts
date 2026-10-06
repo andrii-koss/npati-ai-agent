@@ -717,6 +717,127 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  "code.plan.propose": {
+    inputSchema: {
+      type: "object",
+      required: ["steps"],
+      additionalProperties: false,
+      properties: {
+        files: {
+          type: "array",
+          maxItems: 200,
+          items: { type: "string", minLength: 1, maxLength: 4096 },
+          description: "Workspace-relative paths the plan expects to change, so the reviewer sees the blast radius before approving.",
+        },
+        steps: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          items: { type: "string", minLength: 1, maxLength: 4096 },
+          description: "Ordered steps. When the plan is approved these become the session todo list.",
+        },
+        risks: { type: "array", maxItems: 50, items: { type: "string", minLength: 1, maxLength: 4096 } },
+        testStrategy: { type: "string", maxLength: 4000 },
+      },
+    },
+    outputSchema: resultEnvelope("code.plan.propose", {
+      type: "object",
+      required: ["planRevision", "status", "steps"],
+      additionalProperties: false,
+      properties: {
+        planRevision: { type: "integer" },
+        status: { type: "string" },
+        steps: { type: "integer" },
+      },
+    }),
+  },
+  "code.plan.update": {
+    inputSchema: {
+      type: "object",
+      required: ["tasks"],
+      additionalProperties: false,
+      properties: {
+        tasks: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            type: "object",
+            required: ["taskId", "content", "status"],
+            additionalProperties: false,
+            properties: {
+              taskId: { type: "string", minLength: 1, maxLength: 128 },
+              content: { type: "string", minLength: 1, maxLength: 2000 },
+              status: { enum: ["pending", "in_progress", "completed"] },
+            },
+          },
+          description: "The complete todo list. States are exactly pending, in_progress and completed.",
+        },
+      },
+    },
+    outputSchema: resultEnvelope("code.plan.update", {
+      type: "object",
+      required: ["tasks", "pending", "inProgress", "completed"],
+      additionalProperties: false,
+      properties: {
+        tasks: { type: "integer" },
+        pending: { type: "integer" },
+        inProgress: { type: "integer" },
+        completed: { type: "integer" },
+      },
+    }),
+  },
+  "code.ask_user": {
+    inputSchema: {
+      type: "object",
+      required: ["prompt"],
+      additionalProperties: false,
+      properties: {
+        prompt: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "The question, in the user's language. State what is being decided and why the answer changes what happens next; the row stores this text verbatim.",
+        },
+        choices: {
+          type: "array",
+          maxItems: 10,
+          description: "Options the user may pick from. Every option needs a stable id (that is what comes back) and a label (that is only displayed). Omit to ask for a free-form answer, which then requires allowFreeAnswer.",
+          items: {
+            type: "object",
+            required: ["id", "label"],
+            additionalProperties: false,
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 128 },
+              label: { type: "string", minLength: 1, maxLength: 500 },
+              description: { type: "string", maxLength: 1000 },
+            },
+          },
+        },
+        allowFreeAnswer: {
+          type: "boolean",
+          description: "Accept a typed answer as well as (or instead of) the offered choices. A question with neither a choice nor this flag is refused, because nobody could answer it and the run would wait forever.",
+        },
+        expiresInSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 86400,
+          description: "How long the question stays answerable, in seconds. Defaults to 24 hours and is capped there: an expired question releases the run as ask_user_timeout without inventing an answer.",
+        },
+      },
+    },
+    outputSchema: resultEnvelope("code.ask_user", {
+      type: "object",
+      required: ["questionId", "status", "choices", "allowFreeAnswer", "expiresAt"],
+      additionalProperties: false,
+      properties: {
+        questionId: { type: "string" },
+        status: { type: "string" },
+        choices: { type: "integer" },
+        allowFreeAnswer: { type: "boolean" },
+        expiresAt: { type: "string" },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -1347,12 +1468,118 @@ export const CODE_DEPS_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/** Every `code.*` capability (reads first, then the mutating file tools, then sandbox execution). */
+/**
+ * C9: planning tools (inventory ids 371-372), appended after the dependency group so the earlier groups keep
+ * their exact ids and membership. They are `low` risk and require `workspace:read`: they change session
+ * metadata (a plan draft, the todo list), never a workspace file. Marking them read-only is deliberate — it is
+ * what lets them run in `plan` mode, the one mode whose purpose is to produce a plan — and it is exactly why
+ * both tools are idempotent: C6a recovery repeats read-only tool calls.
+ */
+export const CODE_PLAN_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.plan.propose",
+    inventoryIds: [371],
+    type: "tool",
+    domain: "code",
+    name: "Propose a plan revision",
+    description:
+      "Record a structured plan for the session (expected files, ordered steps, risks, test strategy) as a new draft revision. The plan is model-produced data: it selects no session mode, changes no workspace file, and nothing is executed until the user approves a revision.",
+    useWhen: [
+      "The session runs in plan mode and the agent has finished exploring the code it needs to change.",
+      "The user asked for a plan before any modification.",
+    ],
+    doNotUseWhen: [
+      "The session is not in plan mode and the change is trivial enough to just do.",
+      "The agent wants to change files: the plan is metadata, and the approved revision is what starts execution.",
+      "The agent wants to record progress: use code.plan.update instead.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.plan.propose"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.plan.propose"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.plan.update",
+    inventoryIds: [372],
+    type: "tool",
+    domain: "code",
+    name: "Update the session todo list",
+    description:
+      "Replace the session todo list (pending / in_progress / completed). At most one task may be in_progress; a list that breaks that rule is refused instead of normalised, and the whole list is sent every time so a replayed call cannot duplicate tasks.",
+    useWhen: [
+      "The agent starts, finishes or reorders a task during a run.",
+      "The agent needs the user to see current progress in the workspace.",
+    ],
+    doNotUseWhen: [
+      "The agent wants to record a plan before approval: use code.plan.propose instead.",
+      "The agent wants to mark work done without verifying it: todo state is not acceptance evidence.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.plan.update"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.plan.update"]!.outputSchema,
+    version: 1,
+  },
+];
+
+/**
+ * C9: `code.ask_user` (inventory id 373), appended **after** the planning group so that the ids 349–372 keep
+ * their exact meaning and membership. A published inventory id that moved would silently re-point at another
+ * capability in every stored audit matrix, so a new id is only ever appended.
+ *
+ * It asks a person to decide and pauses the run (`waiting_for_user`) until they answer. `low` risk,
+ * `workspace:read`, no confirmation: the tool cannot change a file, a sandbox or the network, and asking a
+ * question must never be gated behind the very permission whose scope is in doubt — an agent that cannot ask
+ * would guess instead. It is in the narrow `PLAN_SAFE_TOOLS` list rather than the read-only class for the same
+ * reason the plan tools are.
+ */
+export const CODE_ASK_USER_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.ask_user",
+    inventoryIds: [373],
+    type: "tool",
+    domain: "code",
+    name: "Ask the user a question",
+    description:
+      "Ask the user a decision question and pause the run as waiting_for_user until a human answers. The question is a stored row, so the pause survives a restart; only the user can answer it, no default or timeout ever answers for them, and an unanswered question expires with ask_user_timeout instead of being guessed.",
+    useWhen: [
+      "The choice belongs to the user: an ambiguous requirement, two defensible designs, or a production/dev target the agent must not pick.",
+      "The agent would otherwise guess at something that changes the outcome and cannot be discovered by reading the code.",
+    ],
+    doNotUseWhen: [
+      "The answer is in the repository, the plan or the user's earlier message: read it instead of asking again.",
+      "The agent wants permission for something the policy engine already decides: that is a policy decision, not a question.",
+      "The agent wants to report progress or propose a plan: use code.plan.propose or code.plan.update.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.ask_user"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.ask_user"]!.outputSchema,
+    version: 1,
+  },
+];
+
+/** Every `code.*` capability (reads, mutating file tools, sandbox execution, dependencies, planning). */
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_READ_CAPABILITIES,
   ...CODE_WRITE_CAPABILITIES,
   ...CODE_SHELL_CAPABILITIES,
   ...CODE_DEPS_CAPABILITIES,
+  ...CODE_PLAN_CAPABILITIES,
+  ...CODE_ASK_USER_CAPABILITIES,
 ];
 
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
@@ -1391,6 +1618,34 @@ export const CODE_DEPS_MATRIX: CapabilityMatrixEntry[] = CODE_DEPS_CAPABILITIES.
   risk: capability.risk,
   testType: "integration",
   testFiles: ["tests/coding-agent-c4a-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/** C9: the planning tools' audit-matrix entries (inventory ids 371-372). */
+export const CODE_PLAN_MATRIX: CapabilityMatrixEntry[] = CODE_PLAN_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c9-plan-tool.test.ts", "tests/coding-agent-c9-plan-mode.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/** C9: `code.ask_user`'s audit-matrix entry (inventory id 373). */
+export const CODE_ASK_USER_MATRIX: CapabilityMatrixEntry[] = CODE_ASK_USER_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c9-ask-user.test.ts", "tests/coding-agent-c9-ask-user-runner.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
 

@@ -1,7 +1,14 @@
 {
-  "manifestVersion": 5,
-  "checksum": "ea9cf82b2bb4ca1e2e29b5b364d10a0895e9ded6e94f9dc3cf82d600717d9f19",
+  "manifestVersion": 7,
+  "checksum": "44d742ad69ebebca93daccf91ca2be6f3937d344cfb5e03182d6d493c90740da",
   "tools": [
+    {
+      "key": "code.ask_user@1",
+      "name": "code.ask_user",
+      "version": 1,
+      "status": "active",
+      "checksum": "de42bc30fa5cfd636963db95fa840523630ca1c98f2b94149e0b9dc44c4cd090"
+    },
     {
       "key": "code.deps.add@1",
       "name": "code.deps.add",
@@ -99,6 +106,20 @@
       "version": 1,
       "status": "active",
       "checksum": "2aa3e6fe7110e3522f640e134e445edfddcd2eeda3010d6f9954529a70d7e61d"
+    },
+    {
+      "key": "code.plan.propose@1",
+      "name": "code.plan.propose",
+      "version": 1,
+      "status": "active",
+      "checksum": "7b1b6f9d0f89f8135965e41d1f9e7fc802eb3e9a5287bfd5461cce1a7e81d5b0"
+    },
+    {
+      "key": "code.plan.update@1",
+      "name": "code.plan.update",
+      "version": 1,
+      "status": "active",
+      "checksum": "6d6589ab5a1368b92298305a9215ac0f5317e630f3e351d3b38df9fa3b2beec5"
     },
     {
       "key": "code.project.info@1",

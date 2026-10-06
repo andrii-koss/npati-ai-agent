@@ -3,6 +3,8 @@ import type {
   ApprovalCardData,
   ApprovalDecisionPlan,
   ApprovalScope,
+  AskUserAnswer,
+  AskUserCardData,
   CodeSessionMode,
 } from "./types";
 
@@ -193,4 +195,82 @@ export function persistedModeLabel(mode: string | null | undefined, isUk: boolea
   };
   const resolved = canonical[mode];
   return resolved ? modeLabel(resolved, isUk) : null;
+}
+
+/** Upper bound for a free-form answer, mirroring the approvals `notes` limit the API already enforces. */
+export const ASK_USER_FREE_ANSWER_MAX = 2000;
+
+export type AskUserAnswerValidation = { ok: true; answer: AskUserAnswer } | { ok: false; reason: string };
+
+/**
+ * C9: the one rule for what counts as a valid answer to an `ask_user` card, shared by the card and (by
+ * intent) the server. A choice and a free-form answer are mutually exclusive: accepting both would leave the
+ * record ambiguous about what the human actually decided, and the run would continue on an interpretation.
+ *
+ * The choice ids are checked against the card's own `choices`, so a stale or tampered UI cannot answer with
+ * an option that was never offered. The free-form answer is refused when the server said it does not accept
+ * one — a UI that offers more than the API accepts produces a rejected answer after the user has typed it.
+ */
+export function validateAskUserAnswer(answer: AskUserAnswer, card: AskUserCardData): AskUserAnswerValidation {
+  if (card.status !== "pending") {
+    return { ok: false, reason: `the question is not open (status: ${card.status})` };
+  }
+
+  const choiceId = answer.choiceId;
+  const freeAnswer = (answer.freeAnswer ?? "").trim();
+
+  if (choiceId !== undefined && freeAnswer.length > 0) {
+    return { ok: false, reason: "choose an option or write your own answer, not both" };
+  }
+  if (choiceId === undefined && freeAnswer.length === 0) {
+    return { ok: false, reason: "an answer is required" };
+  }
+
+  if (choiceId !== undefined) {
+    if (!card.choices.some((choice) => choice.id === choiceId)) {
+      return { ok: false, reason: "that option was not offered for this question" };
+    }
+    return { ok: true, answer: { choiceId } };
+  }
+
+  if (!card.allowFreeAnswer) {
+    return { ok: false, reason: "this question only accepts one of the offered options" };
+  }
+  if (freeAnswer.length > ASK_USER_FREE_ANSWER_MAX) {
+    return { ok: false, reason: `the answer is longer than ${ASK_USER_FREE_ANSWER_MAX} characters` };
+  }
+  return { ok: true, answer: { freeAnswer } };
+}
+
+export interface AskUserAnswerInput {
+  companyId: string;
+  sessionId: string;
+  questionId: string;
+  /** Echoed so the server can refuse an answer to a question that has since changed or expired. */
+  revision: number;
+  answer: AskUserAnswer;
+}
+
+/**
+ * The request that answers a paused question. `revision` makes the call optimistic-concurrency safe: a card
+ * rendering an older revision must fail loudly rather than answer a question the run has already moved on
+ * from, and `questionId` gives the server its idempotency key for a retried submit.
+ *
+ * NOTE (contract to reconcile): the `code.ask_user` route is implemented by a different stream. This path
+ * mirrors the session-control shape the C7 routes use, and the card itself never calls it directly — it hands
+ * the answer to a handler the page provides, so an unwired route shows as a disabled control with a reason
+ * instead of a button that appears to work. This function is the single place to adjust once the route lands.
+ */
+export function askUserAnswerRequest(input: AskUserAnswerInput): ApiRequest {
+  return {
+    method: "POST",
+    path: `/companies/${encodeURIComponent(input.companyId)}/code/sessions/${encodeURIComponent(
+      input.sessionId
+    )}/questions/${encodeURIComponent(input.questionId)}/answer`,
+    body: {
+      revision: input.revision,
+      ...(input.answer.choiceId !== undefined ? { choiceId: input.answer.choiceId } : {}),
+      ...(input.answer.freeAnswer !== undefined ? { freeAnswer: input.answer.freeAnswer } : {}),
+    },
+  };
 }

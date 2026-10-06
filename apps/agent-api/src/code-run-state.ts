@@ -434,6 +434,58 @@ export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
     });
   }
 
+  /**
+   * C9: the run pauses on a question. This is a **non-terminal** state, and it is deliberately its own value
+   * rather than "still running with no lease": the reconciler exists to turn "running without a live lease" into
+   * `interrupted`, so a run waiting for an answer must not look like a crash — otherwise every restart would
+   * mark a healthy paused run as interrupted, replay work, and orphan the answer the user is about to give.
+   *
+   * The lease is deliberately left alone: this method does not know which process holds it, and releasing a lease
+   * that belongs to someone else would be worse than leaving a stale one. Nothing depends on the lease here —
+   * the status is what pauses the run, and the reconciler ignores a `waiting_for_user` run whatever its lease
+   * says (see `isReconcilable`).
+   */
+  async markWaitingForUser(input: {
+    companyId: string;
+    runId: string;
+    questionId: string;
+    toolCallId: string;
+  }): Promise<CodeRunStateRecord> {
+    assertNoSensitiveRunState({ questionId: input.questionId, toolCallId: input.toolCallId });
+    return this.apply(input.runId, {
+      companyId: input.companyId,
+      runId: input.runId,
+      status: "waiting_for_user",
+      details: {
+        waitingForUser: {
+          questionId: input.questionId,
+          toolCallId: input.toolCallId,
+          since: new Date(this.now()).toISOString(),
+        },
+      },
+    });
+  }
+
+  /**
+   * C9: the answer arrived, so the pause is over. The run becomes `interrupted` — C6a's word for "not running,
+   * continuable from the turn boundary" — and *not* `running`, because nothing is driving it yet: driving the
+   * continuation is Resume (C10), which this step must not implement. The reason records that this was an
+   * answered question rather than a crash, so the two are never confused in Activity or in a report.
+   */
+  async resumeAfterAnswer(input: {
+    companyId: string;
+    runId: string;
+    questionId: string;
+    answeredBy: string;
+  }): Promise<CodeRunStateRecord> {
+    assertNoSensitiveRunState({ questionId: input.questionId, answeredBy: input.answeredBy });
+    return this.markInterrupted({
+      companyId: input.companyId,
+      runId: input.runId,
+      reason: "user_answered",
+    });
+  }
+
   /** Terminal state of a run. `completed`/`failed`/`cancelled` all stamp `finished_at`. */
   async markFinished(input: {
     companyId: string;

@@ -5,6 +5,7 @@ import {
   searchProjectFiles,
   writeProjectFile,
 } from "../../project-files-client";
+import { setStoredAuthToken } from "../../AuthContext";
 import { ProjectFilesClientError } from "../../project-files-paths";
 
 /**
@@ -40,28 +41,54 @@ function stubFetch(response: { ok?: boolean; status?: number; body?: unknown }):
   return { fetchImpl, calls };
 }
 
-function withLocalStorage<T>(run: () => Promise<T>): Promise<T> {
-  const store = new Map<string, string>([["npati.auth.token", "test-token"]]);
+/**
+ * A `localStorage` stub for the node test environment (there is no DOM here), seeded with a token through the
+ * auth layer's own setter.
+ *
+ * The first version of this fixture wrote the token under a hard-coded key, `"npati.auth.token"`, which is not
+ * the key the app uses — `AuthContext.tsx` stores it under `npati_agent_access_token`. The client therefore
+ * correctly attached no header, and the test reported a transport bug that did not exist. Going through
+ * `setStoredAuthToken` makes the fixture unable to drift from the key the client actually reads.
+ */
+function withStoredToken<T>(token: string | null, run: () => Promise<T>): Promise<T> {
+  const store = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => void store.set(key, value),
     removeItem: (key: string) => void store.delete(key),
   });
+  setStoredAuthToken(token);
   return run().finally(() => vi.unstubAllGlobals());
+}
+
+/** The client always sends a `Headers`; asserting that shape beats casting it and reading a silent `null`. */
+function headerValue(call: FetchCall | undefined, name: string): string | null {
+  const headers = call?.init?.headers;
+  expect(headers, "the client must send a Headers instance").toBeInstanceOf(Headers);
+  return (headers as Headers).get(name);
 }
 
 describe("C7: project-files client transport", () => {
   it("attaches the stored bearer token on every file call", async () => {
-    await withLocalStorage(async () => {
+    await withStoredToken("test-token", async () => {
       const { fetchImpl, calls } = stubFetch({ body: { files: [{ path: "src/index.ts" }] } });
       const result = await listProjectFiles(SCOPE, fetchImpl);
       expect(result.files).toEqual([{ path: "src/index.ts" }]);
       expect(calls[0]?.url).toBe("/api/companies/company-1/projects/project-1/files/tree");
-      expect((calls[0]?.init?.headers as Headers).get("Authorization")).toBe("Bearer test-token");
+      expect(headerValue(calls[0], "Authorization")).toBe("Bearer test-token");
 
       const read = stubFetch({ body: { path: "a.ts", content: "x" } });
       await readProjectFile(SCOPE, "a.ts", read.fetchImpl);
       expect(read.calls[0]?.url).toBe("/api/companies/company-1/projects/project-1/files/read?path=a.ts");
+      // "on every file call": the read path carries the token too, not just the tree call.
+      expect(headerValue(read.calls[0], "Authorization")).toBe("Bearer test-token");
+    });
+
+    // With nothing stored the header must be absent — the value comes from storage, not from a constant.
+    await withStoredToken(null, async () => {
+      const { fetchImpl, calls } = stubFetch({ body: { files: [] } });
+      await listProjectFiles(SCOPE, fetchImpl);
+      expect(headerValue(calls[0], "Authorization")).toBeNull();
     });
   });
 

@@ -3,7 +3,62 @@
 Update this file after every completed step.
 
 ## Current step
-- **C8 COMPLETE — context management.** All eight of the owner's decisions are implemented and proven: the
+- **C9 COMPLETE — planning, todo, verification, self-review and goal-driven execution.** All eight owner
+  completion conditions hold: `ask_user` pause/resume green with a pause that is a **persisted state** (survives
+  restart, the C6a reconciler refuses it on two layers, only a human principal may answer, a repeated answer does
+  not resume twice, TTL expiry yields `expired` + `ask_user_timeout` with **no** recorded answer — structurally,
+  because the migration CHECKs make "answered without an answer" and "not answered with an answer" impossible);
+  **self-review runs exactly once** structurally (a single `executed` flag that is never reset, so a second call
+  returns the same frozen verdict and makes no model call), fix iterations capped at **one** by
+  `resolveSelfReviewFixIterations` (which *reduces* any larger value) with a one-way fix and the verify repair
+  budget closed afterwards, **re-verify driven by a change signature** (path + status + `sha256(diff)`), and a
+  finding that asks to change mode/policy/permissions rewritten into a **blocking security finding** because the
+  review output is data and no port could apply it; the **eval corpus expanded** in the existing harness
+  (schema 1 → 2, 8 → 17 tasks) with exact count assertions; and the **Goal/Progress/verification UI** working in
+  the existing plan block.
+- Done and proven: plan mode
+  (which was **already** enforced on three layers — mode matrix, `session_mode_denied` for non-read-only tools,
+  and the runner not offering mutating tools in plan — so the new planning tools were deliberately added to the
+  read-only classification instead of becoming an exception), the `code.plan.propose`/`code.plan.update` tools
+  with capability ids 371/372 and executors, `code_session_plans` with `execution_mode` as a **separate column**
+  (a plan is model output, so it can never choose its own execution mode), `code_session_todos` with a **partial
+  unique index** enforcing "at most one `in_progress`", `code_goals` + `code_goal_criteria` where acceptance
+  criteria are **separate rows** and DB triggers refuse `completed` while any criterion is unverified (plus the
+  reverse trigger stopping a criterion of a completed goal from being re-verified), the verification loop with the
+  **revived** dead knob `repairLoopAttempts`, the **test-integrity guard** (the real gap: deleting or weakening
+  tests was not detected at all) and the scope guard as a warning.
+- **Verified (final, escalated):** `npm run typecheck` exit 0; both workspace builds exit 0;
+  **`npm run security-gate` exit 0 — `passed=1382 failed=0`, 95 suites, `present=95 missing=0`**; and
+  **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed** (the frontend render tests had never executed
+  before this step, and their first real run exposed 7 failures — all **test** defects, no XSS hole).
+- **Registry split-brain closed and the guard hardened.** The generated artifacts said manifest **v6 / 24 tools**
+  while `code-tool-registry.ts` still held `v5` with the old checksum — the artifact guard compared artifacts with
+  each other and could not see it, so a session resolving v5 would silently not see the new tools. v5 is now
+  **frozen with an explicit list of 22 names** (not "all minus new", which would let a future tool leak into an
+  already published manifest), and `c2-schema-parity` gained three provably non-tautological checks: no
+  duplicates and a complete `EXPECTED_RISK`, registry constants equal to the published manifest and to the
+  registry's own checksum helper, and exactly one manifest for the published version with v5 intact.
+- **One pre-existing defect fixed (owner-approved):** `project-deploy-service.ts` value-imported the type
+  `AuthContext`, which broke loading of any suite that pulls `buildApp` under type-stripping — the reason
+  `manual-product-e2e-web.test.ts` could never be a gate member. Zero other occurrences in `apps/agent-api/src`.
+- **Eval-set extension (owner requirement 5) — DONE.** The eight C6 tasks were extended to **seventeen** without
+  a second harness: `check` steps and the `test_integrity`/`self_review`/`repair_loop`/`command_fails`
+  verifications were added **additively** (fixture + report **schema 2**, schema-1 tasks still valid), and the
+  `c6-eval` count assertions were tightened from `8` to an exact `17` plus an exact id list. `ask_user`
+  pause/resume and "a goal cannot complete with an unverified criterion" are **not** in the corpus (they need a
+  store, a runner and DB triggers, not a repository transcript) and stay pinned by
+  `coding-agent-c9-ask-user*.test.ts` and `coding-agent-c9-goal.test.ts`.
+- **STILL OPEN IN C9 (do not read this step as complete):** requirement 4 **self-review** (one pass over the own
+  diff, at most one fix iteration, explicitly **not** a second agent — that is C12); requirement 5 **`ask_user`**
+  (structured question that pauses the run; the pause must be a **state** with a TTL that survives a restart and
+  passes the C6a reconciler, otherwise the question dies with the process and the goal stays `blocked` forever);
+  and the **UI** display of Goal / Progress / current / completed / blocked /
+  Verification status inside the existing Code Workspace components (the plan block already renders — C9 wired a
+  producer to it — so the same pattern applies).
+- **Browser E2E = required in G1, not completed yet. Production ready = NO.** Migrations **070–080** have never
+  run against a live PostgreSQL, the C4b live Docker E2E has not been executed, and G1/R1 have not been passed.
+- **C10 (resume) and C12 (subagents) are NOT implemented** — `subagentDepth`/`subagentParallelism` remain dead
+  configuration; C9 declared interfaces only, as the step requires.
   `CompressionArtifact` is model-visible state recorded into `ReplayBundle.replayInput` (format v3) and reused
   by replay, never recomputed; `contextCompressionRatio` (default 0.75) is revived and pressure is measured from
   the **full** model request; pinning replaced the absolute "never compress code" ban; truncation is
@@ -396,13 +451,26 @@ pass generation parameters to `engine.chat` — recording a value that does not 
 - **RBAC**: `code.run.start` maps to `workspace:write`; the missing `code.session.create` entry was added — it
   is audited but was absent from `CODE_ACTION_PERMISSIONS`, so creating a session (without which no run is
   possible) would have failed with `action_not_mapped`.
-- **Eval harness** (`code-eval-harness.ts` + `tests/fixtures/coding-agent-eval/tasks.json`): eight
-  deterministic tasks (arithmetic bug, add a function, refactor, write a test, broken `package.json`, failing
-  test, TypeScript typing, enable strict) on tiny fixtures with scripted model transcripts, executed through
-  the **real `CodeToolRuntime`** (canonical executors, in-memory read/write port, checkpoint port) and
-  post-verified (`file_contains`/`command_succeeds`). Metrics: steps, tool calls, tokens, duration, totals.
+- **Eval harness** (`code-eval-harness.ts` + `tests/fixtures/coding-agent-eval/tasks.json`): seventeen
+  deterministic tasks on tiny fixtures with scripted model transcripts, executed through the **real
+  `CodeToolRuntime`** (canonical executors, in-memory read/write port, checkpoint port) and post-verified.
+  The eight original C6 tasks (arithmetic bug, add a function, refactor, write a test, broken `package.json`,
+  failing test, TypeScript typing, enable strict) are unchanged and remain valid verbatim: the C9 additions are
+  **additive**, which is why the fixture and the report were raised to **schema 2** (a newer fixture is refused,
+  an older one still loads). The nine C9 tasks pin, in data rather than in code: a *failing* check that is then
+  repaired until it passes (a `check` step records the exit status of a project check **inside** the transcript,
+  so "it was red, then green" is a fact and not the transcript's claim); a run that spends its three repair
+  attempts and **stops** (`repair_loop`, replayed through the real loop state machine, with the check still red);
+  the test-integrity guard's verdict on a skipped case, a deleted case, a whole test file moved out of the suite
+  and a `.only` focus (all flagged, each with its own finding kind) plus the negative control that *adding* a
+  case is not flagged; and two self-review tasks whose findings (a committed credential, an out-of-scope change)
+  are produced by the real review pass from a **recorded** provider answer, so CI needs no live model.
+  Metrics: steps, tool calls, checks, tokens, duration, totals.
   **A negative control exists** — a wrong transcript fails (`verify_content_mismatch`), tool errors surface as
-  `tool_failed:…`, `maxSteps` gives `max_steps_exceeded`, and the live mode requires both `NPATI_CODE_EVAL_LIVE=1`
+  `tool_failed:…`, `maxSteps` gives `max_steps_exceeded`, a `check` step whose expected status did not happen
+  fails (`check_failed`/`check_unexpectedly_passed`), a verification that insists a weakened change is clean
+  fails (`verify_test_integrity_flagged`), a recorded review finding about a file the run never changed is
+  refused (`verify_self_review_file_not_changed`), and the live mode requires both `NPATI_CODE_EVAL_LIVE=1`
   and an injected live model (`eval_live_model_missing`), so recorded answers are never silently reused.
 
 ## Verification (C6)
