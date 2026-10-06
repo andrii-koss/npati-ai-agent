@@ -4293,16 +4293,18 @@ ${localized.next}`;
         const { backupCheckpoint } = await projectGitService.restoreCheckpoint(ctx, companyId, projectId, target.id);
         return { restored: true, files: [], safetyCheckpointId: backupCheckpoint?.id ?? null };
       },
-      // Per-file revert is a path-scoped restore (`git checkout <commit> -- <paths>`) and never the workspace-wide
-      // `reset --hard` + `clean -fd` that `all` uses: reverting one file must not discard unrelated work.
+      // Per-file revert makes the named paths match the **checkpoint** state: what existed there is restored and what
+      // was created afterwards is removed. It never issues the workspace-wide `reset --hard` + `clean -fd` that `all`
+      // uses, because reverting one file must not discard unrelated work.
       files: async (ctx, { companyId, projectId, files }) => {
         const outcome = await projectGitService.restorePaths(ctx, companyId, projectId, { files });
-        const restoredAll = outcome.failed.length === 0 && outcome.restored.length > 0;
+        const revertedAll = outcome.failed.length === 0 && (outcome.restored.length > 0 || outcome.removed.length > 0);
         return {
-          restored: restoredAll,
-          files: outcome.restored,
+          restored: revertedAll,
+          files: [...outcome.restored, ...outcome.removed],
+          removed: outcome.removed,
           safetyCheckpointId: outcome.safetyCheckpointId,
-          ...(restoredAll ? {} : { reason: outcome.failed.length > 0 ? `restore_failed:${outcome.failed[0]!.path}` : "no_files_restored" }),
+          ...(revertedAll ? {} : { reason: outcome.failed.length > 0 ? `restore_failed:${outcome.failed[0]!.path}` : "no_paths_reverted" }),
         };
       },
     },
