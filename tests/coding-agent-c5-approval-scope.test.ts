@@ -314,6 +314,10 @@ describe("security-gate: C5 project scope — explicit allowlist and denylist", 
     const { scope, store, company } = await harness();
     const privileged = [
       "code.fs.delete", "code.deps.add", "code.deps.install", "code.git.push",
+      // C11: the rest of the privileged git writes. `code.git.commit` is deliberately **absent** — a local,
+      // reversible action may be covered by a standing rule — while every git write that destroys or publishes
+      // is listed, and each one is refused at both scopes with `scoped_rule_privileged_action`.
+      "code.git.restore", "code.git.pr.create", "code.git.pr.comment",
       "code.secret_lease", "code.secrets.lease", "code.network.allowlist.add",
       "code.migrations.run", "code.deploy.release", "code.project.trust",
       "code.session.mode", "code.feature_flag.set", "code.rbac.role.assign",
@@ -350,6 +354,21 @@ describe("security-gate: C5 project scope — explicit allowlist and denylist", 
         permitted: false, code: "scoped_rule_privileged_action",
       });
     }
+    /**
+     * C11: and the four git writes that destroy or publish are in that set, each for its own reason — so a
+     * standing rule can never publish a branch, open a pull request, comment under the reviewer's name or
+     * discard uncommitted work. `code.git.commit` stays out on purpose: it is local and reversible, and the
+     * push that would publish it is denied.
+     */
+    for (const action of ["code.git.push", "code.git.restore", "code.git.pr.create", "code.git.pr.comment"]) {
+      expect(SCOPED_RULE_DENIED_ACTIONS.has(action), `${action} must never be a standing rule`).toBe(true);
+      expect(SCOPED_RULE_ALLOWED_ACTIONS.has(action)).toBe(false);
+      expect(evaluateScopedRulePermission({ action })).toMatchObject({
+        permitted: false, code: "scoped_rule_privileged_action", reason: `action_denylisted:${action}`,
+      });
+    }
+    expect(SCOPED_RULE_DENIED_ACTIONS.has("code.git.commit")).toBe(false);
+    expect(SCOPED_RULE_ALLOWED_ACTIONS.has("code.git.commit")).toBe(false);
   });
 
   it("never lets a privileged action (code.fs.delete) become a standing rule at either scope", async () => {

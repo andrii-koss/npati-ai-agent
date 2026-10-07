@@ -27,7 +27,20 @@ describe("security-gate: C5 capability groups are the intersection of agent, use
     expect(groupForCapability("code.fs.read")).toBe("code.read");
     expect(groupForCapability("code.fs.write")).toBe("code.write");
     expect(groupForCapability("code.shell.exec")).toBe("code.shell");
-    expect(groupForCapability("code.git.commit")).toBeNull();
+    /**
+     * C11: the git workflow group is no longer reserved. This assertion moved from "`code.git.commit` has no
+     * group" — true while the group was empty, and now passable only if the tools were missing — to the
+     * stronger statement that **every** published git tool has one. Removing a tool from the group therefore
+     * fails here instead of silently making the group unreachable for it.
+     */
+    expect(groupForCapability("code.git.commit")).toBe("code.git");
+    for (const gitTool of [
+      "code.git.status", "code.git.diff", "code.git.log", "code.git.branch.create", "code.git.branch.switch",
+      "code.git.stage", "code.git.commit", "code.git.restore", "code.git.push", "code.git.pr.create",
+      "code.git.pr.comment",
+    ]) {
+      expect(groupForCapability(gitTool), `${gitTool} must belong to the git group`).toBe("code.git");
+    }
   });
 
   it("refuses a tool whose group the agent does not hold, and never asks for approval", () => {
@@ -91,6 +104,17 @@ describe("security-gate: C5 capability groups are the intersection of agent, use
   it("derives the Inspector view from groups only", () => {
     expect(capabilitiesForGroups(["code.read"])).toEqual(expect.arrayContaining(["code.fs.read", "code.fs.grep"]));
     expect(capabilitiesForGroups([])).toEqual([]);
-    expect(capabilitiesForGroups(["code.git"])).toEqual([]);
+    /**
+     * C11: the git group used to be empty, so this assertion read `[]`. Now it names the group's members
+     * explicitly, which is a stronger statement: the Inspector view must contain exactly the published git
+     * tools when the agent holds `code.git`, and nothing from another group.
+     */
+    expect(capabilitiesForGroups(["code.git"]).sort()).toEqual([
+      "code.git.branch.create", "code.git.branch.switch", "code.git.commit", "code.git.diff", "code.git.log",
+      "code.git.pr.comment", "code.git.pr.create", "code.git.push", "code.git.restore", "code.git.stage",
+      "code.git.status",
+    ].sort());
+    expect(capabilitiesForGroups(["code.git"])).not.toContain("code.fs.write");
+    expect(capabilitiesForGroups(["code.git"])).not.toContain("code.git.future_tool");
   });
 });

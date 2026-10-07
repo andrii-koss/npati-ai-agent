@@ -47,9 +47,27 @@ export const CODE_CAPABILITY_GROUPS: Record<CodeGroup, string[]> = {
     "code.deps.add",
     "code.deps.audit",
   ],
-  // Reserved: Git tooling arrives in a later step; the group exists so RBAC and flags can already be
-  // expressed against it. TODO(C8): add code.git.* capabilities here when they ship.
-  "code.git": [],
+  /**
+   * C11: the git workflow group. Its members are the published `code.git.*` capabilities (inventory ids
+   * 374-384), including the three read-only ones: an agent that may not touch git at all must not be able
+   * to read the repository's git state either, and the group is what expresses that. What the group does
+   * **not** grant is the remote write: `code.git.push`, `code.git.pr.create` and `code.git.pr.comment`
+   * additionally require their own approval record, and a protected branch is a hard deny that no group,
+   * role or approval can lift.
+   */
+  "code.git": [
+    "code.git.status",
+    "code.git.diff",
+    "code.git.log",
+    "code.git.branch.create",
+    "code.git.branch.switch",
+    "code.git.stage",
+    "code.git.commit",
+    "code.git.restore",
+    "code.git.push",
+    "code.git.pr.create",
+    "code.git.pr.comment",
+  ],
 };
 
 const TOOL_TO_GROUP: Record<string, CodeGroup> = Object.entries(CODE_CAPABILITY_GROUPS)

@@ -15,7 +15,7 @@ import { BROWSER_TOOL_IDS, type BrowserUseClient } from "./browser-tool";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService, TerminalSecretReference } from "./project-sandbox-service";
 import type { ProjectPreviewService } from "./project-preview-service";
-import type { ProjectGitService } from "./project-git-service";
+import type { ProjectGitService, GitWriteApprovalRequest } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { DeployTargetConfig } from "./deploy-provider";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
@@ -26,6 +26,14 @@ import type { ProjectApiGatewayService } from "./data-studio/gateway-service";
 export interface CompanyToolExecutor {
   canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
   evaluateSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<{ allowed: boolean; reason: string; sandboxId?: string }>;
+  /**
+   * C11 (owner decision 13): the read-only repository state, asked by the **approval request** path so that
+   * "this write has to create the repository" is part of the payload the human approves. It is the same
+   * `ProjectGitService.inspectRepository` the git boundary consults again before the write. Absent, or `null`,
+   * means the state is unknown and no initialization fact is claimed — an initialization write is then
+   * refused at the boundary instead of being approved by accident.
+   */
+  inspectRepositoryForApproval?(context: AuthContext, companyId: string, projectId: string): Promise<{ initialized: boolean } | null>;
   execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 }
 
@@ -402,8 +410,41 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
   }
 
 
-  private async projectGitTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
-    if (!this.projectGit || !this.projectAgentStore) throw new Error("Project git runtime is not configured");
+  /**
+   * C11 (owner decision 5): the approval record a remote git write presents to the git-policy boundary.
+   *
+   * The `__npatiApprovalGranted` flag is **not** read here: it is a hint the tool runtime used to pass
+   * through as "approved", and a flag can be set by anything that can build the tool input. What the
+   * boundary needs is the id of a real approval record; the record is consumed there, atomically, with the
+   * payload hash of the exact write, so a flag without a record is refused.
+   */
+  private gitWriteApproval(input: Record<string, unknown>, toolName: string): GitWriteApprovalRequest | undefined {
+    const approvalId = typeof input.__npatiApprovalId === "string" ? input.__npatiApprovalId : "";
+    if (!approvalId) return undefined;
+    return {
+      approvalId,
+      runId: typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : "",
+      agentId: typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "",
+      toolName,
+    };
+  }
+
+  /**
+   * C11 (owner decision 13): the read-only repository state for the approval payload of a `project.git.push`.
+   *
+   * The Company run builds the approval request *before* the tool executes, so this is where "the repository
+   * does not exist yet and this push would create it" enters the payload the human approves. The answer comes
+   * from `ProjectGitService.inspectRepository` — `lstat` plus read-only `rev-parse` probes, no `git init`, no
+   * write — so asking costs nothing and changes nothing. `null` means "not configured / not readable": the
+   * payload then claims no initialization fact, and the git boundary refuses a write that would need one.
+   */
+  async inspectRepositoryForApproval(context: AuthContext, companyId: string, projectId: string): Promise<{ initialized: boolean } | null> {
+    if (!this.projectGit || !projectId) return null;
+    const state = await this.projectGit.inspectRepository(context, companyId, projectId);
+    return { initialized: state.initialized };
+  }
+
+  private async projectGitTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {    if (!this.projectGit || !this.projectAgentStore) throw new Error("Project git runtime is not configured");
     const agentId = typeof input.__npatiAgentId === "string" ? input.__npatiAgentId : "";
     if (agentId) {
       const agent = await this.projectAgentStore.getCompanyAgent(context, company.id, agentId);
@@ -447,13 +488,20 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         return this.projectGit.restoreCheckpoint(context, company.id, projectId, String(input.checkpointId ?? ""), {
           approved: input.__npatiApprovalGranted === true,
         });
-      case "project.git.push":
+      case "project.git.push": {
+        // C11: the push carries the typed target (the branch the model asked for) and the approval record.
+        // The service resolves/validates the branch, re-checks the protected-branch policy at the git
+        // boundary and consumes the record with this exact payload — none of which the flag could prove.
+        const approval = this.gitWriteApproval(input, "project.git.push");
         return this.projectGit.push(context, company.id, projectId, {
           credentialId: typeof input.credentialId === "string" ? input.credentialId : undefined,
           branch: typeof input.branch === "string" ? input.branch : undefined,
           approved: input.__npatiApprovalGranted === true,
+          ...(approval ? { approval } : {}),
         });
-      case "project.git.pr":
+      }
+      case "project.git.pr": {
+        const approval = this.gitWriteApproval(input, "project.git.pr");
         return this.projectGit.createPullRequest(context, company.id, projectId, {
           title: typeof input.title === "string" ? input.title : "Website Update",
           body: typeof input.body === "string" ? input.body : undefined,
@@ -461,7 +509,9 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
           head: typeof input.head === "string" ? input.head : undefined,
           credentialId: typeof input.credentialId === "string" ? input.credentialId : undefined,
           approved: input.__npatiApprovalGranted === true,
+          ...(approval ? { approval } : {}),
         });
+      }
       default:
         throw new Error(`Unsupported git tool: ${tool}`);
     }

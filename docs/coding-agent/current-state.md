@@ -3,7 +3,68 @@
 Update this file after every completed step.
 
 ## Current step
-- **C10 COMPLETE — sessions, checkpoints, resume, rewind, fork, background runs.** Final escalated evidence:
+- **C11 COMPLETE — Git workflow and Pull Request.** Final escalated evidence: `npm run typecheck` exit 0, both
+  workspace builds exit 0, **`npm run security-gate` exit 0 — `passed=1627 failed=0`, 111 suites,
+  `present=111 missing=0`**, **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**, and the tool-schema
+  artifact regenerated to **manifest v8 with 36 tools**, checksum `921d6029…` (derived independently by the
+  executor with the guard's own hasher and confirmed by the generator — the two agreed exactly).
+  - **Git transport per the owner's decision**: `ProjectGitService` stays on the host and there is **no second
+    sandbox git**. The Coding Agent calls only structured `code.git.*` tools; the model **never** passes a git
+    command string, and no arbitrary argument can walk from the structured API into a shell. The invariant to
+    keep documented: *AI-generated code and arbitrary commands execute only in the sandbox; platform-controlled
+    structured services such as GitProvider/DeployProvider may execute on the NPATI host against the canonical
+    managed workspace.*
+  - **Protected branches are hard deny in two places.** A new typed policy request
+    (`gitOperation`/`sourceBranch`/`targetBranch`/`remoteBranch`/`force`) replaces branch inference from a command
+    string; the central PolicyEngine phase decides (`code-policy-engine.ts` ~`:520-540`) **and** `ProjectGitService`
+    calls the same policy again immediately before the git side effect, because a direct service call never passes
+    through the runner. A missing policy port fails closed (`GIT_POLICY_UNAVAILABLE`). `git push` **without a
+    refspec** no longer reaches a decision with an empty branch: it is either resolved (host: `rev-parse
+    --abbrev-ref HEAD`) or **hard denied** (`git_push_requires_resolved_branch`) — previously `branch: ""` bypassed
+    the check entirely. Hard deny precedes approval and is not lifted by `approved: true`, a standing rule, or the
+    owner.
+  - **`code.git.protected_write` was removed, not wired.** It had no reader, and the surface it named is hard deny
+    that no permission may lift — so wiring it would have meant either a permission protecting nothing or one that
+    removes hard deny, both forbidden. Removing it made authorisation **stricter**: the permission now maps to
+    `null` → `action_not_mapped` → deny, where before it was an identity mapping, i.e. an allow.
+  - **Approvals are bound to the target.** `__npatiApprovalGranted` is no longer proof: the git boundary consumes
+    the real approval record atomically, and `payloadHashFor` now includes branch, remote, force and credentialId,
+    so an approval for one push cannot be spent on another. A git write with no named target cannot be approved
+    at all (`GIT_WRITE_INTENT_REQUIRED` before the approval is created). No direct HTTP route for push/PR was added.
+  - **Credentials are separated structurally.** A third, non-interchangeable SecretLease target `hostProcess` carries
+    the git token into one process-scoped environment (config via `GIT_CONFIG_*` at a scope above `.git/config`,
+    which is never written), revoked in `finally`. `environmentReferences()` refuses a `hostProcess` lease, so a
+    plaintext token **cannot** reach `code.shell.exec` by construction rather than by filtering. Sandbox commands
+    now receive git hardening built from the existing installer primitives. Tests pin: sha256 of `.git/config`
+    unchanged across a credentialed push, no `extraheader`/`credential`/token in it, clean logs/stdout/stderr, and
+    no credential on the next call without a new lease.
+  - **Eleven `code.git.*` tools** (ids 374–384) as a **thin adapter** over the existing `ProjectGitService` — the
+    adapter contains no git command at all (a source scan in the suite forbids `child_process`/`execFile`/`spawn`),
+    and each executor was exercised against a recording fake. `code.git.pr.comment` was added because requirement
+    10 needs a **separate** approval for PR comments; its payload is bound to the pull number and a hash of the
+    body, so a push/PR approval cannot be spent as a comment. A **real integration bug was found and fixed**: the
+    service hard-coded `project.git.pr` in the approval payload, so every agent PR approval would have been
+    rejected — `toolName` is now passed (default preserves the old bytes).
+  - **Auto branch** `npati/<session-short-id>` is created before the first model step; if that fails the run
+    **stops** rather than working on whatever branch happens to be checked out. Before commit/push the session
+    branch, the canonical revision and the protected-branch policy are all verified.
+  - **Canonical workspace**: the runtime snapshots the canonical `ProjectWorkspace` content digest once per
+    authorised call and the git executors re-check it before the side effect — a changed digest yields
+    `workspace_revision_mismatch` (409) and **no side effect**; an unreadable revision also fails closed rather
+    than inventing a value. The sandbox remains an execution environment that receives a specific revision.
+  - **Conflicts auto-resolve for real**: at most two attempts (`-X ours|theirs` after listing unmerged paths and
+    aborting), then a structured escalation carrying `attempts`, conflicting files and `suggestedTool:
+    "code.ask_user"`. The textual promise "maximum automatic attempts (2)" is gone; the counter is real, and
+    without a resolver the message says one attempt, not two.
+  - **`REVIEW_CODE` read-only is enforced by the server**, not by the unused `intent`/`readOnly` field: a new
+    runtime step (before sub-flag, arguments, approval and executor) plus a PolicyEngine hard-deny phase refuse any
+    tool outside `READ_TOOLS ∪ PLAN_SAFE_TOOLS ∪ REVIEW_SAFE_GIT_TOOLS`, and PR comments still require their own
+    approval. Review never writes to the repository.
+  - **PR description reuses `CodingAgentRunSummary`** (what changed / verification / risks / unresolved), with an
+    explicit "no verification was recorded" line instead of an implied pass; no second summary format exists.
+  - Three stale comments that had become false were corrected (manifest version, the C8 git-group TODO, the C5a
+    migration TODO). No unrelated refactor.
+- Earlier: **C10 COMPLETE — sessions, checkpoints, resume, rewind, fork, background runs.** Final escalated evidence:
   `npm run typecheck` exit 0, both builds exit 0, **`npm run security-gate` exit 0 — `passed=1503 failed=0`,
   105 suites, `present=105 missing=0`**, and **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**.
   - **Owner review (post-C10) — request durability + environment re-check.** Two suites were added
@@ -765,11 +826,13 @@ pass generation parameters to `engine.chat` — recording a value that does not 
   configuration, not code. `authorizeCodeAction` returns a decision or throws `CodeRbacError`
   (`code`, `httpStatus: 403`, `details.reason`, `retryable: false`).
 - **Privileged permissions cannot leak through a wildcard**: `code.prod.operate`,
-  `code.git.protected_write`, `code.policy.manage`, `code.trust.manage`, `code.rbac.manage` are granted
+  `code.policy.manage`, `code.trust.manage`, `code.rbac.manage` are granted
   only when a role names them explicitly; `*`/`admin:all`/`owner` expand only the ordinary vocabulary, and
   `code.prod.operate` is in **no** default role (tested across every role). `permissionsForRole` now really
   strips the privileged half of a `*` expansion (it was a tautology before — and `code-step-up.ts` trusted
-  its output).
+  its output). `code.git.protected_write` left this vocabulary in C11: nothing ever asked for it and the
+  write it appeared to authorise is a hard deny for every principal, so a permission that could neither
+  protect nor lift anything was removed rather than kept as decoration.
 - **Principal invariants**: an agent is never an approver and never changes policy (even with
   `owner` + `admin:all`); a service identity never approves and never performs production operations;
   `CODE_NEVER_GRANTED` actions are refused for every role and wildcard; `classifyPrincipal` now lives in a

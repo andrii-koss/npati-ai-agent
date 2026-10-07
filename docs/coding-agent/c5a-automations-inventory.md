@@ -43,7 +43,7 @@ workspace:read, workspace:write, business:manage, tools:execute, automation:exec
 This is `AUTOMATION_ALLOWED_PERMISSION_DEFAULTS` in `code-service-identity.ts`, derived from
 `AUTOMATION_PERMISSION_INVENTORY` (one binding per row above). Configuration
 (`NPATI_CODE_AUTOMATION_ALLOWED_PERMISSIONS`) can only **narrow** it; a permission that is outside the
-inventory, production-shaped, privileged (`code.prod.operate`, `code.git.protected_write`,
+inventory, production-shaped, privileged (`code.prod.operate`,
 `code.policy.manage`, `code.trust.manage`, `code.rbac.manage`) or a wildcard is **rejected and reported**,
 never granted.
 

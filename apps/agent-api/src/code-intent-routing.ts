@@ -172,7 +172,7 @@ export function resolveChatCodeIntent(input: {
   companyId?: string | null;
   projectId?: string | null;
   projectKind?: CodeProjectKind | null;
-}): { mode: "chat" } | { mode: "clarify"; intent: CodeIntent; message: string } | { mode: "run"; intent: CodeIntent } {
+}): { mode: "chat" } | { mode: "clarify"; intent: CodeIntent; message: string } | { mode: "run"; intent: CodeIntent; readOnly: boolean } {
   // Flag off (or unreadable) → byte-for-byte the previous chat behaviour.
   if (!input.codingEnabled) return { mode: "chat" };
   if (!input.companyId) return { mode: "chat" };
@@ -190,7 +190,15 @@ export function resolveChatCodeIntent(input: {
     return { mode: "clarify", intent: classification.intent, message: classification.clarificationMessage ?? "Which project should I work in?" };
   }
   if (!input.projectId) return { mode: "chat" };
-  return { mode: "run", intent: classification.intent };
+  /**
+   * C11 (owner decision 10): `readOnly` travels with the decision.
+   *
+   * `READ_ONLY_CODE_INTENTS` and `codeIntentIsReadOnly` existed and this function computed neither, so the
+   * read-only property of a review was carried by nothing at all: the chat entry point could not pass it to
+   * the runner even if it wanted to. It is now part of the returned decision, and the entry point feeds it
+   * into `CodingAgentRunInput.readOnlyIntent`, which the tool runtime enforces on the server.
+   */
+  return { mode: "run", intent: classification.intent, readOnly: codeIntentIsReadOnly(classification.intent) };
 }
 
 /**

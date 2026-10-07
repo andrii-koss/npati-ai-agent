@@ -91,6 +91,11 @@ export function describeAction(tool: string, targets: CodeApprovalTarget[]): str
  * Deterministic approval payload: sorted paths and hashes, so both the request and the consumption
  * produce byte-identical input for the repository's payload hash. `turnId`/`sessionId` are included so
  * an approval cannot be replayed for a different turn, and no file content ever enters the payload.
+ *
+ * C11: `extra` carries the tools whose subject is **not** a path list — a git write names a branch, a
+ * remote and a credential reference, a `code.git.restore` names the paths it discards. It is appended
+ * verbatim under its own key, so the file-tool payload stays byte-identical for every existing caller while
+ * a git write's approval binds the fields that actually decide what happens.
  */
 export function buildApprovalPayload(input: {
   tool: string;
@@ -98,6 +103,7 @@ export function buildApprovalPayload(input: {
   turnId: string;
   sessionId?: string;
   targets: CodeApprovalTarget[];
+  extra?: Record<string, unknown>;
 }): Record<string, unknown> {
   const targets = [...input.targets]
     .map((target) => ({ path: target.path, sha256: target.sha256 ?? null }))
@@ -108,5 +114,6 @@ export function buildApprovalPayload(input: {
     turnId: input.turnId,
     sessionId: input.sessionId ?? null,
     targets,
+    ...(input.extra && Object.keys(input.extra).length ? input.extra : {}),
   };
 }

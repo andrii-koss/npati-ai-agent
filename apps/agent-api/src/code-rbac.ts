@@ -22,7 +22,8 @@ export type { CodePrincipalKind };
  *    service identity for Automations) plug in as configuration instead of a rewrite.
  *  - Deny by default: an empty matrix denies everything, and an unknown role grants nothing.
  *  - Privileged permissions never flow from a wildcard: `*` / `admin:all` grant the ordinary
- *    vocabulary but not `code.prod.operate`, `code.git.protected_write` or `code.policy.manage`.
+ *    vocabulary but not `code.prod.operate`, `code.policy.manage`, `code.trust.manage` or
+ *    `code.rbac.manage`.
  */
 
 /** Permissions that exist in the NPATI vocabulary today, plus the `code.` ones this step introduces. */
@@ -41,10 +42,20 @@ export const CODE_RBAC_PERMISSIONS = [
  * Privileged permissions: only ever granted by naming them **explicitly** on a role. A wildcard
  * (`*`, `admin:all`, `owner`) deliberately does not imply them — an operator who wants production
  * operations must say so per role.
+ *
+ * C11 removed `code.git.protected_write` from this list. It was a declaration with **no reader**: no
+ * route, service or action ever asked for it, it was absent from `CODE_ACTION_PERMISSIONS`, and the one
+ * thing it appeared to authorise — writing into a protected branch — is a **hard deny for every
+ * principal**, the owner and an approval included, decided by `code-protected-branches.ts` without
+ * consulting any permission. Wiring it would therefore have meant either a permission that protects
+ * nothing or a permission that lifts a hard deny; both are refused by the owner decision. The sanctioned
+ * pathway into a protected branch (a human merging a reviewed pull request) is authorised by company
+ * membership plus the pull-request review flow, and needs no permission of this vocabulary. Removing a
+ * name is a narrowing change: `requiredPermissionForAction("code.git.protected_write")` is now `null`,
+ * i.e. `action_not_mapped` — a refusal — instead of the identity mapping it used to have.
  */
 export const CODE_PRIVILEGED_PERMISSIONS = [
   "code.prod.operate",
-  "code.git.protected_write",
   "code.policy.manage",
   "code.trust.manage",
   "code.rbac.manage",

@@ -8,8 +8,10 @@ import {
   PUBLISHED_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
   V5_TOOL_SCHEMAS,
   V6_TOOL_SCHEMAS,
+  V7_TOOL_SCHEMAS,
   toolSchemaChecksum,
 } from "../apps/agent-api/src/code-tool-registry";
 
@@ -56,6 +58,71 @@ const TOOL_NAMES = [
   // C9: the user question. It pauses the run as `waiting_for_user`; a person answers it, and neither the model
   // nor a timeout ever does.
   "code.ask_user",
+  // C11 (owner decision 2): the git workflow. These are **adapters over the existing `ProjectGitService`** —
+  // no second git implementation exists — and they are added to this list so the parity guard covers them
+  // field by field like every other tool. They are published in manifest v8.
+  "code.git.status",
+  "code.git.diff",
+  "code.git.log",
+  "code.git.branch.create",
+  "code.git.branch.switch",
+  "code.git.stage",
+  "code.git.commit",
+  "code.git.restore",
+  "code.git.push",
+  "code.git.pr.create",
+  "code.git.pr.comment",
+] as const;
+
+/**
+ * The v6 frozen set (24 tools: everything through the C9 planning tools), listed explicitly **here** rather
+ * than derived from `TOOL_NAMES`. Before C11 the v6 assertion was "every tool except `code.ask_user`", which
+ * was equivalent to the frozen set at the time and would have silently rewritten v6 the moment another tool
+ * was published — exactly the failure the explicit lists in the registry exist to prevent.
+ */
+const V6_TOOL_NAMES = [
+  "code.fs.list",
+  "code.fs.read",
+  "code.fs.grep",
+  "code.fs.tree",
+  "code.symbols.outline",
+  "code.project.info",
+  "code.fs.edit",
+  "code.fs.apply_patch",
+  "code.fs.write",
+  "code.fs.move",
+  "code.fs.delete",
+  "code.fs.diff",
+  "code.fs.undo_last_turn",
+  "code.shell.exec",
+  "code.shell.process.start",
+  "code.shell.process.list",
+  "code.shell.process.logs",
+  "code.shell.process.stop",
+  "code.verify.run",
+  "code.deps.inspect",
+  "code.deps.audit",
+  "code.deps.add",
+  "code.plan.propose",
+  "code.plan.update",
+] as const;
+
+/** The v7 frozen set (25 tools: v6 plus `code.ask_user`), the set C11's publication had to leave untouched. */
+const V7_TOOL_NAMES = [...V6_TOOL_NAMES, "code.ask_user"] as const;
+
+/** C11: the git tools, so the frozen-set assertions below can name exactly what must not leak backwards. */
+const GIT_TOOL_NAMES = [
+  "code.git.status",
+  "code.git.diff",
+  "code.git.log",
+  "code.git.branch.create",
+  "code.git.branch.switch",
+  "code.git.stage",
+  "code.git.commit",
+  "code.git.restore",
+  "code.git.push",
+  "code.git.pr.create",
+  "code.git.pr.comment",
 ] as const;
 
 /**
@@ -64,8 +131,21 @@ const TOOL_NAMES = [
  * third-party code). Shell execution is approved by the PolicyEngine per risk class instead of a static
  * capability flag, per the owner's decision. Mirrored in the capability contract, so the test checks
  * equality.
+ *
+ * C11 adds the git writes whose effect is not recoverable or not local: `code.git.restore` discards
+ * uncommitted work, and the three remote operations publish something. `code.git.push`,
+ * `code.git.pr.create` and `code.git.pr.comment` additionally consume their record at the git boundary,
+ * each bound to its own payload (`code-git-workflow.ts`), which is what makes "PR comments need a separate
+ * approval" a property of the hashes rather than of a comment.
  */
-const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete", "code.deps.add"]);
+const APPROVAL_REQUIRED_TOOLS = new Set([
+  "code.fs.delete",
+  "code.deps.add",
+  "code.git.restore",
+  "code.git.push",
+  "code.git.pr.create",
+  "code.git.pr.comment",
+]);
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
@@ -97,6 +177,20 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   // C9: a question touches session metadata and nothing else. It is *not* approve-gated: asking the user is the
   // alternative to guessing, so gating it would push the agent to guess.
   "code.ask_user": "low",
+  // C11: the read-only git tools only inspect the canonical repository; the local git writes are ordinary
+  // workspace mutations (`medium`, low for the ones that only add information), and the three that destroy or
+  // publish are `high`/`medium` and approve-gated.
+  "code.git.status": "low",
+  "code.git.diff": "low",
+  "code.git.log": "low",
+  "code.git.branch.create": "low",
+  "code.git.branch.switch": "medium",
+  "code.git.stage": "low",
+  "code.git.commit": "medium",
+  "code.git.restore": "high",
+  "code.git.push": "high",
+  "code.git.pr.create": "high",
+  "code.git.pr.comment": "medium",
 };
 
 const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
@@ -219,7 +313,7 @@ describe("security-gate: C2 tool schema parity", () => {
     const v5 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 5)!;
     expect(v5.tools, "v5 is frozen at 22 tools").toHaveLength(22);
     expect(v5.tools.map((tool) => tool.name).sort()).toEqual(
-      TOOL_NAMES.filter((name) => name !== "code.plan.propose" && name !== "code.plan.update" && name !== "code.ask_user").sort(),
+      [...V6_TOOL_NAMES].filter((name) => name !== "code.plan.propose" && name !== "code.plan.update").sort(),
     );
     expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.propose");
     expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.update");
@@ -235,14 +329,31 @@ describe("security-gate: C2 tool schema parity", () => {
      */
     const v6 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 6)!;
     expect(v6.tools, "v6 is frozen at 24 tools").toHaveLength(24);
-    expect(v6.tools.map((tool) => tool.name).sort()).toEqual(
-      [...TOOL_NAMES].filter((name) => name !== "code.ask_user").sort(),
-    );
+    expect(v6.tools.map((tool) => tool.name).sort()).toEqual([...V6_TOOL_NAMES].sort());
     expect(v6.tools.map((tool) => tool.name), "the v7 tool must not leak into v6").not.toContain("code.ask_user");
     expect(v6.checksum, "v6 checksum is frozen").toBe(PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM);
     expect(toolSchemaChecksum(V6_TOOL_SCHEMAS)).toBe(PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM);
-    // The three frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
-    expect(new Set([PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM, PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM, toolSchemaChecksum(CODE_TOOL_SCHEMAS)]).size).toBe(3);
+
+    /**
+     * C11: v7 is frozen the same way, and this is the assertion that keeps it frozen. The git tools are
+     * published in v8, so a session created before them must keep resolving exactly the 25 tools it started
+     * with — no git tool may appear in v7, and v7's checksum is the constant the previous step published.
+     */
+    const v7 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 7)!;
+    expect(v7.tools, "v7 is frozen at 25 tools").toHaveLength(25);
+    expect(v7.tools.map((tool) => tool.name).sort()).toEqual([...V7_TOOL_NAMES].sort());
+    expect(v7.checksum, "v7 checksum is frozen").toBe(PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM);
+    expect(toolSchemaChecksum(V7_TOOL_SCHEMAS)).toBe(PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM);
+    for (const gitTool of GIT_TOOL_NAMES) {
+      expect(v7.tools.map((tool) => tool.name), `v8's ${gitTool} must not leak into v7`).not.toContain(gitTool);
+    }
+    // The four frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
+    expect(new Set([
+      PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
+      PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
+      PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
+      toolSchemaChecksum(CODE_TOOL_SCHEMAS),
+    ]).size).toBe(4);
     expect(V6_TOOL_SCHEMAS.map((tool) => tool.name)).not.toContain("code.ask_user");
   });
 });

@@ -12,9 +12,11 @@ import { isLeasableEnvironment, normalizeCredentialEnvironment, type CredentialE
  * - The lease object never carries a secret value. Delivery to a sandbox goes through the existing
  *   `TerminalSecretReference` mechanism (`{ id: credentialId, field }`), i.e. the sandbox service
  *   resolves the value itself and redacts it on the way out. This module stores metadata only.
- * - The only path that ever needs a value is the optional tmpfs-file delivery; it is performed by an
- *   injected port (`writeSecretFile`) so the value is never written to the host filesystem and never
- *   held longer than the call.
+ * - The only paths that ever need a value are the optional tmpfs-file delivery and the C11 **host process**
+ *   delivery (a host `git` invocation, which reads the credential from its own environment). Both are
+ *   performed by an injected port (`writeSecretFile` / `resolveField`), and the host path returns the
+ *   value only to the caller that is about to run that one git operation; it is never written to the host
+ *   filesystem and never held longer than the call.
  * - Issuing a lease is a privileged action: it is written to the tamper-evident AuditLog *before* the
  *   lease is created, and if the journal is unavailable the lease is refused (fail closed).
  * - Production credentials are refused. The current credential model (`company_browser_credentials`)
@@ -22,7 +24,16 @@ import { isLeasableEnvironment, normalizeCredentialEnvironment, type CredentialE
  *   non-production (or explicitly allowlisted by an operator) is treated as production and denied.
  */
 
-export type SecretLeaseTarget = "environmentReferences" | "tmpfsFile";
+/**
+ * Where a leased value may be delivered. The targets are **disjoint**: each redemption method accepts
+ * exactly one of them, so a credential issued for one destination cannot be redeemed at another.
+ *
+ * C11 added `hostProcess` for the host git path. It exists so that the answer to "does the agent shell
+ * receive a plaintext git token?" is structural rather than a filter: a git credential is issued with
+ * `target: "hostProcess"`, and `environmentReferences` — the only method the sandbox/shell path can use —
+ * refuses every other target (`secret_delivery_mismatch`).
+ */
+export type SecretLeaseTarget = "environmentReferences" | "tmpfsFile" | "hostProcess";
 export type SecretLeaseState = "active" | "revoked" | "expired";
 
 export interface SecretLease {
@@ -299,8 +310,8 @@ export class SecretLeaseProvider {
     const ttl = Math.min(input.ttlMs ?? this.config.defaultTtlMs, this.config.maxTtlMs);
     if (!Number.isFinite(ttl) || ttl <= 0) throw new SecretLeaseError("invalid_lease_request", "Invalid lease TTL", 400);
     const target: SecretLeaseTarget = input.target ?? "environmentReferences";
-    if (target === "tmpfsFile" && !this.deps.resolveField) {
-      throw new SecretLeaseError("secret_delivery_unavailable", "tmpfs secret delivery is not configured", 503, true);
+    if (target !== "environmentReferences" && !this.deps.resolveField) {
+      throw new SecretLeaseError("secret_delivery_unavailable", `Secret delivery for target "${target}" is not configured`, 503, true);
     }
     const issuedAt = this.now();
     const lease: SecretLease = {
@@ -333,11 +344,52 @@ export class SecretLeaseProvider {
   /**
    * Returns the sandbox references for a call. The value itself never passes through this method:
    * the sandbox resolves it from the existing credential store.
+   *
+   * C11: this is the **only** method the agent shell path can use, and it accepts exactly the
+   * `environmentReferences` target — a `hostProcess` lease (the host git credential) is refused here, so
+   * an agent shell can never be handed a git token, whatever the caller asks for.
    */
   environmentReferences(leaseId: string, toolCallId: string, sessionId?: string): Record<string, SecretEnvironmentReference> {
-    const lease = this.consume(leaseId, toolCallId, sessionId);
-    if (lease.target === "tmpfsFile") throw new SecretLeaseError("secret_delivery_mismatch", "This lease was issued for tmpfs file delivery", 409);
-    return { [lease.variableName]: { id: lease.credentialId, field: lease.field } };
+    // The target is checked **before** the lease is consumed: a caller asking for the wrong delivery
+    // channel is refused, and the credential stays usable for the channel it was issued for. Consuming
+    // first would let one mistaken call (or one hostile one) destroy a lease it was never able to use.
+    const lease = this.assertNotInherited(leaseId, toolCallId, sessionId);
+    if (lease.target !== "environmentReferences") {
+      throw new SecretLeaseError("secret_delivery_mismatch", `This lease was issued for "${lease.target}" delivery, not for the agent shell`, 409);
+    }
+    const consumed = this.consume(leaseId, toolCallId, sessionId);
+    return { [consumed.variableName]: { id: consumed.credentialId, field: consumed.field } };
+  }
+
+  /**
+   * C11 (owner decision 6): the **host** delivery path for a git credential.
+   *
+   * Unlike `environmentReferences`, the value is returned here, because a host `git` process reads it from
+   * its own environment and no sandbox is involved. Two structural properties make that safe:
+   *  - the lease must have been issued with `target: "hostProcess"`, so a lease issued for the agent shell
+   *    can never be redeemed here (and the reverse: the agent shell cannot redeem this one, because
+   *    `environmentReferences` refuses every other target);
+   *  - the lease is consumed exactly once (`consume` ⇒ `assertNotInherited`), is bound to one `toolCallId`
+   *    and one session, and its caller revokes it in a `finally` — a second git call without a new lease
+   *    therefore finds no credential to use.
+   */
+  async hostProcessValue(
+    context: AuthContext,
+    leaseId: string,
+    toolCallId: string,
+    sessionId?: string,
+  ): Promise<{ leaseId: string; variableName: string; value: string }> {
+    const lease = this.assertNotInherited(leaseId, toolCallId, sessionId);
+    if (lease.target !== "hostProcess") {
+      throw new SecretLeaseError("secret_delivery_mismatch", `This lease was issued for "${lease.target}" delivery, not for a host process`, 409);
+    }
+    const consumed = this.consume(leaseId, toolCallId, sessionId);
+    if (!this.deps.resolveField) {
+      throw new SecretLeaseError("secret_delivery_unavailable", "Host process secret delivery is not configured", 503, true);
+    }
+    const value = await this.deps.resolveField(context, consumed.companyId, consumed.credentialId, consumed.field);
+    if (typeof value !== "string" || !value) throw new SecretLeaseError("secret_not_found", "Secret reference was not found", 404);
+    return { leaseId: consumed.leaseId, variableName: consumed.variableName, value };
   }
 
   /** Path of the one-call tmpfs secret file (tmpfs delivery only). */

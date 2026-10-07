@@ -164,8 +164,22 @@ describe("security-gate: C6 the CHAT entry point reaches the runner only for cod
   // These assert the exact predicate the chat stream uses (`resolveChatCodeIntent`); the stream itself is a
   // thin adapter over it, which is what makes the "chat behaviour did not change" claim checkable.
   it("sends a code request in an active code project to the runner", () => {
+    // C11 (owner decision 10): the decision now carries `readOnly`, derived from the intent. It is asserted
+    // here rather than left implicit because the chat entry point feeds it straight into
+    // `CodingAgentRunInput.readOnlyIntent`, which the tool runtime enforces on the server.
     expect(resolveChatCodeIntent({ message: "виправ падаючий тест", codingEnabled: true, companyId: "c1", projectId: "p1", projectKind: "code_project" }))
-      .toEqual({ mode: "run", intent: "DEBUG_CODE" });
+      .toEqual({ mode: "run", intent: "DEBUG_CODE", readOnly: false });
+  });
+
+  it("marks a review request read-only, so the loop cannot write to the repository", () => {
+    const decision = resolveChatCodeIntent({ message: "зроби ревю коду", codingEnabled: true, companyId: "c1", projectId: "p1", projectKind: "code_project" });
+    expect(decision).toEqual({ mode: "run", intent: "REVIEW_CODE", readOnly: true });
+    // The two read-only intents are exactly the ones `READ_ONLY_CODE_INTENTS` lists, and an editing intent is
+    // never read-only.
+    expect(resolveChatCodeIntent({ message: "перевір код", codingEnabled: true, companyId: "c1", projectId: "p1", projectKind: "code_project" }))
+      .toEqual({ mode: "run", intent: "REVIEW_CODE", readOnly: true });
+    const edit = resolveChatCodeIntent({ message: "онови функцію parse", codingEnabled: true, companyId: "c1", projectId: "p1", projectKind: "code_project" });
+    expect(edit.mode === "run" ? edit.readOnly : null).toBe(false);
   });
 
   it("asks which project when a code request arrives with no project", () => {

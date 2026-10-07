@@ -449,6 +449,57 @@ export const SECURITY_GATE_TESTS = [
   // legacy run with no snapshot, a capture refused for carrying a credential and a deployment with no port are
   // each reported with their own reason — never as "unchanged".
   "tests/coding-agent-c10-resume-environment.test.ts",
+  // C11 (owner decisions 3–6): the git workflow's security core. Pins that the protected-branch decision is
+  // made on a **typed** git intent (`gitOperation`/`sourceBranch`/`targetBranch`/`remoteBranch`/`remote`/
+  // `force`) and never on a command string, so `git push` without a refspec is refused
+  // (`git_push_requires_resolved_branch`) instead of reaching a decision with an empty branch, and a git
+  // **tool** — which has no command line — must carry the intent or is refused outright; that the hard deny
+  // runs before the approval phase, so a protected branch is `hard_deny` for the owner, for `admin:all`, for a
+  // standing rule and for an `approved: true` claim; that the **same** check is repeated at the git-policy
+  // boundary of `ProjectGitService` immediately before the write, catching a direct service call that never
+  // reaches the engine; that `approved: true` alone is not proof (a real approval record is consumed with the
+  // payload hash of the exact write, and the branch/remote/force/credential are part of that hash); and that a
+  // git credential is issued as a one-operation host-process lease whose `.git/config` is untouched, whose
+  // value never enters the next invocation and which `environmentReferences` refuses — so an agent shell can
+  // never receive a plaintext git token.
+  "tests/coding-agent-c11-git-workflow-security.test.ts",
+  // C11 (owner decisions 2, 7, 8, 9, 10, 11 and 12): the git workflow's **tool surface**. Pins that the eleven
+  // `code.git.*` capabilities are registered, grouped, risk-classified and gated by their own `code.git` flag;
+  // that the executors are **adapters** — a source scan fails if a git command ever appears in them, and each
+  // one is driven against a recording stand-in for `ProjectGitService` to prove it delegates; that the session
+  // branch is deterministic and created-or-switched (never assumed); that a commit or a push refuses on a branch
+  // mismatch, a protected branch or a moved canonical revision, before the service is asked to write; that
+  // `workspace_revision_mismatch` is the fail-closed answer when the canonical workspace moves or cannot be
+  // read; that a merge conflict is resolved **at most twice** and then escalates with the attempts that were
+  // really run and asks for `code.ask_user`; that a read-only intent (`REVIEW_CODE`) cannot write, run a command
+  // or push on the server, while an ordinary session is unchanged; that the pull-request body is generated from
+  // the run's own `CodingAgentRunSummary` and says when verification is missing; and that a pull-request comment
+  // carries its **own** approval payload, so an approval for a push or for opening a pull request can never be
+  // redeemed as a comment.
+  "tests/coding-agent-c11-git-workflow.test.ts",
+  // C11 (owner decision 13, the last known issue): no git mutation before authorization + approval. Pins that
+  // `ProjectGitService.inspectRepository()` is read-only — it may `lstat` and run the two `rev-parse` probes
+  // the suite names, and a recorded process list plus a recursive path+sha256 snapshot prove it creates no
+  // `.git` and changes no file — while `ensureRepositoryInitialized()` (the `git init`, identity, ignore file
+  // and initial commit) is reached only after RBAC, the protected-branch policy and the approval record, and
+  // only immediately before the credential lease and the push. Five different refusals on an uninitialized
+  // workspace are driven and each must leave no `.git`, not one changed byte and no mutating git subcommand;
+  // the fact "this write creates the repository" is part of the approval payload and of the payload hash, so
+  // an approval for a push into an existing repository cannot be redeemed for the initialization (or the other
+  // way round) while every already-initialized write keeps its exact pre-decision-13 payload hash; and the
+  // canonical revision is checked *after* the initialization, so an initialization that moved the workspace
+  // refuses the push as `workspace_revision_mismatch` with no push and no credential lease.
+  "tests/coding-agent-c11-git-init-approval.test.ts",
+  // C11 (owner decision 5, corrected): a `code.git.*` approval must be **redeemable**, not only required. Pins
+  // that the code-tool path and the git boundary hash the *same* material for the same write — the record the
+  // request side creates is the record `ProjectGitService.requireGitWriteApproval` consumes, so an approved
+  // `code.git.push`, `code.git.pr.create` or `code.git.pr.comment` really reaches the write and one record is
+  // one write (a second push with a spent record is `APPROVAL_ALREADY_USED`, and a second push in the same turn
+  // asks the human again); that a record issued for another branch, or a record for a push presented as a
+  // pull-request comment (and the reverse), is refused with no side effect and no credit spent; and that the
+  // initialization fact the read-only inspector resolves is part of the approved payload on this path too, with
+  // the record consumed *before* the repository is created.
+  "tests/coding-agent-c11-git-boundary-approval.test.ts",
 ];
 
 /**

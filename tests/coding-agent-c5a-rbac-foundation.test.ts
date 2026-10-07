@@ -155,11 +155,14 @@ describe("security-gate: C5a RBAC foundation — the matrix is injected configur
     // permission on `owner` — fails here instead of passing as "no role holds a privileged permission".
     expect([...explicitlyNaming.keys()]).toEqual(["owner"]);
     expect(explicitlyNaming.get("owner")).toEqual(["code.policy.manage"]);
-    // Production, protected-branch writes, RBAC and trust stay unnamed by every role.
+    // Production, RBAC and trust stay unnamed by every role. `code.git.protected_write` is not in the
+    // vocabulary at all any more (C11): it had no reader, and a permission that protects nothing is the
+    // defect this assertion exists to catch — so it is asserted as *absent*, not as merely unnamed.
     const allDeclared = Object.values(DEFAULT_CODE_ROLE_MATRIX.roles).flat();
-    for (const forbidden of ["code.prod.operate", "code.git.protected_write", "code.rbac.manage", "code.trust.manage"]) {
+    for (const forbidden of ["code.prod.operate", "code.rbac.manage", "code.trust.manage"]) {
       expect(allDeclared, `no role may name ${forbidden}`).not.toContain(forbidden);
     }
+    expect(CODE_PRIVILEGED_PERMISSIONS).not.toContain("code.git.protected_write");
   });
 
   it("does not let a wildcard permission imply a privileged one", async () => {
@@ -411,7 +414,11 @@ describe("security-gate: C5a RBAC foundation — the required permission comes f
     expect(requiredPermissionForAction("code.prod.operate")).toBe("code.prod.operate");
     // A privileged permission may also be the action it authorizes: that identity is explicit, not implicit.
     expect(requiredPermissionForAction("code.policy.manage")).toBe("code.policy.manage");
-    expect(requiredPermissionForAction("code.git.protected_write")).toBe("code.git.protected_write");
+    // C11 (narrowing clarification, not a relaxation): `code.git.protected_write` was removed from the
+    // privileged vocabulary because nothing ever asked for it and the write it named is a hard deny that
+    // no permission may lift. It therefore resolves to **nothing** — and "nothing" is a refusal
+    // (`action_not_mapped`), which is strictly stricter than the identity mapping this line used to pin.
+    expect(requiredPermissionForAction("code.git.protected_write")).toBeNull();
     // Anything unmapped resolves to nothing (deny by default), never to the caller's label — including a
     // hard-denied action, which the `neverGranted` check refuses before this map is even consulted.
     expect(requiredPermissionForAction("code.future.tool")).toBeNull();

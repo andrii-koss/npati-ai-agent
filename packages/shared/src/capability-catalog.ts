@@ -7267,10 +7267,13 @@ CAPABILITY_CATALOG.push(...PROJECT_DATA_CAPABILITIES);
 // C4: sandbox execution tools (inventory ids 362-367). C4a: dependency tools (368-370).
 // C9: planning tools (371-372) and the user question (373) — session metadata, appended last so the earlier
 // groups keep their ids.
-import { CODE_READ_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_DEPS_CAPABILITIES, CODE_PLAN_CAPABILITIES, CODE_ASK_USER_CAPABILITIES } from "./code-capabilities";
+// C11: the git workflow tools (374-384), adapters over the existing `ProjectGitService`. Appended after 373 so
+// every previously published id keeps its exact meaning and membership.
+import { CODE_READ_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_DEPS_CAPABILITIES, CODE_PLAN_CAPABILITIES, CODE_ASK_USER_CAPABILITIES, CODE_GIT_CAPABILITIES } from "./code-capabilities";
 CAPABILITY_CATALOG.push(...CODE_READ_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_WRITE_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_SHELL_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_DEPS_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_PLAN_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_ASK_USER_CAPABILITIES);
+CAPABILITY_CATALOG.push(...CODE_GIT_CAPABILITIES);

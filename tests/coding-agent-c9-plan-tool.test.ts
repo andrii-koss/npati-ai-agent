@@ -6,6 +6,7 @@ import {
   PUBLISHED_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
   resolveManifestForSession,
   toolSchemaChecksum,
   CODE_TOOL_SCHEMAS,
@@ -121,26 +122,36 @@ describe("security-gate: C9 planning tools", () => {
       // halves are pinned here — the new version publishes the tools, and every older version still resolves to
       // exactly the set sessions created before it started with.
       //
-      // The current version moved on to v7 when `code.ask_user` was published, so the v6 assertions below are
-      // about the frozen set v6 always was: 24 tools, and `code.ask_user` is not one of them.
-      expect(CODE_TOOL_MANIFEST_VERSION).toBe(7);
+      // The current version moved on to v7 when `code.ask_user` was published and to v8 when C11 published the
+      // eleven `code.git.*` tools, so the v6 assertions below are about the frozen set v6 always was: 24 tools,
+      // and `code.ask_user` is not one of them. v7 stays frozen at 25 and must not gain a git tool either.
+      expect(CODE_TOOL_MANIFEST_VERSION).toBe(8);
       expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
-      expect(CODE_TOOL_SCHEMAS).toHaveLength(25);
+      expect(CODE_TOOL_SCHEMAS).toHaveLength(36);
 
       const v5 = resolveManifestForSession(5);
       const v6 = resolveManifestForSession(6);
+      const v7 = resolveManifestForSession(7);
       expect(v5.tools).toHaveLength(22);
       expect(v6.tools).toHaveLength(24);
+      expect(v7.tools).toHaveLength(25);
       expect(v5.checksum).toBe(PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM);
       expect(v6.checksum).toBe(PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM);
+      expect(v7.checksum).toBe(PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM);
       expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.propose");
       expect(v5.tools.map((tool) => tool.name)).not.toContain("code.plan.update");
       expect(v6.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["code.plan.propose", "code.plan.update"]));
       // v6 is frozen at the tool set it was published with: the newest tool must not leak into it.
       expect(v6.tools.map((tool) => tool.name)).not.toContain("code.ask_user");
+      // C11: v7 is frozen the same way — a session created before the git tools must not see them.
+      expect(v7.tools.map((tool) => tool.name)).toContain("code.ask_user");
+      for (const gitTool of ["code.git.status", "code.git.push", "code.git.pr.create"]) {
+        expect(v7.tools.map((tool) => tool.name), `${gitTool} must not leak into v7`).not.toContain(gitTool);
+      }
       const current = resolveManifestForSession(CODE_TOOL_MANIFEST_VERSION);
-      expect(current.tools).toHaveLength(25);
+      expect(current.tools).toHaveLength(36);
       expect(current.tools.map((tool) => tool.name)).toContain("code.ask_user");
+      expect(current.tools.map((tool) => tool.name)).toContain("code.git.push");
     });
 
     it("registers an executor for the planning tools, so publishing them cannot leave them dead", async () => {

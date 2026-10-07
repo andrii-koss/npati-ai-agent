@@ -13,6 +13,7 @@ import {
 import { applyPatch as applyCanonicalPatch } from "./code-tools-patch";
 import { buildUnifiedDiff, diffLineStats, sha256 } from "./code-tools-diff";
 import { CodePlanToolError, type ProposePlanResult, type UpdateTodosResult } from "./code-plan-tool";
+import { canonicalGitExecutors, type CanonicalGitExecutorOptions } from "./code-tool-git-executors";
 
 /**
  * C2: binds the canonical tool logic (`code-tools-fs.ts`, `code-tools-project.ts`) to the runtime.
@@ -897,8 +898,14 @@ export function canonicalPlanExecutors(options: CanonicalPlanExecutorOptions = {
   };
 }
 
-/** Read-only, write and sandbox executors merged, which is what the application wires into the runtime. */
-export function allCanonicalExecutors(options: CanonicalAskUserExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
+/**
+ * Read-only, write, sandbox and git executors merged, which is what the application wires into the runtime.
+ *
+ * C11: the `code.git.*` bodies come from `canonicalGitExecutors`, which delegates to the existing
+ * `ProjectGitService` — there is no second git implementation anywhere under `apps/agent-api/src`, and the
+ * git executors contain no git command of their own.
+ */
+export function allCanonicalExecutors(options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
     ...canonicalExecutors(options),
     ...canonicalWriteExecutors(options),
@@ -906,6 +913,7 @@ export function allCanonicalExecutors(options: CanonicalAskUserExecutorOptions =
     ...canonicalDepsExecutors(options),
     ...canonicalPlanExecutors(options),
     ...canonicalAskUserExecutors(options),
+    ...canonicalGitExecutors(options),
   };
 }
 

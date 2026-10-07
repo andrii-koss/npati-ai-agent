@@ -4846,10 +4846,12 @@ CAPABILITY_MATRIX.push(...PROJECT_DATA_MATRIX);
 // C3: mutating Coding Agent tools (inventory ids 355-361).
 // C4: sandbox execution tools (inventory ids 362-367). C4a: dependency tools (368-370).
 // C9: planning tools (371-372) and the user question (373).
-import { CODE_READ_MATRIX, CODE_WRITE_MATRIX, CODE_SHELL_MATRIX, CODE_DEPS_MATRIX, CODE_PLAN_MATRIX, CODE_ASK_USER_MATRIX } from "./code-capabilities";
+// C11: the git workflow tools (374-384), adapters over the existing `ProjectGitService`.
+import { CODE_READ_MATRIX, CODE_WRITE_MATRIX, CODE_SHELL_MATRIX, CODE_DEPS_MATRIX, CODE_PLAN_MATRIX, CODE_ASK_USER_MATRIX, CODE_GIT_MATRIX } from "./code-capabilities";
 CAPABILITY_MATRIX.push(...CODE_READ_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_WRITE_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_SHELL_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_DEPS_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_PLAN_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_ASK_USER_MATRIX);
+CAPABILITY_MATRIX.push(...CODE_GIT_MATRIX);

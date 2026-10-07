@@ -838,6 +838,255 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  /**
+   * C11 (owner decision 2): the `code.git.*` workflow tools, mirroring `code-tool-schemas.json`.
+   *
+   * `workspaceRevision` is in every result that can change the tree: the caller compares it with the
+   * revision it captured, which is what makes a git operation and a sandbox build provably run against
+   * the same canonical revision.
+   */
+  "code.git.status": {
+    inputSchema: { type: "object", required: [], additionalProperties: false, properties: {} },
+    outputSchema: resultEnvelope("code.git.status", {
+      type: "object",
+      required: ["branch", "clean", "staged", "unstaged", "untracked", "truncated", "workspaceRevision"],
+      additionalProperties: false,
+      properties: {
+        branch: { type: "string" },
+        clean: { type: "boolean" },
+        staged: { type: "array", items: { type: "string" }, maxItems: 500 },
+        unstaged: { type: "array", items: { type: "string" }, maxItems: 500 },
+        untracked: { type: "array", items: { type: "string" }, maxItems: 500 },
+        truncated: { type: "boolean" },
+        workspaceRevision: { type: ["string", "null"], description: "Canonical workspace revision the operation ran against." },
+      },
+    }),
+  },
+  "code.git.diff": {
+    inputSchema: {
+      type: "object",
+      required: [],
+      additionalProperties: false,
+      properties: {
+        file: { type: "string", minLength: 1, maxLength: 500, description: "Workspace-relative path; the canonical validator refuses traversal, absolute and secret paths." },
+        staged: { type: "boolean", default: false, description: "Diff the index against HEAD instead of the worktree against the index." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.diff", {
+      type: "object",
+      required: ["diff", "truncated", "files", "workspaceRevision"],
+      additionalProperties: false,
+      properties: {
+        diff: { type: "string" },
+        truncated: { type: "boolean" },
+        files: { type: "array", items: { type: "string" }, maxItems: 500 },
+        workspaceRevision: { type: ["string", "null"], description: "Canonical workspace revision the operation ran against." },
+      },
+    }),
+  },
+  "code.git.log": {
+    inputSchema: {
+      type: "object",
+      required: [],
+      additionalProperties: false,
+      properties: { limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+    },
+    outputSchema: resultEnvelope("code.git.log", {
+      type: "object",
+      required: ["entries", "count"],
+      additionalProperties: false,
+      properties: {
+        entries: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            type: "object",
+            required: ["hash", "author", "date", "message"],
+            additionalProperties: false,
+            properties: {
+              hash: { type: "string" },
+              author: { type: "string" },
+              date: { type: "string" },
+              message: { type: "string" },
+            },
+          },
+        },
+        count: { type: "integer" },
+      },
+    }),
+  },
+  "code.git.branch.create": {
+    inputSchema: {
+      type: "object",
+      required: ["branch"],
+      additionalProperties: false,
+      properties: { branch: { type: "string", minLength: 1, maxLength: 100, description: "Branch to create. `..`, `@{`, a trailing `.lock` and an empty name are refused." } },
+    },
+    outputSchema: resultEnvelope("code.git.branch.create", {
+      type: "object",
+      required: ["branch", "created", "workspaceRevision"],
+      additionalProperties: false,
+      properties: {
+        branch: { type: "string" },
+        created: { type: "boolean" },
+        workspaceRevision: { type: ["string", "null"], description: "Canonical workspace revision the operation ran against." },
+      },
+    }),
+  },
+  "code.git.branch.switch": {
+    inputSchema: {
+      type: "object",
+      required: ["branch"],
+      additionalProperties: false,
+      properties: { branch: { type: "string", minLength: 1, maxLength: 100, description: "Existing branch to check out." } },
+    },
+    outputSchema: resultEnvelope("code.git.branch.switch", {
+      type: "object",
+      required: ["branch", "previousBranch", "switched"],
+      additionalProperties: false,
+      properties: {
+        branch: { type: "string" },
+        previousBranch: { type: ["string", "null"] },
+        switched: { type: "boolean" },
+      },
+    }),
+  },
+  "code.git.stage": {
+    inputSchema: {
+      type: "object",
+      required: [],
+      additionalProperties: false,
+      properties: {
+        files: { type: "array", maxItems: 200, items: { type: "string", minLength: 1, maxLength: 500 }, description: "Paths to stage. Omit to stage every change." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.stage", {
+      type: "object",
+      required: ["staged", "stagedCount"],
+      additionalProperties: false,
+      properties: {
+        staged: { type: "array", items: { type: "string" }, maxItems: 500 },
+        stagedCount: { type: "integer" },
+      },
+    }),
+  },
+  "code.git.commit": {
+    inputSchema: {
+      type: "object",
+      required: ["message"],
+      additionalProperties: false,
+      properties: {
+        message: { type: "string", minLength: 1, maxLength: 2000 },
+        files: { type: "array", maxItems: 200, items: { type: "string", minLength: 1, maxLength: 500 }, description: "Paths to commit. Omit with stageAll to commit what is already staged." },
+        stageAll: { type: "boolean", default: false, description: "Stage every change before committing." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.commit", {
+      type: "object",
+      required: ["commitHash", "message", "branch", "stagedCount", "workspaceRevision"],
+      additionalProperties: false,
+      properties: {
+        commitHash: { type: "string" },
+        message: { type: "string" },
+        branch: { type: "string" },
+        stagedCount: { type: "integer" },
+        workspaceRevision: { type: ["string", "null"], description: "Canonical workspace revision the operation ran against." },
+      },
+    }),
+  },
+  "code.git.restore": {
+    inputSchema: {
+      type: "object",
+      required: ["files"],
+      additionalProperties: false,
+      properties: {
+        files: { type: "array", minItems: 1, maxItems: 200, items: { type: "string", minLength: 1, maxLength: 500 }, description: "Paths whose working-tree changes are discarded. Empty is refused." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.restore", {
+      type: "object",
+      required: ["restored", "restoredCount"],
+      additionalProperties: false,
+      properties: {
+        restored: { type: "array", items: { type: "string" }, maxItems: 500 },
+        restoredCount: { type: "integer" },
+      },
+    }),
+  },
+  "code.git.push": {
+    inputSchema: {
+      type: "object",
+      required: ["targetBranch", "credentialId"],
+      additionalProperties: false,
+      properties: {
+        targetBranch: { type: "string", minLength: 1, maxLength: 100, description: "The branch on the remote this push writes. Required: without a named target the protected-branch policy has nothing to judge." },
+        sourceBranch: { type: "string", minLength: 1, maxLength: 100, description: "The local branch to publish. Defaults to targetBranch." },
+        credentialId: { type: "string", minLength: 1, maxLength: 100, description: "Company vault credential reference for this one operation; the value never reaches the model or the result." },
+        force: { type: "boolean", default: false, description: "Ask for a history rewrite. A protected branch answers force_push_denied; any other branch is refused as unsupported." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.push", {
+      type: "object",
+      required: ["pushed", "branch", "remoteBranch", "force"],
+      additionalProperties: false,
+      properties: {
+        pushed: { type: "boolean" },
+        branch: { type: "string" },
+        remoteBranch: { type: "string" },
+        force: { type: "boolean" },
+      },
+    }),
+  },
+  "code.git.pr.create": {
+    inputSchema: {
+      type: "object",
+      required: ["title", "base", "head", "credentialId"],
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 300 },
+        body: { type: "string", maxLength: 60000, description: "Body. Omit to reuse the run summary (what changed, verification, risks, unresolved items)." },
+        base: { type: "string", minLength: 1, maxLength: 100, description: "The branch the pull request targets." },
+        head: { type: "string", minLength: 1, maxLength: 100, description: "The branch under review." },
+        credentialId: { type: "string", minLength: 1, maxLength: 100, description: "Company vault credential reference for this one operation; the value never reaches the model or the result." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.pr.create", {
+      type: "object",
+      required: ["prNumber", "prUrl", "base", "head", "created", "descriptionSource"],
+      additionalProperties: false,
+      properties: {
+        prNumber: { type: ["integer", "null"] },
+        prUrl: { type: ["string", "null"] },
+        base: { type: "string" },
+        head: { type: "string" },
+        created: { type: "boolean" },
+        descriptionSource: { type: "string", enum: ["caller", "run_summary", "unavailable"] },
+      },
+    }),
+  },
+  "code.git.pr.comment": {
+    inputSchema: {
+      type: "object",
+      required: ["pullNumber", "body", "credentialId"],
+      additionalProperties: false,
+      properties: {
+        pullNumber: { type: "integer", minimum: 1, maximum: 1000000 },
+        body: { type: "string", minLength: 1, maxLength: 60000 },
+        credentialId: { type: "string", minLength: 1, maxLength: 100, description: "Company vault credential reference for this one operation; the value never reaches the model or the result." },
+      },
+    },
+    outputSchema: resultEnvelope("code.git.pr.comment", {
+      type: "object",
+      required: ["commentId", "commentUrl", "pullNumber", "created"],
+      additionalProperties: false,
+      properties: {
+        commentId: { type: ["integer", "null"] },
+        commentUrl: { type: ["string", "null"] },
+        pullNumber: { type: "integer" },
+        created: { type: "boolean" },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -1572,6 +1821,303 @@ export const CODE_ASK_USER_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
+/**
+ * C11 (owner decision 2): the `code.git.*` workflow capabilities (inventory ids **374–384**), appended after
+ * `code.ask_user`'s 373 so every previously published id keeps its exact meaning and membership.
+ *
+ * They are **adapters over the existing `ProjectGitService`**: no git implementation lives behind them, so
+ * there is still exactly one git path (the service that already re-checks the protected-branch policy at its
+ * boundary and consumes the approval record with the payload hash of the write). Three published facts are
+ * therefore visible in the Capability Inspector and are the contract the executors must honour:
+ *
+ *  - three tools are **read-only** (`status`, `diff`, `log`); they are also the only git tools a
+ *    `REVIEW_CODE` session may call, which is what makes "a review does not write to the repository" a
+ *    server-side property rather than a prompt request;
+ *  - `code.git.push`, `code.git.pr.create` and `code.git.pr.comment` are `high`/`medium` and
+ *    approval-gated, and each carries its **own** approval binding (a branch pair, a `(base, head)` pair, a
+ *    comment hash) — so an approval for one of them is never redeemable for another;
+ *  - `code.git.restore` is `high` and approval-gated, because discarding uncommitted work is not
+ *    recoverable from a checkpoint.
+ */
+export const CODE_GIT_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.git.status",
+    inventoryIds: [374],
+    type: "tool",
+    domain: "code",
+    name: "Git status",
+    description: "Report the git state of the canonical project workspace: the checked-out branch, whether the tree is clean, and the staged, unstaged and untracked paths. Read-only; the paths are data and cannot change policy.",
+    useWhen: [
+      "Before staging or committing, to see exactly what would be included.",
+      "After a repair, to confirm the tree holds what the agent believes it holds.",
+    ],
+    doNotUseWhen: [
+      "A diff body is needed: use code.git.diff.",
+      "The repository is not connected: the tool reports that state instead of inventing one.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.status"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.status"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.diff",
+    inventoryIds: [375],
+    type: "tool",
+    domain: "code",
+    name: "Git diff",
+    description: "Return the unified diff of the canonical project workspace, optionally limited to one workspace-relative path and optionally the staged side. Bounded, explicitly truncated, and untrusted data.",
+    useWhen: [
+      "Before committing, to review what the commit would contain.",
+      "To check one file's change without re-reading the whole file.",
+    ],
+    doNotUseWhen: [
+      "A file's whole content is needed: use code.fs.read.",
+      "A committed revision must be compared: find the commit with code.git.log first.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.diff"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.diff"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.log",
+    inventoryIds: [376],
+    type: "tool",
+    domain: "code",
+    name: "Git log",
+    description: "List the most recent commits of the canonical project workspace (hash, author, date, subject). Read-only and bounded; a repository with no history answers with an empty list rather than an error.",
+    useWhen: [
+      "To confirm a commit the agent made is present before opening a pull request.",
+      "To see what a branch already contains.",
+    ],
+    doNotUseWhen: [
+      "The working-tree state is needed: use code.git.status.",
+      "A full patch is needed: use code.git.diff.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.log"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.log"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.branch.create",
+    inventoryIds: [377],
+    type: "tool",
+    domain: "code",
+    name: "Create a git branch",
+    description: "Create a branch in the canonical project workspace and check it out, so agent work never accumulates on the main branch. The name is validated before any command runs; a branch writes no remote.",
+    useWhen: [
+      "At the start of a coding session, to isolate work on npati/<session-short-id>.",
+      "Before a change that must not touch the current branch.",
+    ],
+    doNotUseWhen: [
+      "The branch already exists: switch to it instead.",
+      "The intent is to publish: that is code.git.push and needs an approval.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.branch.create"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.branch.create"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.branch.switch",
+    inventoryIds: [378],
+    type: "tool",
+    domain: "code",
+    name: "Switch git branch",
+    description: "Check out an existing branch of the canonical project workspace. A switch that would have to carry or discard uncommitted changes is refused, so it never silently moves somebody else's work.",
+    useWhen: [
+      "Returning to the session branch after inspecting another one.",
+      "Moving to a branch a human asked to review.",
+    ],
+    doNotUseWhen: [
+      "The branch does not exist: create it first.",
+      "The change set is unfinished: commit it first, or the switch is refused.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.branch.switch"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.branch.switch"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.stage",
+    inventoryIds: [379],
+    type: "tool",
+    domain: "code",
+    name: "Stage git changes",
+    description: "Stage changes in the canonical project workspace, either the named paths or everything. Every path goes through the canonical validator and the index is re-checked, so a protected or secret file cannot be staged.",
+    useWhen: [
+      "Preparing a commit that must contain only some changed files.",
+      "After a targeted restore, to make the index match the worktree.",
+    ],
+    doNotUseWhen: [
+      "Everything should be committed: code.git.commit stages all by itself.",
+      "A path is secret or protected: that is refused, not silently filtered.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.stage"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.stage"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.commit",
+    inventoryIds: [380],
+    type: "tool",
+    domain: "code",
+    name: "Commit git changes",
+    description: "Commit the staged changes (or every change) in the canonical project workspace and return the commit hash. The commit is checked against the session branch and the canonical revision the run captured, so it cannot land on the wrong branch.",
+    useWhen: [
+      "A verified change set is ready to become durable.",
+      "Before a push, because a push publishes commits and not a working tree.",
+    ],
+    doNotUseWhen: [
+      "Verification has not run: a commit makes an unverified change durable.",
+      "The point is to publish: that is code.git.push.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.commit"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.commit"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.restore",
+    inventoryIds: [381],
+    type: "tool",
+    domain: "code",
+    name: "Restore paths in git",
+    description: "Discard the working-tree changes of the named paths. It always needs an explicit human approval, because it destroys uncommitted work no checkpoint can bring back; the approval is bound to the exact path list.",
+    useWhen: [
+      "A change went wrong and the paths must return to the committed state.",
+      "A file must be reset before a different approach is tried.",
+    ],
+    doNotUseWhen: [
+      "The change should be reversible: make a checkpoint or commit first.",
+      "The paths were never committed: restoring them deletes the only copy.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.restore"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.restore"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.push",
+    inventoryIds: [382],
+    type: "tool",
+    domain: "code",
+    name: "Push a branch",
+    description: "Push one branch to the project's connected GitHub repository. It needs a real human approval record bound to the operation, both branches, the remote, `force` and the credential reference, and the protected-branch policy is re-evaluated at the git boundary immediately before the write. Force pushes are refused.",
+    useWhen: [
+      "An approved, verified change set must be published for review.",
+      "A pull request is about to be opened from this branch.",
+    ],
+    doNotUseWhen: [
+      "The target branch is protected: that is a hard deny no approval can lift.",
+      "History would have to be rewritten: force pushes are refused by this API.",
+      "The work is not verified yet.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.push"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.push"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.pr.create",
+    inventoryIds: [383],
+    type: "tool",
+    domain: "code",
+    name: "Open a pull request",
+    description: "Open a GitHub pull request for an already-pushed branch. The approval is bound to the (base, head) pair and the credential reference, so an approval for one pull request cannot be redeemed for another. Without a body it is generated from the run's own verified summary.",
+    useWhen: [
+      "A pushed branch is ready for human review.",
+      "The run finished and its verification result should travel with the review request.",
+    ],
+    doNotUseWhen: [
+      "The branch is not pushed yet.",
+      "The change is not verified: the generated description states that instead of hiding it.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.pr.create"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.pr.create"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.git.pr.comment",
+    inventoryIds: [384],
+    type: "tool",
+    domain: "code",
+    name: "Comment on a pull request",
+    description: "Post one comment on an existing GitHub pull request. Reviewing is read-only, so commenting is a separate capability with its own approval record bound to the pull-request number and a hash of the comment text: an approval for a push or for opening a pull request can never be redeemed as a comment.",
+    useWhen: [
+      "A review produced a finding that belongs on the pull request for the author to read.",
+      "A human asked for the review result to be posted.",
+    ],
+    doNotUseWhen: [
+      "No pull request exists yet.",
+      "The text contains a credential, a token or production data: it is published to GitHub.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: true,
+    requiredConnections: [],
+    requiredPermissions: WRITE_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.pr.comment"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.git.pr.comment"]!.outputSchema,
+    version: 1,
+  },
+];
+
 /** Every `code.*` capability (reads, mutating file tools, sandbox execution, dependencies, planning). */
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_READ_CAPABILITIES,
@@ -1580,6 +2126,7 @@ export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_DEPS_CAPABILITIES,
   ...CODE_PLAN_CAPABILITIES,
   ...CODE_ASK_USER_CAPABILITIES,
+  ...CODE_GIT_CAPABILITIES,
 ];
 
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
@@ -1650,6 +2197,24 @@ export const CODE_ASK_USER_MATRIX: CapabilityMatrixEntry[] = CODE_ASK_USER_CAPAB
 }));
 
 /**
+ * C11: the `code.git.*` workflow tools' audit-matrix entries (inventory ids 374–384). Every one of them
+ * delegates to the existing `ProjectGitService`; the matrix names the suite that proves it, so a
+ * capability cannot claim to be verified by a file that does not test it.
+ */
+export const CODE_GIT_MATRIX: CapabilityMatrixEntry[] = CODE_GIT_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c11-git-workflow.test.ts", "tests/coding-agent-c11-git-workflow-security.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/**
  * Which feature flag gates which code tool. The read/search tools *and* `code.fs.diff` need `code.read`
  * (they only read), every mutating tool needs `code.write`; both sit on top of the master
  * `coding_agent.enabled` flag. The decision is made from the capability's own permission requirement so
@@ -1680,6 +2245,14 @@ export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntri
   ...CODE_DEPS_CAPABILITIES
     .filter((capability) => capability.id !== "code.deps.inspect")
     .map((capability) => [capability.id, "code.shell"] as const),
+  /**
+   * C11: every `code.git.*` tool hangs off its own `code.git` sub-flag, including the read-only three.
+   * `code.write` and `code.git` are different blast radii: enabling file edits must not enable pushing to
+   * a remote, and enabling git must not be reported as "file writes are on". The read-only git tools share
+   * the flag because an operator who forbids git must not be left with a working `git status` path that
+   * the UI reports as write-gated.
+   */
+  ...CODE_GIT_CAPABILITIES.map((capability) => [capability.id, "code.git"] as const),
 ]);
 
 export const CODE_TOOL_FLAG_KEYS_RESOLVED: Record<string, string> = {

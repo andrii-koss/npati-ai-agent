@@ -11,6 +11,13 @@ import { AutoExecReviewer } from "./auto-exec-reviewer";
 import { CostTelemetry } from "./cost-telemetry";
 import type { AuditRepository } from "./audit-repository";
 import { chatLanguageInstruction } from "./company-chat-i18n";
+import {
+  GIT_WRITE_INTENT_REQUIRED,
+  gitApprovalPayload,
+  gitWriteIntentFromToolInput,
+  isGitWriteTool,
+  pullRequestApprovalPayload,
+} from "./code-git-write-policy";
 
 const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
 type Mode = Exclude<CompanyRunMode, "auto">;
@@ -815,16 +822,82 @@ export class CompanyDelegationRuntime {
       }
       const sandboxAutoApproval = isTerminal && !terminalNeedsApproval && sandboxEvaluation.allowed;
       if (isTerminal) logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: sandboxEvaluation.sandboxId ?? (typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined), projectId: String(plan.input.projectId ?? ""), decision: sandboxAutoApproval ? "allow" : "approval", reason: terminalDecision?.requiresApproval ? terminalDecision.reason : hasSecretReferences ? "Secret references require approval" : sandboxEvaluation.reason, policyRule: terminalDecision?.requiresApproval ? terminalDecision.policyRule : hasSecretReferences ? "secret_references" : sandboxEvaluation.reason, toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType, cwd: normalizedTerminal?.cwd, rawArgs: normalizedTerminal?.args, commandPolicyRule: terminalDecision?.policyRule });
-      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : tool.startsWith("project.data.") ? (tool === "project.data.schema.inspect" || tool === "project.data.rows.list" || tool === "project.data.rows.read" || tool === "project.data.migrations.list" || tool === "project.data.templates.list" ? "low" : tool === "project.data.rows.create" || tool === "project.data.rows.update" ? "medium" : "high") : undefined;
-      const approvalPayload = isTerminal ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(normalizedTerminal?.command ?? String(plan.input.command ?? "")).digest("hex"), cwd: normalizedTerminal?.cwd === "." ? undefined : normalizedTerminal?.cwd, action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") } : plan.input;
+      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : tool.startsWith("project.data.") ? (tool === "project.data.schema.inspect" || tool === "project.data.rows.list" || tool === "project.data.rows.read" || tool === "project.data.migrations.list" || tool === "project.data.templates.list" ? "low" : tool === "project.data.rows.create" || tool === "project.data.rows.update" ? "medium" : "high") : tool === "project.git.push" || tool === "project.git.pr" ? "high" : undefined;
+      /**
+       * C11 (owner decision 5): a remote git write is approved against its **typed target** — the
+       * operation, the branches, `force` and the credential reference — and never against the raw tool
+       * input. The git-policy boundary rebuilds this exact payload from the branch it is about to push and
+       * consumes the record with it, so an approval cannot be redeemed for another branch, and the
+       * `approved` flag the tool runtime receives is not proof of anything.
+       *
+       * A remote write whose target the model did not name cannot be approved at all: there would be no
+       * target to bind the human's decision to, so it is refused **before** an approval request exists
+       * (`GIT_WRITE_INTENT_REQUIRED`, and `GIT_PR_TARGET_REQUIRED` for the (base, head) pair of a PR).
+       */
+      const gitWriteIntent = isGitWriteTool(tool) ? gitWriteIntentFromToolInput(tool, plan.input as Record<string, unknown>) : null;
+      if (isGitWriteTool(tool) && !gitWriteIntent) {
+        throw new CompanyRuntimeError(
+          GIT_WRITE_INTENT_REQUIRED,
+          `Tool "${tool}" performs a remote git write, so it must name the branch it writes to`,
+          400,
+        );
+      }
+      const pullRequestTarget = tool === "project.git.pr"
+        ? { base: String(plan.input.base ?? "").trim(), head: String(plan.input.head ?? "").trim() }
+        : null;
+      if (pullRequestTarget && (!pullRequestTarget.base || !pullRequestTarget.head)) {
+        throw new CompanyRuntimeError(
+          "GIT_PR_TARGET_REQUIRED",
+          "A pull request must name the branch it targets (`base`) and the branch under review (`head`): the approval is bound to that pair",
+          400,
+        );
+      }
+      /**
+       * C11: the name the approval **record** carries for a remote git write is the tool id itself, never
+       * `toolToAssess`. `toolToAssess` appends `plan.input.operation` when the model set one, and the git
+       * boundary consumes the record under the tool id (`project.git.push`) — a derived name would make the
+       * record unmatchable and the push impossible to approve, which is fail-closed but silently useless.
+       */
+      const gitRecordTool = gitWriteIntent || pullRequestTarget ? tool : toolToAssess;
+      /**
+       * C11 (owner decision 13): a `project.git.push` whose repository does not exist yet is a different act
+       * — it creates the repository — and the approval is bound to that fact, exactly like the branch, the
+       * remote, `force` and the credential reference. The fact is resolved **read-only** through the git
+       * service's own inspector, never from `plan.input`: a claim by the model about the disk would be worth
+       * nothing. An unusable answer claims nothing (`null`), and the git boundary then refuses the write as a
+       * payload mismatch instead of approving an initialization it was not asked about.
+       */
+      let gitRepositoryState: { initialized: boolean } | null = null;
+      if (gitWriteIntent && this.toolRuntime.inspectRepositoryForApproval) {
+        gitRepositoryState = await this.toolRuntime
+          .inspectRepositoryForApproval(ctx, company.id, String(plan.input.projectId ?? ""))
+          .catch(() => null);
+      }
+      const approvalPayload = isTerminal
+        ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(normalizedTerminal?.command ?? String(plan.input.command ?? "")).digest("hex"), cwd: normalizedTerminal?.cwd === "." ? undefined : normalizedTerminal?.cwd, action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") }
+        : gitWriteIntent
+          ? gitApprovalPayload({
+              projectId: String(plan.input.projectId ?? ""),
+              tool: gitRecordTool,
+              intent: { ...gitWriteIntent, repositoryInitialized: gitRepositoryState?.initialized ?? null },
+            })
+          : pullRequestTarget
+            ? pullRequestApprovalPayload({
+                projectId: String(plan.input.projectId ?? ""),
+                tool: gitRecordTool,
+                base: pullRequestTarget.base,
+                head: pullRequestTarget.head,
+                credentialId: typeof plan.input.credentialId === "string" ? plan.input.credentialId : null,
+              })
+            : plan.input;
       if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
         if (this.durableApprovals) {
           if (!approvedForCurrent) {
             const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
             const req = await this.durableApprovals.requestApproval(ctx, company.id, {
-              runId, agentId: agent.id, toolName: toolToAssess,
+              runId, agentId: agent.id, toolName: gitRecordTool,
               riskLevel: projectFileRisk === "high" ? "high" : this.riskApprovalService.classifyRisk(toolToAssess) === "critical" ? "critical" : "high",
-              actionSummary: tool === "project.deploy.publish" ? `Deploy ${plan.input.projectId ?? "project"} to ${plan.input.provider ?? "dokploy"} [${plan.input.environment ?? "production"}]` : `${agent.name} requests ${toolToAssess}`, inputPayload: cleanPayload,
+              actionSummary: tool === "project.deploy.publish" ? `Deploy ${plan.input.projectId ?? "project"} to ${plan.input.provider ?? "dokploy"} [${plan.input.environment ?? "production"}]` : `${agent.name} requests ${gitRecordTool}`, inputPayload: cleanPayload,
             });
             await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
               agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
@@ -834,16 +907,40 @@ export class CompanyDelegationRuntime {
             throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval. Approval request ID: ${req.id}`, 403);
           }
           const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
-          try { await this.durableApprovals.consumeApproved(ctx, company.id, approvalId!, { runId, agentId: agent.id, toolName: toolToAssess, inputPayload: cleanPayload }); }
-          catch (error) {
-            const code = (error as any)?.code ?? "APPROVAL_INVALID";
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
-              inputSummary: summary(cleanPayload), errorMessage: error instanceof Error ? error.message : "Approval denied", reasonCode: String(code).toLowerCase(), sequenceNumber: sequenceNumber++
-            });
-            throw new CompanyRuntimeError(code, error instanceof Error ? error.message : "Approval denied", Number((error as any)?.status ?? 409));
+          if (gitWriteIntent || pullRequestTarget) {
+            /**
+             * C11 (owner decision 5): a remote git write consumes its approval **at the git boundary**,
+             * immediately before the side effect (`ProjectGitService.requireGitWriteApproval`), not here.
+             * Consuming it in this loop would spend the one-shot record before the write — leaving the
+             * boundary, which is the place that can recompute the payload hash from the *resolved* target,
+             * with nothing left to verify. It also means a run that is approved for a git write cannot
+             * have that approval spent on a different tool call in the same turn.
+             */
+          } else {
+            try { await this.durableApprovals.consumeApproved(ctx, company.id, approvalId!, { runId, agentId: agent.id, toolName: toolToAssess, inputPayload: cleanPayload }); }
+            catch (error) {
+              const code = (error as any)?.code ?? "APPROVAL_INVALID";
+              await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
+                agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
+                inputSummary: summary(cleanPayload), errorMessage: error instanceof Error ? error.message : "Approval denied", reasonCode: String(code).toLowerCase(), sequenceNumber: sequenceNumber++
+              });
+              throw new CompanyRuntimeError(code, error instanceof Error ? error.message : "Approval denied", Number((error as any)?.status ?? 409));
+            }
           }
         } else {
+          /**
+           * C11: without the durable approval store there is no approval **record** for the git boundary to
+           * verify, and the HMAC token path cannot produce one. A remote git write is therefore refused
+           * instead of being executed on a token alone — `runId`-scoped token replay is not the same proof
+           * as "this record, this payload hash, consumed once, at the boundary".
+           */
+          if (gitWriteIntent || pullRequestTarget) {
+            throw new CompanyRuntimeError(
+              "GIT_APPROVAL_UNAVAILABLE",
+              "A remote git write requires the durable approval store so the git boundary can verify the approval record",
+              503,
+            );
+          }
           const token = typeof plan.input._approvalToken === "string" ? plan.input._approvalToken : undefined;
           if (!token) {
             const req = this.riskApprovalService.createApprovalRequest(ctx, company.id, runId, agent.id, toolToAssess, approvalPayload);
@@ -913,6 +1010,15 @@ export class CompanyDelegationRuntime {
         }
         if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
         if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
+        /**
+         * C11 (owner decision 5): the approval **record id** travels to the git boundary, which is what
+         * verifies it (status, single use, expiry, payload hash). `__npatiApprovalGranted` above is a
+         * legacy hint and is deliberately not the proof for a git write: a flag can be set by anything that
+         * can build a tool input, an id can only name a row that a human decided.
+         */
+        if ((tool === "project.git.push" || tool === "project.git.pr") && approvedForCurrent && approvalId) {
+          adapterInput.__npatiApprovalId = approvalId;
+        }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);

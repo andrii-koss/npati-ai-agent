@@ -28,6 +28,14 @@ import {
 const APPROVAL_REQUIRED_TOOLS = new Set(["code.fs.delete", "code.deps.add"]);
 
 /**
+ * C11: the git writes that destroy work or publish something. They are approval-gated like the two above, and
+ * they are a **separate** list only because their risk is not uniformly `high` (`code.git.pr.comment` is
+ * `medium`): the approval is what gates them, and pinning the risk to `high` for all four would have been a
+ * false statement about a comment.
+ */
+const GIT_APPROVAL_REQUIRED_TOOLS = ["code.git.restore", "code.git.push", "code.git.pr.create", "code.git.pr.comment"] as const;
+
+/**
  * C3: mutating Coding Agent tools.
  *
  * These capabilities are the first ones that can change a workspace, so the contract they must keep is
@@ -86,7 +94,15 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
       expect(capability!.requiresConfirmation, `${id} must require approval`).toBe(true);
     }
     const approvalGated = CAPABILITY_CATALOG.filter((c) => c.domain === "code" && c.requiresConfirmation);
-    expect(approvalGated.map((c) => c.id).sort()).toEqual([...APPROVAL_REQUIRED_TOOLS].sort());
+    expect(approvalGated.map((c) => c.id).sort())
+      .toEqual([...APPROVAL_REQUIRED_TOOLS, ...GIT_APPROVAL_REQUIRED_TOOLS].sort());
+    // C11: and each of them is honest about being gated, without the risk label having to be inflated.
+    for (const id of GIT_APPROVAL_REQUIRED_TOOLS) {
+      const capability = CAPABILITY_CATALOG.find((c) => c.id === id);
+      expect(capability, `${id} must exist`).toBeTruthy();
+      expect(["high", "medium"], `${id} risk`).toContain(capability!.risk);
+      expect(capability!.requiresConfirmation, `${id} must require approval`).toBe(true);
+    }
   });
 
   it("requires workspace:write for mutations and workspace:read for the diff", () => {
@@ -108,8 +124,8 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
     // `code.ask_user`. The pin had stopped at 19 (the count before C4a) because this file is not part of the
     // security gate; it is brought up to the real total rather than widened into a range, which would stop
     // catching an addition.
-    expect(catalogCode).toHaveLength(25);
-    expect(matrixCode).toHaveLength(25);
+    expect(catalogCode).toHaveLength(36);
+    expect(matrixCode).toHaveLength(36);
     expect(matrixCode.filter((entry) => WRITE_INVENTORY_IDS.includes(entry.id)).map((entry) => entry.id)).toEqual(WRITE_INVENTORY_IDS);
 
     for (const [index, id] of WRITE_IDS.entries()) {
@@ -120,11 +136,11 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
 
     const allInventoryIds = CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds);
     expect(new Set(allInventoryIds).size).toBe(allInventoryIds.length);
-    expect(Math.max(...allInventoryIds)).toBe(373); // the last published inventory id, after C9's tools
+    expect(Math.max(...allInventoryIds)).toBe(384); // the last published inventory id, after C11's git tools
 
     const callable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
-    expect(CAPABILITY_CATALOG).toHaveLength(373);
-    expect(callable).toHaveLength(109);
+    expect(CAPABILITY_CATALOG).toHaveLength(384);
+    expect(callable).toHaveLength(120);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
   });
 });
@@ -133,7 +149,7 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
   it("keeps manifest v3 frozen and resolvable while the current manifest publishes every tool", () => {
     // C4 bumped the manifest to v4; v3 must keep resolving with exactly its 13 tools and frozen checksum.
     expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
-    expect(CODE_TOOL_SCHEMAS.length).toBe(25); // 19 at C3, 22 after C4a, 24 after C9's planning tools, 25 after code.ask_user
+    expect(CODE_TOOL_SCHEMAS.length).toBe(36); // 19 at C3, 22 after C4a, 24 after C9's planning tools, 25 after code.ask_user, 36 after C11's git tools
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
 
     const v1 = resolveManifestForSession(1);
