@@ -15,8 +15,25 @@ export interface TerminalRequest {
   environmentReferences?: Record<string, TerminalSecretReference>;
   approved?: boolean; runId?: string; agentId: string;
 }
-export interface TerminalLimits { commandTimeoutMs: number; installBuildTimeoutMs: number; outputLimitBytes: number; inactivityMs: number; syncMaxBytes: number; syncMaxFiles: number; }
-export const defaultTerminalLimits: TerminalLimits = { commandTimeoutMs: 120_000, installBuildTimeoutMs: 600_000, outputLimitBytes: 64_000, inactivityMs: 900_000, syncMaxBytes: 20_000_000, syncMaxFiles: 500 };
+export interface TerminalLimits {
+  commandTimeoutMs: number;
+  installBuildTimeoutMs: number;
+  outputLimitBytes: number;
+  inactivityMs: number;
+  syncMaxBytes: number;
+  syncMaxFiles: number;
+  /**
+   * C10 (ТЗ item 7): how long a sandbox may stay idle (stopped **or** running) before the retention policy
+   * destroys it. Destroying is safe — `ensure` recreates the sandbox from the stored project files — and not
+   * destroying is not: a stopped container keeps its disk for as long as nothing removes it. Default seven days.
+   */
+  retentionMs: number;
+}
+export const defaultTerminalLimits: TerminalLimits = {
+  commandTimeoutMs: 120_000, installBuildTimeoutMs: 600_000, outputLimitBytes: 64_000,
+  inactivityMs: 900_000, syncMaxBytes: 20_000_000, syncMaxFiles: 500,
+  retentionMs: 7 * 24 * 60 * 60 * 1000,
+};
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: project.companyId, projectId: project.id });
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
@@ -48,6 +65,12 @@ export class ProjectSandboxService {
     this.limits.commandTimeoutMs = Math.min(this.limits.commandTimeoutMs, 600_000);
     this.limits.installBuildTimeoutMs = Math.min(this.limits.installBuildTimeoutMs, 600_000);
     this.limits.outputLimitBytes = Math.min(this.limits.outputLimitBytes, 128_000);
+    /**
+     * C10: the retention window can never be shorter than the inactivity window. Retention **destroys**, so a
+     * misconfiguration that made the two disagree would delete a sandbox the very moment it was stopped — the
+     * destructive outcome of a single typo, which is exactly what a floor here prevents.
+     */
+    this.limits.retentionMs = Math.max(this.limits.retentionMs, this.limits.inactivityMs);
   }
   async inspectBrowser(ctx: AuthContext, companyId: string, projectId: string, options: SandboxBrowserQaOptions & { agentId?: string }) {
     const project = await this.project(ctx, companyId, projectId);
@@ -89,6 +112,15 @@ export class ProjectSandboxService {
     return values;
   }
   private touch(ctx: AuthContext, project: Project) { this.lastUse.set(project.id, { ctx, project, at: Date.now() }); }
+
+  /**
+   * C10 (ТЗ item 7): stops every sandbox whose **last activity** is older than the inactivity window.
+   *
+   * The timestamp comes from the sandbox itself (`status.lastActivityAt`), never from this process's clock alone:
+   * a sandbox kept busy by a background process is not idle, and stopping it on the strength of "our map says so"
+   * would kill work this process cannot see. A stopped sandbox is **kept in the map** rather than forgotten, which
+   * is what makes the retention pass below able to reason about it without a second registry.
+   */
   async stopInactive(now = Date.now()) {
     for (const [projectId, item] of this.lastUse) {
       if (now - item.at < this.limits.inactivityMs || !item.project.sandboxId) continue;
@@ -99,10 +131,110 @@ export class ProjectSandboxService {
         const remoteAt = Date.parse(status.lastActivityAt);
         if (Number.isFinite(remoteAt) && now - remoteAt < this.limits.inactivityMs) { item.at = remoteAt; continue; }
         await this.provider.stopSandbox(scope, item.project.sandboxId);
-        this.lastUse.delete(projectId);
+        // Kept, not removed: the retention pass needs to know this sandbox exists and when it went quiet.
+        item.at = now;
       } catch (error) {
         if (error instanceof SandboxProviderError && error.status === 404) this.lastUse.delete(projectId);
       }
+    }
+  }
+
+  /**
+   * C10 (ТЗ item 7): the retention policy that was missing.
+   *
+   * Auto-stop existed (above) and reattachment existed (`ensure`), but nothing ever **destroyed** a sandbox that
+   * had been idle for a long time: a stopped container kept its disk for as long as the process lived and, after a
+   * restart, forever — nothing could even name it, because the project row is the only durable pointer and the
+   * idle map is in memory. This pass closes that: a sandbox whose last activity is older than the configured
+   * retention window is destroyed, and `ensure` recreates it on demand (fresh, from the stored project files).
+   *
+   * `preview` exists for the reaper's dry run, so "nothing to clean" and "the port is unavailable" stay
+   * distinguishable answers.
+   */
+  async retentionPreview(now = Date.now()): Promise<Array<{ projectId: string; sandboxId: string; idleMs: number }>> {
+    const candidates: Array<{ projectId: string; sandboxId: string; idleMs: number }> = [];
+    for (const [projectId, item] of this.lastUse) {
+      if (!item.project.sandboxId) continue;
+      const isRunning = await this.sandboxRuns(item).catch(() => null);
+      if (isRunning === true) continue;
+      const idleMs = now - item.at;
+      if (idleMs < this.limits.retentionMs) continue;
+      candidates.push({ projectId, sandboxId: item.project.sandboxId, idleMs });
+    }
+    return candidates;
+  }
+
+  /**
+   * Destroys every sandbox past its retention window. Answers how many were destroyed. A sandbox that turns out to
+   * be **running** is left alone: retention applies to idle sandboxes, and a pass that destroyed live work would be
+   * a much worse bug than a late cleanup.
+   */
+  async sweepRetention(now = Date.now()): Promise<{ destroyed: number; candidates: number }> {
+    const candidates = await this.retentionPreview(now);
+    let destroyed = 0;
+    for (const candidate of candidates) {
+      const item = this.lastUse.get(candidate.projectId);
+      if (!item || !item.project.sandboxId) continue;
+      try {
+        const isRunning = await this.sandboxRuns(item).catch(() => null);
+        if (isRunning === true) continue;
+        await this.destroy(item.ctx, item.project);
+        destroyed += 1;
+      } catch (error) {
+        if (error instanceof SandboxProviderError && error.status === 404) this.lastUse.delete(candidate.projectId);
+      }
+    }
+    return { destroyed, candidates: candidates.length };
+  }
+
+  /** What is currently tracked, for the reaper's `activeSandboxes` port. Never contains a destroyed sandbox. */
+  listTrackedSandboxIds(): string[] {
+    return [...this.lastUse.values()].map((item) => item.project.sandboxId).filter((id): id is string => Boolean(id));
+  }
+
+  /**
+   * C10: the effective retention window, after the floor that keeps it at or above the inactivity window. Exposed
+   * so the guarantee is observable from outside the class instead of being a claim in a comment.
+   */
+  get retentionWindowMs(): number {
+    return this.limits.retentionMs;
+  }
+
+  /**
+   * C10 (ТЗ item 7): puts a project under the retention policy **without** starting or creating anything.
+   *
+   * Why it is needed: the idle map is in memory, so after a restart a sandbox that exists on disk is invisible to
+   * the sweep — it would never be stopped and never be destroyed, which is precisely the leak retention exists to
+   * close. The caller re-registers the projects that recent runs touched (they are the only projects that can own
+   * a code-run sandbox), and this records the sandbox's own `lastActivityAt` as the baseline rather than "now", so
+   * a sandbox that has genuinely been idle for a week is not given a fresh week by the restart.
+   */
+  async trackForRetention(ctx: AuthContext, project: Project): Promise<boolean> {
+    if (!project.sandboxId) return false;
+    if (!this.lastUse.has(project.id)) this.lastUse.set(project.id, { ctx, project, at: Date.now() });
+    const scope = scopeOf(ctx, project);
+    try {
+      const status = await this.provider.getStatus(scope, project.sandboxId);
+      const remoteAt = Date.parse(status.lastActivityAt);
+      const item = this.lastUse.get(project.id);
+      if (item && Number.isFinite(remoteAt)) item.at = Math.min(item.at, remoteAt);
+      return true;
+    } catch (error) {
+      // A sandbox the provider no longer knows about is not a retention candidate; drop it rather than retrying.
+      if (error instanceof SandboxProviderError && error.status === 404) this.lastUse.delete(project.id);
+      return false;
+    }
+  }
+
+  /** `null` when the sandbox could not be asked; `true`/`false` otherwise, so an unknown is never read as `false`. */
+  private async sandboxRuns(item: { ctx: AuthContext; project: Project }): Promise<boolean | null> {
+    if (!item.project.sandboxId) return false;
+    try {
+      const status = await this.provider.getStatus(scopeOf(item.ctx, item.project), item.project.sandboxId);
+      return status.state === "running";
+    } catch (error) {
+      if (error instanceof SandboxProviderError && error.status === 404) return false;
+      return null;
     }
   }
   private async ensure(ctx: AuthContext, project: Project) {

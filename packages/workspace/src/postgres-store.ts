@@ -10,19 +10,36 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
   CodeRunStateRecord, CodeRunTurnRecord, CodeRunTurnStatus, CreateCodeRunStateInput, ApplyCodeRunStateEventInput,
   UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput, CodeRunScanPage,
+  CodeRunRequestRecord,
+  CodeProjectRefScanInput, CodeProjectRefScanPage,
   CreateExecutionSnapshotInput, ExecutionSnapshotRecord, ExecutionSnapshotTrigger, ExecutionSnapshotDiff,
   ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
   CreateSnapshotConfigVersionInput, CodeActivityEventKind, CodeActivityEventRecord,
   CreateCodeActivityEventInput, ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord,
   ReplayMode, ReplayStepKind, CreateReplayBundleInput, ListReplayBundlesInput,
   CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError, codeRunRequestStatus } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 // C9: goals, plan revisions and session todos. The logic lives in its own module so the Postgres and
 // in-memory backends share one implementation of the rules instead of two that drift apart.
 import { PostgresCodeGoalStore } from "./code-goal-store";
+// C10: session durability (conversation cursor, recovery notice, rewind/fork ledgers). One shared module, so
+// the Postgres and in-memory backends cannot drift on the claim protocol or the revision check.
+import {
+  PostgresCodeSessionDurabilityStore,
+  type CodeRunRecoveryNoticeRecord,
+  type CodeSessionForkRecord,
+  type CodeSessionHeadRecord,
+  type CodeSessionRewindRecord,
+  type CompleteCodeSessionForkInput,
+  type CompleteCodeSessionRewindInput,
+  type CreateCodeRunRecoveryNoticeInput,
+  type CreateCodeSessionForkInput,
+  type CreateCodeSessionRewindInput,
+  type SetCodeSessionHeadInput,
+} from "./code-session-durability-store";
 import {
   PostgresCodeUserQuestionStore,
   type AnswerCodeUserQuestionInput,
@@ -1147,6 +1164,38 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    // C10: session durability — the conversation cursor, the reconciler's notice and the rewind/fork ledgers.
+    // Additive: 082 creates four new tables, their indexes and one append-only trigger; no existing table is
+    // altered, and the only foreign key points at `code_sessions` (which exists since 065) rather than at a
+    // C12 structure. The cursor is what makes a conversation rewind possible without deleting the append-only
+    // replay bundle and the context summaries.
+    const sessionDurabilityMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='082_code_session_durability'");
+    if (!sessionDurabilityMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration082 } = await import("./migration-082");
+        await runMigration082(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('082_code_session_durability')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C10: the run's original request. Additive: 083 adds seven columns and their CHECK constraints to the
+    // existing `code_run_states` table, so a previous application version keeps working against the new schema
+    // (it simply never writes the new columns, and their defaults read as "this run has no recorded request").
+    const runRequestMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='083_code_run_request'");
+    if (!runRequestMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration083 } = await import("./migration-083");
+        await runMigration083(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('083_code_run_request')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   // --- C9: `code.ask_user` — the persistent question --------------------------------------------------
@@ -1189,6 +1238,80 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
     return this.questions().cancelPendingQuestions(input);
+  }
+
+  // --- C10: session durability ----------------------------------------------------------------------
+  // The cursor of a conversation, the reconciler's notice and the two operation ledgers. The rules (one head
+  // per session, claim-before-perform, revision-checked updates) live in `code-session-durability-store.ts`
+  // and are shared with the in-memory backend; migration 082 repeats the structural ones as constraints.
+
+  private codeSessionDurabilityInstance?: PostgresCodeSessionDurabilityStore;
+
+  private durability(): PostgresCodeSessionDurabilityStore {
+    if (!this.codeSessionDurabilityInstance) {
+      this.codeSessionDurabilityInstance = new PostgresCodeSessionDurabilityStore(this.pool);
+    }
+    return this.codeSessionDurabilityInstance;
+  }
+
+  async getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null> {
+    return this.durability().getHead(companyId, sessionId);
+  }
+
+  async setCodeSessionHead(input: SetCodeSessionHeadInput): Promise<CodeSessionHeadRecord> {
+    return this.durability().setHead(input);
+  }
+
+  async createCodeRunRecoveryNotice(input: CreateCodeRunRecoveryNoticeInput): Promise<CodeRunRecoveryNoticeRecord> {
+    return this.durability().createNotice(input);
+  }
+
+  async getLatestCodeRunRecoveryNotice(companyId: string, runId: string): Promise<CodeRunRecoveryNoticeRecord | null> {
+    return this.durability().getLatestNotice(companyId, runId);
+  }
+
+  async listCodeRunRecoveryNotices(input: { companyId: string; runId: string; limit?: number }): Promise<CodeRunRecoveryNoticeRecord[]> {
+    return this.durability().listNotices(input);
+  }
+
+  async createCodeSessionRewind(input: CreateCodeSessionRewindInput): Promise<{ record: CodeSessionRewindRecord; replayed: boolean }> {
+    return this.durability().createRewind(input);
+  }
+
+  async getCodeSessionRewind(companyId: string, operationId: string): Promise<CodeSessionRewindRecord | null> {
+    return this.durability().getRewind(companyId, operationId);
+  }
+
+  async reopenCodeSessionRewind(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionRewindRecord | null; reopened: boolean }> {
+    return this.durability().reopenRewind(input);
+  }
+
+  async completeCodeSessionRewind(input: CompleteCodeSessionRewindInput): Promise<CodeSessionRewindRecord> {
+    return this.durability().completeRewind(input);
+  }
+
+  async listCodeSessionRewinds(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionRewindRecord[]> {
+    return this.durability().listRewinds(input);
+  }
+
+  async createCodeSessionFork(input: CreateCodeSessionForkInput): Promise<{ record: CodeSessionForkRecord; replayed: boolean }> {
+    return this.durability().createFork(input);
+  }
+
+  async getCodeSessionFork(companyId: string, operationId: string): Promise<CodeSessionForkRecord | null> {
+    return this.durability().getFork(companyId, operationId);
+  }
+
+  async completeCodeSessionFork(input: CompleteCodeSessionForkInput): Promise<CodeSessionForkRecord> {
+    return this.durability().completeFork(input);
+  }
+
+  async listCodeSessionForks(input: { companyId: string; parentSessionId: string; limit?: number }): Promise<CodeSessionForkRecord[]> {
+    return this.durability().listForks(input);
+  }
+
+  async reopenCodeSessionFork(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionForkRecord | null; reopened: boolean }> {
+    return this.durability().reopenFork(input);
   }
 
   // --- C9: goals, plan revisions and session todos --------------------------------------------------
@@ -3363,15 +3486,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    */
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
     const expiresAt = new Date(input.now.getTime() + input.leaseMs);
+    const request = input.request ?? { status: "not_recorded" as const, text: null, sha256: null, truncated: false, recordedAt: null };
     await this.pool.query(
       `INSERT INTO code_run_states(
          run_id, workspace_id, company_id, project_id, session_id, status, turn_index, last_event_seq,
-         lease_owner, lease_expires_at, heartbeat_at, started_at, updated_at, details)
-       VALUES ($1,$2,$3,$4,$5,'running',0,1,$6,$7,$8,$8,$8,$9::jsonb)
+         lease_owner, lease_expires_at, heartbeat_at, started_at, updated_at, details,
+         request_status, request_text, request_sha256, request_truncated, request_recorded_at,
+         data_classification, retention_class)
+       VALUES ($1,$2,$3,$4,$5,'running',0,1,$6,$7,$8,$8,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (run_id) DO NOTHING`,
       [
         input.runId, input.workspaceId, input.companyId, input.projectId, input.sessionId,
         input.owner, expiresAt, input.now, JSON.stringify(input.details ?? {}),
+        request.status, request.text, request.sha256, request.truncated, request.recordedAt,
+        input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+        input.retentionClass ?? DEFAULT_RETENTION_CLASS,
       ],
     );
     const stored = await this.getCodeRunState(input.companyId, input.runId);
@@ -3381,6 +3510,37 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       });
     }
     return stored;
+  }
+
+  /**
+   * C10: the run's original request. One extra read for one extra column set — the request text is deliberately
+   * kept out of `codeRunStateColumns` so the reaper's and the reconciler's scans (which run every interval over
+   * every stale run) never pull prompt content into memory.
+   */
+  async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
+    const result = await this.pool.query<{
+      request_status: string; request_text: string | null; request_sha256: string | null;
+      request_truncated: boolean; request_recorded_at: Date | null;
+      data_classification: string; retention_class: string;
+    }>(
+      `SELECT request_status, request_text, request_sha256, request_truncated, request_recorded_at,
+              data_classification, retention_class
+         FROM code_run_states WHERE company_id=$1 AND run_id=$2`,
+      [companyId, runId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      runId,
+      companyId,
+      status: codeRunRequestStatus(row.request_status),
+      text: row.request_text,
+      sha256: row.request_sha256,
+      truncated: row.request_truncated === true,
+      recordedAt: row.request_recorded_at ? new Date(row.request_recorded_at) : null,
+      dataClassification: row.data_classification as DataClassification,
+      retentionClass: row.retention_class as RetentionClass,
+    };
   }
 
   /**
@@ -3545,6 +3705,52 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ? encodeCodeRunScanCursor({ startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: 0 })
         : null,
     };
+  }
+
+  /**
+   * C10 (ТЗ item 7): the projects that own a code session, newest session first. Drives the sandbox-retention
+   * sweep, which must be able to find a sandbox that exists on disk while the process remembers nothing about it.
+   * The system scope (`companyId: null`) is the same one the run scans use and is only for the reaper. Two ids and
+   * a timestamp are selected — never a name, a path or any content.
+   */
+  async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const result = await this.pool.query<{ companyId: string; projectId: string; lastSessionAt: Date }>(
+      `SELECT company_id AS "companyId", project_id AS "projectId", max(created_at) AS "lastSessionAt"
+         FROM code_sessions
+        WHERE ($1::text IS NULL OR company_id=$1)
+        GROUP BY company_id, project_id
+       HAVING ($2::timestamptz IS NULL OR (max(created_at), project_id) < ($2::timestamptz, $3))
+        ORDER BY max(created_at) DESC, project_id ASC
+        LIMIT $4`,
+      [input.companyId, cursor?.startedAt ?? null, cursor?.runId ?? "", limit + 1],
+    );
+    const rows = result.rows.slice(0, limit);
+    const last = rows[rows.length - 1];
+    return {
+      items: rows.map((row) => ({
+        companyId: row.companyId,
+        projectId: row.projectId,
+        lastSessionAt: new Date(row.lastSessionAt).toISOString(),
+      })),
+      nextCursor: result.rows.length > limit && last
+        ? encodeCodeRunScanCursor({ startedAt: new Date(last.lastSessionAt).toISOString(), runId: last.projectId, turnIndex: 0 })
+        : null,
+    };
+  }
+
+  /**
+   * C10 (ТЗ item 7): one project by ids, without a user context, for the sandbox-retention sweep — which runs as the
+   * deployment's system identity and therefore cannot use the `createdBy`-scoped `getProject`. `null` for an unknown
+   * or foreign id.
+   */
+  async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
+    const result = await this.pool.query<Project>(
+      `SELECT ${projectColumns} FROM projects WHERE id=$1 AND company_id=$2 LIMIT 1`,
+      [projectId, companyId],
+    );
+    return result.rows[0] ?? null;
   }
 
   /** Keyset scan over the open turns, used by the reaper to find tool calls with no progress. */

@@ -59,6 +59,7 @@ export function hasSnapshotId(snapshotId: string | undefined | null): snapshotId
 // --- C6b: the real provider -------------------------------------------------------------------------
 
 import { scanTextForSecrets } from "./code-secret-scanner";
+import type { AuthContext } from "@npati/workspace";
 
 /** Bumped when the payload shape changes, so an old snapshot is still readable *as what it was*. */
 export const EXECUTION_SNAPSHOT_SCHEMA_VERSION = 1;
@@ -199,7 +200,6 @@ export interface ExecutionSnapshotPersistPort extends ExecutionSnapshotReadPort 
     id?: string;
   }): Promise<{ id: string }>;
 }
-
 export interface RealSnapshotProviderInput {
   store: ExecutionSnapshotPersistPort;
   sources: ExecutionSnapshotSources;
@@ -262,4 +262,229 @@ export async function readSnapshotForRun(
   const snapshot = await store.getSnapshotForRun(companyId, runId);
   if (!snapshot) return { kind: "legacy_no_snapshot", runId };
   return { kind: "snapshot", snapshotId: snapshot.id, payload: snapshot.payload };
+}
+
+// --- C10: the resume-time environment re-check ---------------------------------------------------------
+
+import type { ExecutionSnapshotDiff, ExecutionSnapshotRecord } from "@npati/workspace";
+
+/**
+ * C10 (Question 2): the environment facts a **resume** can genuinely re-read.
+ *
+ * These are deliberately *not* `ExecutionSnapshotSources`. Those describe a run **in flight**: the admitted
+ * image digest, the system prompt version and the model profile version are published by the runner through a
+ * per-run holder and exist only while that process lives. Re-collecting them after the process is gone would
+ * record `null` for each of them, and the diff against the recorded snapshot would then report a change for
+ * every one of those fields — a false alarm on every single resume, which is worse than not checking at all.
+ *
+ * So a resume records the four families it can really answer, under their **own keys**, which are the same keys
+ * the run snapshot uses. The diff is therefore like-for-like, and a family that cannot be read is reported as
+ * `not compared` with its reason rather than as "unchanged".
+ */
+export interface ResumeEnvironmentSources {
+  /** Resolved feature flags in force now (master + sub-flags), in the shape the run snapshot recorded them. */
+  featureFlags(input: ResumeEnvironmentReadInput): Promise<Record<string, unknown> | null>;
+  /** The policy composition in force now, from the one composition builder the run snapshot uses. */
+  policyComposition(input: ResumeEnvironmentReadInput): Promise<Record<string, unknown> | null>;
+  /** The provider/data policy in force now: the governing version and the classification actually applied. */
+  providerDataPolicy(input: ResumeEnvironmentReadInput): Promise<{ version: number | null; classification: string | null } | null>;
+  /**
+   * Whether the sandbox image the run was admitted with may still be used. Revocation is its own answer and
+   * cannot be expressed as a diff: a changed digest and a revoked digest look identical field-by-field, and only
+   * one of them must stop the continuation.
+   */
+  sandboxImage(input: ResumeEnvironmentReadInput): Promise<ResumeSandboxImageFact | null>;
+}
+
+export interface ResumeEnvironmentReadInput {
+  ctx: AuthContext;
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  runId: string;
+  /** The snapshot the run was admitted under — the comparison base. `null` when the run has none. */
+  recorded: Record<string, unknown> | null;
+}
+
+export interface ResumeSandboxImageFact {
+  /** The digest the run recorded, when the checker could name it. */
+  recordedDigest: string | null;
+  /** What the admission policy says about that image **now**. */
+  status: "admitted" | "revoked" | "unknown";
+  replacement: string | null;
+  reason: string;
+}
+
+/**
+ * The families the resume comparison covers, split by **how** they can be compared.
+ *
+ * `featureFlags`, `policyComposition` and `providerDataPolicy` are values: yesterday's and today's are the same
+ * kind of thing, so a field-by-field diff between them is meaningful.
+ *
+ * The sandbox image is deliberately **not** in that set. The run recorded `{ digest, sbomRef }` and a resume can
+ * only ask the admission policy for a *verdict* (`admitted` / `revoked` / `unknown` plus a replacement). Those
+ * two shapes share no field, so diffing them would report every field as changed on every resume — noise that
+ * would bury the one fact that matters. Revocation is therefore reported as its own verdict, which is also the
+ * only correct reading: a replaced digest and a revoked one are identical field by field, and only one of them
+ * may continue.
+ */
+export const RESUME_ENVIRONMENT_DIFF_FAMILIES: readonly string[] = [
+  "featureFlags",
+  "policyComposition",
+  "providerDataPolicy",
+];
+
+/** The sandbox image family: recorded by the resume snapshot, reported as a verdict rather than as a diff. */
+export const RESUME_ENVIRONMENT_IMAGE_FAMILY = "sandboxImage";
+
+/** Every family a resume snapshot records, so a reader can see the whole environment it describes. */
+export const RESUME_ENVIRONMENT_FAMILIES: readonly string[] = [
+  ...RESUME_ENVIRONMENT_DIFF_FAMILIES,
+  RESUME_ENVIRONMENT_IMAGE_FAMILY,
+];
+
+/**
+ * Assembles the payload of a **resume** snapshot.
+ *
+ * It reuses the same schema version, the same `{ unavailable }` marker for a source that failed, the same
+ * secret scan and the same store write as the run snapshot — there is no second snapshot mechanism, only a
+ * second, honest source set for a moment when the run-scoped one no longer exists.
+ */
+export async function collectResumeSnapshotPayload(input: {
+  sources: ResumeEnvironmentSources;
+  readInput: ResumeEnvironmentReadInput;
+  actor: string;
+  role: string | null;
+  agentId?: string;
+  now: Date;
+  reason: string;
+}): Promise<{ payload: ExecutionSnapshotPayload; unavailable: string[] }> {
+  const unavailable: string[] = [];
+  const s = input.sources;
+  const read = input.readInput;
+  const payload: ExecutionSnapshotPayload = {
+    snapshotSchemaVersion: EXECUTION_SNAPSHOT_SCHEMA_VERSION,
+    trigger: "resume",
+    createdAt: input.now.toISOString(),
+    actor: input.actor,
+    actorRole: input.role,
+    agentId: input.agentId ?? null,
+    reason: input.reason,
+    featureFlags: await readSource("featureFlags", () => s.featureFlags(read), unavailable),
+    policyComposition: await readSource("policyComposition", () => s.policyComposition(read), unavailable),
+    providerDataPolicy: await readSource("providerDataPolicy", () => s.providerDataPolicy(read), unavailable),
+    sandboxImage: await readSource("sandboxImage", () => s.sandboxImage(read), unavailable),
+  };
+  return { payload, unavailable };
+}
+
+/**
+ * The port the resume service consumes. Three methods, all of them the existing mechanism: the store's read, the
+ * store's write (which is what versions the snapshot, links it to its predecessor and hashes it) and the store's
+ * own content-safe diff. The service never compares payloads itself and never builds a second snapshot store.
+ */
+export interface ResumeEnvironmentAdmission {
+  /** The snapshot the run was admitted under, or `null` when the run has none (recorded before C6b). */
+  read(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null>;
+  /** Creates the NEXT version for the session with `trigger: "resume"`; `null` when it cannot be recorded. */
+  capture(input: {
+    ctx: AuthContext;
+    companyId: string;
+    workspaceId: string;
+    projectId: string;
+    sessionId: string;
+    runId: string;
+    actor: string;
+    role?: string | null;
+    reason: string;
+    recorded: Record<string, unknown> | null;
+  }): Promise<{ record: ExecutionSnapshotRecord; unavailable: string[] } | null>;
+  /** The store's diff, so a caller sees exactly the change detection the Run Trace compare surface shows. */
+  diff(before: ExecutionSnapshotRecord, after: ExecutionSnapshotRecord): ExecutionSnapshotDiff;
+}
+
+/**
+ * The store surface the resume environment admission needs: the run's snapshot (the comparison base), the
+ * versioned write, and the store's own content-safe diff. Declared structurally rather than by extending
+ * `ExecutionSnapshotPersistPort`, because that port's read is deliberately narrow (`{ id, payload }`) for
+ * read-only surfaces while a diff needs the versioned record.
+ */
+export interface ResumeEnvironmentAdmissionStore {
+  getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null>;
+  createExecutionSnapshot(input: {
+    companyId: string;
+    workspaceId: string;
+    projectId: string;
+    sessionId: string;
+    runId?: string | null;
+    payload: Record<string, unknown>;
+    trigger: "session_start" | "run_start" | "config_change" | "resume" | "recovery";
+    createdBy: string;
+    now?: Date;
+    id?: string;
+  }): Promise<ExecutionSnapshotRecord>;
+  diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff;
+}
+
+/**
+ * Builds the resume environment admission from the existing snapshot store and the resume-time sources.
+ *
+ * The failure rule matches the rest of the surface: `capture` returning `null` is "this deployment could not
+ * record the environment", which the resume reports as un-checked — it never becomes "the environment is
+ * unchanged", because a check that did not happen is not a clean bill of health.
+ */
+export function createResumeEnvironmentAdmission(input: {
+  store: ResumeEnvironmentAdmissionStore;
+  sources: ResumeEnvironmentSources;
+  resolveRole?: (input: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; runId: string }) => Promise<string | null>;
+  now?: () => Date;
+}): ResumeEnvironmentAdmission {
+  return {
+    read: async (companyId, runId) => input.store.getSnapshotForRun(companyId, runId),
+    capture: async (request) => {
+      const now = input.now?.() ?? new Date();
+      let role: string | null = null;
+      if (input.resolveRole) {
+        try {
+          role = await input.resolveRole({
+            ctx: request.ctx, companyId: request.companyId, projectId: request.projectId,
+            sessionId: request.sessionId, runId: request.runId,
+          });
+        } catch {
+          role = null;
+        }
+      }
+      const { payload, unavailable } = await collectResumeSnapshotPayload({
+        sources: input.sources,
+        readInput: {
+          ctx: request.ctx, companyId: request.companyId, projectId: request.projectId,
+          sessionId: request.sessionId, runId: request.runId, recorded: request.recorded,
+        },
+        actor: request.actor,
+        role: request.role ?? role,
+        now,
+        reason: request.reason,
+      });
+      try {
+        assertNoSecretsInSnapshot(payload);
+      } catch {
+        // A resume snapshot whose combination of facts carries a credential is not written at all: the value is
+        // never stored, and "we refused to record the environment" is what the resume reports.
+        return null;
+      }
+      const record = await input.store.createExecutionSnapshot({
+        companyId: request.companyId,
+        workspaceId: request.workspaceId,
+        projectId: request.projectId,
+        sessionId: request.sessionId,
+        runId: request.runId,
+        payload,
+        trigger: "resume",
+        createdBy: request.actor,
+        now,
+      });
+      return { record, unavailable };
+    },
+    diff: (before, after) => input.store.diffExecutionSnapshots(before, after),
+  };
 }

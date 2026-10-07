@@ -95,10 +95,10 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
-import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder, type CodingAgentRunResult } from "./coding-agent-runner";
+import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder, createCodeRunPolicyComposition, type CodeRunPolicyCompositionSources, type CodingAgentRunResult } from "./coding-agent-runner";
 import { ReplayBundleRecorder } from "./code-replay-bundle";
 import { ensureModelProfilesVersion, ensureSystemPromptVersion } from "./code-snapshot-versioning";
-import { createExecutionSnapshotProvider } from "./execution-snapshot";
+import { createExecutionSnapshotProvider, createResumeEnvironmentAdmission } from "./execution-snapshot";
 import { CodeRunStateLog, readRunEstimate } from "./code-run-state";
 import { CodeRunReconciler } from "./code-run-reconciler";
 import type { CodeSession } from "@npati/workspace";
@@ -113,6 +113,11 @@ import { registerCodeSnapshotRoutes } from "./code-snapshot-routes";
 import { buildCompanyMemoryBlock, buildProjectContextBlock } from "./code-context-memory";import { registerCodeRunStreamRoutes } from "./code-run-stream-routes";
 import { registerCodeProjectLifecycleRoutes } from "./code-project-lifecycle-routes";
 import { registerCodeSessionControlRoutes } from "./code-session-control-routes";
+// C10: durable session operations — resume, rewind, fork — and the reconciler's recovery notice.
+import { registerCodeSessionDurabilityRoutes } from "./code-session-durability-routes";
+import { CodeSessionResumeService } from "./code-session-resume";
+import { CodeSessionRewindService } from "./code-session-rewind";
+import { CodeSessionForkService } from "./code-session-fork";
 import { collectCodeSessionUsage } from "./code-session-usage";
 import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-context-store";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
@@ -131,6 +136,13 @@ import { isRepositoryInstructionsTrusted } from "./code-project-trust";
 import { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
+// C10 (ТЗ items 5, 6, 8): the run queue that bounds concurrency fairly, the registry that keeps a long run alive
+// after its tab closes, the reconnect/polling surface over it, and the Markdown session export.
+import { CodeRunQueue, resolveCodeRunQueueLimits, CodeRunRefusedError } from "./code-run-queue";
+import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
+import { registerCodeBackgroundRunRoutes } from "./code-background-run-routes";
+import { registerCodeSessionExportRoutes } from "./code-session-export-routes";
+import { connectionWantsNotification } from "./code-background-run-notifications";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { registerSandboxImageRoutes } from "./sandbox-image-routes";
 import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort, currentManifestVersion } from "./code-tool-runtime";
@@ -145,6 +157,7 @@ import { SecretLeaseProvider } from "./code-secret-lease";
 import { isAgentPrincipal, matrixModeFor, PolicyEngine } from "./code-policy-engine";
 import { classifyShellCommand } from "./code-shell-classifier";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
+import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
@@ -1125,6 +1138,8 @@ export function buildApp(config: AppConfig = {}) {
     inactivityMs: Number(process.env.NPATI_SANDBOX_IDLE_MS) || undefined,
     syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
     syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
+    // C10 (ТЗ item 7): the retention window the sweep destroys idle sandboxes after.
+    retentionMs: Number(process.env.NPATI_SANDBOX_RETENTION_MS) || undefined,
   }, projectApiGatewayService ? (ctx, companyId, projectId) => projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : undefined);
   const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
     ? setInterval(() => { void backupService.runScheduled(); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
@@ -1132,6 +1147,37 @@ export function buildApp(config: AppConfig = {}) {
   backupTimer?.unref();
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
+  /**
+   * C10 (ТЗ item 7): the retention pass. It runs on the established idle cadence rather than a timer of its own —
+   * `sweepRetention` re-checks the idle age itself, so the cadence only decides how quickly a long-idle sandbox is
+   * noticed, never whether a live one is destroyed.
+   *
+   * Before sweeping it re-registers the projects that own code sessions, because the idle map is in-process: a
+   * sandbox that exists on disk but is not in the map would never be stopped and never be destroyed, which is the
+   * exact leak this policy exists to close. The store read is the existing tenant-enumerating one the reaper and
+   * reconciler already use for cross-company scans — a system scope, so no user's permissions are borrowed.
+   */
+  const sandboxRetentionTimer = projectSandbox ? setInterval(() => {
+    void (async () => {
+      try {
+        const refs = await workspaceStore.listCodeProjectRefs({ companyId: null, limit: 500 });
+        for (const ref of refs.items) {
+          // System-scope read on purpose: the sweep runs as the deployment, which owns no project, so the
+          // tenant-scoped `getProject` would refuse every one of them.
+          const project = await workspaceStore.getProjectForSystem(ref.companyId, ref.projectId).catch(() => null);
+          if (project) await projectSandbox!.trackForRetention({ workspaceId: project.workspaceId, userId: project.createdBy, permissions: [] }, project);
+        }
+      } catch (error) {
+        app.log.warn({ err: error }, "sandbox_retention_tracking_failed");
+      }
+      const result = await projectSandbox!.sweepRetention().catch((error) => {
+        app.log.warn({ err: error }, "sandbox_retention_sweep_failed");
+        return null;
+      });
+      if (result && result.destroyed > 0) app.log.info(result, "sandbox_retention_swept");
+    })();
+  }, 60_000) : undefined;
+  sandboxRetentionTimer?.unref();
   // C1c: background chain verification and the daily anchor. Both are read-only unless a break is
   // detected; a failed verification logs a critical alert and (by configuration) blocks new
   // privileged audit writes for that company until an operator investigates.
@@ -2495,21 +2541,55 @@ export function buildApp(config: AppConfig = {}) {
     }
     return { result: details.run.result || `Company run ${details.run.id} completed.` };
   };
-  const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
-    const connections = await messagingIntegrationsRepo.listConnectedForCompany(automation.workspaceId, automation.userId, automation.companyId, automation.agentId);
-    await Promise.allSettled(connections.filter((connection)=>connection.settings.notifications.automationResults).map(async (connection) => {
-      const notificationTarget=connection.channel==="whatsapp"?(connection.settings.access.allowedUserIds[0]||connection.externalChatId):connection.externalChatId;
+  /**
+   * C10 (ТЗ item 5): the shared delivery path for every messaging notification NPATI sends on a background result.
+   * `notifyAutomation` below was the only caller of this shape; making it a named function is what lets a
+   * background code run use the **existing** Integrations channels instead of inventing a second notifier.
+   *
+   * The switch is read from the connection's own settings, so one connection can have automation notices on and
+   * background-run notices off. `notifications.backgroundResults` existed in the schema, in the migration defaults
+   * and in the UI in eight locales while **no server code read it** — this is the reader.
+   */
+  const notifyMessagingConnections = async (input: {
+    workspaceId: string;
+    userId: string;
+    companyId: string;
+    agentId?: string | null;
+    kind: "automation" | "background_run" | "approval";
+    title: string;
+    detail: string;
+  }) => {
+    const connections = await messagingIntegrationsRepo.listConnectedForCompany(
+      input.workspaceId, input.userId, input.companyId, input.agentId ?? undefined,
+    );
+    const wanted = (connection: (typeof connections)[number]): boolean =>
+      connectionWantsNotification(input.kind, connection.settings);
+    await Promise.allSettled(connections.filter(wanted).map(async (connection) => {
+      const notificationTarget = connection.channel === "whatsapp"
+        ? (connection.settings.access.allowedUserIds[0] || connection.externalChatId)
+        : connection.externalChatId;
       if (!notificationTarget) return;
       try {
         await messagingGateway.adapter(connection.channel).sendText(
           messagingIntegrationsRepo.resolveToken(connection), notificationTarget,
-          `Automation ${status}: ${automation.name}\n\n${detail}`, connection.externalThreadId || undefined,
+          `${input.title}\n\n${input.detail}`, connection.externalThreadId || undefined,
         );
         await messagingIntegrationsRepo.record(connection.id, "outbound");
       } catch (error) {
         await messagingIntegrationsRepo.record(connection.id, "outbound", error instanceof Error ? error.message : String(error));
       }
     }));
+  };
+  const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
+    await notifyMessagingConnections({
+      workspaceId: automation.workspaceId,
+      userId: automation.userId,
+      companyId: automation.companyId,
+      agentId: automation.agentId,
+      kind: "automation",
+      title: `Automation ${status}: ${automation.name}`,
+      detail,
+    });
   };
   const runAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
     try {
@@ -3984,6 +4064,101 @@ ${localized.next}`;
     },
     resolveRole: async () => null,
   });
+  /**
+   * C6b/C10: the readers of the per-run environment facts. They are declared once, as a value, because two
+   * callers need the *same* answer: the run snapshot (through the runner) and the resume-time environment
+   * re-check (which has to compare the continuation's environment against the run's). Two inline objects would
+   * be two definitions of "the policy in force", and a diff between them would be meaningless.
+   */
+  const codeRunPolicySources: CodeRunPolicyCompositionSources = {
+    // C5b project data policy: the version is what changed when someone edited the policy.
+    projectPolicyVersion: async ({ ctx, companyId, projectId }) => {
+      try {
+        const view = await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId);
+        return view.policyVersion;
+      } catch {
+        return null;
+      }
+    },
+    // C5 scoped approval rules: the highest revision in force for this project/session.
+    approvalRulesRevision: async ({ ctx, companyId, projectId, sessionId }) => {
+      try {
+        const rules = await codeApprovalScope.listRules(ctx, companyId, {
+          projectId,
+          ...(sessionId ? { sessionId } : {}),
+        });
+        return rules.reduce((max: number, rule: { revision: number }) => Math.max(max, rule.revision), 0);
+      } catch {
+        return null;
+      }
+    },
+    // C5a company membership: the highest member revision (a role change bumps it).
+    companyMembershipRevision: async ({ ctx, companyId }) => {
+      try {
+        const members = await codeMembership.listMembers(ctx, companyId);
+        return members.reduce((max: number, member: { revision: number }) => Math.max(max, member.revision), 0);
+      } catch {
+        return null;
+      }
+    },
+    // Resolved flags in force for this run (master + sub-flags with scope/source), never the raw list.
+    featureFlags: async ({ ctx, companyId }) => {
+      try {
+        const described = await featureFlagService.describe(ctx, { companyId, userId: ctx.userId });
+        return { master: described.master, flags: described.flags, darkLaunch: described.darkLaunch };
+      } catch {
+        return null;
+      }
+    },
+    // Effective provider data policy for the run: the version that governs it plus the classification that
+    // was actually applied (the strictest of the C5b row and the C1 project record).
+    providerDataPolicy: async ({ ctx, companyId, projectId, model }) => {
+      try {
+        const providerId = (model ?? "auto").split("/")[0] || "auto";
+        const resolved = await codeDataPolicyStoreService.resolveForCompany({
+          companyId,
+          providerId,
+          model: model ?? null,
+          providerKind: null,
+        });
+        let classification: string | null = null;
+        try {
+          classification = (await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId)).effectiveClassification;
+        } catch {
+          classification = null;
+        }
+        return { version: resolved.policyVersion ?? null, classification };
+      } catch {
+        return null;
+      }
+    },
+    // Branch and dirty come from `status`; the HEAD hash comes from the log (never derived from `status`).
+    baseCommit: async ({ ctx, companyId, projectId }) => {
+      try {
+        const status = await projectGitService.status(ctx, companyId, projectId);
+        let commit: string | null = null;
+        try {
+          const entries = await projectGitService.log(ctx, companyId, projectId, 1);
+          commit = entries[0]?.hash ?? null;
+        } catch {
+          commit = null;
+        }
+        return { branch: status.branch ?? null, commit, dirty: status.clean === false };
+      } catch {
+        return null;
+      }
+    },
+    // The project's detected toolchain (C1 detector output), recorded as-is.
+    toolchain: async ({ ctx, companyId, projectId }) => {
+      try {
+        const project = await projectService.get(ctx, companyId, projectId);
+        const toolchain = (project as { toolchain?: unknown } | null)?.toolchain;
+        return toolchain && typeof toolchain === "object" ? (toolchain as Record<string, unknown>) : null;
+      } catch {
+        return null;
+      }
+    },
+  };
   const codingAgentRunner = new CodingAgentRunner({
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
@@ -3992,6 +4167,20 @@ ${localized.next}`;
     schemas: CODE_TOOL_SCHEMAS,
     imageAdmission: sandboxImagePolicy,
     runState: codeRunStateLog,
+    /**
+     * C10: the session→run link. `code_sessions.run_id` had a reader (`lastRun`, `usage`) and an update path but
+     * **no writer**, so both answers were permanently `null` and a resume had no way to find "the run of this
+     * session". The write happens the moment the durable run id exists, and it is best effort: the run row is the
+     * source of truth for the run, and a failed link must not abort work that has already been admitted.
+     */
+    sessionRunLink: async ({ ctx, companyId, sessionId, runId }) => {
+      try {
+        await workspaceStore.updateCodeSession(ctx, companyId, sessionId, { runId });
+        return { linked: true };
+      } catch (error) {
+        return { linked: false, reason: error instanceof Error ? error.message : "session_run_link_failed" };
+      }
+    },
     // C6b: the snapshot is real, not the null provider. The provider is built once per process, so the facts
     // that only exist per run (the admitted image digest and the policy composition) travel through the
     // holder below. Every source that this deployment genuinely cannot answer returns `null` with the reason
@@ -4098,95 +4287,8 @@ ${localized.next}`;
         }
       },
     },
-    policyCompositionSources: {
-      // C5b project data policy: the version is what changed when someone edited the policy.
-      projectPolicyVersion: async ({ ctx, companyId, projectId }) => {
-        try {
-          const view = await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId);
-          return view.policyVersion;
-        } catch {
-          return null;
-        }
-      },
-      // C5 scoped approval rules: the highest revision in force for this project/session.
-      approvalRulesRevision: async ({ ctx, companyId, projectId, sessionId }) => {
-        try {
-          const rules = await codeApprovalScope.listRules(ctx, companyId, {
-            projectId,
-            ...(sessionId ? { sessionId } : {}),
-          });
-          return rules.reduce((max: number, rule: { revision: number }) => Math.max(max, rule.revision), 0);
-        } catch {
-          return null;
-        }
-      },
-      // C5a company membership: the highest member revision (a role change bumps it).
-      companyMembershipRevision: async ({ ctx, companyId }) => {
-        try {
-          const members = await codeMembership.listMembers(ctx, companyId);
-          return members.reduce((max: number, member: { revision: number }) => Math.max(max, member.revision), 0);
-        } catch {
-          return null;
-        }
-      },
-      // Resolved flags in force for this run (master + sub-flags with scope/source), never the raw list.
-      featureFlags: async ({ ctx, companyId }) => {
-        try {
-          const described = await featureFlagService.describe(ctx, { companyId, userId: ctx.userId });
-          return { master: described.master, flags: described.flags, darkLaunch: described.darkLaunch };
-        } catch {
-          return null;
-        }
-      },
-      // Effective provider data policy for the run: the version that governs it plus the classification that
-      // was actually applied (the strictest of the C5b row and the C1 project record).
-      providerDataPolicy: async ({ ctx, companyId, projectId, model }) => {
-        try {
-          const providerId = (model ?? "auto").split("/")[0] || "auto";
-          const resolved = await codeDataPolicyStoreService.resolveForCompany({
-            companyId,
-            providerId,
-            model: model ?? null,
-            providerKind: null,
-          });
-          let classification: string | null = null;
-          try {
-            classification = (await codeDataPolicy.getProjectPolicy(ctx, companyId, projectId)).effectiveClassification;
-          } catch {
-            classification = null;
-          }
-          return { version: resolved.policyVersion ?? null, classification };
-        } catch {
-          return null;
-        }
-      },
-      // Branch and dirty come from `status`; the HEAD hash comes from the log (never derived from `status`).
-      baseCommit: async ({ ctx, companyId, projectId }) => {
-        try {
-          const status = await projectGitService.status(ctx, companyId, projectId);
-          let commit: string | null = null;
-          try {
-            const entries = await projectGitService.log(ctx, companyId, projectId, 1);
-            commit = entries[0]?.hash ?? null;
-          } catch {
-            commit = null;
-          }
-          return { branch: status.branch ?? null, commit, dirty: status.clean === false };
-        } catch {
-          return null;
-        }
-      },
-      // The project's detected toolchain (C1 detector output), recorded as-is.
-      toolchain: async ({ ctx, companyId, projectId }) => {
-        try {
-          const project = await projectService.get(ctx, companyId, projectId);
-          const toolchain = (project as { toolchain?: unknown } | null)?.toolchain;
-          return toolchain && typeof toolchain === "object" ? (toolchain as Record<string, unknown>) : null;
-        } catch {
-          return null;
-        }
-      },
-    },
+    // C6b/C10: the readers declared above, shared with the resume-time environment re-check.
+    policyCompositionSources: codeRunPolicySources,
     activity: activitySinkForKind(codeActivitySink, "run_activity"),
     // C6a: when the reaper reports disk pressure it refuses new runs. The check runs at run start — after
     // RBAC, before image admission and before any model or tool call — and a gate that throws refuses too
@@ -4232,6 +4334,18 @@ ${localized.next}`;
   const codeRunReconciler = new CodeRunReconciler({
     log: codeRunStateLog,
     activity: activitySinkForKind(codeActivitySink, "run_reconcile"),
+    /**
+     * C10: the notice is **persisted** instead of discarded. Until C10 it lived only inside the reconciliation
+     * report, and the two call sites below threw the value away with a `.catch()` that logged the error: the one
+     * component that knows why a run stopped and which calls are in doubt produced information nobody could read.
+     * It is now an append-only row (migration 082) that the recovery route serves and a resume reads.
+     */
+    notices: {
+      record: async (input) => {
+        await workspaceStore.createCodeRunRecoveryNotice(input);
+      },
+    },
+    logger: app.log,
   });
   {
     void codeRunReconciler.reconcileRuns().catch((error) => {
@@ -4372,6 +4486,23 @@ ${localized.next}`;
    * cost of keeping both surfaces' contexts independent, and it is a read-only path.
    */
   const codeSnapshotContexts = new WeakMap<object, AuthContext>();
+  /**
+   * C10 (defect fix): the snapshot map had **no writer**. `registerCodeSnapshotRoutes` was handed a
+   * `getAuthContext` that read the map, and nothing ever put a context into it, so every snapshot/compare/
+   * Activity/GET-replay request authenticated as `null` and answered 401 — in the built application only,
+   * because the suite for this surface builds the routes with its own deps. The hook below is the writer, and
+   * `tests/coding-agent-c10-route-auth-wiring.test.ts` fails if it (or any other surface's) is ever dropped.
+   *
+   * `/code/runs/:runId/replay` is served twice on purpose: this module answers the GET metadata route and the
+   * replay module answers POST plus its own status route, so that one read-only path authenticates twice.
+   */
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    const isSnapshot = /\/code\/(?:runs\/[^/]+\/(?:snapshot|activity)|snapshots(?:\/[^/]+|\/compare))$/.test(path);
+    const isSnapshotReplayMetadata = /\/code\/runs\/[^/]+\/replay$/.test(path);
+    if (!isSnapshot && !isSnapshotReplayMetadata) return;
+    codeSnapshotContexts.set(request, await authProvider.authenticate(request));
+  });
   /**
    * C7: the cancellation registry the Stop route writes to and the agent loop reads from. It is created here,
    * next to the runner it serves, because both the route and the loop must observe the same object; a second
@@ -4565,6 +4696,361 @@ ${localized.next}`;
     // may read a run's diff may read its stream and no new permission is invented for the same data.
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeRunStreamContexts.get(request as object) ?? null,
+    /**
+     * C10: a rewind moves a cursor rather than deleting rows (the replay bundle and the context summaries are
+     * append-only at the database level), so the reader has to apply it. The transcript therefore ends at the
+     * cursor and the response says where — a shorter transcript without that field would look like lost history.
+     */
+    conversationHead: async (companyId, sessionId) => {
+      try {
+        const head = await workspaceStore.getCodeSessionHead(companyId, sessionId);
+        return head ? { runId: head.runId, turnIndex: head.turnIndex } : null;
+      } catch {
+        return null;
+      }
+    },
+    logger: app.log,
+  });
+  /**
+   * C10: durable session operations — resume, rewind, fork — and the reconciler's recovery notice.
+   *
+   * The three services are constructed here, next to the objects they orchestrate, and every one of them is
+   * injected rather than imported: the run-state log (the lease and the turn boundary), the session service (which
+   * owns session creation, including the parent-session and tenant checks), the existing checkpoint service (whose
+   * pre-restore safety checkpoint is what makes a rewind reversible), the process registry, the feature flags and
+   * the shared C5a gate. Nothing in this step re-implements any of them.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
+   * there is no second authentication path.
+   */
+  const codeDurabilityContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/(?:sessions\/[^/]+\/(?:resume|rewind|fork)|runs\/[^/]+\/recovery)$/.test(path)) return;
+    codeDurabilityContexts.set(request, await authProvider.authenticate(request));
+  });
+  const codeSessionResumeService = new CodeSessionResumeService({
+    flags: featureFlagService,
+    sessions: { get: async (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId) },
+    runState: codeRunStateLog,
+    store: {
+      getCodeSessionHead: (companyId, sessionId) => workspaceStore.getCodeSessionHead(companyId, sessionId),
+      setCodeSessionHead: (input) => workspaceStore.setCodeSessionHead(input),
+      getLatestCodeRunRecoveryNotice: (companyId, runId) => workspaceStore.getLatestCodeRunRecoveryNotice(companyId, runId),
+      listCodeContextSummaries: (input) => workspaceStore.listCodeContextSummaries(input),
+      listCodeGoals: (input) => workspaceStore.listCodeGoals(input),
+      getLatestCodeSessionPlan: (companyId, sessionId) => workspaceStore.getLatestCodeSessionPlan(companyId, sessionId),
+      listCodeSessionTodos: (input) => workspaceStore.listCodeSessionTodos(input),
+      listCodeRunTurns: (companyId, runId) => workspaceStore.listCodeRunTurns(companyId, runId),
+      // C10: the run's own request, written when the run was created. This is what makes a resume able to quote
+      // the user's original words instead of describing an objective derived from a plan.
+      getCodeRunRequest: (companyId, runId) => workspaceStore.getCodeRunRequest(companyId, runId),
+    },
+    /**
+     * The transcript is the C6b replay bundle, read through the same reader the run-stream route uses — never
+     * `code_run_turns.messages`, which stays the metadata-only turn snapshot it was declared to be (the run's own
+     * request travels on the run row, not in a turn).
+     */
+    transcript: async ({ companyId, runId }) => {
+      const recording = await readReplayBundle({
+        store: workspaceStore as unknown as ReplayBundleReadPort,
+        companyId,
+        runId,
+      });
+      return recording.kind === "bundle" ? { steps: recording.steps } : null;
+    },
+    /**
+     * C10 (Question 2): the environment re-check. It reuses the C6b snapshot store for the read, the versioned
+     * write and the content-safe diff, and the same environment readers the run snapshot uses — so a resumed run
+     * is compared against exactly the facts that were recorded for it.
+     *
+     * Only the four families a resume can genuinely answer are re-read; the rest of the run snapshot describes a
+     * process that no longer exists. The sandbox image gets its own reader because revocation is not a diff: it
+     * is a verdict from the C1b admission policy, and it is what stops a continuation.
+     */
+    environment: createResumeEnvironmentAdmission({
+      store: workspaceStore,
+      sources: {
+        featureFlags: async ({ ctx, companyId, projectId, sessionId }) =>
+          codeRunPolicySources.featureFlags
+            ? codeRunPolicySources.featureFlags({ ctx, companyId, projectId, sessionId })
+            : null,
+        policyComposition: async ({ ctx, companyId, projectId, sessionId }) =>
+          createCodeRunPolicyComposition({ ctx, companyId, projectId, sessionId, sources: codeRunPolicySources }),
+        providerDataPolicy: async ({ ctx, companyId, projectId, sessionId, recorded }) => {
+          /**
+           * The provider data policy is keyed by provider **and model**, so the comparison has to ask about the
+           * model the run actually used — otherwise a resume would compare policy v3-for-model-A against
+           * v3-for-model-B and report a phantom change. The model is read from the run's own recorded snapshot,
+           * which is the only place it is named after the process that chose it is gone.
+           */
+          const selection = recorded && typeof recorded.modelSelection === "object" && recorded.modelSelection
+            ? (recorded.modelSelection as Record<string, unknown>)
+            : null;
+          const model = selection && typeof selection.model === "string" ? selection.model : undefined;
+          return codeRunPolicySources.providerDataPolicy
+            ? codeRunPolicySources.providerDataPolicy({ ctx, companyId, projectId, sessionId, ...(model ? { model } : {}) })
+            : null;
+        },
+        sandboxImage: async ({ ctx, companyId, recorded }) => {
+          const recordedImage = recorded && typeof recorded.sandboxImage === "object" && recorded.sandboxImage
+            ? (recorded.sandboxImage as Record<string, unknown>)
+            : null;
+          const recordedDigest = recordedImage && typeof recordedImage.digest === "string" ? recordedImage.digest : null;
+          if (!recordedDigest) {
+            // The run recorded no image fact (a run that never reached sandbox admission). There is nothing to
+            // revoke, and saying "unknown" is the honest answer rather than "fine".
+            return { recordedDigest: null, status: "unknown" as const, replacement: null, reason: "no_recorded_image" };
+          }
+          try {
+            const images = await workspaceStore.listSandboxImages(ctx);
+            const match = images.find((image) => image.digest === recordedDigest) ?? null;
+            if (!match) {
+              return { recordedDigest, status: "unknown" as const, replacement: null, reason: "image_not_in_catalogue" };
+            }
+            if (match.status === "revoked") {
+              const replacement = await sandboxImagePolicy
+                .selectForRollout(ctx, { companyId, variant: match.variant, currentReference: match.reference })
+                .catch(() => null);
+              return {
+                recordedDigest,
+                status: "revoked" as const,
+                replacement: replacement?.reference ?? null,
+                reason: "image_revoked",
+              };
+            }
+            return { recordedDigest, status: "admitted" as const, replacement: null, reason: `status_${match.status}` };
+          } catch {
+            return { recordedDigest, status: "unknown" as const, replacement: null, reason: "image_check_failed" };
+          }
+        },
+      },
+      resolveRole: async () => null,
+    }),
+    questions: {
+      get: async (companyId, questionId) => {
+        const question = await workspaceStore.getCodeUserQuestion(companyId, questionId);
+        if (!question) return null;
+        return {
+          questionId: question.id,
+          sessionId: question.sessionId,
+          runId: question.runId,
+          status: question.status,
+          answer: question.answer,
+          answeredBy: question.answeredBy,
+        };
+      },
+    },
+    /**
+     * A resume forfeits whatever the process-local registry still holds for the session. It is never the source of
+     * truth for "what is lost" — after a restart the registry is empty, and the durable evidence (unknown-outcome
+     * calls) is what names the lost work — but a process this host is still holding must not be inherited by a
+     * resumed run that nobody is driving.
+     */
+    processes: {
+      forfeit: async ({ ctx, sessionId }) => {
+        const held = codeProcessManager.list(sessionId).filter((process) => process.state === "running");
+        const forfeited: string[] = [];
+        const failed: Array<{ processId: string; reason: string }> = [];
+        for (const process of held) {
+          try {
+            const stopped = await codeProcessManager.stop(ctx, sessionId, process.processId);
+            if (stopped.state !== "running") forfeited.push(process.processId);
+            else failed.push({ processId: process.processId, reason: `still_${stopped.state}` });
+          } catch (error) {
+            failed.push({ processId: process.processId, reason: error instanceof Error ? error.message : "stop_failed" });
+          }
+        }
+        return { forfeited, failed };
+      },
+    },
+    // The existing checkpoint service: a restore always creates its own mandatory pre-restore safety checkpoint.
+    checkpoints: {
+      restore: async ({ ctx, companyId, projectId, checkpointId }) => {
+        const outcome = await projectGitService.restoreCheckpoint(ctx, companyId, projectId, checkpointId);
+        return {
+          restoredCheckpointId: outcome.restoredCheckpoint.id,
+          safetyCheckpointId: outcome.backupCheckpoint?.id ?? null,
+        };
+      },
+    },
+    linkRun: async ({ ctx, companyId, sessionId, runId }) => {
+      try {
+        await workspaceStore.updateCodeSession(ctx, companyId, sessionId, { runId });
+        return { linked: true };
+      } catch (error) {
+        return { linked: false, reason: error instanceof Error ? error.message : "session_run_link_failed" };
+      }
+    },
+    activity: activitySinkForKind(codeActivitySink, "run_reconcile"),
+    owner: `resume-${process.pid}`,
+  });
+  const codeSessionRewindService = new CodeSessionRewindService({
+    flags: featureFlagService,
+    sessions: { get: async (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId) },
+    store: {
+      getCodeSessionHead: (companyId, sessionId) => workspaceStore.getCodeSessionHead(companyId, sessionId),
+      setCodeSessionHead: (input) => workspaceStore.setCodeSessionHead(input),
+      listCodeRunTurns: (companyId, runId) => workspaceStore.listCodeRunTurns(companyId, runId),
+      createCodeSessionRewind: (input) => workspaceStore.createCodeSessionRewind(input),
+      reopenCodeSessionRewind: (input) => workspaceStore.reopenCodeSessionRewind(input),
+      completeCodeSessionRewind: (input) => workspaceStore.completeCodeSessionRewind(input),
+    },
+    /**
+     * The existing checkpoint service, in the three directions a rewind needs. `restore` is the pre-restore route
+     * (its mandatory safety checkpoint is the pre-rewind checkpoint for `code`/`both`), `create` is the explicit
+     * pre-rewind checkpoint a conversation-only rewind takes, and `find` resolves an explicitly named checkpoint
+     * **through the project**, so a checkpoint of another tenant is simply not found.
+     */
+    checkpoints: {
+      create: async ({ ctx, companyId, projectId, sessionId, label, runId }) => {
+        const checkpoint = await projectGitService.createCheckpoint(ctx, companyId, projectId, {
+          name: label,
+          description: `Session ${sessionId.slice(0, 12)}: state before a rewind`,
+          trigger: "pre_restore",
+          ...(runId ? { runId } : {}),
+        });
+        return { checkpointId: checkpoint.id, commitHash: checkpoint.commitHash ?? null };
+      },
+      restore: async ({ ctx, companyId, projectId, checkpointId }) => {
+        const outcome = await projectGitService.restoreCheckpoint(ctx, companyId, projectId, checkpointId);
+        return {
+          restoredCheckpointId: outcome.restoredCheckpoint.id,
+          safetyCheckpointId: outcome.backupCheckpoint?.id ?? null,
+        };
+      },
+      find: async ({ ctx, companyId, projectId, checkpointId }) => {
+        try {
+          const checkpoint = await projectGitService.getCheckpoint(ctx, companyId, projectId, checkpointId);
+          return { checkpointId: checkpoint.id, runId: checkpoint.runId ?? null };
+        } catch {
+          return null;
+        }
+      },
+    },
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+  });
+  const codeSessionForkService = new CodeSessionForkService({
+    flags: featureFlagService,
+    sessions: {
+      get: async (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId),
+      // Session creation goes through the service that already owns it: the project, the parent session, the agent
+      // and the classification ceiling are all checked there, so a fork cannot bypass a rule a plain create obeys.
+      create: async (ctx, companyId, projectId, input) => codeService.createSession(ctx, companyId, projectId, input),
+    },
+    store: {
+      getCodeSessionHead: (companyId, sessionId) => workspaceStore.getCodeSessionHead(companyId, sessionId),
+      setCodeSessionHead: (input) => workspaceStore.setCodeSessionHead(input),
+      getLatestCodeSessionPlan: (companyId, sessionId) => workspaceStore.getLatestCodeSessionPlan(companyId, sessionId),
+      createCodeSessionPlan: (input) => workspaceStore.createCodeSessionPlan(input),
+      listCodeSessionTodos: (input) => workspaceStore.listCodeSessionTodos(input),
+      replaceCodeSessionTodos: (input) => workspaceStore.replaceCodeSessionTodos(input),
+      createCodeSessionFork: (input) => workspaceStore.createCodeSessionFork(input),
+      reopenCodeSessionFork: (input) => workspaceStore.reopenCodeSessionFork(input),
+      completeCodeSessionFork: (input) => workspaceStore.completeCodeSessionFork(input),
+    },
+    checkpoints: {
+      find: async ({ ctx, companyId, projectId, checkpointId }) => {
+        try {
+          const checkpoint = await projectGitService.getCheckpoint(ctx, companyId, projectId, checkpointId);
+          return { checkpointId: checkpoint.id, runId: checkpoint.runId ?? null };
+        } catch {
+          return null;
+        }
+      },
+    },
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+  });
+  registerCodeSessionDurabilityRoutes(app, {
+    resume: codeSessionResumeService,
+    rewind: codeSessionRewindService,
+    fork: codeSessionForkService,
+    recovery: {
+      runExists: async (companyId, runId) => (await codeRunStateLog.loadRunState(companyId, runId)) !== null,
+      loadNotice: async (companyId, runId) => workspaceStore.getLatestCodeRunRecoveryNotice(companyId, runId),
+      countNotices: async (companyId, runId) => {
+        const notices = await workspaceStore.listCodeRunRecoveryNotices({ companyId, runId, limit: 200 });
+        return notices.length;
+      },
+    },
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeDurabilityContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  /**
+   * C10 (ТЗ item 6): the code-run queue. It bounds how many code runs one user and one Company may execute at the
+   * same time and serves the waiting ones **fairly** (round-robin across Companies, FIFO inside one), so a busy
+   * tenant cannot starve a quiet one. It is in-process on purpose — see `code-run-queue.ts` for why the Redis
+   * Company-run stream is the wrong unit of work for a live code run — and every value comes from configuration,
+   * clamped, so a typo cannot remove the limit.
+   */
+  const codeRunQueueLimits = resolveCodeRunQueueLimits(process.env);
+  const codeRunQueue = new CodeRunQueue(codeRunQueueLimits);
+  /**
+   * C10 (ТЗ item 5): the background-run registry. A run registered here owns its **own** abort signal, so closing
+   * the tab no longer kills it, and its events are buffered with a monotonic sequence so a reconnecting client can
+   * be given the tail it missed instead of a gap.
+   */
+  const codeBackgroundRuns = new CodeBackgroundRunRegistry({
+    logger: { warn: (payload, message) => { app.log.warn(payload as Record<string, unknown>, message ?? "code_background_run_warning"); } },
+  });
+  const codeBackgroundRunContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/runs\/[^/]+\/background(?:-stream|\/abort)?$/.test(path)) return;
+    codeBackgroundRunContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeBackgroundRunRoutes(app, {
+    registry: codeBackgroundRuns,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeBackgroundRunContexts.get(request as object) ?? null,
+    /**
+     * `code.background_runs` was in the flag schema, in the migration defaults and in the UI in eight locales —
+     * and read by exactly one caller (`code-process-manager.ts`). A run that outlives its tab is precisely what
+     * that key names, so this is where it becomes a live handle: off means the run keeps the old behaviour and is
+     * aborted when the client goes away.
+     */
+    isBackgroundRunsEnabled: async (ctx, companyId) => {
+      try {
+        await featureFlagService.assertEnabled(ctx, "code.background_runs", { companyId, userId: ctx.userId });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    logger: app.log,
+  });
+  /**
+   * C10 (ТЗ item 8): exporting a session to Markdown. The route reads the same transcript reader the Workspace
+   * uses, applies the same turn/result bounds and refuses the whole document when either secret scanner finds a
+   * credential — so the export cannot become a wider read path than the API it reuses.
+   */
+  const codeExportContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/runs\/[^/]+\/export$/.test(path)) return;
+    codeExportContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeSessionExportRoutes(app, {
+    store: workspaceStore,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeExportContexts.get(request as object) ?? null,
+    isExportEnabled: async (ctx, companyId) => {
+      try {
+        await featureFlagService.assertEnabled(ctx, "code.export", { companyId, userId: ctx.userId });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    conversationHead: async (companyId, sessionId) => {
+      try {
+        const head = await workspaceStore.getCodeSessionHead(companyId, sessionId);
+        return head ? { runId: head.runId, turnIndex: head.turnIndex } : null;
+      } catch {
+        return null;
+      }
+    },
     logger: app.log,
   });
   /**
@@ -4827,7 +5313,7 @@ ${localized.next}`;
   if (browserCredentials) registerBrowserCredentialsRoutes(app, { auth: authProvider, store: workspaceStore, repo: browserCredentials, browser: browserTool, email: emailInboxRepo, automations: automationsRepo });
   registerMultimodalRoutes(app, { auth: authProvider, store: workspaceStore, storage: objectStorage, aiEngine });
   registerA2AControlPlaneRoutes(app, { auth: authProvider, store: workspaceStore });
-  app.addHook("onClose", async () => { automationScheduler.stop(); codeReaper.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); codeReaper.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (sandboxRetentionTimer) clearInterval(sandboxRetentionTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();
@@ -5465,6 +5951,20 @@ ${localized.next}`;
     noMemory?: boolean;
     ephemeral?: boolean;
   } }>("/chat/stream", async (request, reply) => {
+    /**
+     * C10 (ТЗ item 6): the code-run slot for **this** request, taken here — before `reply.hijack()` — so a run
+     * that cannot be admitted at all gets an honest HTTP answer instead of a status line that already said 200.
+     *
+     * The alternative (acquiring inside the code branch) was rejected for exactly that reason: the SSE headers are
+     * written before the branch is reached, so a `queue_full`/`queue_timeout` refusal would have had to be
+     * smuggled into the event stream while the protocol said the request succeeded.
+     *
+     * Cost of acquiring before the code intent is known: a request that turns out to be plain chat briefly holds
+     * a slot and releases it in the `finally` below. That is why the slot is only taken when the caller named a
+     * company **and** a project — the same two facts a code intent requires — so a request that provably cannot
+     * start a code run never touches the queue.
+     */
+    let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
     try {
       const auth = await authProvider.authenticate(request);
       const streamId=request.body.streamId?.trim();
@@ -5507,6 +6007,40 @@ ${localized.next}`;
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
+      /**
+       * C10 (ТЗ item 6): take the code-run slot now, while an honest HTTP refusal is still possible. The
+       * `code.background_runs` flag decides whether this request may keep its run alive after the client goes
+       * away; it does **not** decide whether the limit applies, because the limit is a property of the deployment.
+       */
+      if (activeCompanyId && activeProjectId) {
+        let backgroundAllowed = false;
+        try {
+          await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId, userId: auth.userId });
+          backgroundAllowed = true;
+        } catch {
+          backgroundAllowed = false;
+        }
+        const waitController = new AbortController();
+        const abandonWait = () => waitController.abort(new Error("Client disconnected while queued"));
+        request.raw.once("close", abandonWait);
+        let lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>;
+        try {
+          lease = await codeRunQueue.acquire(
+            {
+              workspaceId: auth.workspaceId,
+              userId: auth.userId,
+              companyId: activeCompanyId,
+              sessionId: request.body.conversationId ?? `${activeCompanyId}:${activeProjectId}`,
+            },
+            { timeoutMs: codeRunQueueLimits.queueTimeoutMs, signal: waitController.signal },
+          );
+        } finally {
+          // The wait is over either way; the listener exists only to cancel a ticket nobody is waiting for.
+          request.raw.off("close", abandonWait);
+        }
+        reservedCodeRunSlot = { background: backgroundAllowed, lease };
+      }
+
       const streamController=new AbortController();
       let distributedChatLease:ActiveSessionLease|undefined;
       if(streamId){
@@ -5527,7 +6061,21 @@ ${localized.next}`;
       });
       reply.raw.flushHeaders();
       let sequence = 0;
-      reply.raw.once("close",()=>{if(!reply.raw.writableEnded)streamController.abort(new Error("Client disconnected"));});
+      /**
+       * C10 (ТЗ item 5): the client's own transport controller. Its signal still reaches the *streaming* work
+       * (`runNeutralMessage`, `companyRuntime.execute`) so a disconnect stops writing deltas — but it is **not**
+       * the signal a background code run executes under. See the code branch below for who owns that one.
+       */
+      let codeBackgroundRunId: string | null = null;
+      reply.raw.once("close",()=>{
+        if(reply.raw.writableEnded)return;
+        streamController.abort(new Error("Client disconnected"));
+        // A background run owns its own AbortController and its own queue slot, so a closed tab only detaches the
+        // viewer. Aborting here would be exactly the defect this step removes: a long task dying mid-write because
+        // somebody closed a tab. Stopping it is an explicit act (`/background/abort` or the Stop route), and the
+        // run's own `finally` below releases the slot either way.
+        if(codeBackgroundRunId) request.log.info({ runId: codeBackgroundRunId }, "code_background_run_detached");
+      });
       const send = (event: "progress" | "delta" | "result" | "error", data: unknown) => {
         if (reply.raw.destroyed) return;
         sequence += 1;
@@ -5586,37 +6134,156 @@ ${localized.next}`;
           if (!codeSession) {
             send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
-            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId });
+            const runKey = `${codeSession.id}:${Date.now().toString(36)}`;
+            /**
+             * C10 (ТЗ items 5–6): the two gates that turn "a code run" into "a code run that survives the tab".
+             *
+             *  1. `code.background_runs` — the existing sub-flag, read at reservation time above. Off means
+             *     nothing about today's behaviour changes.
+             *  2. The run queue — one user and one Company may execute a bounded number of code runs at once, and
+             *     the waiting ones are served fairly. The slot was taken before the response was hijacked, so a
+             *     run that could not be admitted was refused with an HTTP status instead of an event.
+             */
+            const reserved = reservedCodeRunSlot;
+            reservedCodeRunSlot = null;
+            const backgroundEnabled = reserved
+              ? reserved.background
+              : await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId!, userId: auth.userId })
+                .then(() => true).catch(() => false);
+            /**
+             * The slot is normally the one taken before `reply.hijack()`, where a refusal can still be an HTTP
+             * status. The fallback refuses with the queue's own code instead of waiting: this path is past the point
+             * where a 429 could be sent, so holding the request would promise something the transport can no longer
+             * report.
+             */
+            const lease = reserved
+              ? reserved.lease
+              : codeRunQueue.canAdmit({ userId: auth.userId, companyId: activeCompanyId! })
+                ? await codeRunQueue.acquire({
+                  workspaceId: auth.workspaceId, userId: auth.userId, companyId: activeCompanyId!, sessionId: codeSession.id,
+                })
+                : (() => { throw new CodeRunRefusedError("queue_timeout", "The code run queue is full for this user or Company; the run was not started."); })();
+            const backgroundSink = backgroundEnabled
+              ? codeBackgroundRuns.start({
+                  runId: runKey,
+                  sessionId: codeSession.id,
+                  companyId: activeCompanyId!,
+                  userId: auth.userId,
+                  projectId: effectiveProjectId ?? null,
+                  /**
+                   * ТЗ item 5: completion, failure and an approval request are sent through the **existing**
+                   * Integrations channels. The terminal hook is where a run that nobody is watching says so.
+                   */
+                  onTerminal: async (snapshot) => {
+                    const detail = snapshot.status === "completed"
+                      ? `Run ${snapshot.runId} finished successfully.`
+                      : `Run ${snapshot.runId} ended with status ${snapshot.status}${snapshot.reason ? `: ${snapshot.reason}` : "."}`;
+                    await notifyMessagingConnections({
+                      workspaceId: auth.workspaceId,
+                      userId: auth.userId,
+                      companyId: activeCompanyId!,
+                      kind: "background_run",
+                      title: snapshot.status === "completed" ? "Code run completed" : "Code run needs your attention",
+                      detail,
+                    }).catch((error) => { request.log.warn({ err: error }, "code_background_run_notify_failed"); });
+                  },
+                })
+              : null;
+            const isBackground = backgroundSink !== null;
+            if (isBackground) codeBackgroundRunId = runKey;
+            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId, background: isBackground, runId: isBackground ? runKey : null });
             let runResult: unknown;
+            /**
+             * The terminal status the registry records. Normalised to the three states the registry understands, so
+             * a "stopped" run is never reported as a successful completion.
+             */
+            let runTerminalStatus: "completed" | "failed" | "cancelled" = "completed";
+            let runReason: string | null = null;
+            /**
+             * A live `AbortController` facade over the background run's own signal: the registry's `abort()` is the
+             * only thing that can stop the run, so the Stop route and the reconnect surface cannot disagree about
+             * whether a stop happened. Declared outside the `try` because the `finally` must unregister the very
+             * same object it registered.
+             */
+            const runController: AbortController = isBackground
+              ? {
+                  signal: backgroundSink!.signal,
+                  abort: (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); },
+                } as unknown as AbortController
+              : streamController;
             try {
               // C7: Stop must be able to reach this loop. A cancellation left over from a previous Stop is
-              // cleared first (a stale flag would cancel work the user never asked to stop), then the stream's
-              // abort controller is registered so Stop can interrupt a step that is already in flight.
+              // cleared first (a stale flag would cancel work the user never asked to stop), then the run's
+              // controller is registered so Stop can interrupt a step that is already in flight.
+              //
+              // C10: the registered controller is the **background run's** when there is one, so a stop request
+              // reaches the run after the tab is gone. The transport controller keeps serving `cancelRequested`
+              // for the streaming work.
               codeRunCancellation.clearSession(codeSession.id);
-              codeRunCancellation.registerController(codeSession.id, streamController);
+              codeRunCancellation.registerController(codeSession.id, runController);
               runResult = await codingAgentRunner.run({
                 ctx: auth,
                 session: codeSession,
                 prompt: message,
-                signal: streamController.signal,
+                signal: isBackground ? backgroundSink!.signal : streamController.signal,
                 cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
               });
             } catch (error) {
               runResult = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };
             } finally {
-              codeRunCancellation.unregisterController(codeSession.id, streamController);
-              // C6: release the sandbox after the run — on success, failure and cancellation — because the
-              // project object `destroy` needs is already loaded here. Without a sandbox service there is
-              // nothing to release in this composition, and that path is logged instead of masked.
+              codeRunCancellation.unregisterController(codeSession.id, runController);
+              const finished = runResult && typeof runResult === "object" ? (runResult as Partial<CodingAgentRunResult>) : null;
+              runTerminalStatus = finished?.status === "cancelled" ? "cancelled" : finished?.status === "completed" ? "completed" : finished?.status === "stopped" ? "failed" : "failed";
+              runReason = typeof finished?.reason === "string" ? finished.reason : null;
+              const needsApproval = finished
+                ? finished.status === "waiting_for_user"
+                  || finished.summary?.remaining === VERIFICATION_APPROVAL_REQUIRED
+                  || finished.code === "approval_required"
+                : false;
+              if (backgroundSink) {
+                backgroundSink.emit("result", { routed: "code_runner", intent: codeDecision.intent, run: runResult });
+                backgroundSink.finish(runTerminalStatus, runReason);
+              }
+              /**
+               * ТЗ item 5: an approval request is pushed over the **existing** Integrations channels, because a run
+               * that stopped for a human decision and told nobody is a run that never continues. The detection is
+               * structural rather than guessed: the run's own status (`waiting_for_user`), the verification
+               * summary's `remaining` code, or the run's machine-readable refusal code.
+               *
+               * It is sent whenever there is a decision to make, also when the run is not a background run — an
+               * approval needs an answer either way, and the connection's own `notifications` switches decide
+               * whether anything is delivered at all.
+               */
+              if (needsApproval) {
+                try {
+                  await notifyMessagingConnections({
+                    workspaceId: auth.workspaceId,
+                    userId: auth.userId,
+                    companyId: activeCompanyId!,
+                    kind: "approval",
+                    title: "Code run needs your approval",
+                    detail: `Run ${runKey} in "${codeProject?.name ?? "the project"}" is waiting for a decision${runReason ? ` (${runReason})` : ""}. Open the Code Workspace to approve or deny it.`,
+                  });
+                } catch (error) {
+                  request.log.warn({ err: error }, "code_run_approval_notify_failed");
+                }
+              }
+              // C6/C10: release the sandbox after the run — on success, failure and cancellation. The project
+              // object that `destroy` needs is read **fresh**: `codeProject` above was loaded before the run, so
+              // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
+              // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
+              // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
               if (projectSandbox) {
                 try {
-                  await projectSandbox.destroy(auth, codeProject as never);
+                  const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
+                  await projectSandbox.destroy(auth, current);
                 } catch (error) {
                   request.log.warn({ err: error }, "code_run_sandbox_release_failed");
                 }
               } else {
                 request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
               }
+              lease.release();
             }
             // C7: the chat answer carries a card for the code project/session, so the conversation offers
             // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
@@ -5822,12 +6489,28 @@ ${localized.next}`;
       } finally {
         if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
         if(distributedChatLease)await activeSessionRegistry.release(auth.workspaceId,auth.userId,distributedChatLease).catch(()=>false);
+        // C10 (ТЗ item 6): a slot that was reserved for a code run this request did not start must not stay
+        // occupied — the reservation is released here for every path that did not hand it to the run.
+        reservedCodeRunSlot?.lease.release();
+        reservedCodeRunSlot = null;
         clearInterval(heartbeat);
         reply.raw.end();
       }
     } catch (error) {
       if (error instanceof AuthenticationError) {
         return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
+      }
+      /**
+       * C10 (ТЗ item 6): the queue refused this run before anything was written. 429 with `retry-after` is the
+       * honest answer (the same shape the existing admission and storage limits use), and it is reachable only
+       * here — before `reply.hijack()` — which is exactly why the slot is taken this early.
+       */
+      if (error instanceof CodeRunRefusedError) {
+        request.log.warn({ code: error.code }, "code_run_queue_refused");
+        return reply
+          .header("retry-after", String(Math.max(1, Math.ceil(codeRunQueueLimits.queueTimeoutMs / 1000))))
+          .code(429)
+          .send({ error: { code: error.code === "queue_cancelled" ? "CODE_RUN_QUEUE_CANCELLED" : "CODE_RUN_QUEUE_FULL", message: error.message, retryable: true } });
       }
       if (error instanceof ContextValidationError) {
         return reply.code(400).send({ error: { code: "INVALID_CONTEXT", message: error.message } });

@@ -95,6 +95,17 @@ export interface CodeRunStreamRouteDeps {
   store: CodeRunStreamStore;
   authorize(ctx: AuthContext, companyId: string, input: AuthorizeCodeActionInput): Promise<unknown>;
   getAuthContext(request: unknown): AuthContext | null;
+  /**
+   * C10: the conversation cursor of the run's session.
+   *
+   * A rewind cannot delete rows — the replay bundle is append-only in the database — so it moves a pointer, and
+   * every reader of the transcript has to apply it. When a rewind is in force for this run, the turns after the
+   * cursor are not part of the conversation any more: they are dropped from the response and the response *says
+   * so* (`conversationRewoundToTurn`), because a silently shorter transcript would look like data loss.
+   *
+   * Optional: a deployment without the durability surface (or a caller that never rewound) is unaffected.
+   */
+  conversationHead?: (companyId: string, sessionId: string) => Promise<{ runId: string | null; turnIndex: number } | null>;
   logger?: { warn(payload: unknown, message?: string): void };
 }
 
@@ -309,9 +320,29 @@ export async function registerCodeRunStreamRoutes(instance: FastifyInstance, dep
         const bundle = await readReplayBundle({ store: deps.store, companyId, runId });
         const hasBundle = bundle.kind === "bundle" && bundle.steps.length > 0;
 
-        const allTurns = hasBundle
+        const recordedTurns = hasBundle
           ? groupSteps(bundle.steps)
           : fromRunStateTurns(await deps.store.listCodeRunTurns(companyId, runId));
+
+        /**
+         * C10: the conversation cursor. It applies only when it points into *this* run: a cursor naming another run
+         * means the conversation moved on, and truncating this run's transcript by a position from a different run
+         * would be meaningless. A cursor that could not be read is not a rewind either — the read is fail-open
+         * because dropping turns on a failed lookup would hide history that is genuinely there.
+         */
+        let rewindTurn: number | null = null;
+        if (deps.conversationHead && state.sessionId) {
+          try {
+            const head = await deps.conversationHead(companyId, state.sessionId);
+            if (head && head.runId === runId) rewindTurn = head.turnIndex;
+          } catch {
+            rewindTurn = null;
+          }
+        }
+        const allTurns = rewindTurn === null
+          ? recordedTurns
+          : recordedTurns.filter((turn) => turn.turnIndex <= rewindTurn);
+        const turnsOmittedByRewind = recordedTurns.length - allTurns.length;
 
         const afterCursor = cursor === undefined ? allTurns : allTurns.filter((turn) => turn.turnIndex > cursor);
         const page = afterCursor.slice(0, limit);
@@ -333,6 +364,9 @@ export async function registerCodeRunStreamRoutes(instance: FastifyInstance, dep
                 truncated: bundle.truncated === true,
               }
             : { message: STREAM_UNAVAILABLE_MESSAGE }),
+          // C10: stated rather than implied — a shorter transcript after a rewind is a decision, not a loss.
+          conversationRewoundToTurn: rewindTurn,
+          turnsOmittedByRewind,
           turns: page,
         };
 

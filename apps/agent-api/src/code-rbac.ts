@@ -393,6 +393,17 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   // question it asked would have found a way to grant itself what it asked for.
   "code.question.read": "workspace:read",
   "code.question.answer": "workspace:write",
+  // C10: durable session operations. Resuming a run re-takes its lease, so a resumed process may write the
+  // workspace again — that is a workspace write. Rewinding rolls the *workspace* back for `code`/`both` (and
+  // moves a session's conversation cursor for all three variants), which is destructive in the same way a
+  // revert is, so it is a workspace write too. Forking creates a session that inherits another session's plan
+  // and task list: also a workspace write. Reading the recovery notice is an ordinary read surface, and it has
+  // its own name because the notice explains what the agent was in doubt about — the same data the run stream
+  // serves, but reached through a different route, so it may not be authorized by a label meant for another one.
+  "code.session.resume": "workspace:write",
+  "code.rewind": "workspace:write",
+  "code.session.fork": "workspace:write",
+  "code.recovery.read": "workspace:read",
 });
 
 /**
