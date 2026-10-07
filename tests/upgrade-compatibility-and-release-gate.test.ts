@@ -51,20 +51,38 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   });
 
   describe("All 306 Mapped Statuses & Zero Capability Disappearance", () => {
-    it("verifies the 306 baseline and all 384 current capabilities are retained", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(384);
-      expect(CAPABILITY_CATALOG.length).toBe(384);
+    /**
+     * Historical inventory baseline. Deliberately a literal: the whole point of this release gate is to fail
+     * loudly when a published capability disappears, and a smaller catalog is exactly that failure.
+     */
+    const HISTORICAL_INVENTORY_BASELINE = 306;
+    /**
+     * Current catalog size, read from the static catalog in `packages/shared` (single source of truth) rather
+     * than duplicated by hand here. The audit matrix is authored separately, so `matrix === catalog` remains a
+     * real assertion — a capability added or removed in only one of the two stores fails it.
+     */
+    const staticCatalogSize = CAPABILITY_CATALOG.length;
+
+    it("verifies the 306 baseline and every current catalog capability are retained", () => {
+      expect(CAPABILITY_MATRIX.length).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+      expect(CAPABILITY_MATRIX.length).toBe(staticCatalogSize);
 
       const catalogIds = new Set(CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds || []));
       const matrixIds = new Set(CAPABILITY_MATRIX.map((c) => c.id));
 
-      expect(catalogIds.size).toBe(384);
-      expect(matrixIds.size).toBe(384);
+      expect(catalogIds.size).toBe(staticCatalogSize);
+      expect(matrixIds.size).toBe(CAPABILITY_MATRIX.length);
 
       // Diff check: every ID 1..306 must be in both
-      for (let i = 1; i <= 306; i++) {
+      for (let i = 1; i <= HISTORICAL_INVENTORY_BASELINE; i++) {
         expect(catalogIds.has(i)).toBe(true);
         expect(matrixIds.has(i)).toBe(true);
+      }
+
+      // ...and the published inventory stays contiguous up to its current size, so an id removed from the
+      // middle (not only a shorter tail) is a capability disappearance this gate still catches.
+      for (let i = 1; i <= staticCatalogSize; i++) {
+        expect(catalogIds.has(i)).toBe(true);
       }
     });
 

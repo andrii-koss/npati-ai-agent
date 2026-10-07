@@ -2,6 +2,42 @@
 
 Update this file after every completed step.
 
+## Sign-off policy (from C13 onward, owner decision)
+**Every step sign-off MUST run `npm test` in addition to `typecheck` / `security-gate` / `test:web` / both builds.**
+No new failures are allowed; failures caused by Coding Agent changes must be fixed. This closes a real gap: until C13
+the sign-off criterion did **not** include `npm test`, so 23 failures stayed invisible for many steps while the 116-suite
+security gate was green — because the stale suites were **outside** the gate.
+
+### Known-red `npm test` baseline (recorded at C13 step 0, escalated run)
+`npm test` → **exit 1**: `10 files failed | 327 passed | 2 skipped (339)`, `15 failed | 3756 passed | 6 skipped (3777)`.
+`typecheck` 0 · `security-gate` exit 0 (**116 suites, 1707 passed / 0 failed**) · `test:web` exit 0 (8 files / 71 tests) ·
+both builds exit 0.
+- **All 15 remaining failures are pre-existing and unrelated to the Coding Agent capability work**: `company-runtime`
+  (4), `company-orchestration` (2), `long-ai-company-chat` (2), one each in `chat-entity-mutations`,
+  `per-request-no-memory-production`, `manual-product-e2e-web`, `production-wasm-exec`,
+  `production-durable-approvals`, `advanced-memory-production`, `data-studio-d5-completion`.
+- **Zero capability-count assertions remain red** — the last one seen is an unrelated behavioural `expected 200 to be 502`.
+- **Repaired in step 0 (our own debt from C11/C12 growing the static catalog 370 → 373 → 384 → 385 and agent-callable
+  106 → 121): 8 suites** — `full-capability-regression`, `upgrade-compatibility-and-release-gate`,
+  `phase13-upgrade-gate-expanded`, `production-acceptance`, `phase14-final-production-acceptance`,
+  `control-plane-ui-and-revisions`, `invariants-and-patterns`, `manual-product-e2e-web` (count pins only).
+  The repair went from 23 → 15 failures without weakening a single assertion: historical levels stay **literals** used as
+  disappearance floors (`>= 306`, `>= 370`, `>= 103`, exact `264`), while **current** counts are read from
+  `CAPABILITY_CATALOG` and cross-checked against the **separately edited** `CAPABILITY_MATRIX` and
+  `defaultCapabilityRegistry` — so no assertion became `expect(x).toBe(x)`. Contiguity (`1..size`) and id-uniqueness
+  checks were added. The project's own `code-test-integrity-guard` reported `no reduction detected` on the diff.
+  One honest trade-off: the four original gates no longer exact-pin the total size, so deleting **only** the highest id
+  is no longer caught there — it is still caught by the exact pins in `capability-registry.test.ts` and
+  `coding-agent-c4-capabilities.test.ts` (385).
+- **A previously masked pre-existing failure surfaced**: `manual-product-e2e-web`'s count pins were debt, but fixing them
+  exposed a real one — a run returns `model_unavailable` because `CompanyDelegationRuntime` is built with
+  `strictInferenceRouting = true` while the fixture seeds no added model and passes no `dataDirectory`. Not count debt;
+  deliberately left red and documented.
+- ⚠️ **Two audit scripts are green but blind**: `scripts/verify-capability-matrix.mjs` and `scripts/upgrade-gate.mjs`
+  parse only the base array literal (`306 = 42 + 264`) via regex+eval, so they do **not** see growth applied through
+  `CAPABILITY_MATRIX.push(...)`. To be addressed in C13 together with owner decision 8 (static count vs runtime MCP count
+  vs combined Inspector view).
+
 ## Current step
 - **C12 COMPLETE — subagents and parallel work.** Final escalated evidence: `npm run typecheck` exit 0, both
   workspace builds exit 0, **`npm run security-gate` exit 0 — `passed=1707 failed=0`, 116 suites,

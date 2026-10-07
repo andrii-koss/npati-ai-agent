@@ -542,6 +542,13 @@ export const SECURITY_GATE_TESTS = [
   // project's configured checks — `failed` fails the run, `unavailable` is reported and never presented as a
   // pass, and a runner that throws still settles the run.
   "tests/coding-agent-c12-parallel-verification.test.ts",
+  // C13 (pre-MCP): the capability gates themselves. Pins that `verify-capability-matrix.mjs` and
+  // `upgrade-gate.mjs` audit the *resolved* catalog through `packages/shared/src/capability-catalog-audit.ts`
+  // (catalog ↔ matrix ↔ registry ↔ published manifest) instead of the base source literal, that the four
+  // checks stay separate, that the runtime overlay is the empty rule-24 stub and never counts as static —
+  // with a negative control that pushes a capability into a store, asserts the same parity check fails, and
+  // restores the store in `finally`.
+  "tests/coding-agent-c13-capability-catalog-audit.test.ts",
 ];
 
 /**

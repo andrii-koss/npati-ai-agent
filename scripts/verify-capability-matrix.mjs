@@ -1,117 +1,97 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+#!/usr/bin/env node
+/**
+ * Capability catalog audit (pre-MCP) — resolves the catalog instead of parsing its source text.
+ *
+ * The previous version matched the base literal of `capability-matrix.ts` with a regex and `eval()`d it.
+ * That literal is only the inventory's seed: the catalog grew on C9/C11/C12 through
+ * `CAPABILITY_CATALOG.push(...)` / `CAPABILITY_MATRIX.push(...)`, which a regex over the literal cannot see.
+ * The gate was green and blind. It now imports the real modules (see `capability-audit-runtime.mjs`) and
+ * runs four separate checks:
+ *
+ *   1. static catalog exact integrity  — catalog ↔ matrix ↔ registry, ids, inventory ids, callable split;
+ *   2. static manifest/schema parity   — catalog code tools ↔ `code-tool-schemas.published.json`;
+ *   3. runtime overlay integrity       — the runtime provider overlay must be the empty safe stub;
+ *   4. combined Inspector view         — Inspector output (static) + overlay, both sources shown.
+ *
+ * The static catalog never counts runtime overlay (MCP) capabilities: check 3 and 4 measure that
+ * independence on every run.
+ *
+ * Usage: node scripts/verify-capability-matrix.mjs     (exit 0 = every check passed)
+ */
+import fs from "node:fs";
+import path from "node:path";
+import {
+  SCRIPTS_ROOT,
+  ensureTypeScriptTransformRuntime,
+  loadCapabilityCatalogAudit,
+  printCapabilityAuditReport,
+  readPublishedToolSchemaManifest,
+} from "./capability-audit-runtime.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = SCRIPTS_ROOT;
 
-// Read and parse capability matrix TS file
-const matrixFilePath = path.join(rootDir, "packages", "shared", "src", "capability-matrix.ts");
-const content = fs.readFileSync(matrixFilePath, "utf-8");
+// Before the first line of output: a process that cannot import TypeScript re-executes itself once, so the
+// audit is printed exactly once by the process that actually ran it.
+ensureTypeScriptTransformRuntime();
 
-const match = content.match(/export const CAPABILITY_MATRIX: CapabilityMatrixEntry\[\] = (\[[\s\S]*\]);/);
-if (!match) {
-  console.error("❌ Failed to parse CAPABILITY_MATRIX from capability-matrix.ts");
-  process.exit(1);
-}
+const audit = await loadCapabilityCatalogAudit();
+const { file: manifestFile, manifest } = readPublishedToolSchemaManifest(rootDir);
 
-const matrix = eval(match[1]);
+const report = audit.runCapabilityCatalogChecks({ manifest });
+const stores = audit.resolveStaticCapabilityStores();
 
 console.log("==========================================================");
-console.log("  NPATI AGENT — 306 CAPABILITY AUDIT & REGRESSION SUITE   ");
+console.log(`  NPATI AGENT — ${stores.catalog.length} CAPABILITY AUDIT & REGRESSION SUITE`);
+console.log("  (resolved catalog, no regex/eval of the source literal)");
 console.log("==========================================================");
+console.log(`  • Catalog source   : packages/shared/src/capability-catalog.ts (imported)`);
+console.log(`  • Matrix source    : packages/shared/src/capability-matrix.ts (imported)`);
+console.log(`  • Registry source  : defaultCapabilityRegistry (imported, the single instance)`);
+console.log(`  • Manifest source  : ${path.relative(rootDir, manifestFile).replace(/\\/g, "/")}`);
 
-// 1. Total items count
-if (matrix.length !== 306) {
-  console.error(`❌ Expected exactly 306 capabilities, found ${matrix.length}`);
-  process.exit(1);
-}
-console.log(`✓ Catalog entries validated: ${matrix.length}/306`);
+console.log("\nCapability audit checks:");
+const checksOk = printCapabilityAuditReport(report, (line) => console.log(line));
 
-// 2. Continuous IDs 1 to 306
-const idSet = new Set();
-for (let i = 1; i <= 306; i++) {
-  const item = matrix.find((c) => c.id === i);
-  if (!item) {
-    console.error(`❌ Missing capability ID #${i}`);
-    process.exit(1);
-  }
-  if (idSet.has(i)) {
-    console.error(`❌ Duplicate capability ID #${i}`);
-    process.exit(1);
-  }
-  idSet.add(i);
-}
-console.log(`✓ Continuous Inventory IDs 1..306: 0 gaps, 0 duplicates`);
-
-// 3. Check agentCallable breakdown (42 tool, 264 non-tool)
-const tools = matrix.filter((c) => c.agentCallable);
-const nonTools = matrix.filter((c) => !c.agentCallable);
-console.log(`✓ Agent-Callable Tools: ${tools.length} (Expected: 42)`);
-console.log(`✓ Internal Runtime/Ops Capabilities: ${nonTools.length} (Expected: 264)`);
-
-if (tools.length !== 42 || nonTools.length !== 264) {
-  console.error(`❌ Mismatch in agent-callable tools count: got ${tools.length}, expected 42`);
-  process.exit(1);
-}
-
-// 4. Test file existence check
+// 5. Test-file ownership on disk: the matrix maps every inventory row to suites that must exist.
 let missingFiles = 0;
 const testFileSet = new Set();
-
-for (const item of matrix) {
-  for (const testFile of item.testFiles) {
+for (const entry of stores.matrix) {
+  for (const testFile of entry.testFiles ?? []) {
     testFileSet.add(testFile);
-    const absPath = path.join(rootDir, testFile);
-    if (!fs.existsSync(absPath)) {
-      console.warn(`⚠️ Referenced test file does not exist: ${testFile} (for capability #${item.id} ${item.name})`);
+    if (!fs.existsSync(path.join(rootDir, testFile))) {
+      console.warn(`⚠️ Referenced test file does not exist: ${testFile} (for capability #${entry.id} ${entry.capabilityId})`);
       missingFiles++;
     }
   }
 }
-
-console.log(`✓ Unique Test Suites Mapped: ${testFileSet.size}`);
+console.log("\nTest ownership:");
+console.log(`  ✓ Unique Test Suites Mapped: ${testFileSet.size}`);
 if (missingFiles > 0) {
-  console.error(`❌ ${missingFiles} referenced test files are missing from repository!`);
-  process.exit(1);
+  console.error(`  ❌ ${missingFiles} referenced test files are missing from repository!`);
 } else {
-  console.log(`✓ Test File Integrity: 100% of referenced test files exist on disk`);
+  console.log("  ✓ Test File Integrity: 100% of referenced test files exist on disk");
 }
 
-// 5. Domain Breakdown
-const domains = {};
-for (const item of matrix) {
-  domains[item.domain] = (domains[item.domain] || 0) + 1;
+function breakdown(title, values) {
+  const counts = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  console.log(`\n${title}:`);
+  for (const [key, count] of Object.entries(counts)) {
+    console.log(`  • ${String(key).padEnd(22)}: ${count}`);
+  }
 }
 
-console.log("\nCapabilities by Domain:");
-for (const [domain, count] of Object.entries(domains)) {
-  console.log(`  • ${domain.padEnd(20)}: ${count}`);
-}
+breakdown("Capabilities by Domain", stores.matrix.map((entry) => entry.domain));
+breakdown("Capabilities by Test Ownership", stores.matrix.map((entry) => entry.testType));
+breakdown("Capabilities by Verified Status", stores.matrix.map((entry) => entry.status));
 
-// 6. Test Type Breakdown
-const testTypes = {};
-for (const item of matrix) {
-  testTypes[item.testType] = (testTypes[item.testType] || 0) + 1;
-}
-
-console.log("\nCapabilities by Test Ownership:");
-for (const [tType, count] of Object.entries(testTypes)) {
-  console.log(`  • ${tType.padEnd(20)}: ${count}`);
-}
-
-// 7. Status Breakdown
-const statuses = {};
-for (const item of matrix) {
-  statuses[item.status] = (statuses[item.status] || 0) + 1;
-}
-
-console.log("\nCapabilities by Verified Status:");
-for (const [status, count] of Object.entries(statuses)) {
-  console.log(`  • ${status.padEnd(20)}: ${count}`);
-}
-
+const ok = checksOk && missingFiles === 0;
 console.log("==========================================================");
-console.log("  CAPABILITY MATRIX INTEGRITY CHECKS PASSED  ");
+if (ok) {
+  console.log("  CAPABILITY CATALOG AUDIT PASSED (4/4 checks, tests on disk)");
+  console.log("==========================================================\n");
+  process.exit(0);
+}
+console.error("  CAPABILITY CATALOG AUDIT FAILED (see issues above)");
 console.log("==========================================================\n");
+process.exit(1);
