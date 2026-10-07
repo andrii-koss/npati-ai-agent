@@ -22,6 +22,7 @@ import {
 } from "./code-git-workflow";
 import type { CodeWorkspaceRevisionGuard, CodeWorkspaceRevisionSnapshot } from "./code-workspace-revision";
 import { isGitWriteTool } from "./code-git-write-policy";
+import { CODE_AGENT_SPAWN_TOOL } from "./code-subagent-limits";
 import {
   CodeTurnTracker, extractWriteChanges, resolveTurnTrackingOptions, revisionConflictDetails, simpleUnifiedDiff,
   type CodeApprovalPort, type CodeCheckpointPort, type CodeWriteChange,
@@ -115,7 +116,30 @@ export type CodeToolErrorCode =
   | "command_timeout"
   | "process_not_found"
   /** C11: the session's resolved intent is read-only, so this tool cannot run (owner decision 10). */
-  | "review_code_read_only";
+  | "review_code_read_only"
+  /**
+   * C12: the run is a **child** (it was delegated), so it cannot delegate in turn. Depth 1 is structural: the
+   * tool that would grow the delegation tree is refused here, next to the read-only intent, before the
+   * sub-flag, the arguments, the approval and the executor.
+   */
+  | "subagent_depth_exceeded"
+  /** C12: the tool is outside the capability scope the delegation recorded for this run. */
+  | "subagent_tool_scope_denied"
+  /**
+   * C12: the delegation itself. These are refusals of the **spawn**, not of a child's tool call, so they are
+   * named separately from the two structural ones above: an operator reading `subagent_depth_exceeded` knows
+   * the tree was protected, while `subagent_parent_scope_unresolved` says a record needs fixing.
+   */
+  | "subagent_type_unknown"
+  | "subagent_summary_required"
+  | "subagent_path_outside_scope"
+  | "subagent_tool_not_published"
+  | "subagent_tool_not_delegable"
+  | "subagent_parent_scope_unresolved"
+  | "subagent_parallelism_exceeded"
+  | "subagent_capability_scope_empty"
+  | "subagent_handoff_content_rejected"
+  | "subagent_handoff_refused_credential";
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
@@ -154,6 +178,15 @@ const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   "DUPLICATE_PATHS", "TOO_MANY_FILES", "INVALID_COMMIT", "NO_CHECKPOINT", "CHECKPOINT_NO_COMMIT",
   "PROJECT_ACCESS_DENIED", "PROJECT_WRITE_DENIED", "PROJECT_ARCHIVED", "INVALID_AGENT_SLUG",
   "INVALID_WORKTREE_PATH",
+  /**
+   * C12: the delegation refusals. They are listed here as well as in the union above because a **port** may
+   * raise them (the child runner knows the child's own refusal), and a shaped error from a port must reach the
+   * model with its own code instead of the useless `tool_failed` — the same reason the git codes are listed.
+   */
+  "subagent_type_unknown", "subagent_summary_required", "subagent_path_outside_scope",
+  "subagent_tool_not_published", "subagent_tool_not_delegable", "subagent_parent_scope_unresolved",
+  "subagent_parallelism_exceeded", "subagent_capability_scope_empty",
+  "subagent_handoff_content_rejected", "subagent_handoff_refused_credential",
 ]);
 
 /** Recognises a canonical `CodeToolError` (different class, same contract) by shape. */
@@ -277,6 +310,12 @@ export interface CodeToolExecutionContext {
   agentId?: string;
   /** C11 (owner decision 7): the canonical revision this call was authorised against. */
   workspaceRevision?: CodeWorkspaceRevisionSnapshot;
+  /**
+   * C12: the ExecutionSnapshot this call belongs to, forwarded from the invocation envelope. The delegation
+   * executor records the spawn as an Activity event, and every such event must name its snapshot — without this
+   * field the spawn's event would be the one Activity family that could not.
+   */
+  snapshotId?: string;
 }
 
 /**
@@ -457,6 +496,12 @@ export function describeGitApprovalAction(tool: string): string {
 /** C11: the sub-flag a tool needs; git tools hang off their own `code.git` flag rather than `code.write`. */
 export function codeSubFlagForTool(tool: string, write: boolean): string {
   if (isCodeGitTool(tool)) return "code.git";
+  /**
+   * C12: the delegation tool hangs off its own `code.subagents` flag. It is neither a read nor a write: it
+   * starts another run that draws on the same shared budget and may write, so an operator who enables file
+   * edits must not thereby enable spawning children.
+   */
+  if (tool === CODE_AGENT_SPAWN_TOOL) return "code.subagents";
   return write ? "code.write" : "code.read";
 }
 
@@ -732,6 +777,23 @@ export class CodeToolRuntime {
      * and it is enforced here, on the server, before any side effect.
      */
     readOnlyIntent?: boolean;
+    /**
+     * C12: the run that delegated this one — a **server** fact set by the entry point, never a model argument.
+     *
+     * Where `readOnlyIntent` narrows *what a session may do*, this narrows *what a delegated run may do*: a run
+     * whose parent is known is a child, and a child may not delegate. The refusal below is the guarantee; the
+     * runner not offering the tool is only the courtesy.
+     */
+    parentRunId?: string;
+    /**
+     * C12: the capability scope the delegation recorded for this run (an intersection: the parent's effective
+     * set, the child type's profile and the delegation record). A tool outside it is refused on the server.
+     *
+     * Absent means "no delegation narrowing applies to this run", which is the state of every ordinary run; a
+     * caller that delegates must supply it, because the runner refuses a child run without one rather than
+     * letting it inherit everything.
+     */
+    capabilityScope?: readonly string[];
   }): Promise<CodeToolInvokeResult | CodeToolInvokeFailure> {
     const started = Date.now();
     const sessionId = input.sessionId ?? `project:${input.projectId}`;
@@ -778,6 +840,43 @@ export class CodeToolRuntime {
           false,
           tool.name,
         );
+      }
+
+      /**
+       * (3c) C12: the structural half of "depth 1", and the capability scope of a delegated run.
+       *
+       * Both checks live here, in the `reviewScope` position, for the reason that made the read-only intent a
+       * server property rather than a prompt request: this is the first place every `code.*` call must pass
+       * through, and everything below it — the sub-flag, the argument validation, the approval phase, the
+       * write pre-flight and the executor — can then be reached only by a call the delegation actually
+       * authorised. An approval cannot lift either refusal, because no approval phase has run yet.
+       *
+       * `parentRunId` is the fact that makes recursion impossible rather than discouraged: a run that has a
+       * parent is a child, and a child may never grow the delegation tree, whatever the model asks for, whatever
+       * the schema advertises and whatever the configuration says.
+       */
+      if (input.parentRunId !== undefined && tool.name === CODE_AGENT_SPAWN_TOOL) {
+        throw new CodeToolError(
+          "subagent_depth_exceeded",
+          `Run ${input.parentRunId} is itself a sub-agent run, so ${tool.name} cannot run: a coding sub-agent works, it does not delegate (depth 1)`,
+          403,
+          "policy",
+          false,
+          tool.name,
+        );
+      }
+      if (input.capabilityScope !== undefined) {
+        const scoped = new Set(input.capabilityScope.map((entry) => entry.trim().toLowerCase()));
+        if (!scoped.has(tool.name.toLowerCase())) {
+          throw new CodeToolError(
+            "subagent_tool_scope_denied",
+            `${tool.name} is outside this run's capability scope: a delegated run may use exactly the intersection its delegation recorded`,
+            403,
+            "policy",
+            false,
+            tool.name,
+          );
+        }
       }
 
       // (4) Sub-flag: mutating tools require `code.write`, read-only tools `code.read`, and a git tool its
@@ -949,6 +1048,9 @@ export class CodeToolRuntime {
           ...(input.approvalId ? { approvalId: input.approvalId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
           ...(revisionSnapshot ? { workspaceRevision: revisionSnapshot } : {}),
+          // C12: the snapshot travels to the executor because the delegation records its own Activity event,
+          // and an Activity event without its snapshot is the gap requirement 19 exists to close.
+          ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
         });
       } catch (error) {
         const conflict = revisionConflictDetails(error);

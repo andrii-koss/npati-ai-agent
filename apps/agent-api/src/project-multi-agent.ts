@@ -3,6 +3,8 @@ import type { CompanyDelegationRuntime } from "./company-runtime";
 import type { ProjectPreviewService } from "./project-preview-service";
 import { SecurityPolicyEngine } from "./security-guardrails";
 import { canBuildWebsite } from "./project-agent-capabilities";
+import { resolveCodeAgentLimits } from "./code-agent-config";
+import { resolveCodeSubagentLimits } from "./code-subagent-limits";
 import {
   executeProjectTaskGraph,
   parseProjectTaskPlan,
@@ -17,6 +19,11 @@ import {
 } from "./project-git-service";
 import type { LocalProjectWorkspace } from "./project-workspace";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
+import {
+  createVerificationLoop,
+  type VerificationCheckReport,
+  type VerificationReport,
+} from "./code-verification-loop";
 
 function clean(value: string, length = 1500): string {
   return SecurityPolicyEngine.protectText(value).sanitized.slice(0, length);
@@ -37,10 +44,77 @@ function issuesFromResult(value: string): string[] {
 
 export interface ProjectMultiAgentOptions {
   worktreeMode?: boolean;
+  /**
+   * C12: how many independent tasks may run in parallel. Absent means the coding agent's configured
+   * `subagentParallelism`, which is itself clamped to the canonical hard ceiling — the graph clamps again, so a
+   * caller cannot raise the fan-out by passing a larger number.
+   */
+  parallelism?: number;
+  /**
+   * C12: the **existing** verification runner — the same `CodeVerifyRunnerPort` `code.verify.run` uses, which
+   * replays the project's configured verify commands and never invents one. Absent means the final verification
+   * reports `unavailable`, which is a reported state and never a pass.
+   */
+  verification?: ProjectVerificationPort;
+  /** C12: which kinds to run after the merges. The C9 vocabulary, plus `build`. */
+  verificationTools?: readonly string[];
+}
+
+/** The verification kinds of the C9 loop that a project toolchain can actually run. */
+export const PROJECT_VERIFICATION_KINDS = ["lint", "typecheck", "test", "build"] as const;
+export type ProjectVerificationKind = (typeof PROJECT_VERIFICATION_KINDS)[number];
+
+/**
+ * C12: the post-merge verification port. It is the *canonical* runner (`CodeVerifyRunnerPort`) with the
+ * project service's own call shape, so there is no second way to verify a project: the final check the owner
+ * asked for runs the project's configured `lint`/`typecheck`/`test`/`build` commands exactly as
+ * `code.verify.run` would.
+ */
+export interface ProjectVerificationPort {
+  run(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    tools: ProjectVerificationKind[];
+    changedOnly: boolean;
+    timeoutMs: number;
+  }): Promise<{
+    results: Array<{ tool: string; ok: boolean; summary: string; findings: string[] }>;
+    stats: { tools: number; passed: number; failed: number; durationMs: number };
+  }>;
+}
+
+/** Default verification for a project run: the C9 conservative default, plus nothing else. */
+export const DEFAULT_PROJECT_VERIFICATION_TOOLS: readonly ProjectVerificationKind[] = ["typecheck", "test"];
+
+/** The C9 stop code the loop reports when checks failed and there is no repair budget left. */
+export const PROJECT_VERIFICATION_FAILED = "verification_failed_after_repair_limit";
+
+function isVerificationKind(value: string): value is ProjectVerificationKind {
+  return (PROJECT_VERIFICATION_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * One bounded line describing a final verification report. It names the status and the checks that did not pass
+ * (with their codes) and never quotes a verifier's output: the C9 report is already content-free by
+ * construction, and this keeps it that way at the boundary where it becomes run text.
+ */
+export function summariseProjectVerification(report: VerificationReport): string {
+  const failed = report.failedChecks;
+  const parts = [`${report.status} (${report.checks.length} check(s))`];
+  if (failed.length) {
+    parts.push(failed.slice(0, 8).map((check) => `${check.tool}:${check.code ?? check.state}`).join(", "));
+  }
+  return parts.join(" — ").slice(0, 500);
 }
 
 export class ProjectMultiAgentService {
   private readonly worktreeMode: boolean;
+  /**
+   * C12: the parallel fan-out this service admits. `subagentParallelism` was dead configuration (zero readers)
+   * until this line: the graph used a hard-coded 3 while the plan's table said 4 and nothing connected them.
+   */
+  private readonly parallelism: number;
 
   constructor(
     private readonly store: WorkspaceStore,
@@ -53,6 +127,112 @@ export class ProjectMultiAgentService {
     private readonly qaService?: ProjectBrowserQaService,
   ) {
     this.worktreeMode = options?.worktreeMode ?? (process.env.NPATI_PROJECT_WORKTREE_MODE === "true");
+    const limits = resolveCodeSubagentLimits(resolveCodeAgentLimits());
+    const requested = options?.parallelism;
+    this.parallelism = typeof requested === "number" && Number.isFinite(requested)
+      ? Math.max(1, Math.min(limits.maxParallelism, Math.trunc(requested)))
+      : limits.maxParallelism;
+    this.verification = options?.verification;
+    /**
+     * The requested verification kinds, filtered to the C9 vocabulary and **de-duplicated**. An unknown name is
+     * not dropped silently: it stays in the list and becomes an `unavailable` check, because C9's rule is that a
+     * check which never ran is not a pass.
+     */
+    const requestedTools = options?.verificationTools ?? DEFAULT_PROJECT_VERIFICATION_TOOLS;
+    this.verificationTools = [...new Set(requestedTools.map((tool) => String(tool)))];
+  }
+
+  private readonly verification?: ProjectVerificationPort;
+  private readonly verificationTools: readonly string[];
+
+  /**
+   * C12: the final verification, run **after** every worktree has been merged into `project/main`.
+   *
+   * It is the C9 loop's state machine over the project's configured checks, and it reports rather than repairs:
+   * with `maxRepairAttempts: 0` a failure is a stop, never a second model loop. Three states are kept
+   * distinguishable, which is the whole point of reusing the loop instead of writing a boolean:
+   *
+   *  - `passed` — every requested check ran and passed;
+   *  - `failed` — a check failed, or a check that was asked for never ran (C9: a check which never ran is a
+   *    failure, not a pass);
+   *  - `unavailable` — nothing could be run at all (no port, no configured commands), reported as such.
+   *
+   * The whole method is deliberately total: a port that throws, a store that refuses the event and an unknown
+   * verification name all become reported states. A final check must never be the reason a run hangs.
+   */
+  async verifyAfterMerge(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    parentRunId: string,
+  ): Promise<VerificationReport> {
+    const tools = this.verificationTools;
+    let checks: VerificationCheckReport[];
+    const unknown = tools.filter((tool) => !isVerificationKind(tool));
+    const known = tools.filter(isVerificationKind);
+    if (!this.verification || !tools.length) {
+      checks = tools.map((tool) => ({
+        tool,
+        state: "unavailable" as const,
+        code: "verification_unavailable",
+        message: this.verification ? "No verification kind was requested" : "This deployment has no verification runner configured",
+      }));
+    } else {
+      try {
+        const outcome = await this.verification.run({
+          ctx, companyId, projectId, tools: known, changedOnly: false, timeoutMs: 10 * 60_000,
+        });
+        const byTool = new Map(outcome.results.map((entry) => [entry.tool, entry]));
+        checks = known.map((tool) => {
+          const result = byTool.get(tool);
+          if (!result) {
+            // The runner answered without this check. Reporting it as a pass is exactly the defect C9 exists to
+            // prevent, so it is `unavailable`, and `summariseVerification` turns a partial run into a failure.
+            return { tool, state: "unavailable" as const, code: "verification_not_run", message: "The verification runner did not report a result for this check" };
+          }
+          return result.ok
+            ? { tool, state: "passed" as const }
+            : { tool, state: "failed" as const, code: "verification_check_failed", ...(result.summary ? { message: result.summary } : {}) };
+        });
+      } catch (error) {
+        checks = known.map((tool) => ({
+          tool,
+          state: "unavailable" as const,
+          code: "verification_unavailable",
+          message: error instanceof Error ? error.message : "The verification runner failed",
+        }));
+      }
+    }
+    checks.push(...unknown.map((tool) => ({
+      tool,
+      state: "unavailable" as const,
+      code: "verification_tool_unknown",
+      message: `"${tool}" is not a check this project toolchain can run`,
+    })));
+
+    const loop = createVerificationLoop({ maxRepairAttempts: 0, requestedTools: tools });
+    loop.record(checks);
+    const decision = loop.decide();
+    const report = loop.report();
+    const status = report.status;
+
+    await this.store.appendCompanyAgentRunEvent(ctx, companyId, parentRunId, {
+      eventKey: "project-verification:" + (decision.decision === "complete" ? "passed" : status),
+      eventType: decision.decision === "complete" ? "completed" : "failed",
+      runStatus: status === "passed" ? "running" : "failed",
+      message: "Final verification after merge: " + summariseProjectVerification(report),
+      details: {
+        // Counts and check names only: the loop's own message field is already bounded and content-free, and a
+        // verification summary is not an output dump.
+        status,
+        decision: decision.decision,
+        ...(decision.decision === "stop" ? { code: decision.code } : {}),
+        requestedTools: [...tools],
+        checks: report.checks.map((check) => ({ tool: check.tool, state: check.state, code: check.code ?? null })),
+      },
+    }).catch(() => undefined);
+
+    return report;
   }
 
   async execute(
@@ -235,7 +415,17 @@ export class ProjectMultiAgentService {
         };
 
         if (this.worktreeMode && this.gitService && task.role !== "qa" && !improveOnly) {
-          const agentSlug = task.role || task.id;
+          /**
+           * C12: the worktree slug is derived from the **task**, not from the role.
+           *
+           * `task.role || task.id` made two parallel tasks of one role resolve to the same slug — so
+           * `createAgentWorktree` returned one worktree and one branch (`agent/frontend`) for both, the two
+           * children wrote into the same directory, and the two merges were one merge. That is exactly the
+           * isolation this path exists to provide, and a plan with two frontend tasks (the common case) silently
+           * lost it. `task.id` is validated by `parseProjectTaskPlan` (`^[a-z][a-z0-9_-]{0,31}$`) and the service
+           * normalises it, so the slug stays within `safeAgentSlug`.
+           */
+          const agentSlug = `${task.role}-${task.id}`;
           const { worktreePath, branch, baseBranch } = await this.gitService.createAgentWorktree(ctx, companyId, projectId, {
             agentSlug,
             baseBranch: "project/main",
@@ -333,34 +523,64 @@ export class ProjectMultiAgentService {
         return runTask();
       };
       const onStatus = async (task: ProjectTask, currentSnapshot: ProjectTask[]): Promise<void> => {
-        const updatedSteps = currentSnapshot.map((t, idx) => {
-          const stepStatus = t.status === "completed" ? "completed"
-            : t.status === "failed" ? "failed"
-            : t.status === "running" ? "delegated"
-            : "selected";
-          const stepRole = t.role === "qa" ? "reviewer" : "worker";
-          return {
-            agentId: t.agentId!,
-            stepOrder: idx,
-            lane: t.role === "seo" ? 1 : 0,
-            role: stepRole as "reviewer" | "worker",
-            status: stepStatus as "selected" | "delegated" | "completed" | "failed",
-            modelId: agents.find((a) => a.id === t.agentId)?.modelId ?? "auto",
-          };
-        });
-        await this.store.replaceCompanyAgentRunSteps(ctx, companyId, parent.id, updatedSteps).catch(() => undefined);
-        await this.store.appendCompanyAgentRunEvent(ctx, companyId, parent.id, {
-          eventKey: "project-task:" + task.id + ":" + task.status,
-          eventType: task.status === "running" ? "started" : task.status === "completed" ? "completed" : task.status === "failed" ? "failed" : "queued",
-          runStatus: task.status === "failed" ? "failed" : "running",
-          message: task.title + " — " + task.status,
-          details: { taskId: task.id, role: task.role, agentId: task.agentId, status: task.status, dependsOn: task.dependsOn, paths: task.paths },
-        });
+        /**
+         * C12: progress reporting is **isolated from the run**. This callback writes the step rows and the run
+         * event, and a store outage here used to reject the task's promise — which made `Promise.race` throw and
+         * took the whole graph (and with it the parent's run) down for a bookkeeping failure. Reporting is
+         * therefore best-effort: the run keeps going, and the durable step rows are refreshed on the next
+         * transition.
+         */
+        try {
+          const updatedSteps = currentSnapshot.map((t, idx) => {
+            const stepStatus = t.status === "completed" ? "completed"
+              : t.status === "failed" ? "failed"
+              : t.status === "running" ? "delegated"
+              : "selected";
+            const stepRole = t.role === "qa" ? "reviewer" : "worker";
+            return {
+              agentId: t.agentId!,
+              stepOrder: idx,
+              lane: t.role === "seo" ? 1 : 0,
+              role: stepRole as "reviewer" | "worker",
+              status: stepStatus as "selected" | "delegated" | "completed" | "failed",
+              modelId: agents.find((a) => a.id === t.agentId)?.modelId ?? "auto",
+            };
+          });
+          await this.store.replaceCompanyAgentRunSteps(ctx, companyId, parent.id, updatedSteps).catch(() => undefined);
+          await this.store.appendCompanyAgentRunEvent(ctx, companyId, parent.id, {
+            eventKey: "project-task:" + task.id + ":" + task.status,
+            eventType: task.status === "running" ? "started" : task.status === "completed" ? "completed" : task.status === "failed" ? "failed" : "queued",
+            runStatus: task.status === "failed" ? "failed" : "running",
+            message: task.title + " — " + task.status,
+            details: { taskId: task.id, role: task.role, agentId: task.agentId, status: task.status, dependsOn: task.dependsOn, paths: task.paths },
+          });
+        } catch {
+          // Bookkeeping never changes what was decided, and never stops the graph.
+        }
       };
-      await executeProjectTaskGraph(tasks, execute, onStatus, 3, this.leaseManager, projectId);
+      /**
+       * C12: the configured (hard-clamped) parallelism instead of a literal 3. `this.leaseManager` is also the
+       * **one** lease manager of the deployment: the graph's path locks and the Company tools' file locks must
+       * be the same object, or two agents working on one path would each believe they held it.
+       */
+      await executeProjectTaskGraph(tasks, execute, onStatus, this.parallelism, this.leaseManager, projectId);
       const failed = tasks.filter((task) => task.status === "failed" || task.status === "waiting");
       const hasBudgetFailure = tasks.some((t) => t.error?.includes("model call limit reached") || t.error?.includes("budget"));
       const hasModelFailure = tasks.some((t) => /model_routing_failed|model_unavailable|chat-compatible|AI inference failed|HTTP (?:401|403|404)/i.test(t.error ?? ""));
+      /**
+       * C12 (owner requirement): the **mandatory final verification after the merges**. It runs the project's
+       * configured checks through the existing `ProjectVerificationPort` (the same runner `code.verify.run`
+       * uses) and judges them with the existing `createVerificationLoop` — there is no second verification
+       * mechanism and no new check vocabulary. `maxRepairAttempts: 0` on purpose: repair belongs to the run
+       * that still has a model loop, so this final pass decides and reports rather than opening a second loop.
+       *
+       * A failing final verification does not hang the run and does not invent a repair: the parent settles with
+       * `verification_failed_after_repair_limit` and the failing checks named. `improveOnly` runs change nothing
+       * (it is an analysis-only pass), so there is nothing to verify there.
+       */
+      const verification = improveOnly
+        ? null
+        : await this.verifyAfterMerge(ctx, companyId, projectId, parent.id);
       let result: string;
       if (improveOnly) {
         const findings = tasks.map((task) => task.role + ": " + clean(task.result ?? task.error ?? task.status, 600)).join("\n");
@@ -373,11 +593,25 @@ export class ProjectMultiAgentService {
         result = clean(finalPlan.run.result ?? findings, 4000);
       } else {
         result = tasks.map((task) => task.title + ": " + (task.result ?? task.error ?? task.status)).join("\n").slice(0, 4000);
+        if (verification) result = (result + "\n\nFinal verification: " + summariseProjectVerification(verification)).slice(0, 4000);
       }
+      /**
+       * `failed` fails the run; `approval_required` stops it (the loop must not work around a check that needs a
+       * human). `unavailable` deliberately does **not** fail the run: C9's own vocabulary defines it as "no
+       * verification could be run at all … not a failure of the change", and a deployment with no sandbox would
+       * otherwise fail every project run for a reason the change did not cause. It is still *reported* — named in
+       * the result and in the Activity event — so it is never mistaken for a pass.
+       */
+      const verificationFailed = verification !== null
+        && (verification.status === "failed" || verification.status === "approval_required");
       await this.store.updateCompanyAgentRun(ctx, companyId, parent.id, {
-        status: failed.length ? "failed" : "completed", result,
-        errorCode: failed.length ? (hasModelFailure ? "model_routing_failed" : hasBudgetFailure ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED") : undefined,
-        errorMessage: failed.length ? failed.map((task) => task.id + ": " + (task.error ?? task.status)).join("; ").slice(0, 500) : undefined,
+        status: failed.length || verificationFailed ? "failed" : "completed", result,
+        errorCode: verificationFailed
+          ? PROJECT_VERIFICATION_FAILED
+          : failed.length ? (hasModelFailure ? "model_routing_failed" : hasBudgetFailure ? "MODEL_CALL_BUDGET_EXCEEDED" : "PROJECT_TASK_FAILED") : undefined,
+        errorMessage: verificationFailed
+          ? "Final verification: " + summariseProjectVerification(verification!)
+          : failed.length ? failed.map((task) => task.id + ": " + (task.error ?? task.status)).join("; ").slice(0, 500) : undefined,
       });
       return this.store.getCompanyAgentRun(ctx, companyId, parent.id);
     } catch (error) {

@@ -7,6 +7,7 @@
  */
 
 import { selfReviewFixIterationsFromEnv } from "./code-self-review";
+import { clampCodeSubagentDepth, clampCodeSubagentParallelism } from "./code-subagent-limits";
 
 export interface CodeAgentLimits {
   /** Model turns inside one code run. */
@@ -22,7 +23,16 @@ export interface CodeAgentLimits {
   editRepairAttempts: number;
   repairLoopAttempts: number;
   contextCompressionRatio: number;
+  /**
+   * C12: nesting levels allowed below a main run. This was dead configuration (zero readers) until the
+   * capability scope started reading it; it is clamped to the structural limit, so configuration may turn
+   * delegation **off** (0) but can never buy a second level.
+   */
   subagentDepth: number;
+  /**
+   * C12: how much subagent work one parent admits in parallel. Clamped to the hard ceiling, so configuration
+   * may lower the fan-out but never raise it past what a single node can serve.
+   */
   subagentParallelism: number;
   flagPropagationSeconds: number;
   runHeartbeatMs: number;
@@ -61,7 +71,9 @@ export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
   editRepairAttempts: 2,
   repairLoopAttempts: 3,
   contextCompressionRatio: 0.75,
+  /** C12: one nesting level below a main run — the structural limit (`code-subagent-limits.ts`). */
   subagentDepth: 1,
+  /** C12: the hard ceiling for parallel subagent work; `resolveCodeSubagentLimits` clamps every read of it. */
   subagentParallelism: 4,
   flagPropagationSeconds: 30,
   runHeartbeatMs: 15_000,
@@ -101,8 +113,8 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     editRepairAttempts: positiveInt(env.NPATI_CODE_EDIT_REPAIR_ATTEMPTS, DEFAULT_CODE_AGENT_LIMITS.editRepairAttempts),
     repairLoopAttempts: positiveInt(env.NPATI_CODE_REPAIR_LOOP, DEFAULT_CODE_AGENT_LIMITS.repairLoopAttempts),
     contextCompressionRatio: positiveFloat(env.NPATI_CODE_CONTEXT_COMPRESSION_RATIO, DEFAULT_CODE_AGENT_LIMITS.contextCompressionRatio),
-    subagentDepth: positiveInt(env.NPATI_CODE_SUBAGENT_DEPTH, DEFAULT_CODE_AGENT_LIMITS.subagentDepth),
-    subagentParallelism: positiveInt(env.NPATI_CODE_SUBAGENT_PARALLELISM, DEFAULT_CODE_AGENT_LIMITS.subagentParallelism),
+    subagentDepth: clampCodeSubagentDepth(env.NPATI_CODE_SUBAGENT_DEPTH ?? DEFAULT_CODE_AGENT_LIMITS.subagentDepth),
+    subagentParallelism: clampCodeSubagentParallelism(env.NPATI_CODE_SUBAGENT_PARALLELISM ?? DEFAULT_CODE_AGENT_LIMITS.subagentParallelism),
     flagPropagationSeconds: positiveInt(env.NPATI_CODE_FLAG_PROPAGATION_SECONDS, DEFAULT_CODE_AGENT_LIMITS.flagPropagationSeconds),
     runHeartbeatMs: positiveInt(env.NPATI_CODE_RUN_HEARTBEAT_MS, DEFAULT_CODE_AGENT_LIMITS.runHeartbeatMs),
     runLeaseMs: positiveInt(env.NPATI_CODE_RUN_LEASE_MS, DEFAULT_CODE_AGENT_LIMITS.runLeaseMs),

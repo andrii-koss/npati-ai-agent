@@ -96,6 +96,7 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   prev_hash AS "prevHash", entry_hash AS "entryHash", metadata`;
   const codeActivityEventColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
   project_id AS "projectId", session_id AS "sessionId", run_id AS "runId", snapshot_id AS "snapshotId",
+  parent_run_id AS "parentRunId", parent_tool_call_id AS "parentToolCallId", parent_event_id AS "parentEventId",
   kind, payload, data_classification AS "dataClassification", retention_class AS "retentionClass",
   created_at AS "createdAt"`;
   // C8: no workspace_id column on purpose — a context summary is addressed by company/project/session/run,
@@ -1192,6 +1193,22 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration083 } = await import("./migration-083");
         await runMigration083(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('083_code_run_request')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // C12: the delegation tree of Activity events. Additive: 084 adds three nullable columns and one partial
+    // index to `code_activity_events`, so a previous application version keeps working against the new schema —
+    // it simply never writes the parent columns, and their `NULL` reads as "this event has no parent", which is
+    // the honest reading of every row written before the delegation tree existed.
+    const activityParentMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='084_code_activity_parents'");
+    if (!activityParentMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration084 } = await import("./migration-084");
+        await runMigration084(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('084_code_activity_parents')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -3976,12 +3993,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
     const result = await this.pool.query(
       `INSERT INTO code_activity_events
-        (id, workspace_id, company_id, project_id, session_id, run_id, snapshot_id, kind, payload,
+        (id, workspace_id, company_id, project_id, session_id, run_id, snapshot_id,
+         parent_run_id, parent_tool_call_id, parent_event_id, kind, payload,
          data_classification, retention_class, created_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING ${codeActivityEventColumns}`,
       [input.id ?? randomUUID(), input.workspaceId, input.companyId, input.projectId ?? null,
-        input.sessionId ?? null, input.runId ?? null, input.snapshotId ?? null, input.kind,
+        input.sessionId ?? null, input.runId ?? null, input.snapshotId ?? null,
+        input.parentRunId ?? null, input.parentToolCallId ?? null, input.parentEventId ?? null,
+        input.kind,
         JSON.stringify(input.payload),
         input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
         input.retentionClass ?? DEFAULT_RETENTION_CLASS,
@@ -3998,9 +4018,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           AND ($2::text IS NULL OR session_id=$2)
           AND ($3::text IS NULL OR run_id=$3)
           AND ($4::text IS NULL OR snapshot_id=$4)
-          AND ($5::timestamptz IS NULL OR (created_at, id) < ($5::timestamptz, $6::text))
-        ORDER BY created_at DESC, id DESC LIMIT $7`,
+          AND ($5::text IS NULL OR parent_run_id=$5)
+          AND ($6::timestamptz IS NULL OR (created_at, id) < ($6::timestamptz, $7::text))
+        ORDER BY created_at DESC, id DESC LIMIT $8`,
       [input.companyId, input.sessionId ?? null, input.runId ?? null, input.snapshotId ?? null,
+        input.parentRunId ?? null,
         input.cursor ? new Date(decodeCodeActivityCursor(input.cursor).createdAt) : null,
         input.cursor ? decodeCodeActivityCursor(input.cursor).id : null, limit],
     );
@@ -4016,6 +4038,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       sessionId: row.sessionId === null || row.sessionId === undefined ? null : String(row.sessionId),
       runId: row.runId === null || row.runId === undefined ? null : String(row.runId),
       snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
+      parentRunId: row.parentRunId === null || row.parentRunId === undefined ? null : String(row.parentRunId),
+      parentToolCallId: row.parentToolCallId === null || row.parentToolCallId === undefined ? null : String(row.parentToolCallId),
+      parentEventId: row.parentEventId === null || row.parentEventId === undefined ? null : String(row.parentEventId),
       kind: String(row.kind) as CodeActivityEventKind,
       payload: (row.payload ?? {}) as Record<string, unknown>,
       dataClassification: String(row.dataClassification) as DataClassification,

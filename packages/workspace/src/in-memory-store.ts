@@ -2586,6 +2586,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       sessionId: input.sessionId ?? null,
       runId: input.runId ?? null,
       snapshotId: input.snapshotId ?? null,
+      parentRunId: input.parentRunId ?? null,
+      parentToolCallId: input.parentToolCallId ?? null,
+      parentEventId: input.parentEventId ?? null,
       kind: input.kind,
       payload: input.payload,
       dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
@@ -2604,6 +2607,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .filter((record) => !input.sessionId || record.sessionId === input.sessionId)
       .filter((record) => !input.runId || record.runId === input.runId)
       .filter((record) => !input.snapshotId || record.snapshotId === input.snapshotId)
+      // C12: one level of the delegation tree — every event recorded under the run that delegated.
+      .filter((record) => !input.parentRunId || record.parentRunId === input.parentRunId)
       .filter((record) => {
         if (!cursor) return true;
         // Keyset comparison over (createdAt, id), newest first.

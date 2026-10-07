@@ -3,7 +3,66 @@
 Update this file after every completed step.
 
 ## Current step
-- **C11 COMPLETE — Git workflow and Pull Request.** Final escalated evidence: `npm run typecheck` exit 0, both
+- **C12 COMPLETE — subagents and parallel work.** Final escalated evidence: `npm run typecheck` exit 0, both
+  workspace builds exit 0, **`npm run security-gate` exit 0 — `passed=1707 failed=0`, 116 suites,
+  `present=116 missing=0`**, **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**, and the tool-schema
+  artifact regenerated to **manifest v9 with 37 tools**, checksum `b498efdc…` — computed independently by the
+  executor with the guard's own hasher and confirmed by the generator (the two agreed exactly, as they did in C7
+  and C11).
+  - **Two real capability-escalation holes in the pre-existing subagent path were closed**, and both were of the
+    "the mechanism exists and its result is discarded" kind: the child node was given
+    `allowedTools: params.requestedTools ?? ["*"]`, i.e. it **threw away** the intersection
+    `SubagentToolPolicyGuard` had just computed and kept exactly what was **requested**; and
+    `parentSet.has("*") || parentSet.has("all")` was treated as "everything allowed" (fail-open). Now the child
+    gets `parentEffective ∩ childTypeProfile ∩ delegationRecord`, a wildcard expands **only** into the published
+    canonical registry (with no registry it grants **nothing**: `PARENT_WILDCARD_SCOPE_UNRESOLVED`), and the
+    allowlist comes **only** from the server-side spawn record — never from a model argument, the same discipline
+    as `readOnlyIntent`. A test pins that a **new** tool added to the general set does **not** become available to
+    a child.
+  - **Depth 1 is structural, not a check.** One `capabilityScope` is derived from the server fact
+    `input.subagentScope.parentRunId`; `toolDescriptors` **physically removes** `code.agent.spawn` for a child;
+    and `code-tool-runtime` refuses `subagent_depth_exceeded` / `subagent_tool_scope_denied` in position (3c) —
+    before sub-flag, arguments, approval and executor, so approval cannot lift it. Configuration can only
+    **lower** (`subagentDepth: 0` removes the tool even for a root run). A child run without a recorded scope is
+    refused fail-closed rather than inheriting the parent's set.
+  - **Parallelism 4 is a hard ceiling** (the `code-run-queue` idiom): the config can lower it, never raise it, and
+    the previously dead `subagentDepth`/`subagentParallelism` are now genuinely read — the three divergent
+    limits (`NestedSubagentManager.maxDepth` 4, `maxChildrenPerAgent` 5, `A2AQuotaManager.maxRecursionDepth` 5)
+    were brought to the same canonical numbers.
+  - **One `ProjectFileLeaseManager`.** `project-orchestrator` passed `undefined`, so the graph and the Company
+    tools held **separate** lock managers and could not see each other's leases. Proven from both sides: with one
+    manager the graph's lease on a file makes a Company write return `file_locked` and the content is untouched,
+    and a **negative control** with two managers shows the write succeeding and the file overwritten.
+  - **Shared token budget for parent and children** implemented over the **existing** `A2AQuotaManager`
+    (`CodeRunSharedQuota`, one `sessionBudget` keyed by session, `currentDepth` from `subagentRunDepth`).
+    Verified on the real runner: the parent stops with `budget_exhausted`, and a child run is refused on its
+    **first** pre-flight, so it cannot spend budget the session does not have.
+  - **`code.agent.spawn`** (inventory id **385**, risk medium, flag `code.subagents`) with five typed subagents —
+    `explore`, `plan`, `implement`, `review`, `test` — each mapped to a model **profile id** (never a literal
+    model name), a turn limit and a capability profile; `explore` uses the small-context profile and, per the
+    owner's requirement 6, returns **only a handoff digest**: `detail` must be single-line and short or it is
+    **dropped** (counted in `dropped`, not truncated), paths go through the canonical validator, and the digest
+    passes the metadata-only and secret scanners — a secret **refuses** the handoff instead of being redacted.
+    Proven byte-for-byte: the child's prose and a file body never appear in `JSON.stringify(result)`.
+  - **Nested Activity with a real tree**: migration **084** adds `parent_run_id` / `parent_tool_call_id` /
+    `parent_event_id` (nullable, additive, no FK) plus a **partial index** on `parent_run_id`; the parent fields
+    live in the event **identity**, not in the metadata-only payload. The "parent in payload" shortcut was
+    deliberately rejected (unindexable, and a reference is not a payload key). An end-to-end test finds the event
+    the spawn executor actually writes via a tree query, and `listCodeActivityEvents({parentRunId})` returns
+    exactly one level.
+  - **Parallel implement tasks reuse the existing machinery, with no second orchestrator/planner/isolation**:
+    `parseProjectTaskPlan` + `selectProjectTaskAgent` for decomposition and executor choice (by
+    role/description/instructions/tools/model — never `agent.name`), `executeProjectTaskGraph` for the DAG with
+    leases and cancellation, `ProjectGitService` worktrees for isolation (`cleanupAllWorktrees` in `finally`),
+    the existing structured conflict escalation (`suggestedTool: "code.ask_user"`) and `verifyAfterMerge` over
+    the **same** `CodeVerifyRunnerPort` as `code.verify.run` for mandatory post-merge verification.
+    **A real defect was found and fixed**: `agentSlug = task.role || task.id` gave two parallel tasks of the same
+    role **one** worktree and one branch, so two merges were really one — now `role-taskId`.
+  - **A failing subagent cannot hang the run**: a throwing/failing child yields a **successful** tool call with
+    `status:"failed"` and the child's code, and the graph settles (verified with a `Promise.race` timeout);
+    `onStatus` was isolated in try/catch after a store failure was found to reject the task promise and take down
+    the whole graph.
+- Earlier: **C11 COMPLETE — Git workflow and Pull Request.** Final escalated evidence: `npm run typecheck` exit 0, both
   workspace builds exit 0, **`npm run security-gate` exit 0 — `passed=1627 failed=0`, 111 suites,
   `present=111 missing=0`**, **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**, and the tool-schema
   artifact regenerated to **manifest v8 with 36 tools**, checksum `921d6029…` (derived independently by the

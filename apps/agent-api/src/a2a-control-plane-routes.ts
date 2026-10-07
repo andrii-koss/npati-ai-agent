@@ -777,6 +777,12 @@ export function registerA2AControlPlaneRoutes(
           depth: node.depth,
           ancestorIds: node.ancestorIds,
           allowedTools: node.allowedTools,
+          /**
+           * C12: `false` means the grant contained a `*`/`all` with no canonical universe supplied on this route,
+           * so `allowedTools` is deliberately empty rather than "everything". Reported instead of hidden: a node
+           * whose scope could not be resolved is a delegation record that needs a real tool list.
+           */
+          capabilityScopeResolved: node.capabilityScopeResolved,
           status: node.status,
           createdAt: node.createdAt,
         },

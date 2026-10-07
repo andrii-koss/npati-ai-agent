@@ -9,9 +9,11 @@ import {
   PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM,
   V5_TOOL_SCHEMAS,
   V6_TOOL_SCHEMAS,
   V7_TOOL_SCHEMAS,
+  V8_TOOL_SCHEMAS,
   toolSchemaChecksum,
 } from "../apps/agent-api/src/code-tool-registry";
 
@@ -72,6 +74,9 @@ const TOOL_NAMES = [
   "code.git.push",
   "code.git.pr.create",
   "code.git.pr.comment",
+  // C12: the delegation tool. It is published in manifest v9 and is the one tool a **main** run may use to hand
+  // work to a sub-agent; a delegated run never receives it, which is what makes "depth 1" structural.
+  "code.agent.spawn",
 ] as const;
 
 /**
@@ -124,6 +129,13 @@ const GIT_TOOL_NAMES = [
   "code.git.pr.create",
   "code.git.pr.comment",
 ] as const;
+
+/**
+ * C12: the v8 frozen set (36 tools: v7 plus the eleven git tools), listed explicitly here for the same reason
+ * v6 and v7 are — a session created before the delegation tool existed must keep resolving exactly its 36 tools,
+ * and a "filter the current schemas" rule would have silently rewritten v8 the next time a tool is published.
+ */
+const V8_TOOL_NAMES = [...V7_TOOL_NAMES, ...GIT_TOOL_NAMES] as const;
 
 /**
  * Tools that must never run without an explicit approval through the existing approval system:
@@ -191,6 +203,10 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.git.push": "high",
   "code.git.pr.create": "high",
   "code.git.pr.comment": "medium",
+  // C12: delegation neither destroys work nor publishes anything, but it starts another run that may write and
+  // that draws on the same shared budget, so it is not a read. It is **not** approve-gated: the approval belongs
+  // to the individual write the child attempts, which the same policy engine judges.
+  "code.agent.spawn": "medium",
 };
 
 const capabilityById = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
@@ -347,13 +363,29 @@ describe("security-gate: C2 tool schema parity", () => {
     for (const gitTool of GIT_TOOL_NAMES) {
       expect(v7.tools.map((tool) => tool.name), `v8's ${gitTool} must not leak into v7`).not.toContain(gitTool);
     }
-    // The four frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
+    /**
+     * C12: v8 is frozen the same way, and this is the assertion that keeps it frozen. `code.agent.spawn` is
+     * published in v9, so a session created before it must keep resolving exactly the 36 tools it started with —
+     * the delegation tool may not appear in v8, and v8's checksum is the constant C11 published.
+     */
+    const v8 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 8)!;
+    expect(v8.tools, "v8 is frozen at 36 tools").toHaveLength(36);
+    expect(v8.tools.map((tool) => tool.name).sort()).toEqual([...V8_TOOL_NAMES].sort());
+    expect(v8.checksum, "v8 checksum is frozen").toBe(PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM);
+    expect(toolSchemaChecksum(V8_TOOL_SCHEMAS)).toBe(PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM);
+    for (const gitTool of GIT_TOOL_NAMES) {
+      expect(v8.tools.map((tool) => tool.name), `v8 must hold ${gitTool}`).toContain(gitTool);
+    }
+    expect(v8.tools.map((tool) => tool.name), "v9's code.agent.spawn must not leak into v8").not.toContain("code.agent.spawn");
+    // The five frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
     expect(new Set([
       PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,
       PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
       PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
+      PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM,
       toolSchemaChecksum(CODE_TOOL_SCHEMAS),
-    ]).size).toBe(4);
+    ]).size).toBe(5);
     expect(V6_TOOL_SCHEMAS.map((tool) => tool.name)).not.toContain("code.ask_user");
+    expect(V8_TOOL_SCHEMAS.map((tool) => tool.name)).not.toContain("code.agent.spawn");
   });
 });

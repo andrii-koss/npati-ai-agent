@@ -171,23 +171,56 @@ const V7_TOOL_NAMES: readonly string[] = [
 ];
 export const V7_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V7_TOOL_NAMES.includes(tool.name));
 
+/**
+ * C12: the v8 published set (36 tools: v7's 25 plus the eleven `code.git.*` workflow tools, inventory ids
+ * 374–384). Frozen **explicitly**, name by name, for exactly the reason v5–v7 are: manifest v9 publishes
+ * `code.agent.spawn`, and a session created before it must keep resolving the 36 tools it started with. A
+ * "filter the current schemas" rule — or an "everything except the delegation tool" rule — would have looked
+ * equivalent today and silently rewritten v8 the next time a tool is published.
+ */
+const V8_TOOL_NAMES: readonly string[] = [
+  ...V7_TOOL_NAMES,
+  "code.git.status",
+  "code.git.diff",
+  "code.git.log",
+  "code.git.branch.create",
+  "code.git.branch.switch",
+  "code.git.stage",
+  "code.git.commit",
+  "code.git.restore",
+  "code.git.push",
+  "code.git.pr.create",
+  "code.git.pr.comment",
+];
+export const V8_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name));
+
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 8;
+export const CODE_TOOL_MANIFEST_VERSION = 9;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
  * Regenerate with: `node scripts/code-tool-schemas-generate.mjs --manifest-version N`.
  *
- * v8 (36 tools: v7's 25 plus the eleven `code.git.*` workflow tools, inventory ids 374–384). Equals
+ * v9 (37 tools: v8's 36 plus `code.agent.spawn`, inventory id 385). Equals
  * `toolSchemaChecksum(CODE_TOOL_SCHEMAS)` — computed with the registry's own hasher, never a second
- * implementation. The committed artifacts (`code-tool-schemas.published.json` and the frozen snapshot)
- * are written by the generator; until that run happens the artifact comparison in
+ * implementation, and cross-checked against `buildSnapshot(schemas, 9).checksum` in
+ * `scripts/verify-code-tool-schemas.mjs` (both hashers agree on the canonical form; they produced the same
+ * value for v8). The committed artifacts (`code-tool-schemas.published.json` and the frozen snapshot) are
+ * written by the generator; until that run happens the artifact comparison in
  * `coding-agent-c2-schema-parity.test.ts` and `scripts/verify-code-tool-schemas.mjs --check` are the two
- * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the
- * manifest the application publishes — is already satisfied.
+ * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
+ * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "921d6029dc39122ccda4d71fe426cc4d9c4ca45856c6711fd6908dcdfa7a3233";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
+
+/**
+ * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
+ * the same reason as v2–v7: a session created before the delegation tool was published must keep resolving
+ * its own manifest, and editing one of those schemas without publishing a new version must fail the tests
+ * instead of rewriting history.
+ */
+export const PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM = "921d6029dc39122ccda4d71fe426cc4d9c4ca45856c6711fd6908dcdfa7a3233";
 
 /**
  * Checksum of the v7 published set (25 tools: everything through `code.ask_user`). Frozen for the same
@@ -334,8 +367,10 @@ export function resolveManifestForSession(manifestVersion: number, manifests: re
 /**
  * Manifests this build can serve. Version 1 (the empty C1a set) and version 2 (the C2 read/search
  * tools) stay available so a session created before C3 still resolves; C9 added v6 (the planning tools) and
- * v7 (`code.ask_user`), and froze v5, so a session created before either keeps resolving the exact set it
- * started with. Older versions are never rewritten — that is the whole point of a published manifest.
+ * v7 (`code.ask_user`), C11 added v8 (the eleven `code.git.*` tools) and C12 added v9 (`code.agent.spawn`),
+ * and every older version was frozen as it was published, so a session created before any of them keeps
+ * resolving the exact set it started with. Older versions are never rewritten — that is the whole point of a
+ * published manifest.
  */
 export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest([], 1),
@@ -345,6 +380,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V5_TOOL_SCHEMAS, 5),
   toolManifest(V6_TOOL_SCHEMAS, 6),
   toolManifest(V7_TOOL_SCHEMAS, 7),
+  toolManifest(V8_TOOL_SCHEMAS, 8),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

@@ -19,8 +19,10 @@ const CODE_INVENTORY_IDS = [349, 350, 351, 352, 353, 354];
  * group), so it is brought up to date together with the newer additions rather than left as a stale guard.
  */
 const GIT_CODE_IDS = ["code.git.status", "code.git.diff", "code.git.log", "code.git.branch.create", "code.git.branch.switch", "code.git.stage", "code.git.commit", "code.git.restore", "code.git.push", "code.git.pr.create", "code.git.pr.comment"];
-const ALL_CODE_IDS = [...CODE_IDS, "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.list", "code.shell.process.logs", "code.shell.process.stop", "code.verify.run", "code.deps.inspect", "code.deps.audit", "code.deps.add", "code.plan.propose", "code.plan.update", "code.ask_user", ...GIT_CODE_IDS];
-const ALL_CODE_INVENTORY_IDS = [...CODE_INVENTORY_IDS, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384];
+/** C12: the delegation tool (inventory id 385), appended after the git group so no earlier id moved. */
+const SUBAGENT_CODE_IDS = ["code.agent.spawn"];
+const ALL_CODE_IDS = [...CODE_IDS, "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.diff", "code.fs.undo_last_turn", "code.shell.exec", "code.shell.process.start", "code.shell.process.list", "code.shell.process.logs", "code.shell.process.stop", "code.verify.run", "code.deps.inspect", "code.deps.audit", "code.deps.add", "code.plan.propose", "code.plan.update", "code.ask_user", ...GIT_CODE_IDS, ...SUBAGENT_CODE_IDS];
+const ALL_CODE_INVENTORY_IDS = [...CODE_INVENTORY_IDS, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385];
 
 describe("C2: read-only code.* capability registration", () => {
   it("registers exactly six code capabilities on inventory ids 349-354, all low risk and read-only", () => {
@@ -50,24 +52,24 @@ describe("C2: read-only code.* capability registration", () => {
   it("keeps the catalogue and the audit matrix in sync and the inventory ids unique", () => {
     const catalogCode = CAPABILITY_CATALOG.filter((c) => c.domain === "code");
     const matrixCode = CAPABILITY_MATRIX.filter((c) => c.domain === "code");
-    // C9 published three more code tools (`code.plan.propose`, `code.plan.update`, `code.ask_user`) and C11 the
-    // eleven git tools, so the code group is 36 now.
-    expect(catalogCode).toHaveLength(36);
-    expect(matrixCode).toHaveLength(36);
+    // C9 published three more code tools (`code.plan.propose`, `code.plan.update`, `code.ask_user`), C11 the
+    // eleven git tools and C12 the delegation tool, so the code group is 37 now.
+    expect(catalogCode).toHaveLength(37);
+    expect(matrixCode).toHaveLength(37);
     expect(matrixCode.map((entry) => entry.id)).toEqual(ALL_CODE_INVENTORY_IDS);
     expect(catalogCode.map((c) => c.id)).toEqual(ALL_CODE_IDS);
 
     const allInventoryIds = CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds);
     expect(new Set(allInventoryIds).size).toBe(allInventoryIds.length);
-    expect(Math.max(...allInventoryIds)).toBe(384); // C11 added ids 374-384
+    expect(Math.max(...allInventoryIds)).toBe(385); // C12 added id 385
     // The code group did not disturb the previous totals' internal split.
     const callable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
-    // The catalog is 384 entries with 120 callable: the real totals, updated for C9's three tools and C11's
-    // eleven git tools. This file is not part of the security gate and its pins had drifted before (it expected
-    // 367/103 while the catalog already stood at 370/106), so the numbers here are the current truth rather
-    // than a delta on a stale baseline.
-    expect(CAPABILITY_CATALOG).toHaveLength(384);
-    expect(callable).toHaveLength(120);
+    // The catalog is 385 entries with 121 callable: the real totals, updated for C9's three tools, C11's
+    // eleven git tools and C12's delegation tool. This file is not part of the security gate and its pins had
+    // drifted before (it expected 367/103 while the catalog already stood at 370/106), so the numbers here are
+    // the current truth rather than a delta on a stale baseline.
+    expect(CAPABILITY_CATALOG).toHaveLength(385);
+    expect(callable).toHaveLength(121);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
   });
 
@@ -94,21 +96,22 @@ describe("security-gate: C2 code capabilities are gated by a feature flag", () =
   it("reports the flag as unknown (never on) when the server has no flag source", () => {
     const report = new CapabilityInspectorService().inspect("all");
     const codeItems = report.items.filter((item) => item.domain === "code");
-    expect(codeItems).toHaveLength(36);
+    // C12: 37 code capabilities — the delegation tool is the newest, and it hangs off `code.subagents`.
+    expect(codeItems).toHaveLength(37);
     for (const item of codeItems) {
       // The governing flag comes from the canonical mapping: reads (and code.fs.diff) use code.read,
       // file mutations use code.write, sandbox execution uses code.shell.
       expect(item.flagKey, `${item.capabilityId} flag`).toBe(flagKeyForCodeTool(item.capabilityId, "code"));
       expect(item.flagState).toBe("unknown");
     }
-    // Dark launch: with every code flag off — C11's `code.git` is a fourth code sub-flag — the capabilities
-    // stay visible in the inspector but are gated.
-    const dark = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: false, "code.write": false, "code.shell": false, "code.git": false }, flagSourceAvailable: true });
+    // Dark launch: with every code flag off — C11's `code.git` and C12's `code.subagents` are further code
+    // sub-flags — the capabilities stay visible in the inspector but are gated.
+    const dark = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: false, "code.write": false, "code.shell": false, "code.git": false, "code.subagents": false }, flagSourceAvailable: true });
     expect(dark.items.filter((item) => item.domain === "code").every((item) => item.flagState === "off")).toBe(true);
-    const on = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: true, "code.write": true, "code.shell": true, "code.git": true }, flagSourceAvailable: true });
+    const on = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: true, "code.write": true, "code.shell": true, "code.git": true, "code.subagents": true }, flagSourceAvailable: true });
     expect(on.items.filter((item) => item.domain === "code").every((item) => item.flagState === "on")).toBe(true);
-    // Reads enabled, writes, shell and git still off: exactly the read-gated capabilities report "on".
-    const readOnly = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: true, "code.write": false, "code.shell": false, "code.git": false }, flagSourceAvailable: true });
+    // Reads enabled, writes, shell, git and delegation still off: exactly the read-gated capabilities report "on".
+    const readOnly = new CapabilityInspectorService().inspect("all", undefined, { flagStates: { [CODE_READ_FLAG]: true, "code.write": false, "code.shell": false, "code.git": false, "code.subagents": false }, flagSourceAvailable: true });
     const codeOnly = readOnly.items.filter((item) => item.domain === "code");
     const expectedOn = codeOnly.filter((item) => flagKeyForCodeTool(item.capabilityId, "code") === CODE_READ_FLAG).map((item) => item.capabilityId).sort();
     expect(codeOnly.filter((item) => item.flagState === "on").map((item) => item.capabilityId).sort()).toEqual(expectedOn);
