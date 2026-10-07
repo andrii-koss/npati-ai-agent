@@ -11,8 +11,8 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   CreateSnapshotConfigVersionInput, CodeActivityEventRecord, CreateCodeActivityEventInput,
   ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord, CreateReplayBundleInput,
   CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput,
-  ListReplayBundlesInput } from "./types";
-import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, ExecutionSnapshotImmutableError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor } from "./types";
+  ListReplayBundlesInput, CodeProjectRef, CodeProjectRefScanInput, CodeProjectRefScanPage, CodeRunRequestRecord } from "./types";
+import { WorkspaceAccessError, WorkspaceNotFoundError, CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, ExecutionSnapshotImmutableError, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, isClassificationAtLeast, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, codeRunRequestStatus } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 // C9: goals, plan revisions and session todos — shared rule implementation for both backends.
 import { InMemoryCodeGoalStore } from "./code-goal-store";
@@ -22,6 +22,20 @@ import {
   type CodeUserQuestionRecord,
   type CreateCodeUserQuestionInput,
 } from "./code-question-store";
+// C10: session durability — shared rule implementation for both backends.
+import {
+  InMemoryCodeSessionDurabilityStore,
+  type CodeRunRecoveryNoticeRecord,
+  type CodeSessionForkRecord,
+  type CodeSessionHeadRecord,
+  type CodeSessionRewindRecord,
+  type CompleteCodeSessionForkInput,
+  type CompleteCodeSessionRewindInput,
+  type CreateCodeRunRecoveryNoticeInput,
+  type CreateCodeSessionForkInput,
+  type CreateCodeSessionRewindInput,
+  type SetCodeSessionHeadInput,
+} from "./code-session-durability-store";
 import type {
   CodeGoalRecord, CodeGoalWithCriteria, CodeSessionPlanRecord, CodeSessionTodoRecord,
   CreateCodeGoalInput, CreateCodeSessionPlanInput, DecideCodeSessionPlanInput,
@@ -83,6 +97,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   // keyed by (run, turnIndex) exactly like the primary key of `code_run_turns`.
   private readonly codeRunStates = new Map<string, CodeRunStateRecord>();
   private readonly codeRunTurns = new Map<string, CodeRunTurnRecord>();
+  // C10: the run's original request, keyed by run id like the row it belongs to. It is a separate map so the
+  // lease/status reads (the reaper's scans) never carry prompt content, exactly as the Postgres backend keeps
+  // the request columns out of its shared select list.
+  private readonly codeRunRequests = new Map<string, CodeRunRequestRecord>();
   // C6b: append-only snapshots and config versions. Keyed by id; the session chain is derived on read.
   private readonly executionSnapshots = new Map<string, ExecutionSnapshotRecord>();
   private readonly snapshotConfigVersions = new Map<string, SnapshotConfigVersionRecord>();
@@ -97,6 +115,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeGoalState = new InMemoryCodeGoalStore();
   // C9: `code.ask_user`. Same rules as the Postgres backend — the answer validation lives in the shared module.
   private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
+  // C10: the conversation cursor, the recovery notice and the two operation ledgers. Same rules as the Postgres
+  // backend (claim-before-perform, one head per session, revision-checked), because a rule that holds only in
+  // SQL stops holding on this path.
+  private readonly codeSessionDurabilityState = new InMemoryCodeSessionDurabilityStore();
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -2004,7 +2026,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
     const existing = await this.getCodeRunState(input.companyId, input.runId);
-    // Idempotent by run: a retried create never rewinds the cursor and never steals the lease.
+    // Idempotent by run: a retried create never rewinds the cursor, never steals the lease and — C10 — never
+    // rewrites the original request. A resume re-runs this call with the continuation prompt, and the original
+    // text must survive it.
     if (existing) return existing;
     const record: CodeRunStateRecord = {
       runId: input.runId,
@@ -2025,6 +2049,25 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       revision: 1,
     };
     this.codeRunStates.set(input.runId, record);
+    const request = input.request ?? { status: "not_recorded" as const, text: null, sha256: null, truncated: false, recordedAt: null };
+    this.codeRunRequests.set(input.runId, {
+      runId: input.runId,
+      companyId: input.companyId,
+      status: codeRunRequestStatus(request.status),
+      text: request.text,
+      sha256: request.sha256,
+      truncated: request.truncated === true,
+      recordedAt: request.recordedAt,
+      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
+      retentionClass: input.retentionClass ?? DEFAULT_RETENTION_CLASS,
+    });
+    return structuredClone(record);
+  }
+
+  /** C10: the run's original request. A run of another company is indistinguishable from a missing one. */
+  async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
+    const record = this.codeRunRequests.get(runId);
+    if (!record || record.companyId !== companyId) return null;
     return structuredClone(record);
   }
 
@@ -2147,6 +2190,51 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         ? encodeCodeRunScanCursor({ startedAt: last.startedAt.toISOString(), runId: last.runId, turnIndex: 0 })
         : null,
     };
+  }
+
+  /**
+   * C10 (ТЗ item 7): the projects that own a code session, newest session first. Used by the sandbox-retention
+   * sweep to find a sandbox whose project the process no longer remembers. Two ids and a timestamp — no name,
+   * path or content leaves the store through this read.
+   */
+  async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const newest = new Map<string, { companyId: string; projectId: string; lastSessionAt: string }>();
+    for (const session of this.codeSessions.values()) {
+      if (input.companyId !== null && session.companyId !== input.companyId) continue;
+      const createdAt = typeof session.createdAt === "string" ? session.createdAt : new Date(String(session.createdAt)).toISOString();
+      const key = `${session.companyId}:${session.projectId}`;
+      const existing = newest.get(key);
+      if (!existing || existing.lastSessionAt < createdAt) {
+        newest.set(key, { companyId: session.companyId, projectId: session.projectId, lastSessionAt: createdAt });
+      }
+    }
+    const ordered = [...newest.values()].sort((a, b) =>
+      b.lastSessionAt.localeCompare(a.lastSessionAt) || a.projectId.localeCompare(b.projectId));
+    const afterCursor = cursor
+      ? ordered.filter((ref) => ref.lastSessionAt < cursor.startedAt
+        || (ref.lastSessionAt === cursor.startedAt && ref.projectId > cursor.runId))
+      : ordered;
+    const page = afterCursor.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      items: page as CodeProjectRef[],
+      nextCursor: afterCursor.length > limit && last
+        ? encodeCodeRunScanCursor({ startedAt: last.lastSessionAt, runId: last.projectId, turnIndex: 0 })
+        : null,
+    };
+  }
+
+  /**
+   * C10 (ТЗ item 7): one project by ids, without a user context. The retention sweep runs as the deployment's
+   * system identity, which owns no projects, so the tenant-scoped `getProject` cannot address them. `null` for an
+   * unknown or foreign id — the caller is the reaper, and there is no caller-supplied id to leak here.
+   */
+  async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
+    const project = this.projects.get(projectId);
+    if (!project || project.companyId !== companyId) return null;
+    return structuredClone(project);
   }
 
   /** Keyset scan over the open turns, ordered by (startedAt, runId, turnIndex). */
@@ -2346,6 +2434,68 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
   async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
     return this.codeUserQuestionState.cancelPendingQuestions(input);
+  }
+
+  // --- C10: session durability -------------------------------------------------------------------------
+
+  async getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null> {
+    return this.codeSessionDurabilityState.getHead(companyId, sessionId);
+  }
+
+  async setCodeSessionHead(input: SetCodeSessionHeadInput): Promise<CodeSessionHeadRecord> {
+    return this.codeSessionDurabilityState.setHead(input);
+  }
+
+  async createCodeRunRecoveryNotice(input: CreateCodeRunRecoveryNoticeInput): Promise<CodeRunRecoveryNoticeRecord> {
+    return this.codeSessionDurabilityState.createNotice(input);
+  }
+
+  async getLatestCodeRunRecoveryNotice(companyId: string, runId: string): Promise<CodeRunRecoveryNoticeRecord | null> {
+    return this.codeSessionDurabilityState.getLatestNotice(companyId, runId);
+  }
+
+  async listCodeRunRecoveryNotices(input: { companyId: string; runId: string; limit?: number }): Promise<CodeRunRecoveryNoticeRecord[]> {
+    return this.codeSessionDurabilityState.listNotices(input);
+  }
+
+  async createCodeSessionRewind(input: CreateCodeSessionRewindInput): Promise<{ record: CodeSessionRewindRecord; replayed: boolean }> {
+    return this.codeSessionDurabilityState.createRewind(input);
+  }
+
+  async getCodeSessionRewind(companyId: string, operationId: string): Promise<CodeSessionRewindRecord | null> {
+    return this.codeSessionDurabilityState.getRewind(companyId, operationId);
+  }
+
+  async reopenCodeSessionRewind(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionRewindRecord | null; reopened: boolean }> {
+    return this.codeSessionDurabilityState.reopenRewind(input);
+  }
+
+  async completeCodeSessionRewind(input: CompleteCodeSessionRewindInput): Promise<CodeSessionRewindRecord> {
+    return this.codeSessionDurabilityState.completeRewind(input);
+  }
+
+  async listCodeSessionRewinds(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionRewindRecord[]> {
+    return this.codeSessionDurabilityState.listRewinds(input);
+  }
+
+  async createCodeSessionFork(input: CreateCodeSessionForkInput): Promise<{ record: CodeSessionForkRecord; replayed: boolean }> {
+    return this.codeSessionDurabilityState.createFork(input);
+  }
+
+  async getCodeSessionFork(companyId: string, operationId: string): Promise<CodeSessionForkRecord | null> {
+    return this.codeSessionDurabilityState.getFork(companyId, operationId);
+  }
+
+  async completeCodeSessionFork(input: CompleteCodeSessionForkInput): Promise<CodeSessionForkRecord> {
+    return this.codeSessionDurabilityState.completeFork(input);
+  }
+
+  async listCodeSessionForks(input: { companyId: string; parentSessionId: string; limit?: number }): Promise<CodeSessionForkRecord[]> {
+    return this.codeSessionDurabilityState.listForks(input);
+  }
+
+  async reopenCodeSessionFork(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionForkRecord | null; reopened: boolean }> {
+    return this.codeSessionDurabilityState.reopenFork(input);
   }
 
   async createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria> {

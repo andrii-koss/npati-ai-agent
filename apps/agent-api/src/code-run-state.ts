@@ -1,6 +1,8 @@
 import type {
   ApplyCodeRunStateEventInput,
   AuthContext,
+  CodeRunRequestInput,
+  CodeRunRequestRecord,
   CodeRunScanPage,
   CodeRunStateRecord,
   CodeRunStateScanInput,
@@ -11,11 +13,15 @@ import type {
   CodeRunTurnScanInput,
   CodeRunTurnStatus,
   CreateCodeRunStateInput,
+  DataClassification,
+  RetentionClass,
   UpsertCodeRunTurnInput,
 } from "@npati/workspace";
 import { clampScanLimit, encodeCodeRunScanCursor } from "@npati/workspace";
+import { createHash } from "node:crypto";
 import type { CodeAgentLimits } from "./code-agent-config";
 import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
+import { scanTextForSecrets } from "./code-secret-scanner";
 
 /**
  * C6a: the durable run-state log.
@@ -36,8 +42,14 @@ import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
  *    run whose lease is gone can be reconciled by another process, and the previous owner must stop rather
  *    than keep writing state (see `CodingAgentRunner`, which treats a refused renewal as `interrupted`).
  *
- * Everything the log stores is metadata: tool names, ids, outcomes, counts and timestamps. File contents,
- * commands and model output never reach it — `assertNoSensitiveRunState` throws if they try.
+ * Everything the log stores in a run's `details` bag is metadata: tool names, ids, outcomes, counts and
+ * timestamps. File contents, commands and model output never reach it — `assertNoSensitiveRunState` throws if
+ * they try.
+ *
+ * C10 adds exactly one piece of **content** to the run row: the user's own request (`startRun`'s `request`),
+ * which is the run's input rather than anything a tool or a model produced. It is bounded, credential-scanned
+ * and written once, by the same statement that creates the run; `details` keeps its metadata-only rule, and
+ * `code_run_turns.messages` keeps its documented "bounded, metadata-only snapshot of the turn" meaning.
  */
 
 /** The store surface this log needs. Structural, so a test can inject an in-memory double. */
@@ -49,6 +61,8 @@ export interface CodeRunStateStorePort {
   upsertCodeRunTurn(input: UpsertCodeRunTurnInput): Promise<CodeRunTurnRecord>;
   getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null>;
   listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]>;
+  /** C10: the run's original request; the one read that returns content (see `loadRunRequest`). */
+  getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null>;
   /** Read-only keyset scans, used by `listStuckToolCalls` / `listOverdueRuns` (and by the reaper). */
   listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>>;
   listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>>;
@@ -78,6 +92,18 @@ export interface CodeRunStartInput {
   /** Caller-supplied run id; the log generates one when absent so every run has durable state. */
   runId?: string;
   details?: Record<string, unknown>;
+  /**
+   * C10: the run's **original request**, stored by the same write that creates the run. Only the first
+   * `startRun` of a run id can write it — the row creation is idempotent by run id — so a resume re-running this
+   * call with its continuation prompt cannot replace the user's own words. Omitted means "this caller has no
+   * request to record", which is stored as `not_recorded` rather than as an empty string.
+   */
+  request?: string | null;
+  /** C10: the class in force at creation, copied from the session so the record states its own class. */
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
+  /** The request ceiling; defaults to `CODE_RUN_REQUEST_MAX_CHARS`. Injectable so a test can force truncation. */
+  requestMaxChars?: number;
 }
 
 export interface CodeRunStartResult {
@@ -102,6 +128,35 @@ export interface CodeRunBoundary {
   unknownOutcomeToolCalls: CodeRunToolCallRecord[];
   /** Checkpoint of the last finished turn — the comparison base for the workspace diff. */
   checkpointId: string | null;
+}
+
+/** Why a resume was refused before any lease was taken. `not_found` means the run row itself is gone. */
+export type CodeRunResumeRefusal = "waiting_for_user" | "terminal" | "not_found";
+
+export interface CodeRunResumeResult {
+  /** True when this process now holds the lease and the run is `running` again. */
+  held: boolean;
+  /** The stored state; `null` only when the run row does not exist (or belongs to another company). */
+  state: CodeRunStateRecord | null;
+  refused: CodeRunResumeRefusal | null;
+}
+
+/**
+ * The one rule that decides whether a run may be resumed, exported so the log, the resume service and the tests
+ * cannot disagree about it:
+ *
+ *   - `running` (with an expired lease) and `interrupted` are exactly the states a crash leaves behind, so both
+ *     resume — and resuming an expired-lease `running` run is why the reconciler does not have to run first;
+ *   - `waiting_for_user` is a **pause on a question**, not an interruption. Resuming it would run the turn the
+ *     question stopped and orphan the answer on its way;
+ *   - `completed`/`failed`/`cancelled` are terminal. Continuing one would need a new run id, and a second replay
+ *     bundle for the same run cannot exist (`(run_id, bundle_version)` is unique), so the honest answer is a
+ *     refusal rather than a run that silently loses its recording.
+ */
+export function refuseResume(status: CodeRunStateStatus): CodeRunResumeRefusal | null {
+  if (status === "waiting_for_user") return "waiting_for_user";
+  if (status === "completed" || status === "failed" || status === "cancelled") return "terminal";
+  return null;
 }
 
 const DEFAULT_LEASE_MS = 60_000;
@@ -254,8 +309,70 @@ export function assertNoSensitiveRunState(value: unknown, label = "run state"): 
   }
 }
 
+/**
+ * C10 (request durability): how much of the original request is recorded.
+ *
+ * A ceiling exists because the request is content that becomes durable evidence, and an unbounded prompt would
+ * make one run's row as large as the user's whole paste. 20 000 characters is far beyond a real task
+ * description and far below anything that would threaten the row; when it is exceeded the stored text says so
+ * in place (`truncated` plus the marker appended to the text), so a reader can never mistake a bounded prefix
+ * for the whole request.
+ */
+export const CODE_RUN_REQUEST_MAX_CHARS = 20_000;
+
+/** The visible marker placed where a stored request was cut, so the record explains itself. */
+export function requestTruncationMarker(droppedChars: number): string {
+  return `\n…[request truncated: ${droppedChars} character(s) were not recorded]`;
+}
+
+function sha256HexOf(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * Decides what is stored for a run's original request. Pure, so the decision is testable without a store and the
+ * runner, the log and the tests cannot disagree about what "recorded" means.
+ *
+ * Three outcomes, and the third is the one that matters:
+ *
+ *   - **not recorded** — the caller passed no prompt (a caller that drives the runner programmatically), or one
+ *     that is only whitespace. `status` says so instead of the row simply being empty, because a resume has to
+ *     tell "there was no request" from "we lost it".
+ *   - **recorded** — the verbatim text, bounded, with its own sha256 so a reader can prove it is quoting the
+ *     recorded bytes and not a paraphrase.
+ *   - **refused_credential** — the text looked like it carried a credential. It is **not** stored and **not**
+ *     redacted into a placeholder: the C4a rule is that a secret refuses the write rather than being silently
+ *     stripped, because a `REDACTED:` placeholder is a reference that must never reach disk. Only the fact that
+ *     a record was refused is kept, which is what lets a resume answer honestly instead of pretending the run
+ *     had no request.
+ */
+export function decideRunRequest(input: {
+  request: string | null | undefined;
+  now: Date;
+  maxChars?: number;
+}): CodeRunRequestInput {
+  const raw = typeof input.request === "string" ? input.request : "";
+  if (!raw.trim()) {
+    return { status: "not_recorded", text: null, sha256: null, truncated: false, recordedAt: null };
+  }
+  if (scanTextForSecrets(raw).findings.length > 0) {
+    return { status: "refused_credential", text: null, sha256: null, truncated: false, recordedAt: null };
+  }
+  const limit = Math.max(1, input.maxChars ?? CODE_RUN_REQUEST_MAX_CHARS);
+  const truncated = raw.length > limit;
+  const text = truncated ? `${raw.slice(0, limit)}${requestTruncationMarker(raw.length - limit)}` : raw;
+  return {
+    status: "recorded",
+    text,
+    sha256: sha256HexOf(text),
+    truncated,
+    recordedAt: input.now,
+  };
+}
+
 /** Monotonic sequence derived from whatever the store last confirmed. */
-export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
+export class CodeRunStateLog {
+  private readonly store: CodeRunStateStorePort;
   private readonly now: () => number;
   private readonly leaseMs: number;
   private readonly heartbeatMs: number;
@@ -279,10 +396,24 @@ export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
   /**
    * Creates the run row already leased by `owner`. Idempotent by run id: a retried start returns the stored
    * row untouched, so it can neither rewind the cursor nor steal the lease from the process still working.
+   *
+   * C10: the run's **original request** is stored by this same write, before the first model step. Two
+   * properties follow from doing it here rather than in a later call:
+   *
+   *   - there is no window in which the run exists and its request does not, so a process that dies immediately
+   *     after start still leaves the request behind — which is exactly the failure the owner named;
+   *   - the store's `ON CONFLICT (run_id) DO NOTHING` (and its in-memory equivalent) makes the request
+   *     write-once. A resume re-runs this call with the reconstructed continuation prompt, and the database,
+   *     not a convention, is what keeps the user's own words intact.
    */
   async startRun(input: CodeRunStartInput): Promise<CodeRunStartResult> {
     const runId = input.runId ?? `code-run-${this.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     if (input.details) assertNoSensitiveRunState(input.details);
+    const request = decideRunRequest({
+      request: input.request ?? null,
+      now: new Date(this.now()),
+      ...(input.requestMaxChars === undefined ? {} : { maxChars: input.requestMaxChars }),
+    });
     const state = await this.store.createCodeRunState({
       runId,
       workspaceId: input.ctx.workspaceId,
@@ -293,9 +424,26 @@ export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
       leaseMs: this.leaseMs,
       now: new Date(this.now()),
       ...(input.details ? { details: input.details } : {}),
+      request,
+      ...(input.dataClassification ? { dataClassification: input.dataClassification } : {}),
+      ...(input.retentionClass ? { retentionClass: input.retentionClass } : {}),
     });
+    if (request.status === "refused_credential") {
+      // The run continues: persistence is evidence, never a gate. The refusal is a fact an operator can see
+      // and a resume reports it honestly, and the value itself reached neither this store nor any log line.
+      this.logger?.warn({ runId, reason: "request_contains_credential" }, "code_run_request_record_refused");
+    }
     this.observe(runId, state.lastEventSeq);
     return { runId, state };
+  }
+
+  /**
+   * C10: the run's recorded original request. Tenant-scoped (the store refuses a foreign run), and `null` only
+   * when the run row does not exist — a run with no recorded request answers with a record whose `status` says
+   * which of the two reasons applies.
+   */
+  async loadRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
+    return this.store.getCodeRunRequest(companyId, runId);
   }
 
   /** Takes the lease when it is free, expired or already ours. Returns the stored state either way. */
@@ -306,6 +454,38 @@ export class CodeRunStateLog {  private readonly store: CodeRunStateStorePort;
       lease: { mode: "acquire", owner: input.owner, now: new Date(this.now()), leaseMs: this.leaseMs },
     });
     return { held: state.leaseOwner === input.owner, state };
+  }
+
+  /**
+   * C10: the run is live again under a new owner — the one write a resume performs on the run state.
+   *
+   * Two properties, and both are why this is a method here rather than a sequence the caller assembles:
+   *
+   *  1. **The lease is acquired first, and the status moves only if it was.** `applyCodeRunStateEvent` applies
+   *     the non-lease part of a patch even when the lease predicate fails (deliberately: the status of a run we
+   *     no longer own is still true information). For resume that would be wrong — stamping `running` while
+   *     another process holds a healthy lease would describe someone else's run as ours. Acquiring first and
+   *     only then writing the status closes that: once the acquire succeeded, the lease expiry this write set
+   *     (60 s) cannot be taken by anyone else inside the same call.
+   *  2. **The status is decided by one rule, exported below.** A `waiting_for_user` run is paused on a question,
+   *     not interrupted, and a terminal run is over: resuming either would either orphan the answer that is on
+   *     its way or continue a run whose bundle is already closed. Both are refusals, reported as such instead of
+   *     silently starting something.
+   */
+  async resumeRun(input: { companyId: string; runId: string; owner: string }): Promise<CodeRunResumeResult> {
+    const current = await this.store.getCodeRunState(input.companyId, input.runId);
+    if (!current) return { held: false, state: null, refused: "not_found" };
+    const refused = refuseResume(current.status);
+    if (refused) return { held: false, state: current, refused };
+    const acquired = await this.acquireLease(input);
+    if (!acquired.held) return { held: false, state: acquired.state, refused: null };
+    const state = await this.apply(input.runId, {
+      companyId: input.companyId,
+      runId: input.runId,
+      status: "running",
+      heartbeatAt: new Date(this.now()),
+    });
+    return { held: state.leaseOwner === input.owner, state, refused: null };
   }
 
   /**

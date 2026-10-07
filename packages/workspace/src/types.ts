@@ -15,6 +15,18 @@ import type {
   CodeUserQuestionRecord,
   CreateCodeUserQuestionInput,
 } from "./code-question-store";
+import type {
+  CodeRunRecoveryNoticeRecord,
+  CodeSessionForkRecord,
+  CodeSessionHeadRecord,
+  CodeSessionRewindRecord,
+  CompleteCodeSessionForkInput,
+  CompleteCodeSessionRewindInput,
+  CreateCodeRunRecoveryNoticeInput,
+  CreateCodeSessionForkInput,
+  CreateCodeSessionRewindInput,
+  SetCodeSessionHeadInput,
+} from "./code-session-durability-store";
 
 /**
  * C9 types are defined in `code-goal-types.ts` and `code-question-store.ts` and re-exported here so the store
@@ -74,6 +86,36 @@ export {
   validateQuestionAnswer,
   validateQuestionRequest,
 } from "./code-question-store";
+/**
+ * C10 types are defined in `code-session-durability-store.ts` (the conversation cursor, the recovery notice and
+ * the two operation ledgers) and re-exported here so the store interface can name them. The dependency is
+ * type-only in both directions, so there is no runtime cycle.
+ */
+export type {
+  CodeForkStatus,
+  CodeRewindStatus,
+  CodeRewindTarget,
+  CodeRunRecoveryNoticeRecord,
+  CodeSessionForkRecord,
+  CodeSessionHeadReason,
+  CodeSessionHeadRecord,
+  CodeSessionRewindRecord,
+  CompleteCodeSessionForkInput,
+  CompleteCodeSessionRewindInput,
+  CreateCodeRunRecoveryNoticeInput,
+  CreateCodeSessionForkInput,
+  CreateCodeSessionRewindInput,
+  SetCodeSessionHeadInput,
+} from "./code-session-durability-store";
+export {
+  CODE_FORK_STATUSES,
+  CODE_REWIND_STATUSES,
+  CODE_REWIND_TARGETS,
+  CODE_SESSION_HEAD_REASONS,
+  CodeSessionHeadRevisionConflictError,
+  CodeSessionOperationInProgressError,
+  CodeSessionOperationNotFoundError,
+} from "./code-session-durability-store";
 
 export interface AuthContext {
   userId: string;
@@ -1042,6 +1084,51 @@ export interface CodeRunTurnRecord {
   finishedAt: Date | null;
 }
 
+/**
+ * C10 (request durability): the state of the run's **original request** record.
+ *
+ * `not_recorded` is a first-class answer, not a missing row: a run created before this field existed, and a run
+ * whose caller supplied no prompt at all, are both honestly "we do not have the request" — which is exactly what
+ * a resume must say instead of implying the request was something else. `refused_credential` is the third
+ * answer: the request looked like it carried a credential, so its **text was never stored** and only the fact
+ * that a record was refused is kept.
+ */
+export type CodeRunRequestStatus = "not_recorded" | "recorded" | "refused_credential";
+
+/**
+ * The request record as the writer decided it. The decision (bounding and the credential scan) belongs to the
+ * run-state log, so the store persists a decided value rather than re-deriving one — and the two backends
+ * cannot disagree about what was stored.
+ */
+export interface CodeRunRequestInput {
+  status: CodeRunRequestStatus;
+  /** The verbatim request. `null` unless `status` is `recorded`. */
+  text: string | null;
+  /** sha256 of the exact stored text, so a reader can prove it is quoting the recorded bytes. */
+  sha256: string | null;
+  /** True when the stored text is a bounded prefix of what the user sent; the marker is in the text itself. */
+  truncated: boolean;
+  recordedAt: Date | null;
+}
+
+/** The request record as a reader gets it back, with the tenant and the class it was created under. */
+export interface CodeRunRequestRecord extends CodeRunRequestInput {
+  runId: string;
+  companyId: string;
+  /** The classification in force when the run was created; copied so the evidence is self-describing. */
+  dataClassification: DataClassification;
+  retentionClass: RetentionClass;
+}
+
+/**
+ * Narrows a stored `request_status`. A value the vocabulary does not know is read as `not_recorded` rather than
+ * trusted: an unknown status means this reader cannot say the request is available, and "we cannot say" must
+ * never become "here it is".
+ */
+export function codeRunRequestStatus(value: unknown): CodeRunRequestStatus {
+  return value === "recorded" || value === "refused_credential" ? value : "not_recorded";
+}
+
 export interface CreateCodeRunStateInput {
   runId: string;
   workspaceId: string;
@@ -1054,6 +1141,15 @@ export interface CreateCodeRunStateInput {
   leaseMs: number;
   now: Date;
   details?: Record<string, unknown>;
+  /**
+   * C10: the run's original request, written **in the same row** that creates the run. A separate write would
+   * leave a window in which the run exists and its request does not, which is exactly the window a crash
+   * immediately after start would land in. Idempotent by run id, so a resume can never overwrite it.
+   */
+  request?: CodeRunRequestInput;
+  /** C10: the class in force at creation, copied from the session so the row states its own class. */
+  dataClassification?: DataClassification;
+  retentionClass?: RetentionClass;
 }
 
 export interface ApplyCodeRunStateEventInput {
@@ -1110,6 +1206,33 @@ export interface CodeRunStateScanInput {
   startedBefore: Date;
   limit: number;
   cursor?: string | null;
+}
+
+/**
+ * C10 (ТЗ item 7): one project that owns a code session, as the sandbox-retention sweep needs to see it.
+ *
+ * Why a scan is required rather than a per-project walk: a sandbox is referenced only by `projects.sandbox_id`, and
+ * the only other durable pointer to it is the project itself. The retention policy has to find every project that
+ * can own a sandbox without holding any user's `AuthContext`, and the projects that can are exactly the ones with a
+ * code session. The result carries no names, paths or content — two ids and a timestamp.
+ */
+export interface CodeProjectRef {
+  companyId: string;
+  projectId: string;
+  /** When the project's most recent code session was created; used only to order the scan. */
+  lastSessionAt: string;
+}
+
+export interface CodeProjectRefScanInput {
+  /** `null` is the system scope and is only for the reaper; every other caller passes a company. */
+  companyId: string | null;
+  limit: number;
+  cursor?: string | null;
+}
+
+export interface CodeProjectRefScanPage {
+  items: CodeProjectRef[];
+  nextCursor: string | null;
 }
 
 export interface CodeRunTurnScanInput extends CodeRunStateScanInput {
@@ -1507,11 +1630,32 @@ export interface WorkspaceStore {
   getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null>;
   listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]>;
   /**
+   * C10: the run's **original request**, tenant-scoped like every other run read. `null` means the run row does
+   * not exist for this company — never "the request was empty": a run whose request was never recorded answers
+   * with a record whose `status` says so, so a resume can tell "we lost it" from "there was none".
+   *
+   * It is a separate read from `getCodeRunState` on purpose: the request is content, and the lease/status row is
+   * read by the reaper's and the reconciler's scans, which have no business pulling prompt text into memory.
+   */
+  getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null>;
+  /**
    * Read-only keyset scans for the run reaper. Both are tenant-scoped (`companyId: null` is the documented
    * system scope) and bounded: they never return more than `limit` rows and hand back a cursor when more may
    * follow, so a reaper cannot pull an unbounded result set into memory on a busy deployment.
    */
   listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>>;
+  /**
+   * C10 (ТЗ item 7): enumerate the projects that own a code session, tenant-scoped by the same system-scope rule
+   * the run scans use. The sandbox-retention sweep needs this to find a sandbox whose owning project is no longer
+   * in the process's idle map — after a restart nothing else can name it.
+   */
+  listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage>;
+  /**
+   * C10 (ТЗ item 7): read one of those projects **without** a user context. `getProject` is tenant-scoped by
+   * `createdBy`, so the reaper's system identity cannot use it; this is the same system scope the run scans already
+   * carry, and it returns the project row the caller could have addressed the sandbox by anyway.
+   */
+  getProjectForSystem(companyId: string, projectId: string): Promise<Project | null>;
   listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>>;
 
   // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
@@ -1635,6 +1779,53 @@ export interface WorkspaceStore {
   listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]>;
   /** Steps in the recorded (executed) order. */
   listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]>;
+
+  // --- C10: session durability (the conversation cursor, the recovery notice, the operation ledgers) -----
+  /**
+   * The conversation cursor of a session, or `null` when the session has never been re-pointed. Every reader of
+   * a transcript applies it: turns after `turnIndex` are outside the conversation. Rewinding is a pointer move
+   * because the replay bundle and the context summaries are append-only (078, 079) — deleting them would be
+   * deleting the evidence of what the model was shown.
+   */
+  getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null>;
+  /**
+   * Moves (or creates) the cursor. Optimistic by `expectedRevision` (0 means "no head yet"), so two concurrent
+   * rewinds cannot silently overwrite one another.
+   */
+  setCodeSessionHead(input: SetCodeSessionHeadInput): Promise<CodeSessionHeadRecord>;
+  /** Append-only: a notice describes a moment, so it is never rewritten (migration 082 refuses both). */
+  createCodeRunRecoveryNotice(input: CreateCodeRunRecoveryNoticeInput): Promise<CodeRunRecoveryNoticeRecord>;
+  /** The newest notice of a run, which is what a resume hands to the model. Tenant-scoped. */
+  getLatestCodeRunRecoveryNotice(companyId: string, runId: string): Promise<CodeRunRecoveryNoticeRecord | null>;
+  /** Newest first, tenant-scoped. */
+  listCodeRunRecoveryNotices(input: { companyId: string; runId: string; limit?: number }): Promise<CodeRunRecoveryNoticeRecord[]>;
+  /**
+   * Claims a rewind operation. Idempotent by `(companyId, operationId)`: a repeated call returns the stored
+   * operation instead of performing a second rollback, and a call that arrives while the first is still pending
+   * is refused (`CodeSessionOperationInProgressError`) rather than duplicated.
+   */
+  createCodeSessionRewind(input: CreateCodeSessionRewindInput): Promise<{ record: CodeSessionRewindRecord; replayed: boolean }>;
+  getCodeSessionRewind(companyId: string, operationId: string): Promise<CodeSessionRewindRecord | null>;
+  /**
+   * Reopens a claim that provably changed nothing (a `failed` operation with no effect, or a `pending` claim older
+   * than `staleMs`), so a retry after a crash can perform the operation. An operation that created a checkpoint or
+   * moved the cursor is never reopened — that is what keeps a retry from creating a second safety checkpoint.
+   */
+  reopenCodeSessionRewind(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionRewindRecord | null; reopened: boolean }>;
+  /** Stamps the outcome. Only a `pending` operation can be completed, so a retry cannot rewrite a result. */
+  completeCodeSessionRewind(input: CompleteCodeSessionRewindInput): Promise<CodeSessionRewindRecord>;
+  listCodeSessionRewinds(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionRewindRecord[]>;
+  /** The same claim protocol as the rewind ledger, for the same reason: `createCodeSession` is not idempotent. */
+  createCodeSessionFork(input: CreateCodeSessionForkInput): Promise<{ record: CodeSessionForkRecord; replayed: boolean }>;
+  getCodeSessionFork(companyId: string, operationId: string): Promise<CodeSessionForkRecord | null>;
+  completeCodeSessionFork(input: CompleteCodeSessionForkInput): Promise<CodeSessionForkRecord>;
+  /** Newest first: the branches that were forked from a session. */
+  listCodeSessionForks(input: { companyId: string; parentSessionId: string; limit?: number }): Promise<CodeSessionForkRecord[]>;
+  /**
+   * Reopens a fork claim that provably created no session, so a retry can perform the fork. A claim that already
+   * minted a session is never reopened — that is what keeps a retry from creating a second session.
+   */
+  reopenCodeSessionFork(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionForkRecord | null; reopened: boolean }>;
 }
 
 // --- C6b snapshot DTOs (declared after the interface on purpose: TypeScript hoists them) --------------

@@ -203,6 +203,14 @@ export interface CodeRunToolRuntimePort {
     linesAdded: number;
     linesRemoved: number;
     /**
+     * C10: the checkpoint taken before this turn's first write, as `CodeTurnTracker` recorded it. This is what
+     * finally gives `code_run_turns.checkpoint_id` a writer: the runtime creates the checkpoint during the
+     * write pre-flight (`ensureTurnCheckpoint`), and the runner is the only component that knows which turn it
+     * belongs to. Additive and optional, so a deployment (or a test double) without a tracker keeps working and
+     * simply records `null` — which is the honest answer, not a fabricated id.
+     */
+    checkpointId?: string | null;
+    /**
      * C9 widened this structurally (all new fields optional) so the scope and test-integrity guards can see
      * *what kind* of change each file is without a second port: `CodeTurnTracker` already carries the status
      * and the diff, and re-deriving them elsewhere would let the two disagree.
@@ -252,6 +260,10 @@ export interface CodeRunStatePort {
     sessionId: string;
     owner: string;
     runId?: string;
+    /** C10: the original request, stored by the same write that creates the run. */
+    request?: string | null;
+    dataClassification?: DataClassification;
+    retentionClass?: RetentionClass;
   }): Promise<{ runId: string }>;
   renewLease(input: { companyId: string; runId: string; owner: string }): Promise<{ held: boolean }>;
   releaseLease?(input: { companyId: string; runId: string; owner: string }): Promise<unknown>;
@@ -557,6 +569,23 @@ export interface CodingAgentRunnerPorts {
   quota?: CodeRunQuotaPort;
   /** C6a: durable run state (turn boundaries, write-ahead tool calls, lease/heartbeat). */
   runState?: CodeRunStatePort;
+  /**
+   * C10: links the session to the run it is currently executing. `code_sessions.run_id` existed since C1 (the
+   * store even had its `COALESCE` update) but **nothing ever passed a value**, so `lastRun` and `usage` were
+   * permanently `null` and a resume had no way to find "the run of this session". The link is written right
+   * after the run row is created, because that is the first moment the durable run id exists.
+   *
+   * Best-effort on purpose: the durable run row is the source of truth for the run itself, and a deployment
+   * where this link cannot be written must still execute the run — the cost is that `lastRun`/`usage` stay
+   * unavailable, which the session-control surface already reports honestly.
+   */
+  sessionRunLink?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    runId: string;
+  }) => Promise<{ linked: boolean; reason?: string }>;
   /** Lease identity of this process. Defaults to a per-run id derived from the pid and a random suffix. */
   runStateOwner?: string;
   snapshot?: ExecutionSnapshotProvider | null;
@@ -1202,6 +1231,29 @@ export class CodingAgentRunner {
     const projectId = session.projectId;
     const sessionId = session.id;
     const turnId = input.turnId ?? `run-${startedAt}`;
+    /**
+     * C10: the key a **step** of this run uses in `CodeTurnTracker`.
+     *
+     * Before C10 every tool call of a whole run was invoked with the same `turnId`, so the tracker's per-turn
+     * entry — and therefore the per-turn checkpoint — was created once for the whole run: the first write took
+     * the checkpoint, every later turn reused it, and `code_run_turns.checkpoint_id` (had anything written it)
+     * could only ever have named the state *before the run*. A rewind "to turn 5" would then have restored the
+     * state before turn 1 while claiming to be about turn 5.
+     *
+     * Each assistant step is a turn: it is one model exchange and one batch of tool calls. Keying the tracker by
+     * the step is what makes "the checkpoint of turn N" mean "the workspace as it was before turn N wrote
+     * anything", which is exactly what a rewind to turn N must restore. `turnId` itself keeps its meaning for
+     * everything else — run events, idempotency keys and the verification tool-call ids — so no recorded
+     * identifier moves, and `applyTurnSummary` below aggregates the steps so the run summary is unchanged.
+     */
+    const stepTurnKey = (index: number): string => `${turnId}#turn-${index}`;
+    /**
+     * The steps whose tool calls actually ran. The run summary and the change set are aggregated over exactly
+     * these, so a step with no calls (the closing assistant answer) cannot count twice.
+     */
+    const toolSteps: number[] = [];
+    /** Monotonic carry-forward of the last checkpoint a turn was based on (see `turnCheckpointId`). */
+    let lastCheckpointId: string | null = null;
     const summary: CodingAgentRunSummary = {
       filesChanged: [],
       diffStats: { files: 0, linesAdded: 0, linesRemoved: 0 },
@@ -1421,6 +1473,7 @@ export class CodingAgentRunner {
         }
         await writeState(() => this.ports.runState!.appendTurn({
           companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
+          checkpointId: turnCheckpointId(),
         }));
       }
       stopHeartbeat();
@@ -1474,25 +1527,80 @@ export class CodingAgentRunner {
     };
 
     /**
-     * C9: the run's change set, as the per-turn tracker knows it.
+     * C9/C10: the run's change set, as the per-turn tracker knows it.
      *
      * Best effort by design: a missing tracker means "no changes are known", which disables the guards for
      * this run rather than failing it. The alternative — treating an unreadable tracker as a change set — would
      * make the guards fire on no evidence.
+     *
+     * C10: the tracker is now keyed by **step**, so the run-wide change set is the merge of every step that ran
+     * tool calls, deduplicated by path (the last write of a path wins, which is the state a guard must judge).
+     * The merge is computed here rather than accumulated in a field so it stays live: `currentChangeSignature`
+     * asks exactly this function "did the review-driven fix change anything?", and a cached value would answer
+     * with the state from before the fix.
      */
     const runChanges = (): Array<{ path: string; tool: string; status?: string; diff?: string }> => {
       if (!this.ports.toolRuntime.turnSummary) return [];
-      try {
-        const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, turnId);
-        return (summaryForTurn.changes ?? []).map((change) => ({
-          path: change.path,
-          tool: change.tool,
-          ...(change.status !== undefined ? { status: change.status } : {}),
-          ...(change.diff !== undefined ? { diff: change.diff } : {}),
-        }));
-      } catch {
-        return [];
+      const merged = new Map<string, { path: string; tool: string; status?: string; diff?: string }>();
+      for (const index of toolSteps) {
+        try {
+          const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, stepTurnKey(index));
+          for (const change of summaryForTurn?.changes ?? []) {
+            merged.set(change.path, {
+              path: change.path,
+              tool: change.tool,
+              ...(change.status !== undefined ? { status: change.status } : {}),
+              ...(change.diff !== undefined ? { diff: change.diff } : {}),
+            });
+          }
+        } catch {
+          // A single unreadable step must not discard the changes the other steps reported.
+        }
       }
+      return [...merged.values()];
+    };
+
+    /**
+     * C10: the totals the run summary reports. Summed over the steps that ran, exactly like the pre-C10 code
+     * read them from the single run-scoped tracker entry — the tracker's own `files`/`linesAdded`/`linesRemoved`
+     * are used rather than recomputed from `changes`, because they are the numbers the write runtime counted.
+     */
+    const runChangeTotals = (): { files: number; linesAdded: number; linesRemoved: number } => {
+      const paths = new Set<string>();
+      let linesAdded = 0;
+      let linesRemoved = 0;
+      if (!this.ports.toolRuntime.turnSummary) return { files: 0, linesAdded, linesRemoved };
+      for (const index of toolSteps) {
+        try {
+          const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, stepTurnKey(index));
+          for (const change of summaryForTurn?.changes ?? []) paths.add(change.path);
+          linesAdded += summaryForTurn?.linesAdded ?? 0;
+          linesRemoved += summaryForTurn?.linesRemoved ?? 0;
+        } catch {
+          // Same reasoning as `runChanges`: one unreadable step is not evidence about the others.
+        }
+      }
+      return { files: paths.size, linesAdded, linesRemoved };
+    };
+
+    /**
+     * C10: the checkpoint the turn that just closed should be linked to.
+     *
+     * It is the checkpoint of **this step** when the step wrote something (the tracker created it during the
+     * write pre-flight, before the first byte landed). When the step wrote nothing, the answer is the last
+     * checkpoint that was in force — carrying it forward is what makes the column useful to a reader: a turn
+     * with a checkpoint names the state to compare against, and a null would mean "unknown", not "unchanged".
+     */
+    const turnCheckpointId = (): string | null => {
+      if (this.ports.toolRuntime.turnSummary) {
+        try {
+          const current = this.ports.toolRuntime.turnSummary(sessionId, stepTurnKey(steps)).checkpointId ?? null;
+          if (current) lastCheckpointId = current;
+        } catch {
+          // A tracker that cannot answer leaves the previously observed checkpoint in place.
+        }
+      }
+      return lastCheckpointId;
     };
 
     /** C9: one-line, metadata-only description of a finding — never the diff itself. */
@@ -2245,8 +2353,46 @@ export class CodingAgentRunner {
           sessionId,
           owner: stateOwner,
           ...(input.runId ? { runId: input.runId } : {}),
+          /**
+           * C10: the run's **original request**, written by the same statement that creates the run. Until this
+           * existed the request lived only in the live request body — the replay bundle records the model's side
+           * (its answers and the settled tool results) and is written once, on the terminal path, so a run that
+           * crashed mid-flight left no copy of what the user asked for at all and a resume could not
+           * reconstruct it.
+           *
+           * It is stored here, before the first model step and before any tool call, so a process that dies
+           * immediately after start still leaves the request behind. Only the first `startRun` of a run id can
+           * write it (the store's create is idempotent by run id), so a resume re-entering the loop with the
+           * reconstructed continuation prompt cannot overwrite the user's own words. The class travels with it
+           * from the session, which is the same source the replay bundle and the snapshots copy theirs from.
+           */
+          request: input.prompt,
+          dataClassification: session.dataClassification,
+          retentionClass: session.retentionClass,
         });
         stateRunId = startedState.runId;
+        /**
+         * C10: link the session to its run. `code_sessions.run_id` had a reader (`lastRun`, `usage`) and an
+         * update path, but no writer, so both were permanently `null` and a resume could not find "the run of
+         * this session" without being told. Best effort: the run row above is the source of truth for the run
+         * itself, and a failed link must not abort work that is already admitted.
+         */
+        if (this.ports.sessionRunLink && session.runId !== stateRunId) {
+          try {
+            const link = await this.ports.sessionRunLink({
+              ctx, companyId, projectId, sessionId, runId: stateRunId,
+            });
+            if (!link.linked) {
+              this.ports.logger?.warn("code_session_run_link_failed", {
+                sessionId, runId: stateRunId, reason: link.reason ?? "unknown",
+              });
+            }
+          } catch (error) {
+            this.ports.logger?.warn("code_session_run_link_error", {
+              sessionId, runId: stateRunId, reason: (error as Error).message,
+            });
+          }
+        }
       } catch (error) {
         const failure = error as { code?: string; message?: string };
         return finish(
@@ -2734,12 +2880,15 @@ export class CodingAgentRunner {
         if (stateRunId && this.ports.runState) {
           await writeState(() => this.ports.runState!.appendTurn({
             companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
+            // C10: the closing assistant turn carries the checkpoint in force, so the boundary a recovery
+            // resumes from names the exact state to compare the workspace against.
+            checkpointId: turnCheckpointId(),
           }));
         }
         // The sandbox is **not** released here any more: C9 may still need it for the verification run and for
         // the repair turns that follow a failed check. Releasing before the decision would leave the repair
         // loop with nothing to run in, and it would announce completion for a run that is about to stop.
-        this.applyTurnSummary(summary, sessionId, turnId);
+        this.applyTurnSummary(summary, runChanges(), runChangeTotals());
 
         /**
          * C9: the model has stopped asking for tools, which in C6 meant "done". It is not done until the change
@@ -2948,7 +3097,14 @@ export class CodingAgentRunner {
           tool: call.name,
           args: call.arguments,
           toolCallId: call.id,
-          turnId,
+          /**
+           * C10: the **step-scoped** turn key, not the run-scoped `turnId`. This is what makes the runtime's
+           * per-turn checkpoint belong to the turn that produced it: `ensureTurnCheckpoint` keys the checkpoint
+           * by this value, the write-ahead diff tool reads the step's own changes, and `code.fs.undo_last_turn`
+           * restores the step it was asked about instead of the whole run. Every other use of `turnId` (run
+           * events, idempotency keys, verification tool-call ids) is unchanged, so no recorded identifier moves.
+           */
+          turnId: stepTurnKey(steps),
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
@@ -3046,6 +3202,13 @@ export class CodingAgentRunner {
         }
       };
 
+      /**
+       * C10: this step is about to run tool calls, so it takes part in the aggregated change set and may create
+       * its own checkpoint. Recorded **before** the calls execute, because the checkpoint is created during the
+       * first write's pre-flight and the turn boundary that closes later must find it.
+       */
+      if (toolSteps[toolSteps.length - 1] !== steps) toolSteps.push(steps);
+
       const pending = [...callsToRun];
       while (pending.length) {
         const head = pending.shift();
@@ -3127,19 +3290,27 @@ export class CodingAgentRunner {
           turnIndex: steps,
           status: "finished",
           outcome: turnHadFailure ? "failed" : "ok",
+          // C10: `code_run_turns.checkpoint_id` finally has a writer. The value is the checkpoint this turn's
+          // writes were based on, so a rewind to this turn rolls the workspace back to exactly that state.
+          checkpointId: turnCheckpointId(),
         }));
       }
     }
   }
 
-  private applyTurnSummary(summary: CodingAgentRunSummary, sessionId: string, turnId: string): void {
-    if (!this.ports.toolRuntime.turnSummary) return;
-    try {
-      const turn = this.ports.toolRuntime.turnSummary(sessionId, turnId);
-      summary.filesChanged = [...new Set(turn.changes.map((change) => change.path))];
-      summary.diffStats = { files: turn.files, linesAdded: turn.linesAdded, linesRemoved: turn.linesRemoved };
-    } catch {
-      // The summary is best effort: a missing tracker must not change the run's outcome.
-    }
+  /**
+   * C10: writes the run's change summary from the caller's aggregation.
+   *
+   * The aggregation moved into the loop because the per-turn tracker is now keyed by step (see `stepTurnKey`),
+   * so no single tracker entry describes the run. The values are the same ones the pre-C10 code read from the
+   * one run-scoped entry: the tracker's own counts, and the distinct paths it recorded.
+   */
+  private applyTurnSummary(
+    summary: CodingAgentRunSummary,
+    changes: ReadonlyArray<{ path: string }>,
+    totals: { files: number; linesAdded: number; linesRemoved: number },
+  ): void {
+    summary.filesChanged = [...new Set(changes.map((change) => change.path))];
+    summary.diffStats = { files: totals.files, linesAdded: totals.linesAdded, linesRemoved: totals.linesRemoved };
   }
 }

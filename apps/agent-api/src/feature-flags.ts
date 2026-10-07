@@ -30,6 +30,23 @@ export const CODE_AGENT_SUB_FLAGS = [
   "code.full_auto_sandbox",
   /** C8: the repo map enters the model-visible context, so it stays off until enabled explicitly. */
   "code.repo_map",
+  /**
+   * C10: durable session operations. Each is its own flag because each has a different blast radius: a resume
+   * re-takes the lease of an interrupted run and rebuilds its context, a rewind moves a session's conversation
+   * cursor (and, for `code`/`both`, the workspace itself), and a fork mints a new session that inherits another
+   * session's plan and task list. Adding them here is what makes them settable at all: `CODE_FLAG_KEY_PATTERN`
+   * is an allowlist, and a key it does not match can never be enabled.
+   */
+  "code.session_resume",
+  "code.rewind",
+  "code.session_fork",
+  /**
+   * C10 (ТЗ item 8): exporting a session to Markdown. Its own flag because the exported document is removable
+   * from the product's control — a workspace with data-residency rules may want the Workspace readable while
+   * downloads are off. `code.background_runs` above is unchanged and now actually consumed by the background-run
+   * surface instead of only by `code-process-manager.ts`.
+   */
+  "code.export",
 ] as const;
 
 export type CodeAgentSubFlag = typeof CODE_AGENT_SUB_FLAGS[number];
@@ -41,7 +58,7 @@ export const CODE_MODEL_PROFILE_PATTERN = /^code\.model_profile\.[a-z0-9._-]{1,6
  * the key carries the bare hex prefix (8..64 chars) because a flag key cannot contain a colon.
  */
 export const CODE_SANDBOX_IMAGE_PATTERN = /^code\.sandbox_image\.[a-f0-9]{8,64}$/;
-export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
+export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
 
 export function isValidCodeFlagKey(flagKey: string): boolean {
   return typeof flagKey === "string" && CODE_FLAG_KEY_PATTERN.test(flagKey);

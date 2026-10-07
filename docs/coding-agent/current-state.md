@@ -3,7 +3,80 @@
 Update this file after every completed step.
 
 ## Current step
-- **C9 COMPLETE — planning, todo, verification, self-review and goal-driven execution.** All eight owner
+- **C10 COMPLETE — sessions, checkpoints, resume, rewind, fork, background runs.** Final escalated evidence:
+  `npm run typecheck` exit 0, both builds exit 0, **`npm run security-gate` exit 0 — `passed=1503 failed=0`,
+  105 suites, `present=105 missing=0`**, and **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**.
+  - **Owner review (post-C10) — request durability + environment re-check.** Two suites were added
+    (`tests/coding-agent-c10-run-request.test.ts`, `tests/coding-agent-c10-resume-environment.test.ts`), so the
+    gate list is now **107 suites** with `missing_count = 0` and `node --check scripts/run-security-gate.mjs`
+    exit 0. `npm run typecheck` is exit 0 after the change; the escalated gate/build/web re-run is the owner's.
+  - **Three dead links were written, not invented**: `code_run_turns.checkpoint_id` now has a writer (the turn
+    tracker is keyed **per step**, `${turnId}#turn-<i>`, with carry-forward for steps that wrote nothing — before
+    this, every step of a run shared one `turnId`, so "the checkpoint of turn N" could only ever mean "the state
+    before turn 1" and `CodeRunBoundary.checkpointId` was always `null`); `code_sessions.run_id` has a writer, so
+    `lastRun`/`usage` stop being `null`; and `code_context_summaries` (C8 compaction) got its **first production
+    reader** — it had been written and never read.
+  - **Resume is the *same* run id** (`startRun` + a new `resumeRun` that acquires the lease *then* flips status,
+    so a live foreign lease is never mislabelled), lost processes are derived from durable `unknown_outcome`
+    evidence rather than the in-memory registry, and the continuation prompt is rebuilt from the run's own
+    recorded request + the replay bundle + context summaries + plan/todos/goal + recovery notice — **never** from
+    `code_run_turns.messages`, which the runner does not write (and which stays the metadata-only turn snapshot it
+    was declared to be). The prompt is bounded, and is refused rather than stripped when it contains a secret.
+  - **Owner review, request durability (C10 fix).** The original request used to exist **only in the live request
+    body**: the bundle records the model's side and is written on the terminal path, so a mid-flight crash left no
+    copy of what the user asked for. Migration **083** gives `code_run_states` the request (`request_status` /
+    `request_text` / `request_sha256` / `request_truncated` / `request_recorded_at`) plus its
+    `data_classification`/`retention_class`, written by the **same insert that creates the run** — so a crash
+    immediately after start cannot lose it — and `ON CONFLICT (run_id) DO NOTHING` is what stops a resume
+    re-entering the loop with the continuation prompt from overwriting it. `request_status` is a first-class value:
+    `not_recorded` (no prompt / pre-083 run) and `refused_credential` (the value was **never** stored, so resume
+    reports the refusal instead of pretending there was none). Resume returns the request verbatim plus
+    `requestUnavailable`, and the prompt quotes it as *the user's own text*.
+  - **Owner review, environment re-check (C10 fix).** A resume now records a **new** `ExecutionSnapshot` version
+    with `trigger: "resume"` (the value had a vocabulary entry and no producer), built from the facts a resume can
+    genuinely re-read (resolved flags, policy composition, provider/data policy, the C1b image verdict) because the
+    run-scoped facts die with the process. The comparison is the store's own content-safe `diffExecutionSnapshots`
+    restricted to the value families; an image is a **verdict, not a diff** (a replaced and a revoked digest are
+    identical field by field). A **revoked image refuses the resume before the lease is taken** (409
+    `run_environment_revoked`, run left resumable), and every other move — or a family that could not be compared —
+    is stated in the response **and** in the continuation prompt, never continued silently.
+  - **Rewind** (`code` / `conversation` / `both`) — and "conversation only" is a **cursor move**
+    (`code_session_heads`), because the replay bundle and summaries are append-only **at the trigger level**;
+    deletion is impossible, so rewind must point, not mutate. `both` reports `rewound_partial` honestly, and
+    **claim-before-perform** (ledger unique on `(company_id, operation_id)`, audit before effects) means a repeat
+    leaves exactly one pre-rewind checkpoint — not two.
+  - **Fork** fills `parent_session_id`, copies the plan as a **draft** (an `approved` plan with an
+    `execution_mode` was a decision about *that* session) and the todos/cursor, and deliberately **does not** copy
+    the goal, with the reason returned in the response: two rows for one goal would make "is it done?" depend on
+    which row you read.
+  - **Background runs**: the tab-close handler now aborts only the transport, while the code run owns its own
+    registry `AbortController` — previously closing a tab **killed** the run. Reconnect is served by an SSE
+    endpoint (missed events by `fromSeq`, then live) and a polling endpoint, with monotonic `seq`, bounded
+    buffers, and the terminal event always retained. **Queue and limits** are a new `CodeRunQueue` (not
+    `CompanyRunQueue`, whose unit of work is a durable Company-run row while a code run carries a live
+    `AuthContext` that another replica cannot rebuild): per-user and per-Company counters, round-robin between
+    companies, bounded cancellable queue, `state()` for the UI, admitted **before** `reply.hijack()` so refusal
+    is an honest 429.
+  - **`notifications.backgroundResults` is finally read.** The key existed in the schema, the migration defaults
+    and the UI in eight locales with **no server reader**; it now drives completed/failed notifications. Approval
+    notifications are deliberately **not** muted by result switches — a run waiting on a human must not stall
+    silently because someone turned off result delivery.
+  - **Sandbox**: the `finally` release was confirmed **by fact** to be a no-op (the project object was read before
+    the run created the sandbox, and `destroy` returns early on an empty `sandboxId`) and now re-reads the
+    project; a retention sweep was added that never touches a running sandbox and has a floor of
+    `retention ≥ inactivity`; and restart visibility uses new **system-scoped** reads, because the tenant-scoped
+    `getProject` could not serve a system context.
+  - **Export**: Markdown via the **same** limits (50/200, 4000-char results with a marker) and the **same**
+    scanners as the transcript route; a secret yields `422 export_secret_detected` with `kinds` only and no
+    document at all — a redacted export would look like a clean transcript while the secret stayed in the
+    workspace.
+  - **A real defect in the assembled app was found and fixed, with a test that provably catches it:**
+    `codeSnapshotContexts` was read but never written, so snapshot/compare/by-id/activity and GET replay returned
+    **401** in the assembled application, while `c6b-snapshot-api` stayed green because it builds routes with its
+    own deps. The new `c10-route-auth-wiring` suite checks behaviour on the **real** `buildApp` *and* source-guards
+    every `*Contexts` WeakMap; removing the `.set(...)` temporarily made it fail 4/4, which is how we know the
+    test is not vacuous. This is the fourth instance of the project's recurring class ("module exists, no call").
+- Earlier: **C9 COMPLETE — planning, todo, verification, self-review and goal-driven execution.** All eight owner
   completion conditions hold: `ask_user` pause/resume green with a pause that is a **persisted state** (survives
   restart, the C6a reconciler refuses it on two layers, only a human principal may answer, a repeated answer does
   not resume twice, TTL expiry yields `expired` + `ask_user_timeout` with **no** recorded answer — structurally,

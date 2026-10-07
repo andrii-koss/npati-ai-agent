@@ -364,6 +364,91 @@ export const SECURITY_GATE_TESTS = [
   // that a review asking to change a mode/policy/permission stays a `security` finding while the session mode,
   // the policy and the permissions are observably untouched.
   "tests/coding-agent-c9-self-review.test.ts",
+  // C10: the two columns that had a reader and an updater but **no writer**. Pins that a turn's checkpoint is the
+  // checkpoint that turn's writes were based on (a distinct one per step — the pre-C10 runner used a single
+  // `turnId` for a whole run, so only the first turn could own one), that a step which wrote nothing carries the
+  // checkpoint in force, that the session→run link is written once per run (`lastRun`/`usage` were permanently
+  // `null` without it), that the run summary still aggregates across steps, and that the reconciler's notice is
+  // persisted — and refused rather than scrubbed when it would carry a credential.
+  "tests/coding-agent-c10-run-checkpoint-link.test.ts",
+  // C10: the durable state the session operations are built on. Pins the single revision-checked conversation
+  // cursor (a rewind cannot delete rows: the replay bundle and the context summaries are append-only, so a
+  // truncation is a pointer move every reader applies); the claim-before-perform protocol of the rewind and fork
+  // ledgers, including the asymmetry that a claim which provably changed nothing may be reopened while one that
+  // created a checkpoint or a session may not; tenant scoping of every row; and migration 082 being additive,
+  // classification/retention-carrying, free of any foreign key to a structure that does not exist yet, and
+  // append-only for the notice.
+  "tests/coding-agent-c10-session-durability.test.ts",
+  // C10: resume. Pins that a resume continues the **same** `runId` (a second bundle for one run cannot exist, so a
+  // second run would destroy the recording) and re-takes its lease; that a paused or finished run is refused with
+  // its own reason; that lost processes are named from the durable `unknown_outcome` evidence while a replayable
+  // read is reported separately; that the checkpoint of the last finished turn is reported and the workspace is
+  // only rolled back on request; that a resume never writes the conversation cursor (which would truncate the
+  // conversation it is continuing); and that the continuation prompt is rebuilt from the replay bundle, the
+  // compaction summaries, the plan, the todos and the notice — bounded, and refused when the combination carries
+  // a credential.
+  "tests/coding-agent-c10-resume.test.ts",
+  // C10: rewind in all three variants and fork. Pins that `code`/`conversation`/`both` each do exactly their own
+  // half, that `both` reports `rewound_partial` instead of "rewound" when the cursor could not move, that a turn
+  // without a checkpoint is refused with the nearest earlier one named, that a repeated operation creates no
+  // second checkpoint, session or audit entry, that a journal outage refuses the rewind and can be retried, that a
+  // fork fills `parent_session_id`, copies the plan as a draft and the todo list but not the goal (with the reason
+  // reported), and that the replay bundle's format version and replay-input hash are untouched by this step.
+  "tests/coding-agent-c10-rewind-fork.test.ts",
+  // C10 (ТЗ item 5): a long code run outlives the tab. Pins that a background run owns its **own** abort signal (a
+  // client disconnect only detaches the viewer), that every event carries a monotonic `seq` so a reconnecting
+  // client is handed the tail it missed rather than a gap, that the event buffer and the tracked-run map are
+  // bounded while the terminal event is always retained, that an unknown run answers with an empty identity (no
+  // existence oracle), and — the finding that opened this step — that `notifications.backgroundResults` is finally
+  // **read**, with the asymmetry that an approval request is never silenced by a results switch.
+  "tests/coding-agent-c10-background-runs.test.ts",
+  // C10 (ТЗ item 6): the code-run queue. Pins the configured caps and their hard clamp (nonsense falls back rather
+  // than becoming `NaN`, and an enormous value is clamped, so configuration cannot remove the limit), the two
+  // independent counters (per user, per Company), the bounded and cancellable wait (`queue_timeout`,
+  // `queue_cancelled`, the depth cap), an idempotent release, and the state a UI renders.
+  "tests/coding-agent-c10-run-queue.test.ts",
+  // C10 (ТЗ item 6): the round-robin property on its own, measured over a **sequence of grants** because a
+  // first-come-first-served queue passes every counter assertion and still starves the quiet tenant: one slot per
+  // Company per turn, so a backlog cannot be served twice while another Company waits.
+  "tests/coding-agent-c10-queue-round-robin.test.ts",
+  // C10 (ТЗ item 7): the sandbox lifecycle. Pins that auto-stop keeps the sandbox tracked (which is what lets
+  // retention reason about it at all), that the retention pass destroys only a sandbox that is idle past its
+  // configured window, that it never destroys live work, that the retention window can never be configured shorter
+  // than the inactivity window (retention destroys, so a typo must not delete a just-stopped sandbox), that a
+  // release built on a **stale** project object is a no-op while a fresh read destroys for real, and that deleting
+  // a project destroys its sandbox through the existing `beforeRemove` hook.
+  "tests/coding-agent-c10-sandbox-retention.test.ts",
+  // C10 (ТЗ item 8): the Markdown session export. Pins that it reuses the stream route's bounds (50 default, 200
+  // cap, 4000-character settled results) instead of becoming a wider read path, that a credential refuses the whole
+  // document with **kinds only** (no value, no redacted preview, no file), that the renderer escapes fences and
+  // table separators so a tool name or model answer cannot restructure the document it is quoted in, that the
+  // refusal happens before the store is read, and that `code.export` is an allowlisted flag key.
+  "tests/coding-agent-c10-session-export.test.ts",
+  // C10: the defect class per-module suites cannot see. `codeSnapshotContexts` was declared and read but never
+  // written, so in the **built** application the snapshot, Activity and GET-replay routes answered 401 to every
+  // request while `coding-agent-c6b-snapshot-api.test.ts` stayed green (it builds those routes with its own deps).
+  // This suite drives the real `buildApp` and additionally fails if any `*Contexts` WeakMap in `app.ts` is ever
+  // declared without a `.set` — so the next surface that forgets its `preHandler` is caught before it ships.
+  "tests/coding-agent-c10-route-auth-wiring.test.ts",
+  // C10 (owner review, request durability): the run's **original request**. Pins that it is written by the same
+  // statement that creates the run — before the first model step, so a crash immediately after start cannot lose
+  // it — that `startRun`'s idempotency by run id is what stops a resume from overwriting it with the
+  // reconstructed continuation prompt, that the recorded bytes are hash-addressed and bounded with a visible
+  // marker, and that tenant scoping, classification/retention at creation and the credential refusal hold. The
+  // behavioural half drives the real runner, then a brand-new run-state log and resume service, and asserts that
+  // resume recovers **exactly** the prompt the run was started with; a request that is not there is reported as
+  // `request_not_recorded` / `request_refused_credential` / `request_record_unavailable` — never as a paraphrase
+  // and never as silence. Migration 083 is pinned as additive with its CHECK vocabulary.
+  "tests/coding-agent-c10-run-request.test.ts",
+  // C10 (owner review, Question 2): what a resume does about a **changed environment**. Pins that a resume
+  // records a NEW `ExecutionSnapshot` version with `trigger: "resume"` from the facts a resume can genuinely
+  // re-read (the run-scoped ones no longer exist), that the comparison is the store's own content-safe
+  // `diffExecutionSnapshots` restricted to the value families, that a moved policy/flag is reported in the API
+  // response **and** in the continuation prompt instead of being continued silently, that a revoked sandbox
+  // image stops the resume before the lease is taken (leaving the run resumable) while an unreadable source, a
+  // legacy run with no snapshot, a capture refused for carrying a credential and a deployment with no port are
+  // each reported with their own reason — never as "unchanged".
+  "tests/coding-agent-c10-resume-environment.test.ts",
 ];
 
 /**

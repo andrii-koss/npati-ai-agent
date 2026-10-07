@@ -1,5 +1,6 @@
 import type { CodeRunStateRecord, CodeRunToolCallRecord } from "@npati/workspace";
 import type { CodeRunBoundary, CodeRunStateLog } from "./code-run-state";
+import { scanTextForSecrets } from "./code-secret-scanner";
 
 /**
  * C6a: the run reconciler.
@@ -65,6 +66,25 @@ export interface CodeRunRecoveryNotice {
   messageForModel: string;
 }
 
+/**
+ * The notice as it is persisted (C10). It is the same information as `CodeRunRecoveryNotice` minus the
+ * `status: "interrupted"` literal, which the run state already carries — a second copy of a status in a
+ * second table is a second thing that can disagree — plus the tenant identity the store needs.
+ */
+export interface CodeRunRecoveryNoticeInput {
+  companyId: string;
+  projectId: string;
+  sessionId: string;
+  runId: string;
+  reason: string;
+  lastFinishedTurn: number;
+  replayedReadOnly: Array<{ toolCallId: string; tool: string; replayed: boolean }>;
+  unknownOutcome: Array<{ toolCallId: string; tool: string }>;
+  /** The comparison against the last checkpoint, as a plain value the store can persist. */
+  workspaceDiff: Record<string, unknown> | null;
+  messageForModel: string;
+}
+
 export interface CodeRunReconcileReport {
   scanned: number;
   interrupted: string[];
@@ -104,6 +124,20 @@ export interface CodeRunReconcilerDeps {
   }) => Promise<CodeRunReplayResult>;
   activity?: { record(event: CodeRunReconcileActivityEvent): Promise<void> };
   metrics?: { increment(name: string, tags?: Record<string, string>): void };
+  /**
+   * C10: where the notice is stored so it is reachable instead of discarded.
+   *
+   * Until C10 the notice existed only inside the report this class returns: `app.ts` fired
+   * `reconcileRuns()` with a `.catch()` that logged the error and dropped the value, so the one component that
+   * knows *why* a run stopped and *which* calls are in doubt produced information nobody could read. With this
+   * port the notice becomes a durable, append-only row that a resume and the recovery route both read.
+   *
+   * Optional, and best effort like `activity`: a deployment without a notice store keeps reconciling exactly as
+   * before. A refusal is logged rather than swallowed, because "we could not store the notice" and "there was
+   * nothing to store" are different facts and only one of them is a gap.
+   */
+  notices?: { record(input: CodeRunRecoveryNoticeInput): Promise<void> };
+  logger?: { warn(payload: unknown, message?: string): void };
 }
 
 const DEFAULT_LIMIT = 100;
@@ -117,6 +151,8 @@ export class CodeRunReconciler {
   private readonly replayReadOnly?: CodeRunReconcilerDeps["replayReadOnly"];
   private readonly activity?: CodeRunReconcilerDeps["activity"];
   private readonly metrics?: CodeRunReconcilerDeps["metrics"];
+  private readonly notices?: CodeRunReconcilerDeps["notices"];
+  private readonly logger?: { warn(payload: unknown, message?: string): void };
 
   constructor(deps: CodeRunReconcilerDeps) {
     this.log = deps.log;
@@ -127,6 +163,8 @@ export class CodeRunReconciler {
     if (deps.replayReadOnly) this.replayReadOnly = deps.replayReadOnly;
     if (deps.activity) this.activity = deps.activity;
     if (deps.metrics) this.metrics = deps.metrics;
+    if (deps.notices) this.notices = deps.notices;
+    if (deps.logger) this.logger = deps.logger;
   }
 
   /**
@@ -155,6 +193,7 @@ export class CodeRunReconciler {
           ...(state.leaseOwner === this.owner ? { owner: this.owner } : {}),
         });
         await this.markIncompleteTurn(state, boundary);
+        await this.storeNotice(state, notice);
         this.recordActivity({
           kind: "run_interrupted",
           companyId: state.companyId,
@@ -278,6 +317,59 @@ export class CodeRunReconciler {
     if (!this.activity) return;
     // Activity is a log, never a gate: a failing sink must not stop a reconciliation pass.
     void this.activity.record(event).catch(() => undefined);
+  }
+
+  /**
+   * C10: persists the notice, so the recovery is readable after the report object is gone.
+   *
+   * A dry run never reaches this method (the caller only stores on a real pass), because a dry run must change
+   * nothing at all. A failure here is logged and swallowed: the run has already been moved to `interrupted`
+   * with its turn boundary recorded, and un-doing that because a notice could not be written would trade a
+   * complete recovery for an incomplete one.
+   */
+  private async storeNotice(state: CodeRunStateRecord, notice: CodeRunRecoveryNotice): Promise<void> {
+    if (!this.notices) return;
+    const input: CodeRunRecoveryNoticeInput = {
+      companyId: state.companyId,
+      projectId: state.projectId,
+      sessionId: state.sessionId,
+      runId: notice.runId,
+      reason: notice.reason,
+      lastFinishedTurn: notice.lastFinishedTurn,
+      replayedReadOnly: notice.replayedReadOnlyToolCalls,
+      unknownOutcome: notice.unknownOutcomeToolCalls,
+      // The diff is metadata only (paths, a summary, a boolean); it is stored so a reader does not have to
+      // re-derive a comparison against a workspace that has moved on since.
+      workspaceDiff: notice.workspaceDiff
+        ? {
+            changed: notice.workspaceDiff.changed,
+            files: notice.workspaceDiff.files,
+            summary: notice.workspaceDiff.summary,
+            checkpointId: notice.workspaceDiff.checkpointId,
+            ...(notice.workspaceDiff.unknownBase === undefined ? {} : { unknownBase: notice.workspaceDiff.unknownBase }),
+          }
+        : null,
+      messageForModel: notice.messageForModel,
+    };
+    /**
+     * The notice is built from metadata — tool names, call ids, paths and counts — but it is about to become a
+     * durable row, and "we built it from safe parts" is not a guarantee. A notice that would have to be redacted
+     * is **refused** instead of stored, because a sanitised notice would carry a placeholder into the record a
+     * resume hands to the model, and a placeholder is a reference that must never reach disk.
+     */
+    const findings = scanTextForSecrets(JSON.stringify(input)).findings;
+    if (findings.length) {
+      this.logger?.warn(
+        { runId: state.runId, kinds: Array.from(new Set(findings.map((finding) => String(finding.kind)))) },
+        "code_run_recovery_notice_refused",
+      );
+      return;
+    }
+    try {
+      await this.notices.record(input);
+    } catch (error) {
+      this.logger?.warn({ runId: state.runId, err: error }, "code_run_recovery_notice_store_failed");
+    }
   }
 }
 
