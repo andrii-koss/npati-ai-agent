@@ -671,6 +671,27 @@ export interface CodingAgentRunnerPorts {
   };
   activity?: { record(event: CodeRunActivityEvent): Promise<void> };
   /**
+   * C13 (owner decision 1): the project's `SessionStart` and `Stop` lifecycle hooks. They are emitted through
+   * the **existing** lifecycle hook manager (the same `session:start` / `session:end` names an operator can
+   * already register on), from the two places the run loop really changes state: after every start-up refusal
+   * has passed, and on the terminal exit.
+   *
+   * Fail-soft by construction: a hook is repository content and may never change a run's outcome, so a hook
+   * failure is reported by the hook subsystem itself and the run continues. `waiting_for_user` deliberately
+   * does **not** emit `Stop`: the run is paused, not over, and a hook that cleaned up on `Stop` would run
+   * while the run it observed is still alive.
+   */
+  lifecycleHooks?: {
+    sessionStart(input: {
+      ctx: AuthContext; companyId: string; projectId: string; sessionId: string;
+      runId?: string; snapshotId?: string | null;
+    }): Promise<unknown>;
+    stop(input: {
+      ctx: AuthContext; companyId: string; projectId: string; sessionId: string;
+      runId?: string; snapshotId?: string | null; status: string; reason: string;
+    }): Promise<unknown>;
+  };
+  /**
    * C8: the two non-repository context sources, as text blocks that are already labelled and bounded.
    * Fail-soft: an unreadable memory or project context yields no block rather than stopping the run, because
    * neither is required for the task to proceed and neither may influence permissions.
@@ -1608,6 +1629,23 @@ export class CodingAgentRunner {
           },
         }));
       }
+      /**
+       * C13: `Stop`. Every terminal exit passes through here (the replay bundle, the durable run state and
+       * the run result are all stamped), so this is the one place a project can learn that the run is over —
+       * with the status and reason it really ended with. Best effort: a hook can never change the outcome.
+       */
+      try {
+        await this.ports.lifecycleHooks?.stop({
+          ctx, companyId, projectId, sessionId,
+          ...(input.runId ? { runId: input.runId } : {}),
+          ...(stateRunId ? { runId: stateRunId } : {}),
+          snapshotId: snapshotId ?? null,
+          status,
+          reason,
+        });
+      } catch {
+        // A hook never changes a run's outcome.
+      }
       return finish(status, reason, message);
     };
 
@@ -2512,6 +2550,23 @@ export class CodingAgentRunner {
       message: "Coding Agent run started",
     });
     await record({ kind: "run_started", companyId, projectId, sessionId, runId: input.runId, reason: session.mode });
+
+    /**
+     * C13: `SessionStart`. Emitted here, not earlier, because everything above is a refusal path: the master
+     * flag, RBAC, deployment admission and image admission have all passed, so this is the first moment at
+     * which "the run is really starting" is true. A refused run therefore never fires a project hook, which
+     * is the same rule the tool path applies to a denied call.
+     */
+    try {
+      await this.ports.lifecycleHooks?.sessionStart({
+        ctx, companyId, projectId, sessionId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(stateRunId ? { runId: stateRunId } : {}),
+        snapshotId: snapshotId ?? null,
+      });
+    } catch {
+      // A hook never changes a run's outcome.
+    }
 
     // (5) C6a: durable run state + lease. A run whose state cannot be recorded is refused rather than run
     // "invisibly": without the row there is no turn boundary, and a crash would leave a mutating tool call

@@ -6,7 +6,6 @@ import {
   EffectiveCapabilityResolver,
   validateActiveContext,
   buildRunTimeline,
-  type TraceEvent,
 } from "@npati/shared";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { AuthContext } from "@npati/workspace";
@@ -93,13 +92,13 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
     it("Invariant 8: Cache keys include tenant/context/revision preventing cross-company cache leakage", () => {
       const res1 = resolver.resolve({
         auth: ctx,
-        activeContext: { contextType: "company", companyId: "comp-A" },
+        activeContext: { contextType: "company", companyId: "comp-A", businessId: null },
         company: { id: "comp-A", revision: 1 },
       });
 
       const res2 = resolver.resolve({
         auth: { ...ctx, workspaceId: "ws-other" },
-        activeContext: { contextType: "company", companyId: "comp-B" },
+        activeContext: { contextType: "company", companyId: "comp-B", businessId: null },
         company: { id: "comp-B", revision: 1 },
       });
 
@@ -149,7 +148,7 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
         message: "Знайди новини про штучний інтелект",
         resolutionContext: {
           auth: ctx,
-          activeContext: { contextType: "company", companyId: "comp-1" },
+          activeContext: { contextType: "company", companyId: "comp-1", businessId: null },
           company: { id: "comp-1", revision: 1 },
           agent: { id: "ag-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
@@ -198,7 +197,7 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
       const status = resolver.canExecute(
         {
           auth: { workspaceId: "ws-guest", userId: "u-guest", permissions: [] }, // zero permissions
-          activeContext: { contextType: "company", companyId: "comp-1" },
+          activeContext: { contextType: "company", companyId: "comp-1", businessId: null },
           company: { id: "comp-1", revision: 1 },
           agent: { id: "ag-1", revision: 1, tools: ["*"] },
         },
@@ -254,7 +253,11 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
 
       const fetched = await store.getCompany(ctx, comp.id);
       expect(fetched.knowledge).toHaveLength(1);
-      expect(fetched.knowledge[0]?.title).toBe("Internal SOP");
+      // `Company.knowledge` is `unknown[]` (packages/workspace/src/types.ts:148), so the stored entry is
+      // narrowed instead of assumed: the assertion still compares the title that was actually written.
+      const storedSop = fetched.knowledge[0];
+      const storedTitle = typeof storedSop === "object" && storedSop !== null && "title" in storedSop ? storedSop.title : undefined;
+      expect(storedTitle).toBe("Internal SOP");
     });
 
     // 6. Files
@@ -275,7 +278,7 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
       const status = resolver.canExecute(
         {
           auth: ctx,
-          activeContext: { contextType: "company", companyId: "c-1" },
+          activeContext: { contextType: "company", companyId: "c-1", businessId: null },
           company: { id: "c-1", revision: 1 },
           agent: { id: "a-1", revision: 1, tools: ["*"] },
           activeConnections: [], // no connections

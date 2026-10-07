@@ -72,6 +72,13 @@ import { registerCodeRoutes } from "./code-routes";
 import { NetworkActivityRecorder } from "./network-activity";
 import { PolicyDecisionRecorder } from "./policy-decision-activity";
 import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activity-sink";
+// C13: the project lifecycle hooks. The service is built on the existing lifecycle manager and the existing
+// sandbox/webhook transports; nothing here creates a second event bus or a second egress path.
+import { CodeHookError, createCodeHooksService, createCodeHookPolicyPreflight } from "./code-hooks";
+import { globalLifecycleHookManager } from "./automations-routes";
+import { deliverWebhook } from "./webhook-destination-policy";
+import { defaultResolver as ssrfDefaultResolver } from "./ssrf-safe-http";
+import { resolveMigrationTargetConfig } from "./code-shell-runtime";
 import { CodeProjectTrustService } from "./code-project-trust";
 import { CodeSessionModeService, registerCodeSessionModeRoutes } from "./code-session-mode-routes";
 import { CodeMembershipService } from "./code-membership";
@@ -2225,6 +2232,72 @@ export function buildApp(config: AppConfig = {}) {
       }
     },
   });
+  /**
+   * C13 (owner decisions 1, 2 and 9): project lifecycle hooks.
+   *
+   * Wired on the **existing** lifecycle manager (`globalLifecycleHookManager`, the bus the admin routes
+   * already register handlers on) — no third event bus exists, and this service registers itself there as
+   * the executor of a project's `SessionStart` / `PreToolUse` / `PostToolUse` / `Stop` hooks.
+   *
+   * The three gates the owner named are structural here, in this order: the server-side `code.hooks` flag,
+   * then the project trust record, and only then the read of `.npati/hooks.json` — so an untrusted repository
+   * never has its hook config read, parsed or executed. Execution itself never touches the host: a `command`
+   * hook goes through `codeSandboxExecPort` (the one sandbox transport) and a `webhook` hook through
+   * `deliverWebhook` (the shared SSRF-safe client with the destination re-validated on every delivery and
+   * redirects off), so C4b is not bypassed by a single line.
+   */
+  const codeHooksService = createCodeHooksService({
+    bus: globalLifecycleHookManager,
+    flags: featureFlagService,
+    trust: {
+      isTrusted: async ({ ctx, companyId, projectId }) =>
+        isRepositoryInstructionsTrusted(codeProjectTrust, ctx, companyId, projectId),
+    },
+    readConfig: async ({ ctx, companyId, projectId, path }) => {
+      // Repository content, read through the same workspace API every other code read uses (`secret_path`
+      // and path validation included), and decoded here so the service can be tested without a filesystem.
+      const text = await readWorkspaceText(ctx, companyId, projectId, path);
+      if (text === null) return null;
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        // A config that is not JSON is a refusal the hook service reports (`hook_config_invalid`), not a
+        // crash: returning the raw text would make it look parseable.
+        throw new CodeHookError("hook_config_invalid", "The hooks config is not valid JSON");
+      }
+    },
+    sandbox: codeSandboxExecPort,
+    webhook: {
+      deliver: async ({ url, body, timeoutMs, companyId, projectId }) => {
+        // The hook's own URL is its declared endpoint, and it is validated by the shared destination policy
+        // on *every* delivery (https only, no literal IP, no private/internal/metadata address, no redirects)
+        // before a socket is opened; `assertOutboundAllowed` inside `deliverWebhook` then decides whether the
+        // body may leave NPATI for this tenant at all.
+        const delivered = await deliverWebhook(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          timeoutMs,
+          maxBytes: 64 * 1024,
+          storedEndpoints: [url],
+          requireStoredEndpoint: true,
+          allowInsecureHttp: false,
+          resolve: ssrfDefaultResolver(),
+          policyContext: { companyId, projectId },
+        });
+        return { status: delivered.status, body: delivered.body.toString("utf8") };
+      },
+    },
+    activity: {
+      record: async (event) => {
+        const sink = event.kind === "run_activity"
+          ? activitySinkForKind(codeActivitySink, "run_activity")
+          : activitySinkForKind(codeActivitySink, "code_tool_activity");
+        await sink.record(event);
+      },
+    },
+    logger: { warn: (payload, message) => { app.log.warn(payload, message); } },
+  });
   const parseDeclaredDependencies = (manager: string, text: string): Array<{ name: string; version: string | null; scope: string }> => {
     if (manager === "npm" || manager === "pnpm" || manager === "yarn" || manager === "composer") {
       try {
@@ -2627,6 +2700,23 @@ export function buildApp(config: AppConfig = {}) {
     },
     reviewScope: { allows: (tool: string) => isReviewSafeTool(tool) },
     revisions: codeWorkspaceRevisions,
+    /**
+     * C13 (owner decision 1): `PreToolUse`/`PostToolUse` for the canonical tool path. The service owns the
+     * flag, trust and config gates, so the runtime cannot dispatch a hook for an untrusted repository even if
+     * it wanted to.
+     */
+    hooks: codeHooksService,
+    /**
+     * C13: the policy pre-flight that keeps a hook off a denied path when the engine's verdict is made
+     * *inside* the executor (`code.shell.exec` consults the engine in `CodeShellRuntime`). The factory lives
+     * in `code-hooks.ts` so the ordering claim is tested against this same, real engine rather than against
+     * a copy of the logic. It is advisory in one direction only: `deny` withholds the hook, `allow`
+     * authorises nothing, and the executor still asks the engine for itself.
+     */
+    preToolPolicy: createCodeHookPolicyPreflight({
+      evaluate: (request) => enrichedPolicyEngine.evaluate(request),
+      migrationTargets: () => resolveMigrationTargetConfig(),
+    }),
   });
   codeToolRuntimeRef = codeToolRuntime;
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
@@ -4638,6 +4728,15 @@ ${localized.next}`;
     // C6b/C10: the readers declared above, shared with the resume-time environment re-check.
     policyCompositionSources: codeRunPolicySources,
     activity: activitySinkForKind(codeActivitySink, "run_activity"),
+    /**
+     * C13: `SessionStart` and `Stop` for a run, emitted through the project hooks service (which owns the
+     * flag/trust/config gates and the existing lifecycle bus). A hook failure is swallowed by the runner: a
+     * project's hook can never change a run's outcome.
+     */
+    lifecycleHooks: {
+      sessionStart: (input) => codeHooksService.sessionStart(input),
+      stop: (input) => codeHooksService.stop(input),
+    },
     // C6a: when the reaper reports disk pressure it refuses new runs. The check runs at run start — after
     // RBAC, before image admission and before any model or tool call — and a gate that throws refuses too
     // (`admission_gate_unavailable`), because "the gate did not answer" must never mean "let it run".

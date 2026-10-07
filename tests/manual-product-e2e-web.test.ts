@@ -350,12 +350,18 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     };
     const timeline = buildRunTimeline(mockRun, [], [
       {
+        // A complete `CompanyAgentToolAudit` (packages/workspace/src/types.ts:661): the fields the timeline
+        // reads (`decision`, `agentId`, `inputSummary`) are supplied from this test's own company/agent;
+        // `stepId` and `payloadHash` are not part of the audit record.
         id: "audit-e2e-01",
+        workspaceId: authContext.workspaceId,
+        companyId: company.id,
         runId: runBody.run.id,
-        stepId: "step-1",
+        agentId: researchAgent.id,
         toolName: "research.web_search",
-        status: "succeeded",
-        payloadHash: "sha256-hash-safe",
+        decision: "allowed" as const,
+        status: "succeeded" as const,
+        inputSummary: {},
         createdAt: new Date().toISOString(),
       },
     ]);

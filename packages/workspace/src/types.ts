@@ -642,6 +642,12 @@ export interface CompanyAgentRun {
   executionMode?: Exclude<CompanyRunMode, "auto">; status: CompanyRunStatus;
   selectedAgentIds: string[]; omnirouteTaskId?: string; omnirouteComboName?: string;
   result?: string; errorCode?: string; errorMessage?: string; cancelRequested: boolean;
+  /**
+   * Why the run was cancelled. The in-memory store keeps the whole patch (`updateCompanyAgentRun` spreads
+   * it into the stored run), so a cancelled run really carries this field at runtime; the Postgres writer
+   * maps named columns only.
+   */
+  cancelReason?: string;
   workerId?: string; leaseExpiresAt?: string; lastHeartbeatAt?: string;
   attemptCount: number; maxAttempts: number; nextAttemptAt: string;
   contextSnapshot?: RunContextSnapshot;
@@ -1492,7 +1498,7 @@ export interface WorkspaceStore {
   getCompanyAgentRun(context: AuthContext, companyId: string, runId: string): Promise<CompanyAgentRunDetails>;
   getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null>;
   setCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string, plan: unknown | null): Promise<void>;
-  updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<Pick<CompanyAgentRun, "status" | "executionMode" | "selectedAgentIds" | "omnirouteTaskId" | "omnirouteComboName" | "result" | "errorCode" | "errorMessage" | "cancelRequested" | "totalCost" | "totalTokens" | "totalDurationMs">>): Promise<CompanyAgentRun>;
+  updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<Pick<CompanyAgentRun, "status" | "executionMode" | "selectedAgentIds" | "omnirouteTaskId" | "omnirouteComboName" | "result" | "errorCode" | "errorMessage" | "cancelRequested" | "cancelReason" | "totalCost" | "totalTokens" | "totalDurationMs">>): Promise<CompanyAgentRun>;
   replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>): Promise<CompanyAgentRunStep[]>;
   appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>): Promise<CompanyAgentToolAudit>;
   appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>): Promise<CompanyAgentRunEvent>;

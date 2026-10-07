@@ -48,6 +48,18 @@ function codes(result: CapabilityAuditResult): string[] {
   return result.issues.map((issue) => issue.code);
 }
 
+/**
+ * `CapabilityAuditResult.facts` is `Record<string, string | number | boolean>` (hashes and verdict booleans
+ * live in the same bag), so a measured count is not a `number` for the compiler and arithmetic on it is
+ * rejected (TS2365/TS18048). This reader narrows by *asserting* the runtime type instead of coercing it:
+ * a fact that is not a number fails the test loudly, and the `toBe` assertions below stay exact.
+ */
+function numericFact(result: CapabilityAuditResult, key: string): number {
+  const value = result.facts[key];
+  if (typeof value !== "number") throw new Error(`capability audit fact "${key}" is not a number: ${String(value)}`);
+  return value;
+}
+
 /** A capability that exists nowhere on disk — it only ever lives in a test's `try`/`finally` window. */
 function negativeControlCapability(id: string): CapabilityDefinition {
   return {
@@ -82,7 +94,9 @@ describe("C13 capability catalog audit — resolved stores, not a regex over the
     expect(CAPABILITY_CATALOG.length).toBe(STATIC_CATALOG_BASELINE.total);
     expect(result.facts.agentCallable).toBe(STATIC_CATALOG_BASELINE.agentCallable);
     expect(result.facts.runtimeOnly).toBe(STATIC_CATALOG_BASELINE.runtimeOnly);
-    expect(result.facts.catalogTotal).toBe(result.facts.agentCallable + result.facts.runtimeOnly);
+    // The split is checked on the *measured* facts (narrowed to numbers), not on the pinned constant: a
+    // catalog that grew on one side only must fail here.
+    expect(numericFact(result, "catalogTotal")).toBe(numericFact(result, "agentCallable") + numericFact(result, "runtimeOnly"));
   });
 
   it("resolves the four separate checks the gates report", () => {
@@ -120,7 +134,7 @@ describe("C13 negative control — a temporary mutation must fail the same parit
       expect(codes(result)).toContain("static_catalog_matrix_id_divergence");
       expect(codes(result)).toContain("static_store_total_divergence");
       // The measured total follows the array: 385 -> 386. A regex over the literal would still say 306/385.
-      expect(result.facts.catalogTotal).toBe(STATIC_CATALOG_BASELINE.total + 1);
+      expect(numericFact(result, "catalogTotal")).toBe(STATIC_CATALOG_BASELINE.total + 1);
       expect(result.facts.catalogTotal).toBe(CAPABILITY_CATALOG.length);
 
       // The manifest parity check sees the same push, by a different route.

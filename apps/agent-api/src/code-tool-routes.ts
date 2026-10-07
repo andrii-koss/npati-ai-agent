@@ -50,6 +50,12 @@ const ERROR_STATUS: Record<string, number> = {
   approval_required: 403,
   approval_invalid: 409,
   approval_unavailable: 503,
+  /**
+   * C13: a `PreToolUse` project hook refused the call. Without this entry the route would rewrite the
+   * refusal as the useless `tool_failed`/500, hiding the fact that the repository's own hook — not the
+   * server — said no.
+   */
+  hook_blocked: 403,
   write_unavailable: 503,
   write_failed: 502,
   delete_failed: 502,

@@ -27,6 +27,8 @@ import {
   CodeTurnTracker, extractWriteChanges, resolveTurnTrackingOptions, revisionConflictDetails, simpleUnifiedDiff,
   type CodeApprovalPort, type CodeCheckpointPort, type CodeWriteChange,
 } from "./code-workspace-checkpoint";
+import type { CodeHooksPort } from "./code-hooks";
+import { HOOK_CONTEXT_NOTE } from "./code-hooks";
 
 /**
  * C2: the runtime that executes read-only `code.*` tools.
@@ -139,7 +141,14 @@ export type CodeToolErrorCode =
   | "subagent_parallelism_exceeded"
   | "subagent_capability_scope_empty"
   | "subagent_handoff_content_rejected"
-  | "subagent_handoff_refused_credential";
+  | "subagent_handoff_refused_credential"
+  /**
+   * C13 (owner decision 1): a `PreToolUse` project hook refused this call. The code exists so a refusal that
+   * came from the repository's own hook is distinguishable from one the server made — and so the model
+   * learns *why* without being told that a hook can do anything else. A hook can only ever produce this
+   * outcome: it has no vocabulary for allowing, granting or raising a risk.
+   */
+  | "hook_blocked";
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
@@ -471,6 +480,32 @@ export interface CodeToolRuntimeOptions {
    * and names a tool outside the list is refused before the executor runs.
    */
   reviewScope?: { allows(tool: string): boolean };
+  /**
+   * C13 (owner decision 1): the project's lifecycle hooks. `preToolUse` runs **after** the approval phase
+   * (step 7 below) and after every structural refusal this runtime makes — tenant isolation, the master and
+   * sub-flags, the read-only intent, the delegation scope, argument validation, the git-policy hard deny and
+   * the approval gate — and `postToolUse` runs after the executor. A hook can only narrow: it may refuse the
+   * call (`hook_blocked`), add `untrusted_data` context and add warnings. It has no field that could allow,
+   * approve, grant a capability or change a mode, and this runtime never asks it for one.
+   */
+  hooks?: CodeHooksPort;
+  /**
+   * C13: the policy engine's own verdict for a call whose **executor** is where the engine is consulted
+   * (`code.shell.*` through `CodeShellRuntime`, `code.deps.*`). It exists so the PreToolUse hook can never
+   * run for a call the engine will refuse: the runtime asks the same engine the executor will ask, with the
+   * same inputs, *before* dispatching the hook.
+   *
+   * The port is deliberately **advisory in one direction only**: `deny`/`require_approval` withhold the hook,
+   * while `allow` authorises nothing at all — the executor still evaluates the engine for real, exactly as
+   * before. A port that throws withholds the hook (fail closed) and never turns into a denial. This is the
+   * same shape as the existing `gitPolicy` pre-flight, which exists for the same reason one layer down.
+   */
+  preToolPolicy?: {
+    evaluate(input: {
+      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; tool: string;
+      args: Record<string, unknown>; toolCallId: string; runId?: string; agentId?: string; approvalId?: string;
+    }): Promise<{ decision: "allow" | "require_approval" | "deny"; code?: string }>;
+  };
 }
 
 /** True when a path is denied by the canonical sensitive-file policy (single source of truth). */
@@ -1028,6 +1063,63 @@ export class CodeToolRuntime {
           if (record?.revision) expectedRevisions[target.path] = record.revision;
         }
       }
+
+      /**
+       * (7c) C13 (owner decision 1): `PreToolUse`.
+       *
+       * This line is the whole ordering guarantee, so it is placed after **every** refusal the runtime makes
+       * and after the approval phase, and immediately before the executor:
+       *
+       *   tenant isolation (1) -> master flag (2) -> tool resolution (3) -> read-only intent (3b) ->
+       *   delegation depth/scope (3c) -> sub-flag (4) -> arguments (5) -> git-policy hard deny (5b) ->
+       *   idempotency (6) -> read-before-write + approval (7) -> **PreToolUse (7c)** -> executor (8) ->
+       *   **PostToolUse (9)**
+       *
+       * Nothing above can reach the hook, because every one of those steps ends in a `throw`. Nothing below
+       * can be reached *by* the hook either: a hook's only verdict is a refusal, and its context and warnings
+       * are carried into the result as untrusted data.
+       *
+       * `preToolPolicy` closes the one gap this placement would otherwise leave: for a tool whose *executor*
+       * consults the policy engine (a shell command, a dependency operation), the engine's verdict is made
+       * inside the executor, so the runtime asks that same engine first and withholds the hook unless it
+       * answers `allow`. The port cannot authorise anything — the executor still asks for itself.
+       */
+      let hookContext: Array<{ hookId: string; trust: "untrusted_data"; text: string }> = [];
+      let hookWarnings: string[] = [];
+      if (this.options.hooks && await this.options.hooks.active({ ctx, companyId: input.companyId })) {
+        const engineAllows = await this.preToolPolicyAllows(ctx, input, tool.name, args);
+        if (engineAllows) {
+          const outcome = await this.options.hooks.preToolUse({
+            ctx, companyId: input.companyId, projectId: input.projectId,
+            ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+            ...(input.runId ? { runId: input.runId } : {}),
+            ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
+            tool: tool.name,
+            toolCallId: input.toolCallId,
+            ...(writeTargets.length ? { paths: writeTargets.map((target) => target.path) } : {}),
+          });
+          hookContext = [...outcome.context];
+          hookWarnings = [...outcome.warnings];
+          if (outcome.blocked) {
+            throw new CodeToolError(
+              "hook_blocked",
+              `A project hook blocked ${tool.name}`,
+              403,
+              "hook",
+              false,
+              tool.name,
+              {
+                reason: outcome.blockReason,
+                hookId: outcome.blockedBy,
+                // The hook's own words travel as data, exactly like a reviewer's comment does (C5).
+                trust: "untrusted_data",
+                note: "A hook may only refuse a call; it cannot allow, approve or widen anything.",
+              },
+            );
+          }
+        }
+      }
+
       let raw: unknown;
       try {
         raw = await executor({
@@ -1074,11 +1166,44 @@ export class CodeToolRuntime {
         warnings.push(...await this.runPostWriteHooks(ctx, input, tool.name, raw));
       }
 
+      /**
+       * (9b) C13 (owner decision 1): `PostToolUse`, next to the write bookkeeping so it observes the call
+       * that really happened. A `block` here is refused by the hook result parser (`hook_result_invalid`):
+       * the change is already applied, and pretending a hook could un-apply it would be a lie. Only context
+       * and warnings are accepted, and both travel inside the untrusted-data envelope below.
+       */
+      if (this.options.hooks && await this.options.hooks.active({ ctx, companyId: input.companyId })) {
+        const outcome = await this.options.hooks.postToolUse({
+          ctx, companyId: input.companyId, projectId: input.projectId,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+          ...(input.runId ? { runId: input.runId } : {}),
+          ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
+          tool: tool.name,
+          toolCallId: input.toolCallId,
+          ...(writeTargets.length ? { paths: writeTargets.map((target) => target.path) } : {}),
+        });
+        hookContext = [...hookContext, ...outcome.context];
+        hookWarnings = [...hookWarnings, ...outcome.warnings];
+      }
+
       // (8b) Wrapping: results are data, quote them as such.
       const serialized = JSON.stringify(raw ?? null);
       const truncated = serialized.length > this.limits.toolOutputChars;
       const payload = truncated ? serialized.slice(0, this.limits.toolOutputChars) : raw;
-      const wrapped = this.wrap(tool.name, warnings.length ? { result: payload, warnings } : payload);
+      const allWarnings = [...warnings, ...hookWarnings];
+      const wrapped = this.wrap(tool.name, allWarnings.length || hookContext.length
+        ? {
+            result: payload,
+            ...(allWarnings.length ? { warnings: allWarnings } : {}),
+            /**
+             * C13: hook context is repository-controlled text, so it enters the model's conversation the same
+             * way repository *content* does — as labelled `untrusted_data` inside the same envelope that
+             * already wraps the tool payload. The entry keeps its own `trust` label as well, so a reader (or a
+             * test) can see the label at both levels.
+             */
+            ...(hookContext.length ? { hookContext, note: HOOK_CONTEXT_NOTE } : {}),
+          }
+        : payload);
 
       // (10) Read tracking for read-before-write (C3).
       if (tool.name === "code.fs.read" && raw && typeof raw === "object") {
@@ -1442,6 +1567,35 @@ export class CodeToolRuntime {
       return new CodeToolError("revision_conflict_exhausted", `Revision conflict retry budget spent for ${input.tool}; re-read the file`, 409, "revision", false, tool, { currentRevision, attempts });
     }
     return new CodeToolError("revision_conflict", `File changed on disk; re-read ${input.tool} and retry`, 409, "revision", true, tool, { currentRevision, attempts, retriesLeft: this.maxRevisionRetries - attempts + 1 });
+  }
+
+  /**
+   * C13: asks the executor's own policy engine whether this call will be allowed, so the PreToolUse hook is
+   * withheld when it will not be. Fail closed in the *safe* direction: a port that is absent or cannot answer
+   * withholds the hook, and no answer from this method can ever authorise a call — the executor evaluates the
+   * engine itself, exactly as it did before C13.
+   */
+  private async preToolPolicyAllows(
+    ctx: AuthContext,
+    input: { companyId: string; projectId: string; sessionId?: string; toolCallId: string; runId?: string; agentId?: string; approvalId?: string },
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<boolean> {
+    const port = this.options.preToolPolicy;
+    if (!port) return true;
+    try {
+      const decision = await port.evaluate({
+        ctx, companyId: input.companyId, projectId: input.projectId,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        tool, args, toolCallId: input.toolCallId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.agentId ? { agentId: input.agentId } : {}),
+        ...(input.approvalId ? { approvalId: input.approvalId } : {}),
+      });
+      return decision.decision === "allow";
+    } catch {
+      return false;
+    }
   }
 
   /** Formatter/syntax hooks: warnings only, never a failure and never a silent content change. */
