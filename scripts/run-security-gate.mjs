@@ -500,6 +500,48 @@ export const SECURITY_GATE_TESTS = [
   // initialization fact the read-only inspector resolves is part of the approved payload on this path too, with
   // the record consumed *before* the repository is created.
   "tests/coding-agent-c11-git-boundary-approval.test.ts",
+  // C12: sub-agents and parallel work. Pins that depth 1 is **structural** (a run with a parent is never
+  // offered the delegation tool, and the tool runtime refuses the name before the sub-flag, the approval and the
+  // executor), that parallelism 4 is a hard ceiling configuration may only lower, and that a child's capability
+  // set is an **intersection** — the parent's effective set, the child type's profile and the delegation record
+  // — where a wildcard resolves only against the published universe and grants nothing without one. Also pins
+  // the canonical limits of the two generic A2A registries, and that a tool added to the general set is not
+  // automatically available to a child.
+  "tests/coding-agent-c12-subagent-scope.test.ts",
+  // C12: **one** file-lock manager and **one** budget. Pins that a path locked by the project task graph is
+  // locked for the Company file tools as well (with the two-manager composition asserted as the negative
+  // control, plus a source guard on the wiring, because "shared" is a property of the composition), and that a
+  // parent run and its child draw on a single `sessionBudget` through the existing `A2AQuotaManager` — the
+  // child's first pre-flight is refused rather than being handed an allowance of its own, and
+  // `budget_exhausted` really stops a run.
+  "tests/coding-agent-c12-locks-and-budget.test.ts",
+  // C12 (owner requirement): the `code.agent.spawn` tool. Pins its published schema and manifest version (v9,
+  // with v8 frozen), its own `code.subagents` sub-flag and its Capability Inspector visibility; the five
+  // sub-agent types and what a type really decides (model profile through the existing registry, a turn limit
+  // that configuration and the model may only lower, a published-tool capability profile); the refusals (an
+  // unknown type, an unpublished tool, naming the delegation tool itself, an unusable scope path, an empty
+  // intersection, `summaryOnly: false`); the deterministic run id and the runtime's idempotency; the fan-out
+  // ceiling; and the two properties the owner named: an `explore` child returns a **handoff digest** (findings,
+  // paths, symbols, counts) whose bytes never contain the child's prose or a file body, and a child that fails
+  // or throws still leaves the parent with a **successful** tool call carrying the child's code.
+  "tests/coding-agent-c12-subagent-workflow.test.ts",
+  // C12 (owner criterion): the delegation tree is **visible**. Pins migration 084 as additive (three nullable
+  // parent columns and one partial index, registered by the store and carried in its own select list), the store
+  // round-trip and the `parentRunId` filter that makes one level of the tree a query, a pre-C12 event staying
+  // parentless, tenant scoping, the parent linkage being *identity* rather than payload (so the metadata-only
+  // checker never sees it), and — end to end — that the event the spawn executor writes is the row the tree
+  // query finds, with its parent run, its tool call and its snapshot.
+  "tests/coding-agent-c12-subagent-activity-tree.test.ts",
+  // C12: parallel implement work and the mandatory verification after the merge. Pins that two tasks on
+  // disjoint paths run in one graph turn under one lease manager each in its **own** worktree/branch (the slug
+  // is derived per task — deriving it from the role alone made two parallel tasks share one worktree, which is
+  // the defect this suite found), that overlapping scopes serialise instead of racing, that a real merge
+  // conflict becomes the existing structured escalation (`GitConflictEscalationError`, its `conflictingFiles`
+  // and its `code.ask_user` suggestion) with cleanup still in the `finally`, that a failing sub-agent fails its
+  // task without hanging the parent's run, and that the final verification is the existing C9 loop over the
+  // project's configured checks — `failed` fails the run, `unavailable` is reported and never presented as a
+  // pass, and a runner that throws still settles the run.
+  "tests/coding-agent-c12-parallel-verification.test.ts",
 ];
 
 /**

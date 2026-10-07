@@ -14,6 +14,12 @@ import { applyPatch as applyCanonicalPatch } from "./code-tools-patch";
 import { buildUnifiedDiff, diffLineStats, sha256 } from "./code-tools-diff";
 import { CodePlanToolError, type ProposePlanResult, type UpdateTodosResult } from "./code-plan-tool";
 import { canonicalGitExecutors, type CanonicalGitExecutorOptions } from "./code-tool-git-executors";
+import {
+  createCodeAgentSpawnExecutor,
+  type CodeAgentSpawnExecutorOptions,
+  type CodeSubagentActivityRecorder,
+  type CodeSubagentChildRunner,
+} from "./code-agent-spawn-executor";
 
 /**
  * C2: binds the canonical tool logic (`code-tools-fs.ts`, `code-tools-project.ts`) to the runtime.
@@ -899,13 +905,20 @@ export function canonicalPlanExecutors(options: CanonicalPlanExecutorOptions = {
 }
 
 /**
- * Read-only, write, sandbox and git executors merged, which is what the application wires into the runtime.
+ * Read-only, write, sandbox, git and delegation executors merged, which is what the application wires into the
+ * runtime.
  *
  * C11: the `code.git.*` bodies come from `canonicalGitExecutors`, which delegates to the existing
  * `ProjectGitService` — there is no second git implementation anywhere under `apps/agent-api/src`, and the
  * git executors contain no git command of their own.
+ *
+ * C12: `code.agent.spawn` comes from `createCodeAgentSpawnExecutor`, which delegates the child run to the
+ * existing `CodingAgentRunner` through a narrow port. There is likewise **no second orchestration engine**:
+ * the executor validates, intersects capabilities with the existing `SubagentToolPolicyGuard` and forwards.
  */
-export function allCanonicalExecutors(options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
+export function allCanonicalExecutors(
+  options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions & CanonicalSubagentExecutorOptions = {},
+): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
     ...canonicalExecutors(options),
     ...canonicalWriteExecutors(options),
@@ -914,6 +927,40 @@ export function allCanonicalExecutors(options: CanonicalAskUserExecutorOptions &
     ...canonicalPlanExecutors(options),
     ...canonicalAskUserExecutors(options),
     ...canonicalGitExecutors(options),
+    ...canonicalSubagentExecutors(options),
+  };
+}
+
+/**
+ * C12: the delegation executor. One entry, and it is an **adapter**: the type table, the capability
+ * intersection, the child runner and the handoff digest all live in their own modules, so this is the single
+ * place that binds them to the runtime.
+ *
+ * Without `childRunner` the tool fails closed with `tool_not_configured` — a published tool with no wiring is
+ * the `runCtags` defect class, and claiming to have delegated when nothing ran would be worse.
+ */
+export interface CanonicalSubagentExecutorOptions {
+  /** Late-bound because the composition builds the executors before the runner exists. */
+  subagentChildRunner?: () => CodeSubagentChildRunner | undefined;
+  /** The published registry (`CodeToolRuntime.listTools()`), i.e. the canonical tool universe. */
+  subagentCanonicalTools?: () => readonly string[];
+  /** The C6b Activity sink, so the delegation is recorded as a nested event with its snapshot. */
+  subagentActivity?: CodeSubagentActivityRecorder;
+  subagentModelProfiles?: CodeAgentSpawnExecutorOptions["modelProfiles"];
+  subagentEnv?: NodeJS.ProcessEnv;
+}
+
+export function canonicalSubagentExecutors(
+  options: CanonicalSubagentExecutorOptions = {},
+): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
+  return {
+    "code.agent.spawn": createCodeAgentSpawnExecutor({
+      ...(options.subagentChildRunner ? { childRunner: options.subagentChildRunner } : {}),
+      ...(options.subagentCanonicalTools ? { canonicalTools: options.subagentCanonicalTools } : {}),
+      ...(options.subagentActivity ? { activity: options.subagentActivity } : {}),
+      ...(options.subagentModelProfiles ? { modelProfiles: options.subagentModelProfiles } : {}),
+      ...(options.subagentEnv ? { env: options.subagentEnv } : {}),
+    }),
   };
 }
 

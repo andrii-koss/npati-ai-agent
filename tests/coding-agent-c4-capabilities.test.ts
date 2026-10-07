@@ -94,11 +94,12 @@ describe("security-gate: C4 sandbox execution capabilities", () => {
   it("pins the catalog totals in exactly one place so an accidental addition fails loudly", () => {
     const callable = CAPABILITY_CATALOG.filter((capability) => capability.agentCallable);
     // C2 (6 reads) + C3 (7 file tools) + C4 (6 sandbox tools) + C4a (3 dependency tools) = 22 code tools, plus
-    // C9's three (the planning pair and the user question) and C11's eleven git tools = 36, all agent-callable.
-    expect(CODE_CAPABILITIES).toHaveLength(36); // C11 added the eleven code.git.* tools
-    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(36);
-    expect(CAPABILITY_CATALOG.length).toBe(384);
-    expect(callable.length).toBe(120);
+    // C9's three (the planning pair and the user question), C11's eleven git tools and C12's delegation tool = 37,
+    // all agent-callable.
+    expect(CODE_CAPABILITIES).toHaveLength(37); // C12 added code.agent.spawn on inventory id 385
+    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(37);
+    expect(CAPABILITY_CATALOG.length).toBe(385);
+    expect(callable.length).toBe(121);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
     expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
   });

@@ -100,6 +100,14 @@ export interface CodeActivityEventIdentity {
   sessionId?: string | null;
   runId?: string | null;
   snapshotId?: string | null;
+  /**
+   * C12: the delegation tree. `parentRunId` (plus the tool call that started the child) says which run this
+   * event hangs under; all three are optional, so every pre-C12 caller is unchanged and keeps recording a
+   * root-level event.
+   */
+  parentRunId?: string | null;
+  parentToolCallId?: string | null;
+  parentEventId?: string | null;
 }
 
 export interface CodeActivityClassificationResolver {
@@ -138,7 +146,12 @@ export interface CodeRunActivitySink {
   record(identity: CodeActivityEventIdentity, payload: Record<string, unknown>): Promise<CodeActivityWriteResult>;
 }
 
-const IDENTITY_KEYS = ["kind", "at", "companyId", "workspaceId", "projectId", "sessionId", "runId", "snapshotId"] as const;
+const IDENTITY_KEYS = [
+  "kind", "at", "companyId", "workspaceId", "projectId", "sessionId", "runId", "snapshotId",
+  // C12: the delegation tree. They are identity, not payload, so they never reach the metadata-only checker
+  // and cannot be re-described as something a caller supplied.
+  "parentRunId", "parentToolCallId", "parentEventId",
+] as const;
 
 /**
  * Splits an event object into its identity and its payload, so a caller can pass the event it already builds
@@ -157,6 +170,9 @@ export function splitActivityEvent(event: Record<string, unknown>): {
     sessionId: event.sessionId === null || event.sessionId === undefined ? null : String(event.sessionId),
     runId: event.runId === null || event.runId === undefined ? null : String(event.runId),
     snapshotId: event.snapshotId === null || event.snapshotId === undefined ? null : String(event.snapshotId),
+    parentRunId: event.parentRunId === null || event.parentRunId === undefined ? null : String(event.parentRunId),
+    parentToolCallId: event.parentToolCallId === null || event.parentToolCallId === undefined ? null : String(event.parentToolCallId),
+    parentEventId: event.parentEventId === null || event.parentEventId === undefined ? null : String(event.parentEventId),
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(event)) {
@@ -199,6 +215,8 @@ export function createCodeRunActivitySink(options: CodeRunActivitySinkOptions): 
         sessionId: identity.sessionId ?? null,
         runId: identity.runId ?? null,
         snapshotId: identity.snapshotId ?? null,
+        parentRunId: identity.parentRunId ?? null,
+        parentToolCallId: identity.parentToolCallId ?? null,
         dataClassification,
         retentionClass,
         payload,
@@ -213,6 +231,9 @@ export function createCodeRunActivitySink(options: CodeRunActivitySinkOptions): 
           sessionId: identity.sessionId ?? null,
           runId: identity.runId ?? null,
           snapshotId: identity.snapshotId ?? null,
+          parentRunId: identity.parentRunId ?? null,
+          parentToolCallId: identity.parentToolCallId ?? null,
+          parentEventId: identity.parentEventId ?? null,
           kind: identity.kind,
           payload,
           dataClassification,

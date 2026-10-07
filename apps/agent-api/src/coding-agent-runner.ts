@@ -28,6 +28,15 @@ import type {
 import type { AuthContext, CodeSession, DataClassification, RetentionClass } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import {
+  CODE_AGENT_SPAWN_TOOL,
+  resolveCodeRunCapabilityScope,
+  resolveCodeSubagentLimits,
+  subagentDepthForRun,
+  type CodeRunCapabilityScope,
+  type ResolvedCodeSubagentLimits,
+} from "./code-subagent-limits";
+import { clampCodeSubagentTurnLimit } from "./code-subagent-types";
+import {
   executableToolCalls,
   normalizeToolCalls,
   planToolCallWaves,
@@ -241,7 +250,14 @@ export interface CodeRunQuotaPort {
     sessionId: string,
     requestedTokens: number,
     estimatedCostUsd: number,
-  ): { allowed: boolean; error?: string };
+    /**
+     * C12: where this run sits in the delegation tree (1 = main run, 2 = its child). The shared budget is
+     * keyed by session, so parent and children draw on the same allowance; the depth is passed as well so a
+     * budget configured with the canonical depth refuses a level that should not exist even if a delegation
+     * somehow slipped through.
+     */
+    currentDepth?: number,
+  ): { allowed: boolean; error?: string; remainingTokens?: number; remainingCostUsd?: number };
   recordUsage(sessionId: string, tokens: number, costUsd: number): void;
 }
 
@@ -831,6 +847,39 @@ export interface CodingAgentRunInput {
    * courtesy; the refusal is the guarantee.
    */
   readOnlyIntent?: boolean;
+  /**
+   * C12: the delegation record of a **subagent run** — the server fact that makes "depth 1" structural.
+   *
+   * `parentRunId` is written by whichever server component started this run on behalf of another one (the
+   * delegation executor), never by the model and never by a configuration value: a run that has a parent is a
+   * child, and a child is not offered the delegation tool at all, is refused by the tool runtime if it names
+   * it anyway, and cannot buy an allowance past the canonical depth.
+   *
+   * `allowedTools` is the intersection the delegation recorded (`SubagentToolPolicyGuard`). It can only
+   * narrow: the runner offers the model this set, and every tool call carries it into the runtime, which
+   * refuses anything outside it before the sub-flag, the approval or the executor. When a child run arrives
+   * without a recorded set the run is refused outright rather than inheriting the parent's whole surface.
+   */
+  subagentScope?: CodingAgentSubagentScopeInput;
+  /**
+   * C12: a **ceiling** on this run's assistant turns, set by the delegation for a sub-agent run. It can only
+   * lower the deployment's `maxStepsPerRun` (`clampCodeSubagentTurnLimit`) and it is absent for every ordinary
+   * run, so the global step limit stays exactly what it was. Without it the sub-agent type's turn budget would
+   * be a description of behaviour rather than the behaviour — the defect class this project treats as a bug.
+   */
+  maxTurns?: number;
+}
+
+/** C12: the server-side record of a delegation. */
+export interface CodingAgentSubagentScopeInput {
+  /** The run that delegated this one. */
+  parentRunId: string;
+  /**
+   * The tools the delegation permits (an intersection, already resolved). Optional on purpose: a caller that
+   * knows this run is a child but has **no** record is refused, rather than being handed the parent's whole
+   * surface by omission.
+   */
+  allowedTools?: readonly string[];
 }
 
 export interface CodingAgentRunSummary {
@@ -1251,6 +1300,24 @@ export class CodingAgentRunner {
   }
 
   /**
+   * C12: the resolved subagent limits of this runner — **readable**, clamped and actually consumed.
+   *
+   * `subagentDepth` and `subagentParallelism` were dead configuration until now (zero readers): the plan's
+   * table said 1 and 4 while the registries defaulted to 4 and 5 and nothing read either value. `maxDepth` is
+   * consumed by the capability scope (0 turns delegation off entirely, and it can never exceed the structural
+   * limit), and `maxParallelism` is consumed by the project task graph, which admits work in parallel under
+   * one parent.
+   */
+  get subagentLimits(): ResolvedCodeSubagentLimits {
+    return resolveCodeSubagentLimits(this.limits);
+  }
+
+  /** The deployment's published, active tools — the canonical universe a scope is resolved against. */
+  private publishedTools(): CodeRunToolDescriptor[] {
+    return this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
+  }
+
+  /**
    * Tool definitions offered to the model.
    *
    * `plan` mode offers read/search tools plus the narrow, explicit planning list — never a workspace, sandbox
@@ -1261,9 +1328,25 @@ export class CodingAgentRunner {
    * tools, the plan-safe metadata tools and the read-only git tools, plus the separately approved pull-request
    * comment. This is the courtesy half of the enforcement; the runtime refuses anything else even if the model
    * names it anyway.
+   *
+   * C12: a **delegated run** is offered neither the delegation tool (depth 1 is structural: a child cannot
+   * become a parent) nor anything outside the single `capabilityScope` object the caller computed. The same
+   * object travels into the runtime, so what the model sees and what the server enforces cannot drift — and a
+   * tool newly added to the general set is not offered to a child merely because it exists.
    */
-  toolDescriptors(session: CodeSession, options: { readOnlyIntent?: boolean } = {}): CodeRunToolDescriptor[] {
-    const available = this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
+  toolDescriptors(
+    session: CodeSession,
+    options: { readOnlyIntent?: boolean; capabilityScope?: CodeRunCapabilityScope } = {},
+  ): CodeRunToolDescriptor[] {
+    const scope = options.capabilityScope;
+    const mayDelegate = scope ? scope.mayDelegate : this.subagentLimits.delegationAllowed;
+    let available = this.publishedTools();
+    // A delegation tool is only ever offered to a run that may delegate, and only while the depth limit allows.
+    if (!mayDelegate) available = available.filter((tool) => tool.name !== CODE_AGENT_SPAWN_TOOL);
+    if (scope?.tools) {
+      const allowed = new Set(scope.tools.map((tool) => tool.toLowerCase()));
+      available = available.filter((tool) => allowed.has(tool.name.toLowerCase()));
+    }
     if (options.readOnlyIntent === true) {
       return available.filter((tool) => isReadOnlyRunTool(tool.name) || isPlanSafeTool(tool.name) || REVIEW_SAFE_RUN_GIT_TOOLS.has(tool.name));
     }
@@ -1808,6 +1891,7 @@ export class CodingAgentRunner {
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
           ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+          ...capabilityScopeFields,
         });
       } catch (error) {
         const failure = error as { code?: string; message?: string };
@@ -2263,6 +2347,7 @@ export class CodingAgentRunner {
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
           ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+          ...capabilityScopeFields,
         });
       } catch (error) {
         const failure = error as { code?: string; message?: string };
@@ -2501,6 +2586,55 @@ export class CodingAgentRunner {
     }
 
     /**
+     * C12: the **one** capability-scope object this run uses, computed before anything is offered or executed.
+     *
+     * Every decision below reads this object and nothing else: which tools the model is offered (`tools`), whether
+     * the delegation tool exists for this run (`mayDelegate`, false for any run with a parent), what travels into
+     * the tool runtime on every call (`tools` again), and which depth the shared budget is checked at. One object,
+     * one source of truth — the shape C11 gave the read-only intent, applied to delegation.
+     *
+     * A delegated run whose record is missing or whose grant was an unresolvable wildcard is **refused**, not
+     * quietly widened: inheriting the parent's whole surface is precisely the escalation this step removes.
+     */
+    const capabilityScope = resolveCodeRunCapabilityScope({
+      parentRunId: input.subagentScope?.parentRunId ?? null,
+      allowedTools: input.subagentScope?.allowedTools ?? null,
+      canonicalTools: this.publishedTools().map((tool) => tool.name),
+      maxDepth: this.subagentLimits.maxDepth,
+    });
+    if (capabilityScope.source === "subagent_scope_missing" || capabilityScope.source === "subagent_wildcard_unresolved") {
+      const detail = capabilityScope.source === "subagent_scope_missing"
+        ? "no capability scope was recorded for it"
+        : "its recorded capability scope was a wildcard with no published tool universe to resolve against";
+      return finish(
+        "failed",
+        "refused",
+        `The delegated run was not started: ${detail}. A subagent run receives the intersection its delegation recorded, never its parent's full tool set.`,
+      );
+    }
+    /**
+     * The runtime fields every tool call of this run carries. Spread into each call site so the enforcement half
+     * cannot be forgotten at one of them: the tool runtime refuses a delegation tool for a run with a parent and
+     * any tool outside the recorded scope, before the sub-flag, the arguments, the approval and the executor.
+     */
+    const capabilityScopeFields = {
+      ...(capabilityScope.tools ? { capabilityScope: capabilityScope.tools } : {}),
+      ...(capabilityScope.parentRunId ? { parentRunId: capabilityScope.parentRunId } : {}),
+    };
+    /** C12: this run's depth in the delegation tree (1 = main run, 2 = its child) for the shared budget. */
+    const delegationDepth = subagentDepthForRun(capabilityScope.parentRunId);
+
+    /**
+     * C12: this run's assistant-turn ceiling. A delegated run may be given a smaller budget than the
+     * deployment's global `maxStepsPerRun` (the sub-agent type's limit); a run that asked for nothing keeps the
+     * global limit **exactly** as it was, because defaulting a root run into the canonical sub-agent ceiling
+     * would silently shorten every ordinary run.
+     */
+    const runTurnLimit = input.maxTurns === undefined
+      ? this.limits.maxStepsPerRun
+      : clampCodeSubagentTurnLimit(input.maxTurns, this.limits.maxStepsPerRun);
+
+    /**
      * C11 (owner decision 8): a coding session works on its own branch, never on the repository's main branch.
      *
      * The step runs **before** the first model step and before any tool call, so there is no window in which
@@ -2537,7 +2671,7 @@ export class CodingAgentRunner {
       }
     }
 
-    const tools = this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true });
+    const tools = this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true, capabilityScope });
     const modelName = input.model ?? "auto";
     // Profiles come from configuration (injected registry/overrides/enabled ids); an unknown model with no
     // configuration falls back to the conservative profile rather than a guessed capability set.
@@ -2618,7 +2752,7 @@ export class CodingAgentRunner {
         cwd: `/workspace/${projectId}`,
         date: new Date(startedAt).toISOString().slice(0, 10),
       },
-      limits: this.limits,
+      limits: { ...this.limits, maxStepsPerRun: runTurnLimit },
       ...(projectInstructions ? { instructions: projectInstructions.body } : {}),
       ...(contextBlocks ? { contextBlocks } : {}),
       ...(input.extraSystemPromptLines ? { extraLines: input.extraSystemPromptLines } : {}),
@@ -2677,14 +2811,14 @@ export class CodingAgentRunner {
       systemPrompt: this.ports.environment?.systemPrompt() ?? null,
       modelProfileVersion: this.ports.environment?.modelProfileVersion() ?? null,
       toolVersions: Object.fromEntries(
-        this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true }).map((tool) => [tool.name, tool.version]),
+        this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true, capabilityScope }).map((tool) => [tool.name, tool.version]),
       ),
       dataClassification: session.dataClassification,
       retentionClass: session.retentionClass,
     });
     /** Tool schema versions, so a recorded call carries the contract it was made under. */
     const toolVersionByName = new Map(
-      this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true }).map((tool) => [tool.name, tool.version] as const),
+      this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true, capabilityScope }).map((tool) => [tool.name, tool.version] as const),
     );
 
     const messages: ChatMessage[] = [
@@ -2732,10 +2866,10 @@ export class CodingAgentRunner {
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
         return stop("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
       }
-      if (steps >= this.limits.maxStepsPerRun) {
+      if (steps >= runTurnLimit) {
         await release("step_limit");
         summary.remaining = "Step limit reached; the task may be unfinished.";
-        return stop("stopped", "step_limit", `Stopped after ${this.limits.maxStepsPerRun} turns: the step limit was reached.`);
+        return stop("stopped", "step_limit", `Stopped after ${runTurnLimit} turns: the step limit was reached.`);
       }
       if (this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
         await release("time_limit");
@@ -2743,7 +2877,12 @@ export class CodingAgentRunner {
         return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
       }
       if (this.ports.quota) {
-        const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd);
+        /**
+         * C12: the depth travels with the check, and the budget is keyed by **session** — so a parent and its
+         * children draw on one allowance (a delegated coding run is a run of the same session) and a depth past
+         * the canonical limit cannot obtain an allowance even if a delegation somehow slipped through.
+         */
+        const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth);
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
@@ -3238,6 +3377,12 @@ export class CodingAgentRunner {
            * courtesy; this flag is the guarantee.
            */
           ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+          /**
+           * C12: the same capability scope the model was offered, per call. Offering less is a courtesy; this
+           * is the guarantee, and it sits in the runtime before the sub-flag, the arguments, the approval and
+           * the executor — so no approval, rule or mode can buy a tool a delegation did not record.
+           */
+          ...capabilityScopeFields,
         };
         let result: CodeToolInvokeResult | CodeToolInvokeFailure;
         try {

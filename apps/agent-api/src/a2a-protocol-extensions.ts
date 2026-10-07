@@ -1,3 +1,8 @@
+import {
+  CODE_SUBAGENT_MAX_NODE_DEPTH,
+  clampCodeSubagentRegistryDepth,
+} from "./code-subagent-limits";
+
 export interface AgentQuotaBudget {
   sessionId: string;
   maxTokens: number;
@@ -42,18 +47,33 @@ export class A2AQuotaManager {
 
   /**
    * 1. A2A Quota Management: Tracks & enforces sub-agent token and cost allowances
+   *
+   * C12: the depth bound is no longer this class's own literal (it was 5, while the registry used 4 and the
+   * coding config said 1). It now defaults to the canonical subagent limit — expressed as the node depth, so
+   * "one level of delegation" is 2 here because the root counts as 1 — and an explicit value is clamped to the
+   * declared registry ceiling, so a caller can no longer hand this budget an unbounded depth.
    */
-  setSessionBudget(sessionId: string, maxTokens = 100_000, maxCostUsd = 1.0, maxDepth = 5): AgentQuotaBudget {
+  setSessionBudget(sessionId: string, maxTokens = 100_000, maxCostUsd = 1.0, maxDepth = CODE_SUBAGENT_MAX_NODE_DEPTH): AgentQuotaBudget {
     const budget: AgentQuotaBudget = {
       sessionId,
       maxTokens,
       usedTokens: 0,
       maxCostUsd,
       usedCostUsd: 0,
-      maxRecursionDepth: maxDepth,
+      maxRecursionDepth: clampCodeSubagentRegistryDepth(maxDepth),
     };
     this.budgets.set(sessionId, budget);
     return budget;
+  }
+
+  /**
+   * C12: read-only access to a session's budget, so a caller can tell "an operator configured this" from
+   * "this manager will invent a default on the next check". `checkAllowance` keeps its auto-create behaviour
+   * for compatibility, but the coding runner's adapter now configures the budget explicitly first instead of
+   * relying on a default it does not own.
+   */
+  getBudget(sessionId: string): AgentQuotaBudget | undefined {
+    return this.budgets.get(sessionId);
   }
 
   checkAllowance(

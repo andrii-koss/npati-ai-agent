@@ -149,7 +149,10 @@ import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createP
 import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-deps-policy";
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
 import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
-import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
+import { allCanonicalExecutors, runSandboxPostWriteHook, type CodeVerifyRunnerPort } from "./code-tool-executors";
+// C12: the delegation adapter. It is the only thing that turns a `code.agent.spawn` call into a child run, and
+// it does so through the **same** `CodingAgentRunner` instance the rest of the application uses.
+import { createCodeSubagentChildRunner } from "./code-subagent-child-runner";
 import { ensureSessionBranch } from "./code-tool-git-executors";
 import { gitWriteIntentForTool, sessionBranchName } from "./code-git-workflow";
 import { CodeWorkspaceRevisionGuard } from "./code-workspace-revision";
@@ -177,6 +180,7 @@ import { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { registerProjectQaRoutes } from "./project-qa-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
+import { CodeRunSharedQuota } from "./code-run-quota";
 import { ProjectOrchestrator, ProjectOrchestrationError } from "./project-orchestrator";
 import { saveChatProjectCard } from "./project-chat-cards";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
@@ -196,7 +200,7 @@ import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { registerBrowserCredentialsRoutes } from "./browser-credentials-routes";
 import { BrowserUseClient } from "./browser-tool";
 import { registerMultimodalRoutes } from "./multimodal-routes";
-import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
+import { registerA2AControlPlaneRoutes, globalQuotaManager } from "./a2a-control-plane-routes";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
 import { AutomationScheduler, computeNextCronDate } from "./automation-scheduler";
@@ -2137,10 +2141,10 @@ export function buildApp(config: AppConfig = {}) {
    * Output parsing is the canonical `code-verify-parser.ts` (tsc/eslint/pytest/jest/vitest/go/cargo),
    * which degrades to a bounded raw excerpt for unknown formats.
    */
-  const codeVerifyRunnerPort = projectSandbox ? {
+  const codeVerifyRunnerPort: CodeVerifyRunnerPort | undefined = projectSandbox ? {
     run: async (input: {
       ctx: AuthContext; companyId: string; projectId: string;
-      tools: Array<"lint" | "typecheck" | "test" | "build">; timeoutMs: number;
+      tools: Array<"lint" | "typecheck" | "test" | "build">; changedOnly: boolean; timeoutMs: number;
     }) => {
       const project = (await projectService.get(input.ctx, input.companyId, input.projectId)) as
         { toolchain?: { verifyCommands?: Record<string, string | undefined> } | null } | null;
@@ -2371,6 +2375,18 @@ export function buildApp(config: AppConfig = {}) {
     const description = buildPullRequestDescription({ summary });
     return { title: description.title, body: description.body };
   };
+  /**
+   * C12: the two late-bound ports the delegation executor needs.
+   *
+   * They are placeholders rather than values because the composition has a genuine ordering constraint: the
+   * tool executors (and therefore the runtime) are built **before** the runner, and the runner is built over the
+   * runtime. A value would have to be `undefined` forever; a getter lets the delegation see them once they
+   * exist, which is the same late-binding idiom `createCodeRunEnvironmentHolder` already uses for the
+   * per-run facts. Neither holder is a second engine: they are the **same** `CodeToolRuntime` and the **same**
+   * `CodingAgentRunner` instances the rest of the application uses.
+   */
+  let codeToolRuntimeRef: CodeToolRuntime | undefined;
+  let codingAgentRunnerRef: CodingAgentRunner | undefined;
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
@@ -2494,6 +2510,39 @@ export function buildApp(config: AppConfig = {}) {
       },
       sessionBranch: async ({ sessionId }) => (sessionId ? sessionBranchName(sessionId) : null),
       describeRun: describeCodeRunForPullRequest,
+      /**
+       * C12: the delegation ports.
+       *
+       *  - `subagentCanonicalTools` is the **published** registry (`listTools()`) — the only universe a parent's
+       *    wildcard grant may expand into. It reads through the late holder above so it always reflects the very
+       *    runtime these tool calls go through, rather than a copy that could drift from it.
+       *  - `subagentChildRunner` delegates the child run to the **same** `CodingAgentRunner` (again through the
+       *    late holder, because the runner is built over this runtime). There is no second loop: the executor
+       *    validates and intersects, the runner runs. The `subagentScope` it passes is the one interface the
+       *    runner already reads for a delegated run, and a child without it is refused rather than widened.
+       *  - `subagentActivity` is the same C6b sink every other Activity family writes through, so a delegation
+       *    is one more event in the one Activity stream — with its `snapshot_id` and its parent run.
+       */
+      subagentCanonicalTools: () => codeToolRuntimeRef?.listTools().map((entry) => entry.name) ?? CODE_TOOL_SCHEMAS.map((entry) => entry.name),
+      subagentChildRunner: () => codingAgentRunnerRef
+        ? createCodeSubagentChildRunner({
+            loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
+            runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns }) =>
+              codingAgentRunnerRef!.run({
+                ctx,
+                session,
+                prompt,
+                runId,
+                maxTurns,
+                subagentScope: { parentRunId, allowedTools: [...allowedTools] },
+                ...(model ? { model } : {}),
+                // A read-only type (explore/plan/review) travels as the session's own read-only intent, so the
+                // runner offers only the review-safe tools and the runtime refuses anything else on the server.
+                ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
+              }),
+          })
+        : undefined,
+      subagentActivity: codeActivitySink,
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,
@@ -2579,6 +2628,7 @@ export function buildApp(config: AppConfig = {}) {
     reviewScope: { allows: (tool: string) => isReviewSafeTool(tool) },
     revisions: codeWorkspaceRevisions,
   });
+  codeToolRuntimeRef = codeToolRuntime;
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
   // published checksum), so a session can always be read with the exact tool versions it used.
   try {
@@ -2639,6 +2689,24 @@ export function buildApp(config: AppConfig = {}) {
     projectBrowserQaService,
     dataBackendService,
     projectRedirectRepository,
+    // C12: the **one** lease manager of the deployment. `CompanyToolRuntime` above already holds this exact
+    // instance, so a path locked by the project task graph and the same path locked by a `project.files.*` tool
+    // are one lock instead of two managers that cannot see each other.
+    projectFileLeaseManager,
+    /**
+     * C12: the mandatory verification after the merges, over the **same** `codeVerifyRunnerPort` the
+     * `code.verify.run` tool uses. There is no second verification path: the final check replays the project's
+     * configured `lint`/`typecheck`/`test`/`build` commands exactly as the tool does, and a deployment with no
+     * sandbox reports `unavailable` rather than a pass.
+     */
+    codeVerifyRunnerPort
+      ? {
+          run: async ({ ctx, companyId, projectId, tools, changedOnly, timeoutMs }) =>
+            codeVerifyRunnerPort.run({
+              ctx, companyId, projectId, tools: [...tools], changedOnly, timeoutMs,
+            }),
+        }
+      : undefined,
   );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {
@@ -4430,6 +4498,15 @@ ${localized.next}`;
     imageAdmission: sandboxImagePolicy,
     runState: codeRunStateLog,
     /**
+     * C12: the coding agent's budget. The port and both call sites existed since C6 (`checkQuota` before every
+     * model call, `recordUsage` after every answered turn), but nothing ever supplied an implementation, so
+     * `budget_exhausted` was unreachable in a real deployment. It is supplied here over the **existing**
+     * `A2AQuotaManager` — the same instance the A2A control-plane routes configure — so there is one accounting
+     * system, and it is keyed by session: a delegated run belongs to its parent's session, so parent and
+     * children draw on one shared `sessionBudget` and a child cannot spend past what the parent has left.
+     */
+    quota: new CodeRunSharedQuota(globalQuotaManager),
+    /**
      * C10: the session→run link. `code_sessions.run_id` had a reader (`lastRun`, `usage`) and an update path but
      * **no writer**, so both answers were permanently `null` and a resume had no way to find "the run of this
      * session". The write happens the moment the durable run id exists, and it is best effort: the run row is the
@@ -4599,6 +4676,8 @@ ${localized.next}`;
     // C6b: activity is persisted by the shared sink above; the run-entity binding arrives with the run trace.
     runEvents: { append: async (entry) => entry },
   });
+  // C12: the delegation can now reach the runner. Same instance, no second loop.
+  codingAgentRunnerRef = codingAgentRunner;
   // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
   // moved to `interrupted`; read-only calls with an unknown result may be replayed, mutating calls are reported
   // as a doubt and never replayed. This is what turns a crash into a recoverable state instead of a mystery.

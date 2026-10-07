@@ -1,7 +1,14 @@
 {
-  "manifestVersion": 8,
-  "checksum": "921d6029dc39122ccda4d71fe426cc4d9c4ca45856c6711fd6908dcdfa7a3233",
+  "manifestVersion": 9,
+  "checksum": "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20",
   "tools": [
+    {
+      "key": "code.agent.spawn@1",
+      "name": "code.agent.spawn",
+      "version": 1,
+      "status": "active",
+      "checksum": "59bcf82d4fbd1d0d1412f588021efe0fa151fe3d25e473e990092248c68728ab"
+    },
     {
       "key": "code.ask_user@1",
       "name": "code.ask_user",

@@ -1087,6 +1087,91 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
       },
     }),
   },
+  /**
+   * C12: the delegation tool. It is a **metadata** tool like the git adapters — the child's transcript,
+   * file bodies and tool output never travel back — which is why its result schema is a bounded handoff
+   * digest rather than a nested run result.
+   */
+  "code.agent.spawn": {
+    inputSchema: {
+      type: "object",
+      required: ["agentType", "task"],
+      additionalProperties: false,
+      properties: {
+        agentType: { enum: ["explore", "plan", "implement", "review", "test"], description: "The kind of sub-agent. It decides the child's model profile, turn limit and capability profile." },
+        task: { type: "string", minLength: 1, maxLength: 8000, description: "A self-contained task. The child sees this text, not this run's conversation." },
+        paths: { type: "array", maxItems: 20, items: { type: "string", maxLength: 1024 }, description: "Workspace-relative file or directory scope for the child. Each path passes the canonical path guard, so absolute, traversing and secret paths are refused." },
+        tools: { type: "array", maxItems: 64, items: { type: "string", maxLength: 128 }, description: "Tools requested for the child. A request is never a grant: the effective set is the intersection of this run's effective tools, the child type's profile and this list, resolved against the published registry. A wildcard resolves only against that registry." },
+        model: { type: "string", maxLength: 200, description: "Optional model override. The child type's model profile still applies, so an override cannot remove its constraints." },
+        turnLimit: { type: "integer", minimum: 1, maximum: 40, description: "Requested cap on the child's model turns. Clamped down to the child type's limit, which is itself clamped to the canonical ceiling: configuration may lower it, never raise it." },
+        summaryOnly: { type: "boolean", default: true, description: "Return the metadata-only handoff digest. It is the only result this tool produces, so `false` is refused with `subagent_summary_required` instead of being silently ignored." },
+      },
+    },
+    outputSchema: resultEnvelope("code.agent.spawn", {
+      type: "object",
+      required: ["agentType", "status", "runId", "capabilityProfile", "limits", "tools", "handoff", "truncated"],
+      additionalProperties: false,
+      properties: {
+        agentType: { enum: ["explore", "plan", "implement", "review", "test"] },
+        status: { enum: ["completed", "failed"] },
+        runId: { type: ["string", "null"] },
+        errorCode: { type: ["string", "null"] },
+        capabilityProfile: { type: "string" },
+        limits: {
+          type: "object",
+          required: ["maxTurns", "maxParallelism"],
+          additionalProperties: false,
+          properties: {
+            maxTurns: { type: "integer" },
+            maxParallelism: { type: "integer" },
+          },
+        },
+        tools: { type: "array", maxItems: 64, items: { type: "string" } },
+        handoff: {
+          type: "object",
+          required: ["schemaVersion", "findings", "files", "symbols", "toolCalls", "turns", "dropped"],
+          additionalProperties: false,
+          properties: {
+            schemaVersion: { type: "integer" },
+            findings: {
+              type: "array",
+              maxItems: 100,
+              items: {
+                type: "object",
+                required: ["kind", "path", "name", "detail"],
+                additionalProperties: false,
+                properties: {
+                  kind: { enum: ["fact", "file", "symbol", "risk", "open_question"] },
+                  path: { type: ["string", "null"] },
+                  name: { type: ["string", "null"] },
+                  detail: { type: "string", maxLength: 200 },
+                },
+              },
+            },
+            files: { type: "array", maxItems: 200, items: { type: "string" } },
+            symbols: {
+              type: "array",
+              maxItems: 200,
+              items: {
+                type: "object",
+                required: ["path", "name", "kind"],
+                additionalProperties: false,
+                properties: {
+                  path: { type: "string" },
+                  name: { type: "string" },
+                  kind: { type: "string" },
+                },
+              },
+            },
+            toolCalls: { type: "integer" },
+            turns: { type: "integer" },
+            dropped: { type: "integer" },
+          },
+        },
+        truncated: { type: "boolean" },
+      },
+    }),
+  },
 };
 
 export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
@@ -2118,6 +2203,59 @@ export const CODE_GIT_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
+/**
+ * C12: the delegation capability (inventory id **385**), appended after the git group so every previously
+ * published id keeps its exact meaning and membership.
+ *
+ * One capability, because there is one act: hand a bounded task to a coding sub-agent. Its published facts are
+ * the contract the server enforces:
+ *
+ *  - **Depth 1 is structural.** A run that has a parent is never offered this tool and the tool runtime refuses
+ *    the name before the sub-flag, the arguments, the approval and the executor, so a child cannot delegate
+ *    whatever the model asks for or the configuration says.
+ *  - **A request is never a grant.** The child's tools are the intersection of this run's effective set, the
+ *    child type's own profile and the requested list. A wildcard resolves only against the published registry;
+ *    with no registry it grants nothing rather than meaning "everything".
+ *  - **Metadata only in both directions.** The child receives the task text and a scope; the parent receives a
+ *    bounded handoff digest (findings, paths, symbols, counts) and never the child's transcript, file bodies or
+ *    tool output.
+ *
+ * `risk` is `medium`: it neither destroys work like `code.fs.delete` nor publishes anything like
+ * `code.git.push`, but it does start another run that may write to the workspace, so it is not a read.
+ * It is **not** approve-gated: approval belongs to the individual write the child attempts, which is judged by
+ * the same policy engine as any other call — gating the delegation as well would ask the human twice for one
+ * change and would teach the agent to avoid delegating.
+ */
+export const CODE_SUBAGENT_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.agent.spawn",
+    inventoryIds: [385],
+    type: "tool",
+    domain: "code",
+    name: "Delegate to a coding sub-agent",
+    description: "Delegate one bounded task to a coding sub-agent of a named type (explore for read-only repository search, plan, implement within a file scope, review, or test) and get back a metadata-only handoff digest: findings, file paths, symbols and counts. Depth is 1 by construction — a sub-agent run is never offered this tool and the runtime refuses it for a run that has a parent — and the child's tools are an intersection of this run's effective set, the type's profile and the requested list, so a request can only narrow.",
+    useWhen: [
+      "A repository-wide search or an architecture survey would flood this conversation with file bodies: delegate it to an explore sub-agent and keep only the digest.",
+      "Several independent files or areas have to change and the work can be split without a second planner.",
+      "A change needs an independent review or a test-focused pass that should not see this run's reasoning.",
+    ],
+    doNotUseWhen: [
+      "The answer is one known file: read it directly instead of paying for a second run.",
+      "The task needs this conversation's context: the child sees the task text only, never the transcript.",
+      "The work needs a decision from the user: ask with code.ask_user, because a sub-agent cannot answer for them.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.agent.spawn"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.agent.spawn"]!.outputSchema,
+    version: 1,
+  },
+];
+
 /** Every `code.*` capability (reads, mutating file tools, sandbox execution, dependencies, planning). */
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_READ_CAPABILITIES,
@@ -2127,6 +2265,7 @@ export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_PLAN_CAPABILITIES,
   ...CODE_ASK_USER_CAPABILITIES,
   ...CODE_GIT_CAPABILITIES,
+  ...CODE_SUBAGENT_CAPABILITIES,
 ];
 
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
@@ -2215,6 +2354,24 @@ export const CODE_GIT_MATRIX: CapabilityMatrixEntry[] = CODE_GIT_CAPABILITIES.ma
 }));
 
 /**
+ * C12: the delegation tool's audit-matrix entry (inventory id 385). The two suites named here are the ones
+ * that prove the published behaviour: the scope suite drives the intersection and the depth limit, and the
+ * workflow suite drives the executor, the handoff digest and the failure path.
+ */
+export const CODE_SUBAGENT_MATRIX: CapabilityMatrixEntry[] = CODE_SUBAGENT_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c12-subagent-workflow.test.ts", "tests/coding-agent-c12-subagent-scope.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/**
  * Which feature flag gates which code tool. The read/search tools *and* `code.fs.diff` need `code.read`
  * (they only read), every mutating tool needs `code.write`; both sit on top of the master
  * `coding_agent.enabled` flag. The decision is made from the capability's own permission requirement so
@@ -2253,6 +2410,12 @@ export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntri
    * the UI reports as write-gated.
    */
   ...CODE_GIT_CAPABILITIES.map((capability) => [capability.id, "code.git"] as const),
+  /**
+   * C12: the delegation tool hangs off its own `code.subagents` sub-flag, not `code.read`/`code.write`.
+   * Delegation has a different blast radius again: it starts another run that consumes the shared budget and
+   * may write, so enabling file edits must not enable spawning children, and enabling git must not either.
+   */
+  ...CODE_SUBAGENT_CAPABILITIES.map((capability) => [capability.id, "code.subagents"] as const),
 ]);
 
 export const CODE_TOOL_FLAG_KEYS_RESOLVED: Record<string, string> = {

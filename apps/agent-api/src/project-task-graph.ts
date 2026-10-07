@@ -1,4 +1,5 @@
 import type { CompanyAgent, CompanyAgentEdge } from "@npati/workspace";
+import { resolveCodeSubagentLimits } from "./code-subagent-limits";
 import {
   ProjectFileLeaseManager,
   type ProjectFileLease,
@@ -123,6 +124,14 @@ export function taskScopesConflict(left: ProjectTask, right: ProjectTask): boole
   return left.paths.some((a) => right.paths.some((b) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/")));
 }
 
+/**
+ * Runs the plan's tasks, honouring dependencies and file scopes, with at most `maxConcurrent` tasks in flight.
+ *
+ * C12: `maxConcurrent` is clamped to the canonical parallelism **hard ceiling** (`resolveCodeSubagentLimits`
+ * owns the number), so configuration may lower the fan-out but can never raise it past what one node serves —
+ * the `code-run-queue.ts` idiom applied to parallel implement tasks. The default stays 3 for a caller that
+ * passes nothing; the project service passes the configured (clamped) value.
+ */
 export async function executeProjectTaskGraph(
   tasks: ProjectTask[],
   execute: (task: ProjectTask, snapshot: ProjectTask[]) => Promise<string>,
@@ -132,7 +141,7 @@ export async function executeProjectTaskGraph(
   projectId?: string,
 ): Promise<ProjectTask[]> {
   const running = new Map<string, Promise<void>>();
-  const capacity = Math.max(1, Math.min(3, maxConcurrent));
+  const capacity = Math.max(1, Math.min(resolveCodeSubagentLimits().maxParallelism, maxConcurrent));
   while (true) {
     for (const task of tasks) {
       if (task.status !== "queued") continue;

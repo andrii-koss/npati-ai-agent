@@ -151,11 +151,37 @@ describe("Per-Subagent Tool Policy (SubagentToolPolicyGuard)", () => {
       parentAllowedTools: ["*"], // parent has wildcard
       childAgentId: "agent-sub",
       childBaseTools: ["web.search", "mcp.dangerous.wipe"],
+      /**
+       * C12 (refinement, not a weakening): a wildcard is a placeholder for the deployment's canonical universe,
+       * not a universal key. Before this the wildcard short-circuited the escalation invariant entirely, so the
+       * parent's real surface was never consulted. The suite's own subject is unchanged — the policy engine,
+       * not the wildcard, is what refuses `mcp.dangerous.wipe` — so the universe is now supplied explicitly.
+       */
+      canonicalTools: ["web.search", "mcp.dangerous.wipe"],
     };
 
     const result = guard.evaluateSubagentTools(scope);
     expect(result.permittedTools).toContain("web.search");
     expect(result.permittedTools).not.toContain("mcp.dangerous.wipe");
     expect(result.deniedTools.length).toBe(1);
+    expect(result.effectiveParentTools).toEqual(["web.search", "mcp.dangerous.wipe"]);
+  });
+
+  it("treats a wildcard with no canonical universe as granting nothing", () => {
+    const guard = new SubagentToolPolicyGuard();
+    const result = guard.evaluateSubagentTools({
+      parentAgentId: "agent-manager",
+      parentAllowedTools: ["*"],
+      childAgentId: "agent-sub",
+      childBaseTools: ["web.search", "files.delete"],
+    });
+
+    expect(result.wildcardUnresolved).toBe(true);
+    expect(result.effectiveParentTools).toEqual([]);
+    expect(result.permittedTools).toEqual([]);
+    // The request is reported as an escalation attempt rather than silently dropped, so the manager above this
+    // guard refuses the spawn instead of creating a child whose grant nobody could resolve.
+    expect(result.escalationAttempts).toEqual(["web.search", "files.delete"]);
+    expect(result.deniedTools[0]!.reason).toContain("PARENT_WILDCARD_SCOPE_UNRESOLVED");
   });
 });

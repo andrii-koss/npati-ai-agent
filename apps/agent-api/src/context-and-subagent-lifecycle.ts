@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { SubagentToolPolicyGuard, type SubagentDelegationScope } from "./subagent-tool-policy";
+import {
+  CODE_SUBAGENT_MAX_NODE_DEPTH,
+  CODE_SUBAGENT_MAX_PARALLELISM,
+  clampCodeSubagentRegistryChildren,
+  clampCodeSubagentRegistryDepth,
+  resolveEffectiveToolSet,
+} from "./code-subagent-limits";
 
 export interface ContextMessage {
   id: string;
@@ -31,7 +38,19 @@ export interface SubagentNode {
   rootAgentId: string;
   depth: number;
   ancestorIds: string[];
+  /**
+   * C12: the resolved capability set of this node. It is an **intersection** (the parent's effective set, the
+   * child type's profile and the delegation record) and it never contains a wildcard — the previous
+   * `requestedTools ?? ["*"]` stored what the caller *asked for* and defaulted to "everything", which made a
+   * bigger request a bigger grant.
+   */
   allowedTools: string[];
+  /**
+   * C12: `false` when a `*`/`all` grant could not be resolved against a canonical universe, so `allowedTools`
+   * is deliberately empty instead of meaning "everything". Reported rather than hidden, because a node whose
+   * grant could not be resolved is a delegation record that needs fixing.
+   */
+  capabilityScopeResolved: boolean;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   cancellationReason?: string;
   createdAt: string;
@@ -215,24 +234,47 @@ export class NestedSubagentManager {
   private readonly maxChildrenPerAgent: number;
 
   constructor(options: { maxDepth?: number; maxChildrenPerAgent?: number; toolGuard?: SubagentToolPolicyGuard } = {}) {
-    this.maxDepth = options.maxDepth ?? 4;
-    this.maxChildrenPerAgent = options.maxChildrenPerAgent ?? 5;
+    /**
+     * C12: both bounds come from the canonical subagent-limits module and are clamped there, so the three
+     * numbers that used to describe "how deep" (this manager's 4, `A2AQuotaManager`'s 5 and the coding config's
+     * 1) are now one declared pair. The default is the canonical **node** depth — the root counts as 1, so
+     * "one level of delegation" is 2 here — and an explicit caller (the generic A2A registry) may go up to the
+     * declared registry ceiling, never past it.
+     */
+    this.maxDepth = clampCodeSubagentRegistryDepth(options.maxDepth ?? CODE_SUBAGENT_MAX_NODE_DEPTH);
+    this.maxChildrenPerAgent = clampCodeSubagentRegistryChildren(options.maxChildrenPerAgent ?? CODE_SUBAGENT_MAX_PARALLELISM);
     this.toolGuard = options.toolGuard ?? new SubagentToolPolicyGuard();
   }
 
+  /** The bounds this manager actually enforces (clamped), so a caller can read them instead of guessing. */
+  get limits(): { maxDepth: number; maxChildrenPerAgent: number } {
+    return { maxDepth: this.maxDepth, maxChildrenPerAgent: this.maxChildrenPerAgent };
+  }
+
   /**
-   * Spawn a nested sub-agent under a parent agent with depth, cycle, and privilege escalation guards
+   * Spawn a nested sub-agent under a parent agent with depth, cycle, and privilege escalation guards.
+   *
+   * C12: the node's capability set is the **intersection** the guard computes (`permittedTools`) — never the
+   * requested list and never a default wildcard. A child can therefore only ever hold a subset of its parent,
+   * and a wildcard grant with no canonical universe is reported as unresolved rather than granted.
    */
   spawnSubagent(params: {
     agentId: string;
     name: string;
     parentAgentId?: string;
     parentAllowedTools?: string[];
+    /** The delegation record. For a child it is intersected; for a root it is the caller's grant. */
     requestedTools?: string[];
+    /** C12: the child **type**'s own profile, intersected with the parent's effective set. */
+    childTypeTools?: string[];
+    /** C12: the deployment's published tool universe, the only thing a `*`/`all` can expand to. */
+    canonicalTools?: readonly string[];
   }): SubagentNode {
     let depth = 1;
     let rootAgentId = params.agentId;
     let ancestorIds: string[] = [];
+    let allowedTools: string[] = [];
+    let capabilityScopeResolved = true;
 
     if (params.parentAgentId) {
       const parent = this.nodes.get(params.parentAgentId);
@@ -271,8 +313,9 @@ export class NestedSubagentManager {
         parentAgentId: parent.agentId,
         parentAllowedTools: parentTools,
         childAgentId: params.agentId,
-        childBaseTools: params.requestedTools ?? parentTools,
-        delegationAllowedTools: params.requestedTools,
+        childBaseTools: params.childTypeTools ?? params.requestedTools ?? parentTools,
+        ...(params.requestedTools ? { delegationAllowedTools: params.requestedTools } : {}),
+        ...(params.canonicalTools ? { canonicalTools: params.canonicalTools } : {}),
       });
 
       if (evaluation.escalationAttempts.length > 0) {
@@ -280,6 +323,18 @@ export class NestedSubagentManager {
           `PRIVILEGE_ESCALATION_BLOCKED: Child requested tools [${evaluation.escalationAttempts.join(", ")}] not possessed by parent.`
         );
       }
+
+      /**
+       * This is the corrected line. The node stores what the **guard** permitted — the intersection — and a
+       * wildcard that could not be resolved yields an explicitly empty set with the reason recorded, never
+       * `["*"]`. A model (or caller) that asks for more now provably gets less.
+       */
+      allowedTools = [...evaluation.permittedTools];
+      capabilityScopeResolved = !evaluation.wildcardUnresolved;
+    } else {
+      const resolved = resolveEffectiveToolSet(params.requestedTools, params.canonicalTools);
+      allowedTools = resolved.tools;
+      capabilityScopeResolved = !resolved.wildcardUnresolved;
     }
 
     const node: SubagentNode = {
@@ -289,7 +344,8 @@ export class NestedSubagentManager {
       rootAgentId,
       depth,
       ancestorIds,
-      allowedTools: params.requestedTools ?? ["*"],
+      allowedTools,
+      capabilityScopeResolved,
       status: "running",
       createdAt: new Date().toISOString(),
       children: [],

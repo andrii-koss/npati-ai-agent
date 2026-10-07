@@ -1,7 +1,8 @@
 import type { ProjectGitService } from "./project-git-service";
 import type { ProjectDeployService } from "./project-deploy-service";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
-import { ProjectMultiAgentService } from "./project-multi-agent";
+import { ProjectMultiAgentService, type ProjectMultiAgentOptions } from "./project-multi-agent";
+import type { ProjectFileLeaseManager } from "./project-file-lock";
 import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS, canBuildWebsite, canBuildMobileApp } from "./project-agent-capabilities";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
@@ -90,6 +91,19 @@ export class ProjectOrchestrator {
     private readonly qaService?: ProjectBrowserQaService,
     private readonly dataBackends?: DataBackendService,
     private readonly authRedirects?: ProjectRedirectRepository,
+    /**
+     * C12: **the** deployment's lease manager. `CompanyToolRuntime` holds the same instance, so a path locked by
+     * the project task graph and the same path locked by a pair of Company file tools are the same lock. Without
+     * this parameter the multi-agent service silently created its own manager, which is how "two ways of locking
+     * one file" would have started: each side would have reported a successful acquisition of the same path.
+     */
+    private readonly leaseManager?: ProjectFileLeaseManager,
+    /**
+     * C12: the post-merge verification port. It is the **same** `CodeVerifyRunnerPort` `code.verify.run` uses, so
+     * the mandatory final check runs the project's configured commands and cannot invent one. Absent means the
+     * multi-agent service reports the final verification as `unavailable` rather than as a pass.
+     */
+    private readonly codeVerification?: ProjectMultiAgentOptions["verification"],
   ) {}
 
   /**
@@ -611,10 +625,13 @@ export class ProjectOrchestrator {
         this.workspaceStore,
         this.companyRuntime,
         this.previewService,
-        undefined,
+        // C12: the shared lease manager (undefined only in a composition that has none, where the service's own
+        // default applies). Never a second manager next to `CompanyToolRuntime`'s.
+        this.leaseManager,
         this.gitService,
         this.projectWorkspace as any,
-        undefined,
+        // C12: the mandatory post-merge verification, over the canonical verify runner.
+        this.codeVerification ? { verification: this.codeVerification } : undefined,
         this.qaService,
       );
       const multiResult = project.framework !== "HTML/CSS" && ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
