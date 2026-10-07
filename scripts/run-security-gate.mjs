@@ -574,6 +574,104 @@ export const SECURITY_GATE_TESTS = [
   // outbound exfiltration guard still refuses a credential in the body, and that the hooks module has one
   // injected port and no HTTP client of its own.
   "tests/coding-agent-c13-hooks-egress.test.ts",
+  // C13: slash commands. Pins that a command is a **versioned prompt template and nothing else** — `/review`
+  // expands into the stored text plus a labelled argument block, and the expansion value carries
+  // `canChangePolicy: false` / `canGrantTools: false` with no field naming a mode, an approval, a role or a
+  // flag; that a project command file under `.npati/commands/` is **not read** before the project trust record
+  // says yes (the reader spy and its counter both stay at zero, and the gate order is flag -> trust -> read);
+  // that a declaration naming a decision is refused by name in the same closed vocabulary the hooks use; that a
+  // template attempting a policy mutation is refused instead of expanded; that the C13 precedence
+  // `system -> user -> project -> session` picks the same winner and the same shadowed list for both candidate
+  // orders; that the template, the expansion and every argument value are bounded and validated; and that the
+  // expansion's content hash and provenance are recorded as replay input, so a replay expands the recorded
+  // command version rather than today's — with the bundle format staying at version 3 because the two
+  // provenance lists are optional header members and a bundle without them still derives the pre-C13 hash.
+  "tests/coding-agent-c13-slash-commands.test.ts",
+  // C13: lazily loaded Skills. Pins that the metadata listing never calls the body reader and withholds a
+  // repository-sourced Skill without a trust record; that a loaded body becomes a typed `SKILL INSTRUCTIONS`
+  // section of the system prompt rather than a tool result, and that the **real** `compactConversation` leaves
+  // it byte-identical while old tool results become stubs; that `skill_id` + version + hash + provenance are
+  // recorded while the body is not; that the replay reader refuses a moved version or an edited body instead of
+  // answering with the current one; that a credential-shaped body is refused by the scanner before the provider
+  // guard is reached and a redaction-requiring body is refused rather than sanitised; and that two sessions
+  // share neither active Skills nor the lazy-load budget.
+  "tests/coding-agent-c13-skills-lazy-load.test.ts",
+  // C13: the runner wiring, end to end. Pins that the text the **engine** really receives as the user message
+  // is the expanded command text and not the raw `/name` line; that the command provenance reaches the replay
+  // recorder at start (so the bundle pins the expanded version rather than resolving the name later); that a
+  // registry failure leaves the caller's own prompt in place and records no provenance instead of inventing
+  // one; that the typed `SKILL INSTRUCTIONS` section is inside the system prompt above the data boundary with
+  // its invariant lines still last; and that the Skill provenance published to the ExecutionSnapshot holder is
+  // id/version/hash/source only.
+  "tests/coding-agent-c13-runner-wiring.test.ts",
+  // C13 (owner decisions 5 and 8): MCP as a **runtime** capability provider. Pins the runtime record the owner
+  // named (connection id, tool name, schema hash, risk, approval requirement, `discoveredAt`, connection scope),
+  // the `static → runtime → unknown ⇒ deny` lookup in one function with the static path measurably untouched, the
+  // fail-closed default (`high` + approval required) that a new/unknown MCP tool gets and that an MCP server's own
+  // metadata can never lower (a declaration is refused by name, and a schema parameter named `mode` is not a
+  // declaration), the owner/admin-only risk flow that is journalled in the AuditLog **before** it applies and
+  // refuses with `audit_unavailable` when the journal is unavailable, the Capability Inspector showing both
+  // sources while the static count does not move (measured: static 385, runtime N, combined 385 + N), the runtime
+  // manifest pinned in the ExecutionSnapshot, a schema change minting a new revision/hash, and a replay against a
+  // different set refused with a structured error instead of a silent swap.
+  "tests/coding-agent-c13-mcp-runtime-capabilities.test.ts",
+  // C13 (owner decision 7): MCP network and data safety. Pins that an endpoint may come only from a configured
+  // Integration — a model argument, a README line or a `NPATI.md` instruction is refused by name with the
+  // transport never dialled (call count asserted); that the transport is the **existing** SSRF-safe client, so a
+  // loopback, link-local (cloud metadata), RFC1918 or privately-resolving destination is refused before a socket
+  // exists and every redirect is re-validated (a public host bounced towards metadata is refused at hop two, with
+  // exactly one dial); that the egress allowlist is enforced (an empty allowlist denies every host); that a
+  // response is untrusted data bounded with a visible marker, refused — never redacted — when it carries a
+  // credential, classified by the injection guard, and wrapped in the canonical `code_tool_result` envelope with
+  // a **closed** key vocabulary so an injected instruction has no policy field to reach; and that a discovery is
+  // tenant scoped and a refused declaration contributes nothing to the manifest.
+  "tests/coding-agent-c13-mcp-network-safety.test.ts",
+  // C13 (owner requirement: fresh-process MCP acceptance): discovery must happen **on the run path**. Pins that a
+  // brand-new runtime with a configured, active MCP Integration discovers its tools before the first model call
+  // with **no** Capability Inspector request and no warm-up call (measured: the overlay is empty and the transport
+  // was never entered before the run, and the numbers captured *inside* the first model call show the discovery
+  // had already happened); that the fail-closed risk/approval assignment reaches the model-visible descriptors and
+  // the pinned ExecutionSnapshot (hash/revision, metadata only); that the model's call really executes through the
+  // existing transport and returns the canonical `untrusted_data` envelope (bounded with a marker, a credential
+  // **refused** and never redacted, an injected instruction carried as classified data with no policy field to
+  // reach); that the default `high` + approval-required tool is refused with `approval_required` and a real
+  // approval request; that a re-listing keeps the manifest hash while a schema change mints a new revision; that a
+  // replay against a changed schema is refused by the existing 409 contract; that tenants are isolated and the
+  // static count does not move (385 / runtime N / combined); and the negative controls — no Integration, an
+  // `is_active=false` row, an unwired source, a failing discovery and `code.mcp` off all leave the overlay empty
+  // with an Activity code, remove the tool from the descriptors, make the call impossible (`unknown_tool`) and
+  // still let the run complete.
+  "tests/coding-agent-c13-mcp-run-path.test.ts",
+  // C13: the wiring of that run path in the **composed** application — one discovery system with two entry points
+  // (the runner's `runtimeCapabilities` and the Inspector route are the same object; the route no longer calls
+  // `discoverMcpRuntimeCapabilities` directly), the source-level ordering inside the runner (discovery < tool list
+  // < ExecutionSnapshot < the loop's first model call, each anchor non-vacuously present), the absence of any
+  // Inspector dependency in the runner and the MCP run path, the newly wired replay-bundle manifest pin, and a
+  // fresh `buildApp` whose Inspector still answers over the shared discovery.
+  "tests/coding-agent-c13-mcp-run-path-wiring.test.ts",
+  // C13 (owner requirement, corrected): the two **replay modes** are not interchangeable. Pins that a
+  // deterministic replay of an MCP-using run verifies against the runtime manifest the run's **own bundle**
+  // recorded — with the discovery port never consulted, zero dials and the recorded settled tool results —
+  // so it works in a fresh process whose runtime overlay is empty (the defect: the recorded replay compared
+  // against the in-process overlay, answered "I cannot say" and refused every such run with
+  // `runtime_mcp_manifest_unavailable`); that an explicit live comparison of a moved manifest is still the
+  // 409 `replay_runtime_mcp_manifest_changed` refusal; that **live** replay is where discovery happens and a
+  // moved or unstateable manifest refuses **before** any run is started; and that the bundle format stays at
+  // version 3, with a bundle carrying no runtime field hashing exactly as it did before the field existed.
+  "tests/coding-agent-c13-mcp-replay-modes.test.ts",
+  // C13 (owner blocker 1): a runtime MCP call is approved **once**, for that exact call, and the run continues.
+  // Pins that `approval_required` pauses the run in the existing `waiting_for_user` state, that exactly one
+  // durable approval record is created for it with the canonical material (provider, connection, tool, schema
+  // hash, argument hash and the run/agent/call ids — never the arguments themselves), that the material the
+  // requesting side stored and the material the consuming side presents hash to the **same** value (the C11
+  // defect this closes: two builders, two hashes, an approval nobody could redeem), that the same run resumes
+  // and really executes the call through the SSRF-safe transport with the canonical `untrusted_data` envelope,
+  // that one record is one call (`APPROVAL_ALREADY_USED`) while a record for another tool, schema, argument set,
+  // run or agent is `APPROVAL_INVALID` with no dial, that two runtime MCP calls in one turn are **two** human
+  // requests and one pause, that the pause survives a process restart, and that a rejection, a timeout and a
+  // cancellation are structured refusals that execute nothing — without ever requiring the separate owner/admin
+  // risk downgrade, which keeps working beside it.
+  "tests/coding-agent-c13-mcp-approval-flow.test.ts",
 ];
 
 /**

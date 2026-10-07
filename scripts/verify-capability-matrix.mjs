@@ -24,6 +24,7 @@ import {
   SCRIPTS_ROOT,
   ensureTypeScriptTransformRuntime,
   loadCapabilityCatalogAudit,
+  loadMcpRuntimeOverlay,
   printCapabilityAuditReport,
   readPublishedToolSchemaManifest,
 } from "./capability-audit-runtime.mjs";
@@ -51,6 +52,42 @@ console.log(`  • Manifest source  : ${path.relative(rootDir, manifestFile).rep
 
 console.log("\nCapability audit checks:");
 const checksOk = printCapabilityAuditReport(report, (line) => console.log(line));
+
+/**
+ * C13 (owner decision 5): the same two overlay checks, run against the **real** runtime provider instead of the
+ * null stub. The four checks above still enforce the stub contract (an empty overlay is required today); this
+ * block is what proves the machinery those checks describe actually works with a provider that reports tools.
+ *
+ * Non-vacuity: a synthetic listing is pushed through the real record builder, so the overlay is genuinely
+ * non-empty, and the fail-closed defaults it must have produced (`high` + approval required) are asserted here.
+ * A normaliser that let a server lower its own risk would turn this gate red.
+ */
+const realRuntime = await loadMcpRuntimeOverlay();
+const probeSize = 3;
+const probeTools = realRuntime.publishProbe(probeSize);
+const realIntegrity = audit.checkRuntimeOverlayIntegrity(realRuntime.overlay, { expectEmpty: false });
+const realCombined = audit.checkCombinedInspectorView(realRuntime.overlay);
+const probeManifest = realRuntime.snapshot();
+const defaultsHeld = probeTools.every(
+  (tool) => tool.risk === "high" && tool.approvalRequired === true && tool.riskSource === "runtime_default",
+);
+const realOverlayOk = realIntegrity.ok && realCombined.ok && defaultsHeld && probeTools.length === probeSize;
+
+console.log("\nRuntime provider overlay (real MCP provider, not the null stub):");
+console.log(`  • Provider           : ${realRuntime.overlay.providerId}`);
+console.log(`  • Runtime tools      : ${probeTools.length} (synthetic listing through the real record builder)`);
+console.log(`  • Manifest revision  : ${probeManifest.revision}`);
+console.log(`  • Runtime hash       : ${realRuntime.overlay.hash()}`);
+console.log(`  • Fail-closed default: high + approval required for every probe tool = ${defaultsHeld ? "yes" : "NO"}`);
+console.log(
+  `  ${realIntegrity.ok ? "✓" : "✗"} runtime overlay integrity (non-empty): static=${realIntegrity.facts.staticTotalWithNullOverlay} overlay=${realIntegrity.facts.overlayCount} hashRecomputes=${realIntegrity.facts.overlayHashRecomputes}`,
+);
+for (const issue of realIntegrity.issues) console.log(`      ✗ ${issue.code}: ${issue.detail}`);
+console.log(
+  `  ${realCombined.ok ? "✓" : "✗"} combined Inspector view: static=${realCombined.facts.inspectorAll} overlay=${realCombined.facts.combinedOverlayTotal} combined=${realCombined.facts.combinedTotal} sources=${realCombined.facts.combinedSources}`,
+);
+for (const issue of realCombined.issues) console.log(`      ✗ ${issue.code}: ${issue.detail}`);
+console.log(`  ${realOverlayOk ? "✓" : "✗"} real runtime provider overlay: ${realOverlayOk ? "OK" : "FAILED"}`);
 
 // 5. Test-file ownership on disk: the matrix maps every inventory row to suites that must exist.
 let missingFiles = 0;
@@ -85,10 +122,10 @@ breakdown("Capabilities by Domain", stores.matrix.map((entry) => entry.domain));
 breakdown("Capabilities by Test Ownership", stores.matrix.map((entry) => entry.testType));
 breakdown("Capabilities by Verified Status", stores.matrix.map((entry) => entry.status));
 
-const ok = checksOk && missingFiles === 0;
+const ok = checksOk && missingFiles === 0 && realOverlayOk;
 console.log("==========================================================");
 if (ok) {
-  console.log("  CAPABILITY CATALOG AUDIT PASSED (4/4 checks, tests on disk)");
+  console.log("  CAPABILITY CATALOG AUDIT PASSED (4/4 checks, real runtime overlay, tests on disk)");
   console.log("==========================================================\n");
   process.exit(0);
 }

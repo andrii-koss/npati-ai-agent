@@ -10,7 +10,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, buildCombinedCapabilityView, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -97,7 +97,7 @@ import { resolveAutomationAllowedPermissions, serviceIdentityForAutomation } fro
 import { CodeRbac } from "./code-rbac";
 import type { ApprovalDecisionAuditPort } from "./approvals-repository";
 import { groupForCapability } from "./code-capability-groups";
-import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
+import { resolveAllowlistForPhase, resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
 import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
@@ -140,6 +140,8 @@ import { createCodeUserQuestionReaperPort } from "./code-ask-user-reaper";
 import { registerCodeAskUserRoutes } from "./code-ask-user-routes";
 import { registerCodeProjectTrustRoutes } from "./code-project-trust-routes";
 import { isRepositoryInstructionsTrusted } from "./code-project-trust";
+import { createCodeCommandRegistry } from "./code-command-registry";
+import { createCodeSkillsService } from "./code-skills-instructions";
 import { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
@@ -217,6 +219,20 @@ import { CompanyApprovalsRepository } from "./approvals-repository";
 import { registerCompanyApprovalsRoutes } from "./approvals-routes";
 import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
+// C13 (owner decision 5–8): the runtime MCP capability surface. `lookupCapability` is the one place the
+// `static → runtime → unknown` order lives; the store/overlay and the SSRF-safe transport are the only
+// runtime provider mechanism in the process (no second client, no second catalog).
+import { lookupCapability } from "./mcp-runtime-capabilities";
+import { McpRuntimeCapabilityStore } from "./mcp-runtime-capabilities";
+import { applyMcpRiskOverride } from "./mcp-risk-override";
+import { McpToolPolicyStore } from "./mcp-tool-policy-repository";
+import {
+  McpRuntimeTransport,
+  configuredIntegrationsFrom,
+  type McpIntegrationSource,
+} from "./mcp-runtime-transport";
+import { createMcpRuntimeRunPath, readMcpRuntimeManifest } from "./mcp-run-path";
+import { mcpApprovalRunIdOf, releaseMcpApprovalPause, type McpApprovalReleaseReason } from "./mcp-approval";
 import { MessagingIntegrationsRepository } from "./messaging-integrations-repository";
 import { MessagingGateway, TelegramMessagingAdapter, formatTelegramCards, type GatewayOutboundAttachment } from "./messaging-gateway";
 import { WhatsAppMessagingAdapter } from "./whatsapp-messaging";
@@ -1617,12 +1633,72 @@ export function buildApp(config: AppConfig = {}) {
     assertGitWriteAllowed: (ctx: AuthContext, companyId: string, input: GitWriteIntent) =>
       codeProtectedBranches.assertGitWriteAllowed(ctx, companyId, input),
   };
+  /**
+   * C13 (owner decision 5–8): the **runtime** MCP capability surface, constructed here because the policy
+   * engine's capability port (below) consults it on every tool call.
+   *
+   * Three things are one instance each, deliberately:
+   *   - `mcpRuntimeCapabilities` is the only runtime provider overlay in the process. A discovered MCP tool is
+   *     published **into it** and never into `CODE_TOOL_SCHEMAS`/`CAPABILITY_CATALOG`/`CAPABILITY_MATRIX`, so
+   *     the static manifest stays versioned and immutable while the Inspector still shows both sources.
+   *   - `mcpRuntimeTransport` is the existing SSRF-safe client, not a second HTTP stack. The allowlist is read
+   *     lazily (the C4b allowlist is learned at runtime), and a request to a host that is not on it is refused
+   *     by the SSRF policy before a socket exists.
+   *   - `mcpToolPolicyStore` is migration 085's table: the durable record of an owner/admin risk decision. The
+   *     default for every discovered tool stays `high` + approval required until such a decision exists.
+   */
+  const mcpToolPolicyStore = new McpToolPolicyStore(config.databaseUrl);
+  const mcpRuntimeCapabilities = new McpRuntimeCapabilityStore({ policies: mcpToolPolicyStore });
+  const mcpRuntimeTransport = new McpRuntimeTransport({
+    // The **run** phase allowlist is the one an MCP dial belongs to: it is the phase for outbound calls made
+    // while work is in flight, and it is read lazily because the C4b allowlist is learned at runtime.
+    allowlist: () => resolveAllowlistForPhase("run", egressAllowlist),
+  });
+  /**
+   * The configured integrations the transport may dial. Late-bound because `IntegrationsRepository` is
+   * constructed further down (the same late-binding idiom the spawn executor uses): `null` means "not wired",
+   * and discovery then reports `mcp_integration_source_unavailable` rather than dialling anything.
+   */
+  let mcpIntegrationSourceForRuntime: McpIntegrationSource | null = null;
+  /**
+   * The runtime MCP manifest, in the metadata-only shape the ExecutionSnapshot and the replay bundle pin.
+   * One definition, three readers (the snapshot source, the replay recorder's context and the replay route's
+   * "current manifest" side), so a pinned manifest and a compared manifest cannot be computed differently.
+   */
+  const readRuntimeMcpManifest = (tenant: { workspaceId: string; companyId: string }) =>
+    readMcpRuntimeManifest(mcpRuntimeCapabilities, tenant);
   const policyEngine = new PolicyEngine({
     flags: featureFlagService,
+    /**
+     * C13 (owner decision 5): the capability lookup is `static → runtime → unknown ⇒ deny`, in one function.
+     *
+     * `lookupCapability` is asked with the request's tenant (the engine passes the scope), so:
+     *   - a static code tool resolves exactly as before — the static registry is consulted **first**, so a
+     *     runtime provider capability can never shadow one, and the pre-C13 path is byte-identical;
+     *   - a runtime MCP tool resolves from that tenant's overlay, carrying `requiresConfirmation` from its own
+     *     fail-closed `approvalRequired`, which is the field the approval phase already reads;
+     *   - anything else stays `undefined`, so the engine answers `unknown_tool` (404). A discovered MCP tool is
+     *     never written into `CODE_TOOL_SCHEMAS`, `CAPABILITY_CATALOG` or `CAPABILITY_MATRIX`.
+     */
     capabilities: {
-      get: (id) => {
-        const schema = CODE_TOOL_SCHEMAS.find((tool) => tool.name === id);
-        return schema ? { id: schema.name, status: schema.status, version: schema.version } : undefined;
+      get: (id, scope) => {
+        const tenant = scope?.companyId
+          ? { workspaceId: scope.workspaceId ?? AUDIT_SYSTEM_WORKSPACE, companyId: scope.companyId }
+          : null;
+        return lookupCapability(
+          {
+            staticCapabilities: {
+              get: (toolId) => {
+                const schema = CODE_TOOL_SCHEMAS.find((tool) => tool.name === toolId);
+                return schema ? { id: schema.name, status: schema.status, version: schema.version } : undefined;
+              },
+            },
+            runtimeOverlay: tenant
+              ? mcpRuntimeCapabilities.overlayFor(tenant)
+              : mcpRuntimeCapabilities.overlayFor({ workspaceId: AUDIT_SYSTEM_WORKSPACE, companyId: "" }),
+          },
+          id,
+        ).capability;
       },
     },
     classifier: (command) => classifyShellCommand(command),
@@ -1945,6 +2021,36 @@ export function buildApp(config: AppConfig = {}) {
       return policyEngine.evaluate(enriched);
     },
   });
+  /**
+   * C13 (owner requirement: fresh-process MCP acceptance): **the** run-path entry point of runtime MCP
+   * discovery, and the vendor of the discovery the Capability Inspector route asks for.
+   *
+   * It is one object with one `discover` implementation, so there is no second discovery system and no way for
+   * the Inspector and a run to disagree about what a tenant's MCP server offers. Crucially the dependency runs
+   * the other way from what it used to: the **run** discovers for itself (`prepareForRun`, which the runner
+   * calls before the first model call and before the ExecutionSnapshot that pins the runtime manifest), and the
+   * Inspector route simply calls the same function. No run depends on the Inspector having been opened, and
+   * nothing here reads a route, a cache or a warm-up hook.
+   *
+   * It is constructed here — after the enriched engine, before the runner — because both are needed: the engine
+   * is the port that decides whether a runtime MCP call may happen, and the runner is the consumer that must be
+   * offered the tools the discovery published.
+   */
+  const mcpRunPath = createMcpRuntimeRunPath({
+    store: mcpRuntimeCapabilities,
+    transport: mcpRuntimeTransport,
+    source: () => mcpIntegrationSourceForRuntime,
+    // `code.mcp` is read before anything is dialled: a disabled sub-flag means no discovery pass at all.
+    flags: featureFlagService,
+    // The same engine the rest of the tool path consults, so `code.mcp`, the mode, the permission, the
+    // capability lookup and the fail-closed approval requirement are enforced for a runtime MCP call too.
+    policy: enrichedPolicyEngine,
+    // Metadata-only Activity (counts, codes, the manifest hash): the sink itself rejects endpoints and tokens.
+    activity: activitySinkForKind(codeActivitySink, "run_activity"),
+    logger: { warn: (message, meta) => app.log.warn(meta ?? {}, message) },
+  });
+  const discoverRuntimeMcpCapabilities = (ctx: AuthContext, companyId: string) =>
+    mcpRunPath.discover(ctx, companyId);
   const shellSandboxPort: CodeShellSandboxPort | undefined = projectSandbox ? {
     execute: async (input) => {
       const started = Date.now();
@@ -2012,6 +2118,14 @@ export function buildApp(config: AppConfig = {}) {
    * `codeReaper.run()` is only reached near the end of this composition, well after the assignment.
    */
   let codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null = null;
+  /**
+   * C13 (owner blocker 1): the release of a run paused on a **runtime MCP approval**. Late bound for the same
+   * reason as the question port above — it needs the run-state log, which is constructed further down — and a
+   * `null` holder means the release is reported as unsupported rather than silently skipped.
+   */
+  let mcpApprovalPauseRelease:
+    | ((input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }) => Promise<unknown>)
+    | null = null;
   const codeReaper = new CodeReaper({
     intervalMs: config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs,
     toolCallNoProgressMs: config.codeAgentLimits?.toolCallNoProgressMs ?? DEFAULT_CODE_AGENT_LIMITS.toolCallNoProgressMs,
@@ -2027,7 +2141,37 @@ export function buildApp(config: AppConfig = {}) {
     shellSessions: { reap: () => codeShellRuntime.reap() },
     // Detected, not assumed: until the approvals module exposes a bulk expiry (with its own audit) the
     // step is reported as `port_unavailable` rather than reaching into its private pool.
-    staleApprovals: asStaleApprovalReaper(approvalsRepo),
+    //
+    // C13 (owner blocker 1): the sweep is also where a run paused on a **runtime MCP approval** is released, and
+    // it reuses the transition the question reaper uses (`markInterrupted`, reason `approval_timeout`). The rows
+    // come from the sweep that already read them, so "which record expired" and "which run is released" cannot
+    // disagree; a release that fails is swallowed per row, so one stuck run cannot stop the expiry of the rest.
+    staleApprovals: asStaleApprovalReaper(
+      approvalsRepo
+        ? {
+            expireStaleApprovals: async (input: { now: number }) => {
+              const expired = await approvalsRepo!.expireStaleApprovalsDetailed({ now: input.now });
+              if (mcpApprovalPauseRelease) {
+                for (const row of expired.rows) {
+                  const runId = mcpApprovalRunIdOf(row.inputPayload);
+                  if (!runId) continue;
+                  try {
+                    await mcpApprovalPauseRelease({
+                      companyId: row.companyId,
+                      runId,
+                      approvalId: row.id,
+                      reason: "expired",
+                    });
+                  } catch (error) {
+                    app.log.warn({ err: error, approvalId: row.id, kind: "approval_timeout" }, "mcp_approval_pause_release_failed");
+                  }
+                }
+              }
+              return expired.expired;
+            },
+          }
+        : null,
+    ),
     /**
      * C9: a question past its TTL releases the run it paused as `ask_user_timeout`, and no answer is invented.
      * The port is resolved lazily (see the holder above) because it needs the run-state log; a dry run lists the
@@ -2294,6 +2438,170 @@ export function buildApp(config: AppConfig = {}) {
           ? activitySinkForKind(codeActivitySink, "run_activity")
           : activitySinkForKind(codeActivitySink, "code_tool_activity");
         await sink.record(event);
+      },
+    },
+    logger: { warn: (payload, message) => { app.log.warn(payload, message); } },
+  });
+  /**
+   * C13 (owner decisions 3 and 4): slash commands and lazily loaded Skills.
+   *
+   * Both are wired on machinery that already exists — no second template engine, no second settings system, no
+   * second file reader:
+   *
+   *   - **Reading.** The command files go through `codeInstructionsLoader.collectCommands`, i.e. the *same* C8
+   *     loader and therefore the same `readWorkspaceText` path guard, and the loader asks the project trust
+   *     record **before** its first read. An untrusted repository is never read, which the suite proves with a
+   *     spy that stayed at zero calls.
+   *   - **Classification.** A command template and a Skill body both pass the existing C5 classifier
+   *     (`classifyRepositoryInstruction`) and the existing C4a scanner (`scanTextForSecrets`) — the same two
+   *     functions `NPATI.md` and the stored webhook prompt already pass.
+   *   - **Provider policy.** A Skill body passes the existing C5b `ProviderDataGuard`
+   *     (`guardProviderBoundText`), exactly as the C8 compaction summary does. A body the guard would have to
+   *     redact is **refused**, never sanitised, because a redacted body would carry a `REDACTED:` placeholder
+   *     into the prompt and into the recorded model-visible state.
+   *   - **Skills.** The metadata and the body both come from the one `defaultSkillRegistry` the `/skills` route
+   *     and `/settings/skills` already serve. `list()` (which strips `canHandle`/`run`) supplies the metadata,
+   *     and nothing calls `run()` until a Skill is really selected — that is the lazy-load boundary, and it is
+   *     observable as a spy on the body reader.
+   */
+  const codeCommandIds = ["review", "explain", "test", "fix"] as const;
+  const codeCommandRegistry = createCodeCommandRegistry({
+    loader: {
+      collectCommands: (input) => codeInstructionsLoader.collectCommands(input),
+    },
+    flags: featureFlagService,
+    knownCommandIds: () => [...codeCommandIds],
+    systemCommands: [
+      {
+        declaration: {
+          id: "review",
+          version: 1,
+          description: "Review the current change for correctness, security and missing tests.",
+          allowedTools: ["code.fs.read", "code.fs.grep", "code.git.diff", "code.symbols.outline"],
+          args: [
+            { name: "focus", type: "enum", required: false, values: ["correctness", "security", "tests", "all"], description: "What to look at first" },
+          ],
+        },
+        template: [
+          "Review the work in progress as a careful reviewer.",
+          "",
+          "Read the current diff and the files it touches, then report:",
+          "1. defects that would change behaviour, with the file and line;",
+          "2. security problems (injection, path traversal, secret handling, unsafe shell);",
+          "3. missing or weakened tests;",
+          "4. anything you could not verify.",
+          "",
+          "Do not change any file in this pass, and do not report a check you did not run.",
+        ].join("\n"),
+      },
+      {
+        declaration: {
+          id: "explain",
+          version: 1,
+          description: "Explain how the current code works, with the call path and the data it handles.",
+          allowedTools: ["code.fs.read", "code.fs.grep", "code.fs.tree", "code.symbols.outline", "code.project.info"],
+          args: [{ name: "target", type: "string", required: true, description: "The file, symbol or area to explain" }],
+        },
+        template: [
+          "Explain the target below for a new team member.",
+          "",
+          "Describe what it does, where it is called from, what it reads and writes, and which invariants a change must not break. Cite the files and line numbers you used.",
+        ].join("\n"),
+      },
+      {
+        declaration: {
+          id: "test",
+          version: 1,
+          description: "Run the project's test command for a target and report the real result.",
+          allowedTools: ["code.fs.read", "code.shell.exec", "code.fs.grep"],
+          forbiddenTools: ["code.git.push", "code.git.commit"],
+          args: [{ name: "target", type: "string", required: false, description: "A test file, suite name or pattern" }],
+        },
+        template: [
+          "Run the project's test command for the target below, using the same command the project already documents.",
+          "",
+          "Report the exact command, its exit code and the failing output verbatim. If the suite cannot run, say so and why — never report a result you did not observe.",
+        ].join("\n"),
+      },
+      {
+        declaration: {
+          id: "fix",
+          version: 1,
+          description: "Fix a described defect with the smallest correct change.",
+          allowedTools: ["code.fs.read", "code.fs.write", "code.fs.grep", "code.verify.run"],
+          args: [{ name: "problem", type: "string", required: true, description: "The defect to fix" }],
+        },
+        template: [
+          "Fix the defect below with the smallest change that is actually correct.",
+          "",
+          "Read the code first, change only what the fix needs, then run the project's checks and report what they said. Do not refactor around the fix and do not disable a failing check.",
+        ].join("\n"),
+      },
+    ],
+    activity: {
+      record: async (event) => {
+        const sink = event.kind === "run_activity"
+          ? activitySinkForKind(codeActivitySink, "run_activity")
+          : activitySinkForKind(codeActivitySink, "code_tool_activity");
+        await sink.record(event);
+      },
+    },
+    logger: { warn: (payload, message) => { app.log.warn(payload, message); } },
+  });
+
+  /**
+   * C13: the Skill reader. `defaultSkillRegistry` is the **one** registry the `/skills` route serves; the
+   * metadata listing uses `list()` (which already strips the executable members) and the body is produced by the
+   * Skill's own `run`, which nothing calls until a Skill is selected.
+   *
+   * The `version` field of an `AgentSkill` is a semver string, while the pinned hash wants a stable number. The
+   * string is folded into a deterministic integer, so the same declared version always yields the same pin, and
+   * the semver string itself is carried inside the hashed body.
+   */
+  const skillPinnedVersion = (version: string): number => {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < version.length; index += 1) {
+      hash ^= version.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619) >>> 0;
+    }
+    return hash % 1_000_000_000;
+  };
+  const codeSkillsService = createCodeSkillsService({
+    flags: featureFlagService,
+    listMetadata: async () =>
+      defaultSkillRegistry.list().map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        version: skillPinnedVersion(skill.version),
+        source: "builtin" as const,
+        // A Skill the platform itself ships is trusted by construction. A repository-sourced Skill would have to
+        // carry the project trust record here, which is why this field is explicit rather than implied.
+        trusted: true,
+        capabilities: [...skill.capabilities],
+      })),
+    readBody: async ({ id }) => {
+      const skill = defaultSkillRegistry.get(id);
+      if (!skill) return null;
+      const result = await skill.run({ userMessage: "" });
+      const lines = [
+        `Skill: ${skill.name} (${skill.id}@${skill.version})`,
+        `Purpose: ${skill.purpose ?? skill.description}`,
+        skill.requiredTools?.length ? `Required tools: ${skill.requiredTools.join(", ")}` : null,
+        skill.optionalTools?.length ? `Optional tools: ${skill.optionalTools.join(", ")}` : null,
+        skill.forbiddenTools?.length ? `Forbidden tools: ${skill.forbiddenTools.join(", ")}` : null,
+        "",
+        result.message,
+        result.suggestedActions.length ? `Suggested actions: ${result.suggestedActions.join("; ")}` : null,
+      ].filter((line): line is string => line !== null);
+      return { body: lines.join("\n"), version: skillPinnedVersion(skill.version), source: "builtin" as const, trusted: true };
+    },
+    // The **existing** C5b guard. It is present whenever provider enforcement is on, so a Skill body is judged by
+    // the project's real policy (classification ceiling, content types, private-code rule, redaction list).
+    ...(providerDataGuardInstance ? { providerDataGuard: providerDataGuardInstance.providerDataGuard } : {}),
+    activity: {
+      record: async (event) => {
+        await activitySinkForKind(codeActivitySink, "run_activity").record(event as never);
       },
     },
     logger: { warn: (payload, message) => { app.log.warn(payload, message); } },
@@ -3027,6 +3335,8 @@ export function buildApp(config: AppConfig = {}) {
   );
   const contentLibrary = new ContentLibraryStore(workspaceStore);
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
+  // C13: the configured MCP integrations become the **only** endpoints the runtime MCP transport may dial.
+  mcpIntegrationSourceForRuntime = configuredIntegrationsFrom(integrationsRepo);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
     let manualModel = preferences.routing.mode === "manual" && preferences.routing.defaultModelId
@@ -4481,6 +4791,14 @@ ${localized.next}`;
       projectInstructions: async () =>
         codeRunEnvironment.projectInstructions() ?? { contentHash: null, trustStatus: "untrusted" as const },
       toolchain: async () => codeRunEnvironment.toolchain(),
+      /**
+       * C13 (owner decision 6): the **runtime MCP manifest** in force for this run's tenant, published into
+       * the snapshot so a run that called a runtime tool records *which* tool set and schema hashes it was
+       * admitted under. A tenant with no runtime tools records `null` — the honest absence — and the payload
+       * keeps the key set it had before this feature existed, so the snapshot schema version does not move.
+       */
+      runtimeProviderCapabilities: async ({ workspaceId, companyId }) =>
+        readRuntimeMcpManifest({ workspaceId, companyId }),
     },
     resolveRole: async () => null,
   });
@@ -4583,6 +4901,16 @@ ${localized.next}`;
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
     toolRuntime: codeToolRuntime,
+    /**
+     * C13 (owner requirement: fresh-process MCP acceptance): the runtime provider surface of a run.
+     *
+     * The runner calls `prepareForRun` itself, once, before it builds the model-visible tool list and before the
+     * ExecutionSnapshot (`codeSnapshotProvider` above) pins the runtime manifest — so an MCP Integration that is
+     * configured and active is discovered by the **run**, with no Inspector request and no warm-up call. A
+     * discovery that fails only removes MCP tools: the port answers with a code and an empty list, and the run
+     * proceeds on the static tools.
+     */
+    runtimeCapabilities: mcpRunPath,
     engine: aiEngine,
     schemas: CODE_TOOL_SCHEMAS,
     imageAdmission: sandboxImagePolicy,
@@ -4725,6 +5053,32 @@ ${localized.next}`;
         }
       },
     },
+    /**
+     * C13: the typed Skill Instructions section of the system prompt. `render` produces the section the model
+     * reads; `provenance` produces the `skill_id`/`version`/`hash`/`source` the ExecutionSnapshot records. Both
+     * read the **same** per-session state, so the snapshot cannot describe a different set of Skills than the
+     * prompt contained.
+     */
+    skillInstructions: {
+      render: async ({ sessionId }) => {
+        try {
+          return codeSkillsService.renderInstructions(sessionId);
+        } catch {
+          return null;
+        }
+      },
+      provenance: async ({ sessionId }) => codeSkillsService.provenance(sessionId),
+    },
+    /**
+     * C13: the slash-command expansion of the run's prompt. The registry resolves the name with the C13
+     * precedence, expands through the one pure builder and answers with the text plus the provenance the replay
+     * bundle pins. A prompt that is not a slash command comes back unchanged, so this port cannot alter any
+     * existing run.
+     */
+    commandExpansion: {
+      resolvePrompt: async ({ ctx, companyId, projectId, sessionId, prompt }) =>
+        codeCommandRegistry.resolvePrompt({ ctx, companyId, projectId, ...(sessionId ? { sessionId } : {}), prompt }),
+    },
     // C6b/C10: the readers declared above, shared with the resume-time environment re-check.
     policyCompositionSources: codeRunPolicySources,
     activity: activitySinkForKind(codeActivitySink, "run_activity"),
@@ -4764,6 +5118,18 @@ ${localized.next}`;
           provider: replayInput.modelSelection?.provider ?? null,
           model: replayInput.modelSelection?.model ?? null,
           replayMode: "recorded",
+          /**
+           * C13 (owner decision 6): the runtime MCP manifest this run was admitted under, pinned into the
+           * recorded bundle. The run path discovered before the recorder started, so this reads the set the run
+           * really had. Until this line the recorder's `runtimeMcpManifest` member existed with **no writer**,
+           * which meant `assertReplayRuntimeMcpManifestMatches` could only ever pass: a bundle that replayed a
+           * call to a tool whose schema had since changed would have replayed it silently against the new
+           * schema. `null` for a run with no runtime tools keeps the pre-C13 bundle shape (and its hash).
+           */
+          runtimeMcpManifest: readRuntimeMcpManifest({
+            workspaceId: replayInput.workspaceId,
+            companyId: replayInput.companyId,
+          }),
           ...(replayInput.dataClassification ? { dataClassification: replayInput.dataClassification } : {}),
           ...(replayInput.retentionClass ? { retentionClass: replayInput.retentionClass } : {}),
         },
@@ -4893,6 +5259,23 @@ ${localized.next}`;
       loadReplayById: async (_ctx, companyId, replayId) =>
         getReplayBundleById({ store: workspaceStore as unknown as ReplayBundleReadPort, companyId, replayId }),
       toolVersions: (toolName) => CODE_TOOL_SCHEMAS.find((schema) => schema.name === toolName)?.version ?? null,
+      /**
+       * C13 (owner decision 6, corrected): the runtime MCP manifest this deployment discovers **now**, read by
+       * the **live** replay mode only.
+       *
+       * Deterministic replay never calls this port: it verifies the run against the manifest the run's own
+       * bundle recorded, which is the only value that describes the tool set that run saw and the only one that
+       * works in a fresh process. It also means the in-process overlay being empty (a restart, or simply no run
+       * of this tenant having discovered anything yet) cannot refuse a replay that is perfectly reproducible.
+       *
+       * Live replay really discovers: `null` here is then a refusal (`replay_runtime_mcp_manifest_changed`),
+       * because "we could not tell" is not "unchanged".
+       */
+      loadRuntimeMcpManifest: async (ctx, companyId) => {
+        // The tenant is the caller's own workspace plus the company, which is exactly the key the overlay was
+        // published under — a live replay of another workspace's run cannot resolve this one's manifest.
+        return readRuntimeMcpManifest({ workspaceId: ctx.workspaceId, companyId });
+      },
       // The status route reads a replay record by id. No such record store exists yet: the bundle read port is
       // keyed by run id and exposes no by-id accessor, and live replay returns its record in the POST response.
       // Until a replay-record store exists the route answers `replay_not_found` — fail-closed and honest,
@@ -5650,6 +6033,20 @@ ${localized.next}`;
     onActivity: (event) => { void codeQuestionActivity(event).catch(() => undefined); },
     now: () => Date.now(),
   });
+  /**
+   * C13 (owner blocker 1): the **one** release path of a run paused on a runtime MCP approval, shared by the
+   * approval decision route (a human approved or rejected) and the reaper's expiry sweep (nobody answered in
+   * time). It chooses between the two transitions C9 already owns — `resumeAfterAnswer` for "the answer arrived"
+   * and `markInterrupted` for "the wait ended without one" — so a paused run is released exactly like a run
+   * paused on a question, and the C10 resume can then continue the **same** run.
+   */
+  mcpApprovalPauseRelease = async (input) => {
+    const outcome = await releaseMcpApprovalPause(codeRunStateLog, input);
+    if (outcome === "unsupported") {
+      app.log.warn({ ...input, kind: "approval_release_unsupported" }, "mcp_approval_pause_release_unsupported");
+    }
+    return outcome;
+  };
   // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
   registerNetworkRoutes(app, {
     auth: authProvider,
@@ -5692,8 +6089,78 @@ ${localized.next}`;
     },
   );
   registerContentLibraryRoutes(app, authProvider, workspaceStore, contentLibrary);
-  if (approvalsRepo) registerCompanyApprovalsRoutes(app, { auth: authProvider, store: workspaceStore, repo: approvalsRepo, auditLog: auditLogService });
-  registerMcpPolicyRoutes(app,{apiKeys:apiKeysRepo,store:workspaceStore,tools:companyToolRuntime});
+  if (approvalsRepo) registerCompanyApprovalsRoutes(app, {
+    auth: authProvider,
+    store: workspaceStore,
+    repo: approvalsRepo,
+    auditLog: auditLogService,
+    /**
+     * C13 (owner blocker 1): a decision on a **runtime MCP** approval is the answer a paused run is waiting for,
+     * so it releases that run through the same transition a question answer uses (`resumeAfterAnswer`). An
+     * ordinary approval (a file write, a git push, a dependency install) carries no MCP payload and is left
+     * exactly as it was: its own boundary consumes it.
+     */
+    onDecided: async ({ ctx: decisionCtx, companyId, approval, decision }) => {
+      const runId = mcpApprovalRunIdOf(approval.inputPayload);
+      if (!runId || !mcpApprovalPauseRelease) return;
+      await mcpApprovalPauseRelease({
+        companyId,
+        runId,
+        approvalId: approval.id,
+        reason: decision === "approved" ? "approved" : "rejected",
+        answeredBy: String(decisionCtx.userId ?? "unknown"),
+      });
+    },
+    logger: app.log,
+  });
+  registerMcpPolicyRoutes(app,{
+    apiKeys:apiKeysRepo,
+    store:workspaceStore,
+    tools:companyToolRuntime,
+    /**
+     * C13 (owner decision 5): the owner/admin flow that may lower a runtime MCP tool's risk. The authorization
+     * (owner/admin only, agent principals refused), the audit-before-apply order and the durable policy row all
+     * live in `applyMcpRiskOverride`; this adapter only supplies the runtime store, the migration-085 policy
+     * store and the existing tamper-evident AuditLog — there is no second journal and no second authorization.
+     */
+    runtimeRisk:{
+      apply: (input) => applyMcpRiskOverride(
+        {
+          store: mcpRuntimeCapabilities,
+          policies: mcpToolPolicyStore,
+          ...(auditLogService
+            ? {
+                audit: {
+                  record: async (entry) => {
+                    await auditLogService.record(
+                      { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: entry.actor, permissions: [] } as AuthContext,
+                      {
+                        companyId: entry.companyId, actor: entry.actor, actorRole: entry.actorRole, action: entry.action,
+                        resourceType: entry.resourceType, resourceId: entry.resourceId, decision: entry.decision,
+                        payload: entry.payload, metadata: entry.metadata ?? {},
+                        ...(entry.requestId ? { requestId: entry.requestId } : {}),
+                        ...(entry.correlationId ? { correlationId: entry.correlationId } : {}),
+                        ...(entry.snapshotId ? { snapshotId: entry.snapshotId } : {}),
+                      },
+                    );
+                  },
+                },
+              }
+            : {}),
+        },
+        {
+          ctx: input.ctx,
+          tenant: { workspaceId: input.ctx.workspaceId, companyId: input.companyId },
+          toolId: input.toolId,
+          risk: input.risk,
+          ...(input.approvalRequired === undefined ? {} : { approvalRequired: input.approvalRequired }),
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+          ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
+        },
+      ),
+    },
+  });
   if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
   const messagingResultAttachments=async(auth:AuthContext,message:string):Promise<GatewayOutboundAttachment[]>=>{
     if(!chatFiles)return[];const output:GatewayOutboundAttachment[]=[],seen=new Set<string>();
@@ -5851,7 +6318,7 @@ ${localized.next}`;
 
   const capabilityInspector = new CapabilityInspectorService(defaultEffectiveCapabilityResolver);
 
-  app.get<{ Querystring: { slice?: string; companyId?: string; agentId?: string } }>("/capabilities/inspect", async (request) => {
+  app.get<{ Querystring: { slice?: string; companyId?: string; agentId?: string; includeRuntime?: string } }>("/capabilities/inspect", async (request) => {
     const auth = await authProvider.authenticate(request);
     let resolutionContext;
     if (request.query.companyId) {
@@ -5884,7 +6351,30 @@ ${localized.next}`;
         flagSourceAvailable = false;
       }
     }
-    return capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
+    const report = capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
+    /**
+     * C13 (owner decision 5 and 8): the **combined** view, when asked for. `includeRuntime=true` first runs a
+     * discovery pass for the requested Company (so the runtime list is current rather than whatever the process
+     * happened to hold) and then returns the static Inspector report plus the tenant's runtime overlay, each with
+     * its own count (`buildCombinedCapabilityView`). The static numbers are the ones the Inspector just produced,
+     * so a runtime tool can never be counted as static — and an unauthenticated or missing `companyId` answers
+     * the plain static report, because a runtime overlay is tenant data.
+     */
+    if (request.query.includeRuntime === "true" && request.query.companyId) {
+      const tenant = { workspaceId: auth.workspaceId, companyId: request.query.companyId };
+      const discovery = await discoverRuntimeMcpCapabilities(auth, request.query.companyId);
+      const combined = buildCombinedCapabilityView(mcpRuntimeCapabilities.overlayFor(tenant), capabilityInspector);
+      return {
+        ...report,
+        runtime: {
+          discovery,
+          counts: combined.counts,
+          sources: combined.sources,
+          items: combined.overlayItems,
+        },
+      };
+    }
+    return report;
   });
 
   app.post<{ Body: { message: string; contextType?: string; companyId?: string; businessId?: string; projectId?: string } }>("/router/evaluate", async (request) => {

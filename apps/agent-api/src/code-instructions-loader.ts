@@ -7,6 +7,12 @@ import {
   type ProjectInstructionFile,
 } from "./code-project-instructions";
 import { buildInstructionsDraft, type InstructionsDraft } from "./code-instructions-init";
+import { CODE_COMMANDS_DIRECTORY, CODE_COMMAND_FILE_EXTENSION } from "./code-commands";
+
+/** C13: the ids a repository may use to declare its slash-command directory explicitly. */
+const COMMAND_MANIFEST_NAMES = ["commands.json", "index.json"] as const;
+/** C13: the one extension a command may use. `.json` is the declared form, `.md` the authored one. */
+const CODE_COMMAND_EXTENSIONS = [CODE_COMMAND_FILE_EXTENSION, ".json"] as const;
 
 /**
  * C8 — the I/O shell around the pure instructions core.
@@ -83,6 +89,68 @@ export function createCodeInstructionsLoader(deps: CodeInstructionsLoaderDeps) {
     return files;
   }
 
+  /**
+   * C13 — the repository's slash-command files, read through **this** loader.
+   *
+   * Why here and not in a new module: this file is the only place that reads workspace text for instructions,
+   * and `readWorkspaceText` underneath it is the only path-guarded read. Adding a second reader would mean a
+   * second path guard, a second trust call and a second place to forget the trust gate. The command files are
+   * therefore collected by the same function, with the same trust answer, and the same non-recursive,
+   * bounded probe discipline.
+   *
+   * **Trust is asked before the first read, not after.** When the project is not trusted the function returns
+   * immediately: `readsAttempted` stays `0` and `readFile` is never called, which is the property the C13 suite
+   * proves with a spy. The caller (`code-command-registry.ts`) therefore receives "untrusted" without ever
+   * having been handed repository bytes.
+   *
+   * **Discovery is bounded by name, never by a directory walk.** A repository cannot make the loader list a
+   * directory, so there is no unbounded enumeration: two files per declared name (`<id>.md`, `<id>.json`), plus
+   * the explicitly declared manifest names (`.npati/commands/commands.json` and `index.json`) whose ids are
+   * resolved by the registry. The probe names are supplied by the caller, which derives them from the command
+   * ids the *platform* already knows — a file the run never asks about is never read.
+   */
+  async function collectCommands(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    targetPaths?: readonly string[];
+    /** Command ids to probe for. Bounded by the caller; the loader never invents a name. */
+    ids?: readonly string[];
+  }): Promise<{ files: ProjectInstructionFile[]; readsAttempted: number; trusted: boolean }> {
+    let trusted = false;
+    try {
+      trusted = (await deps.isTrusted({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId })) === true;
+    } catch {
+      trusted = false;
+    }
+    // The gate: an untrusted repository's command directory is not read — not even probed for existence.
+    if (!trusted) return { files: [], readsAttempted: 0, trusted: false };
+
+    const files: ProjectInstructionFile[] = [];
+    let readsAttempted = 0;
+    const read = async (path: string): Promise<void> => {
+      readsAttempted += 1;
+      try {
+        const content = await deps.readFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path });
+        if (typeof content === "string") files.push({ path, content });
+      } catch {
+        // Absent or unreadable: not a command of this run.
+      }
+    };
+
+    for (const name of COMMAND_MANIFEST_NAMES) {
+      await read(`${CODE_COMMANDS_DIRECTORY}/${name}`);
+    }
+    for (const name of input.ids ?? []) {
+      const id = String(name ?? "").trim().toLowerCase();
+      if (!/^[a-z][a-z0-9:_-]{0,63}$/.test(id)) continue;
+      for (const extension of CODE_COMMAND_EXTENSIONS) {
+        await read(`${CODE_COMMANDS_DIRECTORY}/${id}${extension}`);
+      }
+    }
+    return { files, readsAttempted, trusted: true };
+  }
+
   async function load(input: {
     ctx: AuthContext;
     companyId: string;
@@ -131,6 +199,7 @@ export function createCodeInstructionsLoader(deps: CodeInstructionsLoaderDeps) {
   return {
     load,
     buildDraft,
+    collectCommands,
     /** The loader's answer in the shape the runner port expects. */
     async loadForRun(input: { ctx: AuthContext; companyId: string; projectId: string; targetPaths?: readonly string[] }) {
       const instructions = await load(input);

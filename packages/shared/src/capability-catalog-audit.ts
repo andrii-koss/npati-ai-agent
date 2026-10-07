@@ -425,6 +425,30 @@ export interface RuntimeProviderCapability {
   risk: CapabilityRisk;
   /** Optional transport/provider origin for display; never a secret and never an instruction. */
   source?: string;
+  /**
+   * C13 (owner decision 5): the **runtime record** an MCP discovery publishes. All of these are optional so
+   * the pre-MCP probe overlay and the null stub keep their shape (and their empty-list hash), while a real
+   * runtime tool carries the facts the owner named: the configured connection, the tool name, the schema
+   * hash/version, the risk, the approval requirement, the discovery time and the connection scope.
+   *
+   * Every one of them is part of `hashRuntimeOverlayEntries`, which is what makes the runtime manifest hash a
+   * real change detector: a changed schema, a changed risk (an owner override) or a re-discovery all mint a
+   * new revision — a manifest that hashed only the display fields would answer "unchanged" for exactly the
+   * change replay must refuse to ignore.
+   */
+  connectionId?: string;
+  toolName?: string;
+  /** Hash of the published input schema. A schema change is a new tool contract, therefore a new revision. */
+  schemaHash?: string;
+  /** The schema version the provider declares, when it declares one (MCP servers usually do not). */
+  schemaVersion?: string | number;
+  approvalRequired?: boolean;
+  /** ISO timestamp of the discovery that produced this record. */
+  discoveredAt?: string;
+  /** The scope the connection was configured in (for example `company`). */
+  connectionScope?: string;
+  /** Where `risk` came from: the fail-closed runtime default, or an owner/admin policy override. */
+  riskSource?: "runtime_default" | "owner_policy";
 }
 
 /**
@@ -473,6 +497,16 @@ export function hashRuntimeOverlayEntries(entries: readonly RuntimeProviderCapab
       agentCallable: entry.agentCallable,
       risk: entry.risk,
       source: entry.source ?? null,
+      // C13: the runtime record, folded in **only when the entry carries it**, so an entry written before
+      // this field existed hashes exactly as it did and the null overlay keeps its pinned empty-list hash.
+      ...(entry.connectionId === undefined ? {} : { connectionId: entry.connectionId }),
+      ...(entry.toolName === undefined ? {} : { toolName: entry.toolName }),
+      ...(entry.schemaHash === undefined ? {} : { schemaHash: entry.schemaHash }),
+      ...(entry.schemaVersion === undefined ? {} : { schemaVersion: entry.schemaVersion }),
+      ...(entry.approvalRequired === undefined ? {} : { approvalRequired: entry.approvalRequired }),
+      ...(entry.discoveredAt === undefined ? {} : { discoveredAt: entry.discoveredAt }),
+      ...(entry.connectionScope === undefined ? {} : { connectionScope: entry.connectionScope }),
+      ...(entry.riskSource === undefined ? {} : { riskSource: entry.riskSource }),
     })),
   );
   let laneA = 0x811c9dc5;

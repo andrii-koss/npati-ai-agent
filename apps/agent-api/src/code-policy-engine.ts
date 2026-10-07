@@ -3,7 +3,13 @@ import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIE
 import { assertCapabilityGranted, CodeCapabilityError } from "./code-capability-groups";
 import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
 import { hasAdminPermission, type CodeCanonicalSessionMode } from "./code-rbac";
+import {
+  MCP_APPROVAL_TTL_MS,
+  mcpApprovalPayloadFor,
+  type McpApprovalRuntimeSubject,
+} from "./mcp-approval";
 import { detectGitWriteAttempts } from "./code-shell-classifier";
+import { MCP_FLAG as MCP_RUNTIME_FLAG, isRuntimeMcpTool } from "./mcp-runtime-identity";
 import {
   GIT_PUSH_REQUIRES_RESOLVED_BRANCH,
   GIT_WRITE_INTENT_INVALID,
@@ -171,6 +177,19 @@ export interface PolicyRequest {
    * hard-deny phases (4, 4b, 4c) have already returned by the time it is read.
    */
   approvalDeferredByBoundary?: boolean;
+  /**
+   * C13 (owner blocker 1): the **runtime MCP identity** of this call, when the tool is a discovered MCP tool.
+   *
+   * It is set by the MCP run path (`mcp-run-path.ts`) from the tool's published record and the model's own
+   * arguments — never by the model and never by the MCP server — and it has two effects, both of which exist so
+   * that an approval for one call cannot be redeemed as another:
+   *
+   *  - the approval **payload** of this request is the canonical MCP material (`mcp-approval.ts`), which is the
+   *    material the run path recomputes when it redeems the record, so the two sides hash the same bytes;
+   *  - the payload hash of this request covers the tool's schema hash and the hash of the exact arguments, so
+   *    "approve the call" cannot mean "approve this tool in general".
+   */
+  runtimeMcp?: McpApprovalRuntimeSubject | null;
 }
 
 export interface PolicyResult {
@@ -186,8 +205,21 @@ export interface PolicyResult {
 
 export interface PolicyEngineDeps {
   flags?: { assertEnabled(ctx: AuthContext, key: string, opts: { companyId: string }): Promise<boolean> };
-  /** Registry lookup: returns the published capability or undefined. */
-  capabilities?: { get(id: string): { id: string; status?: string; version?: number } | undefined };
+  /**
+   * Registry lookup: returns the published capability or undefined.
+   *
+   * C13 (owner decision 5): the lookup is `static → runtime → unknown`. The engine hands the port the tenant of
+   * the request as an optional **scope**, so a runtime provider capability (an MCP tool) can be resolved from
+   * the overlay of *that* tenant. The scope is additive: an implementation that ignores it (every pre-C13 port)
+   * is still assignable and behaves exactly as before, and the engine itself never reads the overlay — the
+   * order lives in one place (`lookupCapability`), which is what makes it testable.
+   */
+  capabilities?: {
+    get(
+      id: string,
+      scope?: { workspaceId?: string; companyId?: string; projectId?: string },
+    ): { id: string; status?: string; version?: number; requiresConfirmation?: boolean } | undefined;
+  };
   classifier?: (command: string, opts?: unknown) => { risk: PolicyRisk; reasons?: string[] };
   approvals?: {
     requestApproval(ctx: AuthContext, companyId: string, input: Record<string, unknown>): Promise<{ id: string }>;
@@ -288,6 +320,15 @@ export const SHELL_FLAG = "code.shell";
  * decorative. Git tools are named here so the mapping and the flag agree.
  */
 export const GIT_FLAG = "code.git";
+/**
+ * C13 (owner decision 5): the sub-flag that gates **runtime MCP tools**. `code.mcp` has existed in
+ * `CODE_AGENT_SUB_FLAGS` and in `CODE_FLAG_KEY_PATTERN` since the flag list was written, but nothing read it —
+ * a flag that is settable and inert is worse than a missing one, because an operator who turns it off believes
+ * something changed. It is its own flag rather than `code.write` because calling a third-party MCP server is a
+ * different blast radius from editing a file: a workspace may want agent edits while forbidding outbound
+ * server calls entirely.
+ */
+export const MCP_FLAG = MCP_RUNTIME_FLAG;
 
 /**
  * Tools whose capability declaration demands a human approval. Derived from the shared capability
@@ -368,6 +409,9 @@ const WRITE_TOOLS = new Set([
 
 /** Exported for tests and for the wiring layer, so the mapping has exactly one definition. */
 export function subFlagForTool(tool: string): string {
+  // C13: a runtime MCP tool is gated by `code.mcp`. Checked first because the id space (`mcp:<connection>/<tool>`)
+  // is disjoint from every static one, so there is no ordering question to get wrong.
+  if (isRuntimeMcpTool(tool)) return MCP_FLAG;
   // Every shell capability (including the read-only process list/logs) is gated by the dedicated
   // `code.shell` sub-flag, so an operator can forbid command execution while still allowing edits.
   if (tool.startsWith("code.shell.")) return SHELL_FLAG;
@@ -386,6 +430,11 @@ export function permissionForTool(tool: string): "workspace:read" | "workspace:w
   // same level their capability records declare. Requiring `workspace:write` here would be stricter than
   // the tool's blast radius and would contradict the catalogue. The read-only git tools only read the
   // repository's state, so they are reads too.
+  //
+  // C13: a runtime MCP tool is neither, and it is deliberately mapped to the **stricter** of the two. It is not
+  // derived from the tool name (an MCP tool called `read_file` is a claim by a third-party server, and a claim
+  // is not a permission), so it can only be reached by a principal that already holds `workspace:write` or
+  // `admin:all`.
   return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) || REVIEW_SAFE_GIT_TOOLS.has(tool)
     ? "workspace:read"
     : "workspace:write";
@@ -516,9 +565,13 @@ export class PolicyEngine {
     reasons.push(`permission:${permission}`);
 
     // Phase 3 — capability must exist in the registry and be usable.
+    //
+    // C13: the port is asked with the request's tenant, so the same call resolves a static capability first and,
+    // when the id is not one, a runtime provider capability (an MCP tool) of that tenant. An id that is neither
+    // is still `unknown_tool` — the "unknown ⇒ deny" half of the owner's lookup rule, unchanged.
     const registry = this.deps.capabilities;
     if (!registry) return deny("policy_engine_unavailable", "Capability registry is not configured", 503, "capability");
-    const capability = registry.get(tool);
+    const capability = registry.get(tool, { workspaceId: ctx.workspaceId, companyId: request.companyId, projectId: request.projectId });
     if (!capability) return deny("unknown_tool", `Unknown tool: ${tool}`, 404, "capability");
     if (capability.status === "deprecated") return deny("tool_deprecated", `Tool is deprecated: ${tool}`, 409, "capability");
     if (request.toolVersion !== undefined && capability.version !== undefined && capability.version !== request.toolVersion) {
@@ -911,10 +964,50 @@ export class PolicyEngine {
       };
     }
     if (!approvals) return deny("approval_unavailable", "Approval system is not configured", 503, phase);
+    /**
+     * C13 (owner blocker 1): the approval **material** of a runtime MCP call.
+     *
+     * `mcpApprovalPayloadFor` is the one builder both sides use (see `mcp-approval.ts` for why that is the whole
+     * point). Two consequences are deliberate:
+     *
+     *  - the material is handed to the durable approval store as its `inputPayload`, so the row's own
+     *    `payload_hash` is the hash of *this* call — the same value the run path will present when it redeems
+     *    the record. Without it the store would hash an empty payload and no runtime MCP approval could ever be
+     *    consumed;
+     *  - the repo-shaped fields (`toolName`, `actionSummary`, `runId`, `agentId`, `riskLevel`, `ttlMs`) travel
+     *    with it, because `CompanyApprovalsRepository.requestApproval` is the real implementation behind this
+     *    port and it needs exactly those to write the row. A deployment whose approval gateway is the store
+     *    therefore creates a real, redeemable, one-shot approval for an MCP call.
+     */
+    // A `PolicyRequest` structurally satisfies `McpApprovalSubject`, which is what lets the run path and this
+    // phase build the material from the same values with the same function.
+    const mcpPayload = mcpApprovalPayloadFor(request);
+    const runtimeApprovalFields = mcpPayload
+      ? {
+          toolName: request.tool,
+          actionSummary: `Runtime MCP tool ${request.tool} requires an approval for this exact call`,
+          inputPayload: mcpPayload,
+          runId: request.runId ?? "",
+          agentId: request.agentId ?? "",
+          riskLevel: "high" as const,
+          // A paused run can outlive a tab and a process restart, so the window is the store's own maximum.
+          ttlMs: MCP_APPROVAL_TTL_MS,
+        }
+      : {};
     if (request.approved === true || request.approvalId) {
       const expected = payloadHashFor(request);
       try {
         await approvals.consumeApproved(request.ctx, request.companyId, String(request.approvalId ?? request.toolCallId ?? ""), {
+          ...(mcpPayload
+            ? {
+                // The consuming side of the same material: `run_id`, `agent_id`, `tool_name` and the payload
+                // hash are all matched by the store's own atomic statement.
+                runId: request.runId ?? "",
+                agentId: request.agentId ?? "",
+                toolName: request.tool,
+                inputPayload: mcpPayload,
+              }
+            : {}),
           payloadHash: expected, tool: request.tool, toolCallId: request.toolCallId,
         });
       } catch (error) {
@@ -957,6 +1050,8 @@ export class PolicyEngine {
         // C6a: what a migration would do (target, destructive, snapshot, plan). Metadata only — no SQL,
         // no connection string and no credentials.
         ...(details ? { migration: details } : {}),
+        // C13: the durable store's own fields plus the canonical MCP material, for a runtime MCP call.
+        ...runtimeApprovalFields,
       });
       return {
         decision: "require_approval", phase, reasons: [...reasons, "approval:required"],
@@ -1007,6 +1102,12 @@ function deny(code: string, message: string, status: number, phase: PolicyPhase,
  * `gitApprovalPayload` so the two hashers cannot drift). An approval granted for "push into an existing
  * repository" therefore hashes differently from one granted for "create the repository and push", while
  * every write against an existing repository keeps the exact bytes — and the exact hash — it had before.
+ *
+ * C13 (owner blocker 1): a **runtime MCP call** adds the tool's runtime identity — `providerId`,
+ * `connectionId`, `toolName`, the schema hash and the hash of the exact (normalised) arguments. An approval
+ * for one MCP call therefore cannot be spent on another: a different tool, a server that changed its input
+ * schema, or different arguments all move the hash. The key is added only when the request carries
+ * `runtimeMcp`, so every other request keeps the exact bytes — and the exact hash — it had before.
  */
 export function payloadHashFor(request: PolicyRequest): string {
   const material = JSON.stringify({
@@ -1026,6 +1127,17 @@ export function payloadHashFor(request: PolicyRequest): string {
             force: request.git.force === true,
             credentialId: request.git.credentialId ?? null,
             ...(bindsRepositoryInitialization(request.git) ? { repositoryInitialized: false } : {}),
+          },
+        }
+      : {}),
+    ...(request.runtimeMcp
+      ? {
+          runtimeMcp: {
+            providerId: request.runtimeMcp.providerId,
+            connectionId: request.runtimeMcp.connectionId,
+            toolName: request.runtimeMcp.toolName,
+            schemaHash: request.runtimeMcp.schemaHash,
+            argsHash: request.runtimeMcp.argsHash,
           },
         }
       : {}),

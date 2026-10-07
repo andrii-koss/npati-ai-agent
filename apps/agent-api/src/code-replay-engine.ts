@@ -28,6 +28,7 @@ import {
   type ReplayBundleStepPayload,
 } from "./code-replay-bundle";
 import { COMPACTION_SCHEMA_VERSION } from "./code-conversation-compaction";
+import { ReplayRuntimeMcpManifestChangedError, assertReplayRuntimeMcpManifestMatches } from "./mcp-runtime-capabilities";
 
 /** Shape version of the payloads this engine writes. Bumped when the meaning changes. */
 export const CODE_REPLAY_SCHEMA_VERSION = 1;
@@ -79,6 +80,12 @@ export const CODE_REPLAY_CODES = Object.freeze({
   compactionRecomputeForbidden: "replay_compaction_recompute_forbidden",
   /** C8: a recorded compression artifact is present but unusable (wrong schema, no hash, not an object). */
   compressionArtifactInvalid: "replay_compression_artifact_invalid",
+  /**
+   * C13 (owner decision 6): the runtime MCP tool set (or one tool's schema) changed since the run was recorded,
+   * or the deployment cannot state the current manifest at all. The replay is refused instead of silently
+   * running against a different set of tools.
+   */
+  runtimeMcpManifestChanged: "replay_runtime_mcp_manifest_changed",
 });
 
 export type ReplayDivergenceReason =
@@ -152,6 +159,22 @@ export interface RecordedReplayResult {
    * compression artifact existed).
    */
   compression: ReplayCompressionState;
+  /**
+   * C13 (owner decision 6, corrected): what the runtime MCP pin of this replay was checked against.
+   * `mode: "recorded"` means the run verified itself against the manifest **it recorded** — no discovery, no
+   * dial (`dials` is a structural zero); `mode: "live"` means the caller supplied a live manifest and it matched
+   * the recorded one; `mode: "none"` means the run recorded no manifest (no runtime MCP tool, or a pre-C13
+   * bundle), so there was nothing to check. Hashes and modes only: never a schema body, an endpoint or an
+   * argument.
+   */
+  runtimeMcpManifest: {
+    mode: "recorded" | "live" | "none";
+    checked: boolean;
+    source: "recording" | "live_discovery" | "none";
+    recordedHash: string | null;
+    comparedHash: string | null;
+    dials: number;
+  };
   /** How many recorded steps the verification walk actually inspected. */
   stepsVerified: number;
   durationMs: number;
@@ -178,6 +201,26 @@ export interface RecordedReplayDeps {
    * what a test asserts. The parameter exists precisely so the refusal is testable rather than a comment.
    */
   compaction?: () => unknown;
+  /**
+   * C13 (owner decision 6): the runtime MCP tool set of the tenant replaying the run.
+   *
+   * **Two modes, and they are not interchangeable** (owner requirement, C13 correction):
+   *
+   *  - **`recorded`** (the default, and the only mode a deterministic replay may use): the manifest the run
+   *    recorded in its own bundle is used as the value to check against. The engine makes **no** discovery and
+   *    contacts nothing — it has no transport, provider or discovery port at all — so the replay reproduces the
+   *    run against the tool set and schemas it was admitted under, in a fresh process, with zero dials. This is
+   *    also why the recorded tool results are the only results a replay feeds back.
+   *  - **`live`** (opt-in): the caller already performed a **live discovery** and hands the current manifest in.
+   *    It is compared with the recorded one and a difference is refused, so a live comparison can never silently
+   *    substitute the current tool set for the recorded one.
+   *
+   * The mode is explicit (`runtimeMcpManifestMode`) and defaults to `live` exactly when a manifest is supplied,
+   * which keeps every existing caller's meaning: a caller that passes a manifest is asking for the comparison.
+   * An explicit `live` with nothing to compare stays a refusal — "we could not tell" is not "unchanged".
+   */
+  runtimeMcpManifest?: Record<string, unknown> | null;
+  runtimeMcpManifestMode?: "recorded" | "live";
   onActivity?(event: Record<string, unknown> & { kind: string }): void | Promise<void>;
   now?(): number;
 }
@@ -277,6 +320,52 @@ function divergence(reason: ReplayDivergenceReason, turn: number, fields: Partia
 }
 
 /**
+ * C13 (owner decision 6, corrected): **one** implementation of the runtime MCP pin, used by both replay modes
+ * so they cannot drift into two different checks.
+ *
+ * `recorded` is the manifest the run itself recorded (from its bundle); `current` is a manifest a **live**
+ * caller discovered. `mode: "recorded"` checks the recording against itself — no discovery, no dial — and
+ * `mode: "live"` compares a live value, refusing a difference and refusing "we could not tell".
+ */
+export function compareRuntimeMcpManifestForReplay(input: {
+  recorded: Record<string, unknown> | null | undefined;
+  current: Record<string, unknown> | null | undefined;
+  mode: "recorded" | "live";
+  runId: string;
+}): RecordedReplayResult["runtimeMcpManifest"] {
+  const recorded = input.recorded ?? null;
+  // A run that recorded no runtime MCP manifest has nothing to compare, in either mode. That is the honest
+  // "no runtime MCP tool was involved" answer, not a skipped check.
+  if (!recorded) {
+    return { mode: "none", checked: false, source: "none", recordedHash: null, comparedHash: null, dials: 0 };
+  }
+  const current = input.mode === "live" ? input.current ?? null : recorded;
+  try {
+    const checked = assertReplayRuntimeMcpManifestMatches({ recorded, current });
+    return {
+      mode: input.mode,
+      checked: checked.checked,
+      source: input.mode === "live" ? "live_discovery" : "recording",
+      recordedHash: checked.recordedHash,
+      comparedHash: checked.currentHash,
+      // Structurally zero: this module owns no transport, discovery port or HTTP client, so a replay cannot dial
+      // anything even by mistake. Reported so a caller (and a test) can assert it rather than believe it.
+      dials: 0,
+    };
+  } catch (error) {
+    if (error instanceof ReplayRuntimeMcpManifestChangedError) {
+      throw new CodeReplayError(
+        CODE_REPLAY_CODES.runtimeMcpManifestChanged,
+        "The runtime MCP tool set or one of its schemas changed since this run was recorded",
+        409,
+        { runId: input.runId, mode: input.mode, ...error.details },
+      );
+    }
+    throw error;
+  }
+}
+
+/**
  * Deterministic replay: verify the recorded run against its own two records (model output and execution).
  *
  * Divergences are returned, not thrown, so a caller can show the whole comparison and the API can answer
@@ -316,6 +405,33 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
       { reason: "replay_bundle_truncated", runId: recording.runId },
     );
   }
+  /**
+   * C13 (owner decision 6, corrected): the runtime MCP tool set is dynamic, so the recording pins it and this is
+   * where the pin is enforced. The check sits with the other structural refusals — before any verification walk —
+   * so a changed schema cannot produce a "divergence report" against a tool set the run never had. A run without
+   * a recorded manifest skips it entirely.
+   *
+   * The **default is the recorded manifest**, and that is the correction the owner asked for: a deterministic
+   * replay must not discover anything. Reading the value out of the bundle it is about to verify cannot fail for
+   * a reason that has nothing to do with the run (an empty in-process overlay after a restart), and it is the
+   * only value that describes the tool set this run actually saw. A caller that hands in a **live** manifest
+   * asks for the comparison instead, which is the separate live mode; the two meanings are reported apart in
+   * `runtimeMcpManifest.mode` rather than merged into one "current manifest" concept.
+   *
+   * The MCP module raises its own error type so the guard is reusable outside replay; here it is translated into
+   * the engine's single error vocabulary, keeping the structured reason and both hashes for the API answer.
+   */
+  const recordedRuntimeMcpManifest = recording.runtimeMcpManifest ?? null;
+  const runtimeMcpManifestMode: "recorded" | "live" =
+    deps.runtimeMcpManifestMode ?? (deps.runtimeMcpManifest ? "live" : "recorded");
+  const runtimeMcpManifestReport = compareRuntimeMcpManifestForReplay({
+    recorded: recordedRuntimeMcpManifest,
+    // In `recorded` mode the comparison value is the recording itself, so the check can never fail for a reason
+    // that has nothing to do with the run (an empty in-process overlay after a restart).
+    current: runtimeMcpManifestMode === "live" ? deps.runtimeMcpManifest ?? null : recordedRuntimeMcpManifest,
+    mode: runtimeMcpManifestMode,
+    runId: recording.runId,
+  });
   if (!deps.toolVersions) {
     throw new CodeReplayError(
       CODE_REPLAY_CODES.toolVersionsRequired,
@@ -489,6 +605,7 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
      * false alarm rather than a check).
      */
     compression,
+    runtimeMcpManifest: runtimeMcpManifestReport,
     stepsVerified,
     durationMs: (deps.now ?? Date.now)() - started,
   };

@@ -39,7 +39,112 @@ both builds exit 0.
   vs combined Inspector view).
 
 ## Current step
-- **C12 COMPLETE — subagents and parallel work.** Final escalated evidence: `npm run typecheck` exit 0, both
+- **C13 COMPLETE — hooks, slash commands, skills, MCP.** Final escalated evidence: `typecheck` exit 0,
+  **`typecheck:tests` exit 0**, `verify-capability-matrix.mjs` exit 0 (**4/4**, now against the **real** MCP overlay
+  provider: `static=385 overlay=3 combined=388`, `hashRecomputes=true`), `upgrade-gate.mjs` exit 0 (`GREEN`),
+  **`security-gate` exit 0 — `passed=1824 failed=0`, 125 suites, `present=125 missing=0`**, `test:web` exit 0
+  (8 files / 71 tests), both builds exit 0, and **`npm test` unchanged at the recorded known-red baseline
+  (10 files / 15 tests, same file list)** — no new failures. Last migration is now **085**.
+  - **Hooks** reuse the one existing lifecycle manager and only add an emitter to the run loop (no third event bus);
+    they map onto the existing `session:start`/`tool:before`/`tool:after`/`session:end` names. Position is the
+    security property: `PreToolUse` fires **after** approval-allow and immediately before the executor (ordering
+    test `["approval","hook","executor"]` with a real consuming approvals port), and hooks are never invoked on a
+    denied path (hard deny, engineering require_approval — with no second approval page, flag/master-off, RBAC
+    denial, read-only intent, read-before-write, unknown tool). The "engine decides inside the executor" gap is
+    closed by an **advisory one-way** `preToolPolicy`: `deny` only removes the hook, `allow` authorizes nothing.
+  - **Hook output is a closed vocabulary** (`{block,reason}` | `{context,trust:"untrusted_data"}` | `{warnings}`);
+    forbidden names (`allow/permission/approval/mode/role/flag/risk/riskOverride/capability/grant/policy/decision/
+    bypass`) are refused **by name** before unknown keys, `block` is impossible on `PostToolUse`/`Stop`, and a
+    secret **refuses** the hook rather than being redacted. `PolicyRequest` carries **no** hook field (source guard
+    asserts `!/hook/i`), so no phase can read a hook verdict.
+  - **Untrusted project hooks are not read at all** — `flag → isTrusted → readConfig → parse → execute`, proven by
+    `readConfig` spy 0, executor spy 0, and a config getter counting accesses (`accesses.value === 0`), i.e. parsing
+    never happened; with the flag off, trust is not even consulted.
+  - **Execution**: `command` hooks run in the sandbox via the existing `SandboxExecPort` (never the host) with a
+    metadata-only event (no args, no file contents); `webhook` hooks use the existing SSRF-safe `deliverWebhook`
+    (destination re-validated on every delivery, redirects 0, `assertOutboundAllowed({channel:"webhook"})`).
+  - **Activity ≠ AuditLog structurally**: `code-hooks.ts` has no audit port at all, so a hook invocation cannot be
+    confused with an administrative decision; hook events are metadata-only Activity proven free of the command
+    line, output, reason text, context and secrets. Trust/flag changes keep going to the tamper-evident AuditLog.
+  - **Slash commands** live in `.npati/commands/<id>.{md,json}` plus system/user/session sources through the **same**
+    parser, read via the **existing** instructions loader (no second file reader). Precedence
+    `system → user → project → session` is a **total order** proven deterministic by resolving the same input
+    forwards and backwards; duplicate ids in one source are refused; project commands are **not read before trust**
+    (`readFile` 0 / `readsAttempted` 0 while `isTrusted` *was* called, so the trust record decided). Expansion keeps
+    `canChangePolicy:false`/`canGrantTools:false`, refuses forbidden keys by name, passes the existing C5 classifier
+    (policy-mutation → `command_injection_refused`), and the new modules import **neither** policy engine, approval
+    scope, RBAC, session modes nor feature flags — there is no channel to change a decision. Arguments are **data**:
+    appended as a separate `ARGUMENTS (untrusted_user_data)` block, never interpolated. The runner resolves the
+    prompt **once** and uses that value in all five places, and provenance rides into `replayInputHash`;
+    `REPLAY_BUNDLE_FORMAT_VERSION` deliberately stays **3** because the new member is optional and a bundle without
+    it hashes exactly as before (asserted).
+  - **Skills are metadata-first**: `listMetadata()` never loads a body (`readBody` spy 0 across repeated listings);
+    untrusted repository skills are withheld and never offered by name. A loaded body renders into a **typed
+    `SKILL INSTRUCTIONS` section** in the system prefix, above the data-boundary, and **survives C8 compression** —
+    proven on the real `compactConversation` (tool results get stubbed while `messages[0].content` keeps the body
+    byte-for-byte). `skillId/version/hash/source` are published to the snapshot holder without the body, and
+    `readPinnedSkillBody` refuses on version/hash mismatch or deletion, so replay uses the **recorded** version. The
+    body must pass the existing `ProviderDataGuard`; if it would have to be redacted the skill is **refused**
+    (`skill_provider_data_refused`), never sanitized, and a secret shape refuses before the guard is called.
+  - **MCP**: the static manifest stays versioned/immutable (v9/385) and dynamic tools live in a
+    `RuntimeProviderCapabilityOverlay` (`connectionId, toolName, schemaHash, risk, approvalRequired, discoveredAt,
+    connectionScope, riskSource`). Policy lookup is one `lookupCapability` (`static → runtime → unknown ⇒ deny`)
+    feeding the existing port; `code.mcp` finally has a reader. **Risk is assigned, never read from server
+    metadata**: default `high` + `approvalRequired=true`, any metadata declaration of a policy field is refused by
+    name and the tool is not published, and the only way down is the owner/admin flow that journals to the AuditLog
+    **before** applying (fail-closed — `audit_unavailable` when the journal throws). The runtime manifest/hash is
+    pinned into `ExecutionSnapshot` (optional source, schema version unchanged) and into replay input; a changed
+    schema/risk gives a new revision, and replaying against a different set is a structured 409
+    `replay_runtime_mcp_manifest_changed` (an unavailable manifest is also a refusal: "could not tell" ≠
+    "unchanged"). Endpoints come **only** from the configured integration row — a requested endpoint equal to the
+    configured one is still refused, so "configured vs injected" stays decidable. Transport is the existing
+    SSRF-safe client (private/loopback/metadata refusal **before** any dial, redirect re-validation; dial counts
+    asserted); outbound data passes `assertOutboundAllowed({channel:"mcp"})` before the request is built; responses
+    are bounded, secret-**refused**, injection-classified and wrapped in the canonical `untrusted_data` envelope
+    with a closed key vocabulary and `canChangePolicy/canGrantTools/canChangeMode/canChangeApproval` literally false.
+  - **Discovery happens on the run path** (`mcp-run-path.ts`): the runner calls
+    `runtimeCapabilities.prepareForRun` **once per run**, after every start-up refusal and **before** the
+    model-visible tool list is built and **before** the `ExecutionSnapshot` that pins the manifest — so a fresh
+    process with a configured, active Integration discovers its MCP tools with **no Inspector request and no
+    warm-up call**. The same object serves the Inspector route (`discoverRuntimeMcpCapabilities` *is*
+    `mcpRunPath.discover`), so there is one discovery system with two entry points and neither depends on the
+    other. The declared schemas are stored beside the published records (`McpConnectionToolSet.schemas`) and only
+    the run path reads them: the manifest, the snapshot and Activity stay metadata-only. Order:
+    discovery → risk assignment → overlay → descriptors → snapshot → model call. A pass that finds nothing, a
+    disabled `code.mcp`, an unwired Integration source or a discovery that throws all leave the tenant's overlay
+    **empty** (never stale), record an Activity event (metadata only: counts, codes, the manifest hash) and leave
+    the run untouched — the tool is then absent from the descriptors and the model's own call is rejected as
+    `unknown_tool` before execution. A re-listing that changes nothing keeps the published `discoveredAt`, so a
+    repeated run does not move the manifest hash (a real schema/risk change still mints a new revision), and the
+    recorded bundle now really pins `runtimeMcpManifest` — the recorder member had no writer before.
+  - **Counts are measured** (owner decision 8): static 385 (121 callable / 264 runtime-only) is identical before and
+    after discovery, runtime MCP 3, combined Inspector view 388, `CAPABILITY_CATALOG.some(isRuntimeMcpTool)===false`;
+    static / runtime / combined are three separate checks.
+  - **One-time approval on the run path (not only an owner downgrade)**: an approval-required runtime MCP call now
+    **pauses** the run through the existing `waiting_for_user` state (`pauseForUser(..., "approval")` →
+    `markWaitingForUser`) and creates **exactly one** approval request through the existing approval phase and durable
+    repository. The payload is built by **one** builder on both sides (`mcp-approval.ts` `mcpApprovalPayloadFor`, 14
+    fields: provider/connection/tool/`schemaHash`/`argsHash` + company/project/session/run/agent/toolCall +
+    `approvalScope:"once"`, with **no raw arguments**), so a record issued for one tool/schema/arguments cannot be
+    spent on another (`APPROVAL_INVALID`), reuse is `APPROVAL_ALREADY_USED`, and two calls in one turn ask the human
+    twice. Approval is released through a new optional `onDecided` on the existing approvals route and the run
+    resumes the **same** run id, executing the call through the same run path and the SSRF-safe transport, and the
+    pause **survives a process restart** (proven over the durable approvals + run state). Expiry reuses the existing
+    reaper (`stale_approvals` → `markInterrupted{reason:"approval_timeout"}`). The owner/admin risk flow is **not**
+    required for a one-time approval and is **not** removed — it remains the way to lower risk persistently.
+  - **Replay modes are explicit**: deterministic replay compares against the **recorded** manifest (0 dials, never
+    "cannot tell") and verifies the recorded MCP tool results instead of executing them; **live** replay performs
+    discovery and refuses a mismatch with 409 `replay_runtime_mcp_manifest_changed`. `REPLAY_BUNDLE_FORMAT_VERSION`
+    stays **3** because the member is optional (a bundle without runtime fields hashes exactly as before, asserted).
+  - **Open items**: `mcp-server-engine.ts` stays unmounted (exposing it is not C13); there is no Company-level
+    endpoint registry, so hook/webhook endpoints are the config's own declared endpoints protected by the SSRF
+    policy; a **pre-existing** defect outside C13: for **non-MCP** approval-class requests `app.ts` passes the
+    engine-shaped object (without `toolName`/`actionSummary`/`inputPayload`) to
+    `CompanyApprovalsRepository.requestApproval`, so such a request ends as `approval_unavailable` in production —
+    the runtime MCP path was fixed, the remaining surfaces were deliberately left for a separate step;
+    `tests/coding-agent-c4b-ssrf-client.test.ts` and `tests/production-mcp-policy.test.ts` cannot load under the
+    spec harness (pre-existing shim gaps).
+- Earlier: **C12 COMPLETE — subagents and parallel work.** Final escalated evidence: `npm run typecheck` exit 0, both
   workspace builds exit 0, **`npm run security-gate` exit 0 — `passed=1707 failed=0`, 116 suites,
   `present=116 missing=0`**, **`npm run test:web` exit 0 — 8 files / 71 tests / 0 failed**, and the tool-schema
   artifact regenerated to **manifest v9 with 37 tools**, checksum `b498efdc…` — computed independently by the

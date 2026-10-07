@@ -46,6 +46,9 @@ export interface FlagHistoryEntry {
 export const CODE_SUB_FLAGS: readonly string[] = [
   "code.read", "code.write", "code.shell", "code.git", "code.subagents",
   "code.background_runs", "code.mounted_folder", "code.hooks", "code.mcp", "code.full_auto_sandbox",
+  // C13: slash commands (stored prompt templates) and lazily loaded Skills. Added here as well as on the
+  // server because `CODE_FLAG_KEY_PATTERN` is an allowlist and this panel's list is what an operator sees.
+  "code.commands", "code.skills",
 ];
 
 const STAGE_LABELS: Record<FlagStage, string> = { off: "off", internal: "internal", allowlist: "allowlist", percent: "percent", ga: "ga" };
