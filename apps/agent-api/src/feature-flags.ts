@@ -47,6 +47,16 @@ export const CODE_AGENT_SUB_FLAGS = [
    * surface instead of only by `code-process-manager.ts`.
    */
   "code.export",
+  /**
+   * C13: slash commands and lazily loaded Skills. Each is its own flag because each has a different blast
+   * radius: a slash command expands a *stored template* into the model's input (and a project's templates are
+   * repository content), while a Skill puts an *installed* body into the system prompt. A workspace may
+   * reasonably want one and not the other, and the two flags let it say so. No duplicate keys: neither name
+   * existed before C13, and both are added to `CODE_FLAG_KEY_PATTERN` in the same edit — a key the pattern does
+   * not match can never be enabled, which is exactly the failure mode this list exists to prevent.
+   */
+  "code.commands",
+  "code.skills",
 ] as const;
 
 export type CodeAgentSubFlag = typeof CODE_AGENT_SUB_FLAGS[number];
@@ -58,7 +68,7 @@ export const CODE_MODEL_PROFILE_PATTERN = /^code\.model_profile\.[a-z0-9._-]{1,6
  * the key carries the bare hex prefix (8..64 chars) because a flag key cannot contain a colon.
  */
 export const CODE_SANDBOX_IMAGE_PATTERN = /^code\.sandbox_image\.[a-f0-9]{8,64}$/;
-export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
+export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
 
 export function isValidCodeFlagKey(flagKey: string): boolean {
   return typeof flagKey === "string" && CODE_FLAG_KEY_PATTERN.test(flagKey);

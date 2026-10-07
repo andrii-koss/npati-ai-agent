@@ -38,6 +38,15 @@ export const REPLAY_BUNDLE_FORMAT_VERSION = 3;
  * input, which is what the owner asked for. The field is included **only when the run actually compacted**, so
  * a version-1/2 bundle — whose stored hash was derived from the steps alone — still verifies unchanged: the
  * hash semantics changed, and the bump is what makes that visible instead of silent.
+ *
+ * Version 3 is **unchanged** by C13's runtime MCP manifest, and that is a deliberate, argued decision rather
+ * than an omission. The persisted shape is the same: `runtimeMcpManifest` is an optional header member that is
+ * written **only when the run actually had runtime MCP tools**, exactly like `commandExpansions`. A bundle
+ * without the field therefore serialises to the same header and derives the same `replayInputHash` as before
+ * C13 (asserted directly: `replayInputHash(steps) === bundleHash({ steps })`), so a format bump would invalidate
+ * stored bundles that are still perfectly readable — the opposite of what the version exists to protect. The
+ * one thing that *did* change is the hash of a bundle that carries the field, and that is visible where it
+ * matters: on the bundles that carry the new input.
  */
 
 /** Raised instead of persisting a bundle whose recording contains a credential. */
@@ -172,20 +181,42 @@ export function replayInputSteps(steps: ReplayBundleStepPayload[]): ReplayBundle
  * The **replay input hash**.
  *
  * It covers the ordered steps with every `rawArtifact` removed, plus — when the run actually compacted — the
- * recorded compression artifacts. Both halves matter for the same reason: a replay must consume exactly what
- * the model saw. The artifacts are added **only when present**, so the hash of a run that never compacted is
- * byte-identical to the version-1/2 derivation and old bundles keep verifying; a run that did compact gets a
- * hash that a swapped or edited summary cannot satisfy.
+ * recorded compression artifacts, and — since C13 — any recorded **command expansions**. All three halves
+ * matter for the same reason: a replay must consume exactly what the model saw. The artifacts are added **only
+ * when present**, so the hash of a run that never compacted is byte-identical to the version-1/2 derivation and
+ * old bundles keep verifying; a run that did compact gets a hash that a swapped or edited summary cannot
+ * satisfy.
+ *
+ * C13 extends the same rule to slash commands. A command expansion is a **stored template**, so the persisted
+ * bundle must pin the exact text the run expanded, or "replay the same run" would expand today's template and
+ * reproduce a conversation that never happened. The field is added only when the run really expanded a command,
+ * which is what keeps every pre-C13 bundle — whose stored hash was derived from the steps alone — verifiable
+ * without a format bump. `REPLAY_BUNDLE_FORMAT_VERSION` therefore stays at 3: the **shape** of a persisted
+ * bundle is unchanged (the two provenance lists are optional header members, absent for every run that does not
+ * use the feature), and the hash change is visible exactly where it is meaningful, on the bundles that carry
+ * the new input.
  */
 export function replayInputHash(
   steps: ReplayBundleStepPayload[],
   compressionArtifacts?: readonly Record<string, unknown>[],
+  commandExpansions?: readonly Record<string, unknown>[],
+  runtimeMcpManifests?: readonly Record<string, unknown>[],
 ): string {
   const artifacts = compressionArtifacts ?? [];
+  const expansions = commandExpansions ?? [];
+  const manifests = runtimeMcpManifests ?? [];
   const input = replayInputSteps(steps);
-  return artifacts.length > 0
-    ? bundleHash({ steps: input, compressionArtifacts: [...artifacts] })
-    : bundleHash({ steps: input });
+  if (artifacts.length === 0 && expansions.length === 0 && manifests.length === 0) return bundleHash({ steps: input });
+  return bundleHash({
+    steps: input,
+    ...(artifacts.length > 0 ? { compressionArtifacts: [...artifacts] } : {}),
+    ...(expansions.length > 0 ? { commandExpansions: [...expansions] } : {}),
+    // C13 (owner decision 6): the runtime MCP manifest the run was admitted under. It is replay **input** for
+    // the same reason a slash-command expansion is: the tool set is dynamic, so a replay that resolved today's
+    // tools would reproduce a conversation the run never had. Added only when the run had runtime MCP tools, so
+    // a bundle without the field keeps the pre-C13 derivation byte for byte (and the format stays at version 3).
+    ...(manifests.length > 0 ? { runtimeMcpManifests: [...manifests] } : {}),
+  });
 }
 
 /** Refuse a bundle whose serialised recording contains a credential (scanned, not trusted by field list). */
@@ -253,6 +284,19 @@ export interface ReplayBundleContext {
   sourceSnapshotId?: string | null;
   dataClassification?: DataClassification;
   retentionClass?: RetentionClass;
+  /**
+   * C13: the slash-command expansions that produced this run's prompt. The prompt is resolved before the first
+   * model call, so the provenance is known at run start and travels with the context; it is recorded when the
+   * bundle is written, and it is **replay input**, because a replay must expand the recorded version of
+   * `/review` rather than whatever the repository or the user has today.
+   */
+  commandProvenance?: readonly Record<string, unknown>[];
+  /**
+   * C13 (owner decision 6): the runtime MCP manifest this run was admitted under, read from the run's
+   * ExecutionSnapshot. It is optional and absent for every run that used no MCP tool, which is what keeps the
+   * persisted shape (and therefore the format version) unchanged.
+   */
+  runtimeMcpManifest?: Readonly<Record<string, unknown>> | null;
 }
 
 export interface ReplayBundleRecorderInput {
@@ -336,10 +380,26 @@ export class ReplayBundleRecorder {
      * input so a replay replays the *model-visible* compacted context instead of recomputing a summary.
      */
     compressionArtifacts?: readonly Record<string, unknown>[];
+    /**
+     * C13: the slash-command expansions this run applied, in order. Each entry pins the command's provenance
+     * (`source`/`scope`/`version`/`hash`) and the `contentHash` of the exact expanded text — never the text's
+     * argument values, and never a secret. Recorded for the same reason as the compaction artifacts: a stored
+     * template is not a frozen input until the bundle says which version was expanded.
+     */
+    commandExpansions?: readonly Record<string, unknown>[];
   }): Promise<{ written: boolean; bundleId?: string; errorCode?: string }> {
     if (this.written) return { written: false, errorCode: "already_written" };
     const now = this.input.now?.() ?? new Date();
     const steps = this.orderedSteps();
+    // C13: the expansions this run applied. The runner reports them at finalize time; a caller that resolved
+    // them at run start (where the prompt is built) may instead publish them through the context. `finalize`
+    // wins when both exist, so one expansion is never recorded twice.
+    const commandExpansions = input.commandExpansions
+      ? [...input.commandExpansions]
+      : [...(this.input.context.commandProvenance ?? [])];
+    // C13: the runtime MCP manifest, recorded only when the run really had runtime tools. `null`/absent means
+    // "this run had none (or predates the feature)", which is exactly what the reader derives the hash from too.
+    const runtimeMcpManifest = this.input.context.runtimeMcpManifest ?? null;
     const header = {
       bundleVersion: REPLAY_BUNDLE_FORMAT_VERSION,
       runId: this.input.context.runId,
@@ -363,6 +423,14 @@ export class ReplayBundleRecorder {
       // summary changes the bundle's own hash, so tampering is detectable rather than merely unlikely.
       compressionArtifacts: [...(input.compressionArtifacts ?? [])],
       compressionArtifactCount: input.compressionArtifacts?.length ?? 0,
+      // C13: recorded **only when the run applied one**, so a run that used no slash command has exactly the
+      // header it had before this feature existed.
+      ...(commandExpansions.length > 0
+        ? { commandExpansions, commandExpansionCount: commandExpansions.length }
+        : {}),
+      // C13: the runtime MCP manifest, recorded **only when the run had one**, so a run that used no MCP tool
+      // has exactly the header it had before this feature existed.
+      ...(runtimeMcpManifest ? { runtimeMcpManifest } : {}),
       createdAt: now.toISOString(),
     };
     const compressionArtifacts = [...(input.compressionArtifacts ?? [])];
@@ -375,7 +443,7 @@ export class ReplayBundleRecorder {
       throw error;
     }
     const payloadHash = bundleHash(header);
-    const inputHash = replayInputHash(steps, compressionArtifacts);
+    const inputHash = replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : []);
     try {
       const record = await this.input.store.createReplayBundle({
         workspaceId: this.input.context.workspaceId,
@@ -491,6 +559,20 @@ export interface ReplayBundleReadResult {
    * which reads as "no compaction to reproduce" rather than as a licence to recompute a summary.
    */
   compressionArtifacts?: Record<string, unknown>[];
+  /**
+   * C13: the recorded slash-command expansions, in order. **This is replay input, not a report**: a template is
+   * versioned, so a replay must expand the recorded version (`version` + `hash`) and republish the recorded
+   * `contentHash`, never resolve `/name` against whatever the repository or the user has today. An empty list
+   * means the run applied no slash command (or predates C13), which reads as "there is nothing to re-expand".
+   */
+  commandExpansions?: Record<string, unknown>[];
+  /**
+   * C13 (owner decision 6): the runtime MCP manifest the run was recorded under, or `null`/absent when the run
+   * had no runtime MCP tools. **This is replay input, not a report**: a replay must refuse when the current
+   * runtime manifest hash differs, because otherwise it would reproduce the run against a tool set (or a tool
+   * schema) the run never saw.
+   */
+  runtimeMcpManifest?: Record<string, unknown> | null;
 }
 
 /** One assembly path for every read (by run and by id), so the two can never answer differently. */
@@ -510,6 +592,17 @@ async function assembleBundleRead(
   const compressionArtifacts = Array.isArray(bundle.payload?.compressionArtifacts)
     ? (bundle.payload?.compressionArtifacts as Record<string, unknown>[])
     : [];
+  // C13: the same reading for the command expansions. Absent means "this run applied none", and the hash is
+  // derived without them — which is exactly what the writer did for that run.
+  const commandExpansions = Array.isArray(bundle.payload?.commandExpansions)
+    ? (bundle.payload?.commandExpansions as Record<string, unknown>[])
+    : [];
+  // C13: the same reading for the runtime MCP manifest. Absent means "this run had no runtime MCP tools", and
+  // the hash is derived without it — exactly what the writer did for that run.
+  const runtimeMcpManifest =
+    bundle.payload?.runtimeMcpManifest && typeof bundle.payload.runtimeMcpManifest === "object" && !Array.isArray(bundle.payload.runtimeMcpManifest)
+      ? (bundle.payload.runtimeMcpManifest as Record<string, unknown>)
+      : null;
   return {
     kind: "bundle",
     runId: bundle.runId,
@@ -522,9 +615,11 @@ async function assembleBundleRead(
     replayInputHash: bundle.replayInputHash,
     // The same derivation the writer used, artifacts included: a summary that was swapped after the fact can
     // no longer pass, because it is now part of the value the stored hash covers.
-    integrityFailure: bundle.replayInputHash !== replayInputHash(steps, compressionArtifacts),
+    integrityFailure: bundle.replayInputHash !== replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : []),
     truncated: steps.length < storedCount,
     compressionArtifacts,
+    commandExpansions,
+    runtimeMcpManifest,
   };
 }
 

@@ -101,6 +101,21 @@ export interface ExecutionSnapshotSources {
    * Optional: a deployment that cannot read them records nothing rather than guessing a number.
    */
   policyComposition?(): Promise<Record<string, unknown> | null>;
+  /**
+   * C13 (owner decision 6): the **runtime provider capability manifest** in force at admission — for MCP, the
+   * provider id, the revision, the manifest hash and, per tool, its id, schema hash, risk, approval requirement
+   * and risk source. Metadata only: no schema body, no tool argument, no endpoint.
+   *
+   * Why it must be in the snapshot at all: the static tool manifest is versioned and immutable, but a runtime
+   * MCP tool set is dynamic — a server can add a tool, remove one, or change one tool's input schema between two
+   * runs of the same session. Without this field the snapshot would describe a run as "tools: v9" while the run
+   * really called a tool that did not exist in v9, and a replay would have nothing to compare against.
+   *
+   * Optional on purpose (rule 13): a deployment with no runtime provider, or a run that used none, records
+   * nothing here and keeps the payload's previous key set — so `EXECUTION_SNAPSHOT_SCHEMA_VERSION` stays at 1
+   * and every already-persisted snapshot remains readable as exactly what it was.
+   */
+  runtimeProviderCapabilities?(input: { workspaceId: string; companyId: string; projectId: string; sessionId?: string }): Promise<Record<string, unknown> | null>;
 }
 
 export interface ExecutionSnapshotPayload extends Record<string, unknown> {
@@ -134,10 +149,17 @@ export async function collectExecutionSnapshotPayload(input: {
   agentId?: string;
   now: Date;
   trigger: string;
+  /**
+   * C13: the tenant the run belongs to, so a source that must answer per-tenant (the runtime provider
+   * capability manifest) can be asked. Optional: a caller that supplies none gets the pre-C13 behaviour, and a
+   * source that ignores the argument is unaffected.
+   */
+  tenant?: { workspaceId: string; companyId: string; projectId: string; sessionId?: string };
 }): Promise<{ payload: ExecutionSnapshotPayload; unavailable: string[] }> {
   const unavailable: string[] = [];
   const s = input.sources;
   const readPolicyComposition = s.policyComposition;
+  const readRuntimeProviderCapabilities = s.runtimeProviderCapabilities;
   const payload: ExecutionSnapshotPayload = {
     snapshotSchemaVersion: EXECUTION_SNAPSHOT_SCHEMA_VERSION,
     trigger: input.trigger,
@@ -160,6 +182,17 @@ export async function collectExecutionSnapshotPayload(input: {
     // Recorded only when the deployment supplies it, so the payload keeps its previous key set otherwise.
     ...(readPolicyComposition
       ? { policyComposition: await readSource("policyComposition", () => readPolicyComposition(), unavailable) }
+      : {}),
+    // C13 (owner decision 6): the runtime provider capability manifest, recorded only when the deployment
+    // supplies it — so a payload written before the feature existed keeps its exact key set.
+    ...(readRuntimeProviderCapabilities
+      ? {
+          runtimeProviderCapabilities: await readSource(
+            "runtimeProviderCapabilities",
+            () => readRuntimeProviderCapabilities(input.tenant ?? { workspaceId: "", companyId: "", projectId: "" }),
+            unavailable,
+          ),
+        }
       : {}),
   };
   return { payload, unavailable };
@@ -227,6 +260,12 @@ export function createExecutionSnapshotProvider(input: RealSnapshotProviderInput
         ...(request.agentId ? { agentId: request.agentId } : {}),
         now,
         trigger: request.runId ? "run_start" : "session_start",
+        tenant: {
+          workspaceId: request.workspaceId ?? input.workspaceId,
+          companyId: request.companyId,
+          projectId: request.projectId,
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+        },
       });
       assertNoSecretsInSnapshot(payload);
       const record = await input.store.createExecutionSnapshot({

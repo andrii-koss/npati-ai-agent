@@ -113,3 +113,41 @@ export function printCapabilityAuditReport(report, write = (line) => process.std
 
 /** Repository root resolved from this file, for scripts that only need paths. */
 export const SCRIPTS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * C13 (owner decision 5): loads the **real** runtime provider overlay — `McpRuntimeCapabilityStore` from
+ * `apps/agent-api/src/mcp-runtime-capabilities.ts`, the same class the API wires into the policy port.
+ *
+ * Why the gate loads it at all: the four checks would otherwise only ever run against the null stub, and a
+ * stub is exactly the thing that cannot be wrong. The gate also **publishes a synthetic listing through the
+ * real normaliser** and asserts the fail-closed defaults survived it, so "an MCP server cannot set its own
+ * risk" is measured by the gate rather than asserted in a comment.
+ *
+ * `publishProbe` writes into the returned store only: nothing here can reach the static catalog, and a
+ * `push(...)` into it is still caught by check 1.
+ */
+export async function loadMcpRuntimeOverlay() {
+  const mcp = await import("../apps/agent-api/src/mcp-runtime-capabilities.ts");
+  const store = new mcp.McpRuntimeCapabilityStore();
+  const tenant = { workspaceId: "capability-audit-runtime", companyId: "capability-audit-runtime" };
+  const connection = { connectionId: "capability-audit", connectionName: "capability-audit", connectionScope: "company" };
+  return {
+    module: mcp,
+    store,
+    overlay: store.overlayFor(tenant),
+    snapshot: () => store.manifestFor(tenant),
+    /** Publishes `size` synthetic tools through the real record builder; returns the records it produced. */
+    publishProbe(size = 3) {
+      const discoveredAt = "1970-01-01T00:00:00.000Z";
+      const tools = Array.from({ length: size }, (_, index) =>
+        mcp.buildMcpRuntimeToolRecord({
+          connection,
+          discoveredAt,
+          tool: { name: `probe_tool_${index + 1}`, inputSchema: { type: "object", properties: { index: { const: index + 1 } } } },
+        }),
+      );
+      store.publish(tenant, { connection, discoveredAt, tools });
+      return tools;
+    },
+  };
+}

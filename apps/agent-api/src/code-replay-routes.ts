@@ -16,6 +16,7 @@ import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { ReplayBundleReadResult } from "./code-replay-bundle";
 import {
   assertReplayClean,
+  compareRuntimeMcpManifestForReplay,
   replayLive,
   replayRecorded,
   CodeReplayError,
@@ -52,6 +53,15 @@ export interface CodeReplayServiceDeps {
   loadSession(ctx: AuthContext, companyId: string, projectId: string, sessionId?: string | null): Promise<CodeSession | null>;
   /** The current schema version per tool name (the published registry in production). */
   toolVersions?(toolName: string): number | null;
+  /**
+   * C13 (owner decision 6, corrected): the run-path manifest reader, used by **live replay only**.
+   *
+   * A deterministic replay never calls it — it verifies the run against the manifest its own bundle recorded,
+   * which is why a recorded replay of an MCP-using run works in a fresh process with an empty in-process
+   * overlay and with zero dials. Live replay is the one mode that really discovers the current tool set, and
+   * there a difference from the recording (or an unanswerable port) is refused with 409.
+   */
+  loadRuntimeMcpManifest?(ctx: AuthContext, companyId: string, projectId: string, runId: string): Promise<Record<string, unknown> | null>;
   /** Live replay: how the source run is resolved and how a new run is started. */
   live?: {
     loadSourceRun(ctx: AuthContext, companyId: string, runId: string): Promise<{
@@ -124,6 +134,15 @@ export class CodeReplayService {
       ...(input.projectId ? { projectId: input.projectId } : {}),
     });
     const loaded = await this.deps.loadRecording(ctx, companyId, input.projectId ?? "", runId);
+    /**
+     * C13 (owner decision 6, corrected): a **deterministic** replay resolves the runtime MCP pin from the
+     * recording itself. `loadRuntimeMcpManifest` is deliberately not consulted here: it reads the in-process
+     * overlay, which is empty in a fresh process, so consulting it refused every replay of an MCP-using run with
+     * `runtime_mcp_manifest_unavailable` while the bundle already carried the manifest. The recorded run
+     * verifies against the tool set it was admitted under, with no discovery and no dial (see
+     * `compareRuntimeMcpManifestForReplay`); a caller that wants a **live** comparison passes
+     * `runtimeMcpManifest` explicitly, and that path is the live mode's own check.
+     */
     const result = await replayRecorded({
       recording: loaded.recording,
       ...(loaded.bundleVersion === undefined || loaded.bundleVersion === null
@@ -131,6 +150,7 @@ export class CodeReplayService {
         : { bundleVersion: loaded.bundleVersion }),
       ...(loaded.terminalStatus === undefined ? {} : { recordedTerminalStatus: loaded.terminalStatus }),
       ...(this.deps.toolVersions ? { toolVersions: this.deps.toolVersions } : {}),
+      runtimeMcpManifestMode: "recorded",
       ...(this.deps.onActivity ? { onActivity: this.deps.onActivity } : {}),
       ...(this.deps.now ? { now: this.deps.now } : {}),
     });
@@ -169,6 +189,13 @@ export class CodeReplayService {
         sessionId: source.sessionId ?? null,
       });
     }
+    /**
+     * C13 (owner decision 6, corrected): **live replay is where discovery belongs**, and the mismatch check runs
+     * here — before `startRun` — so a moved tool set never starts a run that would work against tools the source
+     * run never saw. A run that recorded no runtime MCP manifest skips it, which is the honest reading of "this
+     * run used no runtime MCP tool".
+     */
+    await this.assertLiveRuntimeMcpManifestUnchanged(ctx, companyId, source.projectId, runId);
     return replayLive({
       ctx,
       session,
@@ -183,6 +210,34 @@ export class CodeReplayService {
       startRun: this.deps.live.startRun,
       ...(this.deps.live.recordReplay ? { recordReplay: this.deps.live.recordReplay } : {}),
     });
+  }
+
+  /**
+   * The **live** half of the runtime MCP pin (C13, owner decision 6, corrected).
+   *
+   * It reads the recording's own manifest and the manifest this deployment discovers **now**, then hands both to
+   * the single comparison the recorded engine also uses, so the two modes cannot drift into two different rules.
+   * A read that fails is treated as "no recorded manifest" — a live replay of a run that has no bundle is the
+   * existing behaviour, and the run that *did* record a manifest is the only one this check can protect.
+   */
+  private async assertLiveRuntimeMcpManifestUnchanged(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    runId: string,
+  ): Promise<void> {
+    let recorded: Record<string, unknown> | null = null;
+    try {
+      const loaded = await this.deps.loadRecording(ctx, companyId, projectId, runId);
+      recorded = loaded.recording.kind === "bundle" ? loaded.recording.runtimeMcpManifest ?? null : null;
+    } catch {
+      recorded = null;
+    }
+    if (!recorded) return;
+    const current = this.deps.loadRuntimeMcpManifest
+      ? await this.deps.loadRuntimeMcpManifest(ctx, companyId, projectId, runId).catch(() => null)
+      : null;
+    compareRuntimeMcpManifestForReplay({ recorded, current, mode: "live", runId });
   }
 
   /**

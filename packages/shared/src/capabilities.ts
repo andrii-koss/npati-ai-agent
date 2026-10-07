@@ -182,3 +182,20 @@ export class CapabilityRegistry {
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 
 export const defaultCapabilityRegistry = new CapabilityRegistry(CAPABILITY_CATALOG);
+
+/**
+ * C13 (owner decision 5): the **static** half of the capability lookup.
+ *
+ * The owner's decision is that a discovered MCP tool is never added to the static canonical catalog, so the
+ * static manifest stays versioned and immutable while runtime providers publish into a
+ * `RuntimeProviderCapabilityOverlay` beside it. The policy lookup is therefore `static → runtime → unknown`.
+ *
+ * `StaticCapabilityRegistry` is deliberately an **alias** of the one existing registry rather than a second
+ * class: `defaultCapabilityRegistry` is built once at import from `CAPABILITY_CATALOG`, and its `register`
+ * method is only ever called by the static catalog builders. A second registry would be a second source of
+ * truth for exactly the set of tools this decision exists to keep stable.
+ */
+export type StaticCapabilityRegistry = CapabilityRegistry;
+
+/** The single static registry instance the policy lookup consults first. */
+export const staticCapabilityRegistry: StaticCapabilityRegistry = defaultCapabilityRegistry;

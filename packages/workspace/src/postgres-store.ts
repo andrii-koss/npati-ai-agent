@@ -1213,6 +1213,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    // C13 (owner decision 5): the durable owner/admin risk decisions for runtime MCP tools. Additive: 085
+    // creates one new table with its unique key, so a previous application version keeps working — it never
+    // reads the table, and every runtime MCP tool keeps the fail-closed `high` + approval-required default.
+    const mcpToolPolicyMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='085_mcp_tool_policies'");
+    if (!mcpToolPolicyMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration085 } = await import("./migration-085");
+        await runMigration085(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('085_mcp_tool_policies')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   // --- C9: `code.ask_user` — the persistent question --------------------------------------------------

@@ -343,8 +343,14 @@ export class CompanyApprovalsRepository {
    * The reaper must not be touched, so `expireStaleApprovals` keeps exactly that shape, and callers that need
    * the ids (metrics, audit review, tests) use this variant. Both share one implementation, so they cannot
    * drift.
+   *
+   * C13 (owner blocker 1): the expired **rows** travel as well. A run paused on a runtime MCP approval is
+   * released by the same kind of transition the question reaper uses (`markInterrupted`, reason
+   * `approval_timeout`), and the caller needs to know which company and which run each expired record belonged
+   * to. Returning them from the sweep that already read them is what keeps that a single query rather than a
+   * second one that could disagree with it.
    */
-  async expireStaleApprovalsDetailed(params: { now?: number | Date; limit?: number } = {}): Promise<{ expired: number; ids: string[] }> {
+  async expireStaleApprovalsDetailed(params: { now?: number | Date; limit?: number } = {}): Promise<{ expired: number; ids: string[]; rows: CompanyApproval[] }> {
     const now = params.now instanceof Date ? params.now : new Date(params.now ?? Date.now());
     const limit = Math.max(1, Math.min(params.limit ?? 500, 5_000));
     const candidates = await this.pool.query<CompanyApproval>(
@@ -355,6 +361,7 @@ export class CompanyApprovalsRepository {
       [now, limit]
     );
     const ids: string[] = [];
+    const rows: CompanyApproval[] = [];
     for (const approval of candidates.rows) {
       await this.journalExpiry(approval, now);
       const updated = await this.pool.query<{ id: string }>(
@@ -363,9 +370,12 @@ export class CompanyApprovalsRepository {
           RETURNING id`,
         [approval.id, now]
       );
-      if (updated.rows[0]) ids.push(updated.rows[0].id);
+      if (updated.rows[0]) {
+        ids.push(updated.rows[0].id);
+        rows.push(approval);
+      }
     }
-    return { expired: ids.length, ids };
+    return { expired: ids.length, ids, rows };
   }
 
   /**
