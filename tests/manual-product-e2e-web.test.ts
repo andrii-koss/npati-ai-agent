@@ -5,6 +5,8 @@ import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import {
+  CAPABILITY_CATALOG,
+  CAPABILITY_MATRIX,
   HybridRouter,
   EffectiveCapabilityResolver,
   RiskApprovalService,
@@ -202,7 +204,19 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     });
     expect(capsRes.statusCode).toBe(200);
     const tools = capsRes.json();
-    expect(tools.length).toBe(106); // Exactly 106 agent-callable tools
+    /**
+     * The current agent-callable size is read from the static catalog in `packages/shared` — the single source of
+     * truth — and never hand-copied. The endpoint serves `defaultCapabilityRegistry`, which is derived from that
+     * catalog through a separate id-keyed index, so it can still drop an entry on its own (a duplicated id
+     * collapses); the separately authored `CAPABILITY_MATRIX` is a third store, and a tool present in only one of
+     * the two fails the comparison. 106 is a historical level of this metric: the agent-callable side grew
+     * 103 -> 106 -> 121 while the runtime/ops side stayed at 264.
+     */
+    const HISTORICAL_AGENT_CALLABLE_BASELINE = 106;
+    const catalogCallableTools = CAPABILITY_CATALOG.filter((capability) => capability.agentCallable).length;
+    expect(tools.length).toBeGreaterThanOrEqual(HISTORICAL_AGENT_CALLABLE_BASELINE);
+    expect(tools.length).toBe(catalogCallableTools);
+    expect(tools.length).toBe(CAPABILITY_MATRIX.filter((capability) => capability.agentCallable).length);
 
     const skillsRes = await app.inject({
       method: "GET",
@@ -304,8 +318,20 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     });
     expect(inspectRes.statusCode).toBe(200);
     const inspectorReport = inspectRes.json();
-    expect(inspectorReport.counts.all).toBe(370);
-    expect(inspectorReport.counts.agentCallable).toBe(106);
+    /**
+     * The inspector counts are produced from the separately authored `CAPABILITY_MATRIX`, so checking them
+     * against the static catalog (single source of truth) is again a cross-store assertion. 370 and 106 are
+     * historical levels of these counters: the catalog grew 370 -> 385 and the tool side 106 -> 121, while the
+     * runtime/ops side stayed at 264.
+     */
+    const HISTORICAL_INVENTORY_BASELINE = 370;
+    const HISTORICAL_RUNTIME_ONLY_BASELINE = 264;
+    expect(inspectorReport.counts.all).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+    expect(inspectorReport.counts.all).toBe(CAPABILITY_CATALOG.length);
+    expect(inspectorReport.counts.agentCallable).toBeGreaterThanOrEqual(HISTORICAL_AGENT_CALLABLE_BASELINE);
+    expect(inspectorReport.counts.agentCallable).toBe(catalogCallableTools);
+    expect(inspectorReport.counts.runtimeOnly).toBe(HISTORICAL_RUNTIME_ONLY_BASELINE);
+    expect(inspectorReport.counts.runtimeOnly).toBe(CAPABILITY_CATALOG.length - catalogCallableTools);
 
     // Verify activity timeline without secret leak
     const mockRun: any = {

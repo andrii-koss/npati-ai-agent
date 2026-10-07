@@ -206,6 +206,8 @@ export * from "./run-trace";
 export * from "./capability-matrix";
 export * from "./tool-test-matrix";
 export * from "./capability-inspector";
+// C13 pre-work: the resolved-catalog auditor shared by the capability gates and their negative control.
+export * from "./capability-catalog-audit";
 export * from "./project-file-capabilities";
 export * from "./project-terminal-capabilities";
 export * from "./project-preview-capabilities";

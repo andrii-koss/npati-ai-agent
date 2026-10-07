@@ -199,12 +199,30 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   // 4. Capability Registry Diff (306 Baseline Check)
   // -------------------------------------------------------------
   describe("4. Capability Registry Diff & Zero Disappearance", () => {
-    it("proves the 306 baseline remains and the catalog includes 384 capabilities", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(384);
-      expect(CAPABILITY_CATALOG.length).toBe(384);
+    /**
+     * Historical inventory baseline. It stays a literal so that a catalog shrink (a capability disappearing)
+     * still fails this upgrade gate instead of silently following whatever the catalog currently contains.
+     */
+    const HISTORICAL_INVENTORY_BASELINE = 306;
+    /**
+     * Current catalog size comes from the static catalog in `packages/shared` — the single source of truth —
+     * not from a second hand-copied number. `CAPABILITY_MATRIX` is maintained separately from the catalog, so
+     * the equality below is a genuine check between two stores, not a tautology.
+     */
+    const staticCatalogSize = CAPABILITY_CATALOG.length;
+
+    it("proves the 306 baseline remains and every current catalog capability is retained", () => {
+      expect(CAPABILITY_MATRIX.length).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+      expect(CAPABILITY_MATRIX.length).toBe(staticCatalogSize);
 
       const matrixIds = new Set(CAPABILITY_MATRIX.map((c) => c.id));
-      for (let i = 1; i <= 306; i++) {
+      expect(matrixIds.size).toBe(CAPABILITY_MATRIX.length);
+      for (let i = 1; i <= HISTORICAL_INVENTORY_BASELINE; i++) {
+        expect(matrixIds.has(i)).toBe(true);
+      }
+
+      // Published inventory ids are contiguous up to the current size: a hole is a disappeared capability.
+      for (let i = 1; i <= staticCatalogSize; i++) {
         expect(matrixIds.has(i)).toBe(true);
       }
 

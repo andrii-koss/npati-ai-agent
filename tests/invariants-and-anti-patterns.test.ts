@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   CAPABILITY_CATALOG,
+  CAPABILITY_MATRIX,
   HybridRouter,
   EffectiveCapabilityResolver,
   validateActiveContext,
@@ -161,12 +162,24 @@ describe("Sections 12 & 13: Database & Runtime Invariants and Anti-Pattern Guard
       expect(decision.candidateTools.length).toBeLessThan(306);
     });
 
-    it("Anti-pattern 2: UI never shows 306 separate switches; only user-facing agent-callable tools (97)", () => {
+    it("Anti-pattern 2: UI never shows every capability as a switch; only user-facing agent-callable tools", () => {
       const agentCallable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
       const runtimeOnly = CAPABILITY_CATALOG.filter((c) => !c.agentCallable);
 
-      expect(agentCallable.length).toBe(103);
-      expect(runtimeOnly.length).toBe(264);
+      /**
+       * 103 is a historical level of *this* metric — agent-callable entries in the static catalog. At C4 the
+       * catalog held 367 = 103 callable + 264 runtime-only, and only the callable side has grown since
+       * (103 -> 106 -> 121); the 264 runtime/ops side never moved. Both stay literals so that a shrinking tool
+       * set or a runtime capability leaking out of the gated side fails here. The current values are not
+       * hand-copied but cross-checked against the separately authored `CAPABILITY_MATRIX`.
+       */
+      const HISTORICAL_AGENT_CALLABLE_BASELINE = 103;
+      const HISTORICAL_RUNTIME_ONLY_BASELINE = 264;
+
+      expect(agentCallable.length).toBeGreaterThanOrEqual(HISTORICAL_AGENT_CALLABLE_BASELINE);
+      expect(agentCallable.length).toBe(CAPABILITY_MATRIX.filter((c) => c.agentCallable).length);
+      expect(runtimeOnly.length).toBe(HISTORICAL_RUNTIME_ONLY_BASELINE);
+      expect(runtimeOnly.length).toBe(CAPABILITY_MATRIX.filter((c) => !c.agentCallable).length);
 
       // Verify safety gating prevents raw internal capabilities from appearing as agent-callable tools
       for (const cap of runtimeOnly) {

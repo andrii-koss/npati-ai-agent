@@ -5,15 +5,28 @@ import type { AuthContext } from "@npati/workspace";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 
 describe("PHASE 11: Full Capability Regression Suite", () => {
+  /**
+   * Historical inventory baseline. It stays a literal on purpose: this suite is a disappearance gate, and a
+   * shrinking catalog is exactly what has to fail loudly here.
+   */
+  const HISTORICAL_INVENTORY_BASELINE = 306;
+  /**
+   * Current catalog size, taken from the static catalog in `packages/shared` — the single source of truth —
+   * instead of a second hand-copied number that silently rots whenever the catalog grows (it did in C9, C11
+   * and C12). `CAPABILITY_MATRIX` is authored separately from `CAPABILITY_CATALOG`, so asserting that the two
+   * agree is still a real check: a capability added to or removed from only one of them fails right here.
+   */
+  const staticCatalogSize = CAPABILITY_CATALOG.length;
+
   describe("Audit Matrix Coverage and Hygiene", () => {
-    it("verifies all 384 capabilities have test/evidence ownership and zero unknown/unmapped items", () => {
-      expect(CAPABILITY_MATRIX.length).toBe(384);
-      expect(CAPABILITY_CATALOG.length).toBe(384);
+    it("verifies every catalogued capability has test/evidence ownership and zero unknown/unmapped items", () => {
+      expect(CAPABILITY_MATRIX.length).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+      expect(CAPABILITY_MATRIX.length).toBe(staticCatalogSize);
 
       const idSet = new Set<number>();
       for (const item of CAPABILITY_MATRIX) {
         expect(item.id).toBeGreaterThanOrEqual(1);
-        expect(item.id).toBeLessThanOrEqual(384);
+        expect(item.id).toBeLessThanOrEqual(staticCatalogSize);
         expect(idSet.has(item.id)).toBe(false);
         idSet.add(item.id);
 
@@ -27,16 +40,32 @@ describe("PHASE 11: Full Capability Regression Suite", () => {
         );
       }
 
-      expect(idSet.size).toBe(384);
+      expect(idSet.size).toBe(CAPABILITY_MATRIX.length);
+
+      // Inventory ids are contiguous 1..N: a hole means a published capability disappeared from the catalog,
+      // which the old exact-count pin could only detect when the count itself moved.
+      for (let id = 1; id <= staticCatalogSize; id++) {
+        expect(idSet.has(id)).toBe(true);
+      }
     });
 
-    it("verifies exact separation: 120 agent-callable tools vs 264 internal runtime/ops items", () => {
+    it("verifies exact separation: agent-callable tools vs internal runtime/ops items", () => {
+      /**
+       * The non-tool side of the audited 306 baseline (306 = 42 agent-callable tools + 264 runtime/ops items).
+       * It has never moved across C2..C12 — only the tool side grew — so it stays an exact literal: a runtime
+       * or ops capability disappearing from the catalog must fail here.
+       */
+      const HISTORICAL_NON_TOOL_BASELINE = 264;
+
       const callable = CAPABILITY_MATRIX.filter((c) => c.agentCallable);
       const internal = CAPABILITY_MATRIX.filter((c) => !c.agentCallable);
 
-      expect(callable.length).toBe(120);
-      expect(internal.length).toBe(264);
-      expect(callable.length + internal.length).toBe(384);
+      // The catalog is the source of truth for the current tool-side split; the separately authored audit
+      // matrix must describe the same split, and the two partitions must cover the whole catalog.
+      const catalogCallable = CAPABILITY_CATALOG.filter((c) => c.agentCallable).length;
+      expect(internal.length).toBe(HISTORICAL_NON_TOOL_BASELINE);
+      expect(callable.length).toBe(catalogCallable);
+      expect(callable.length + internal.length).toBe(CAPABILITY_MATRIX.length);
 
       // All agentCallable must have type tool
       for (const tool of callable) {

@@ -1,10 +1,30 @@
+#!/usr/bin/env node
+/**
+ * Phase 13 upgrade / release gate.
+ *
+ * Step 2 used to read the capability inventory with a regex over `capability-matrix.ts` + `eval()`, which
+ * only ever saw the base literal (the `306` seed) and was therefore blind to the `CAPABILITY_*.push(...)`
+ * growth of C9/C11/C12. It now runs the four resolved-catalog checks that
+ * `scripts/verify-capability-matrix.mjs` runs, through the same module
+ * (`packages/shared/src/capability-catalog-audit.ts`), so both gates fail together on the same change.
+ *
+ * Usage: node scripts/upgrade-gate.mjs     (exit 0 = GREEN)
+ */
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import {
+  SCRIPTS_ROOT,
+  ensureTypeScriptTransformRuntime,
+  loadCapabilityCatalogAudit,
+  printCapabilityAuditReport,
+  readPublishedToolSchemaManifest,
+} from "./capability-audit-runtime.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = SCRIPTS_ROOT;
+
+// Before the first line of output: if this process cannot import TypeScript it re-executes itself once,
+// and a caller must see the gate's report exactly once rather than twice.
+ensureTypeScriptTransformRuntime();
 
 console.log("==========================================================");
 console.log("  NPATI AGENT — PHASE 13 UPGRADE COMPATIBILITY & RELEASE GATE");
@@ -18,33 +38,23 @@ const supportedRange = { min: "3.8.49", max: "3.9.99", current: "3.8.50" };
 console.log(`  • Upstream Target: OmniRoute v${supportedRange.current} (Supported range: >= ${supportedRange.min} < 4.0.0)`);
 console.log("  ✓ Upstream version is within supported semantic version window.");
 
-// 2. Capability Registry Diff & Zero Disappearance Check
-console.log("\n[2/5] Running Capability Registry Diff (306 Baseline Check)...");
-const matrixPath = path.join(rootDir, "packages", "shared", "src", "capability-matrix.ts");
-const matrixContent = fs.readFileSync(matrixPath, "utf-8");
-const match = matrixContent.match(/export const CAPABILITY_MATRIX: CapabilityMatrixEntry\[\] = (\[[\s\S]*\]);/);
-
-if (!match) {
-  console.error("  ❌ Failed to parse CAPABILITY_MATRIX");
+// 2. Capability registry diff & zero-disappearance check — over the resolved catalog, not a source regex.
+console.log("\n[2/5] Running Capability Catalog Diff (resolved export, 4 separate checks)...");
+const audit = await loadCapabilityCatalogAudit();
+const { file: manifestFile, manifest } = readPublishedToolSchemaManifest(rootDir);
+console.log(`  • Catalog    : packages/shared/src/capability-catalog.ts (imported)`);
+console.log(`  • Matrix     : packages/shared/src/capability-matrix.ts (imported)`);
+console.log(`  • Registry   : defaultCapabilityRegistry (imported, the single instance)`);
+console.log(`  • Manifest   : ${path.relative(rootDir, manifestFile).replace(/\\/g, "/")}`);
+const auditReport = audit.runCapabilityCatalogChecks({ manifest });
+if (!printCapabilityAuditReport(auditReport, (line) => console.log(line))) {
+  console.error("  ❌ Capability catalog parity failed: a capability reached one store and not the others.");
   gateFailed = true;
 } else {
-  const matrix = eval(match[1]);
-  if (matrix.length !== 306) {
-    console.error(`  ❌ Capability count mismatch: expected 306, found ${matrix.length}`);
-    gateFailed = true;
-  } else {
-    // Verify each ID 1..306 exists
-    const missing = [];
-    for (let i = 1; i <= 306; i++) {
-      if (!matrix.some((c) => c.id === i)) missing.push(i);
-    }
-    if (missing.length > 0) {
-      console.error(`  ❌ Missing capability IDs: ${missing.join(", ")}`);
-      gateFailed = true;
-    } else {
-      console.log(`  ✓ 306/306 capabilities verified in registry (0 unexpected capability disappearances)`);
-    }
-  }
+  const facts = auditReport.staticCatalogIntegrity.facts;
+  console.log(
+    `  ✓ ${facts.catalogTotal} static capabilities verified (${facts.agentCallable} agent-callable / ${facts.runtimeOnly} runtime-only, 0 capability disappearances)`,
+  );
 }
 
 // 3. Database Migration Sequence & Idempotency Check

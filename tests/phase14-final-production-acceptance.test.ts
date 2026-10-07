@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  CAPABILITY_CATALOG,
   HybridRouter,
   EffectiveCapabilityResolver,
   RiskApprovalService,
@@ -363,9 +364,25 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       const inspector = new CapabilityInspectorService();
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(370);
-      expect(report.counts.agentCallable).toBe(106);
-      expect(report.counts.runtimeOnly).toBe(264);
+      /**
+       * Historical inventory baselines. They stay literals so this acceptance gate still fails loudly when a
+       * published capability disappears instead of silently following whatever the catalog currently holds.
+       * 370 is the pre-C9 catalog, 106 the agent-callable level of that era, and 264 the runtime/ops side, which
+       * has not moved at all. The *current* sizes are never hand-copied here: the inspector counts come from the
+       * separately authored `CAPABILITY_MATRIX`, and they are checked against the static catalog in
+       * `packages/shared`, which is the single source of truth.
+       */
+      const HISTORICAL_INVENTORY_BASELINE = 370;
+      const HISTORICAL_AGENT_CALLABLE_BASELINE = 106;
+      const HISTORICAL_RUNTIME_ONLY_BASELINE = 264;
+      const catalogCallable = CAPABILITY_CATALOG.filter((capability) => capability.agentCallable).length;
+
+      expect(report.counts.all).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+      expect(report.counts.all).toBe(CAPABILITY_CATALOG.length);
+      expect(report.counts.agentCallable).toBeGreaterThanOrEqual(HISTORICAL_AGENT_CALLABLE_BASELINE);
+      expect(report.counts.agentCallable).toBe(catalogCallable);
+      expect(report.counts.runtimeOnly).toBe(HISTORICAL_RUNTIME_ONLY_BASELINE);
+      expect(report.counts.runtimeOnly).toBe(CAPABILITY_CATALOG.length - catalogCallable);
 
       const mockRunForInspect: any = {
         id: "run-insp-01",

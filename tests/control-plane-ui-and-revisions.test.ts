@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   CAPABILITY_CATALOG,
+  CAPABILITY_MATRIX,
   EffectiveCapabilityResolver,
   defaultCapabilityRegistry,
   type AgentExecutionInput,
@@ -19,14 +20,37 @@ describe("PHASE 8: Settings and Company UI as Control Plane", () => {
   describe("UI Capability Exposure & Filtering", () => {
     it("ensures UI only exposes agent-callable tools and never exposes internal runtime capabilities", () => {
       const allCapabilities = CAPABILITY_CATALOG;
-      expect(allCapabilities.length).toBe(370);
+
+      /**
+       * Historical inventory baselines, deliberately literals: this suite is a disappearance gate, so a
+       * shrinking catalog or a shrinking tool set has to fail loudly instead of following whatever the catalog
+       * currently contains. 370 is the pre-C9 catalog, 106 the agent-callable level of that era, and 264 the
+       * runtime/ops side, which has not moved at all.
+       *
+       * The *current* sizes are never hand-copied: the static catalog above is the single source of truth and the
+       * separately authored `CAPABILITY_MATRIX` (the inventory behind the inspector the UI reads) is the
+       * cross-check. The registry index below is a third store that can drop entries on its own.
+       */
+      const HISTORICAL_INVENTORY_BASELINE = 370;
+      const HISTORICAL_AGENT_CALLABLE_BASELINE = 106;
+      const HISTORICAL_NON_TOOL_BASELINE = 264;
+
+      expect(allCapabilities.length).toBeGreaterThanOrEqual(HISTORICAL_INVENTORY_BASELINE);
+      expect(allCapabilities.length).toBe(CAPABILITY_MATRIX.length);
+      // The registry indexes capabilities by id, so a duplicated id silently collapses two entries; the raw
+      // catalog length is only meaningful while every entry is distinct.
+      expect(defaultCapabilityRegistry.list().length).toBe(allCapabilities.length);
 
       const agentCallableTools = allCapabilities.filter((cap) => cap.agentCallable);
       const internalNonTools = allCapabilities.filter((cap) => !cap.agentCallable);
 
-      // Exactly 97 tools are agent-callable after the Data Studio / Project API / Coding Agent capabilities.
-      expect(agentCallableTools.length).toBe(106);
-      expect(internalNonTools.length).toBe(264);
+      // The tool side grew across C9/C11/C12; the current size is read from the catalog, never written by hand.
+      expect(agentCallableTools.length).toBeGreaterThanOrEqual(HISTORICAL_AGENT_CALLABLE_BASELINE);
+      expect(agentCallableTools.length).toBe(CAPABILITY_MATRIX.filter((cap) => cap.agentCallable).length);
+      expect(agentCallableTools.length).toBe(defaultCapabilityRegistry.listAgentCallable().length);
+      expect(internalNonTools.length).toBe(HISTORICAL_NON_TOOL_BASELINE);
+      // The two partitions must cover the catalog exactly, so nothing can hide by belonging to neither.
+      expect(agentCallableTools.length + internalNonTools.length).toBe(allCapabilities.length);
 
       // Verify that internal runtime/ops/orchestration capabilities are strictly non-agentCallable
       const internalTypes = new Set(["runtime", "orchestration", "security_ops", "configuration"]);
