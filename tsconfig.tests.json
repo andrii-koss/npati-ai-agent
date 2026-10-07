@@ -1,0 +1,28 @@
+{
+  // Type gate for the test suites the repository keeps type-clean.
+  //
+  // `npm run typecheck` only walks each workspace's own tsconfig (`packages/*/src`, `apps/*/src`), so
+  // `tests/**` was never typechecked by any run — which is how the errors fixed in C13 (a missing export,
+  // stale literal shapes, `ContextType` drift) stayed invisible in CI while the IDE kept showing them.
+  //
+  // `tests/**` as a whole still carries a pre-existing backlog of type errors in other files
+  // (451 diagnostics across ~100 suites at the time of writing), so this gate lists the suites that are
+  // clean today and grows as the backlog is paid down. It must never be made to pass with `as any`,
+  // `@ts-ignore` or a skipped file.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [
+    "tests/coding-agent-c13-capability-catalog-audit.test.ts",
+    "tests/control-plane-ui-and-revisions.test.ts",
+    "tests/full-capability-regression.test.ts",
+    "tests/invariants-and-anti-patterns.test.ts",
+    "tests/manual-product-e2e-web.test.ts",
+    "tests/phase13-upgrade-gate-expanded.test.ts",
+    "tests/phase14-final-production-acceptance.test.ts",
+    "tests/production-acceptance.test.ts"
+  ]
+}

@@ -36,7 +36,10 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Поясни, що таке Redis і навіщо він потрібен",
         resolutionContext: {
           auth: tenantCtxA,
-          activeContext: { contextType: "chat" },
+          // Neutral context: "none" is the `ContextType` member for a chat with no business/company loaded
+          // (packages/shared/src/index.ts:86); both ids are required and `null` is the neutral value
+          // `validateActiveContext({ contextType: "none" })` produces (packages/shared/src/index.ts:159).
+          activeContext: { contextType: "none", businessId: null, companyId: null },
         },
       });
 
@@ -51,7 +54,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Знайди сьогодні актуальні новини та зміни у законодавстві",
         resolutionContext: {
           auth: tenantCtxA,
-          activeContext: { contextType: "company", companyId: "c-prod-1" },
+          activeContext: { contextType: "company", companyId: "c-prod-1", businessId: null },
           company: { id: "c-prod-1", revision: 1 },
           agent: { id: "a-prod-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
@@ -69,7 +72,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Прочитай https://example.com/pricing і підсумуй тарифи",
         resolutionContext: {
           auth: tenantCtxA,
-          activeContext: { contextType: "company", companyId: "c-prod-1" },
+          activeContext: { contextType: "company", companyId: "c-prod-1", businessId: null },
           company: { id: "c-prod-1", revision: 1 },
           agent: { id: "a-prod-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
@@ -88,7 +91,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Проскануй весь сайт competitor.com і створи звіт",
         resolutionContext: {
           auth: tenantCtxA,
-          activeContext: { contextType: "company", companyId: "c-prod-1" },
+          activeContext: { contextType: "company", companyId: "c-prod-1", businessId: null },
           company: { id: "c-prod-1", revision: 1 },
           agent: { id: "a-prod-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
@@ -113,7 +116,11 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
 
       const fetched = await store.getCompany(tenantCtxA, companyA.id);
       expect(fetched.knowledge.length).toBe(1);
-      expect(fetched.knowledge[0]?.content).toContain("within 14 days");
+      // `Company.knowledge` is `unknown[]` (packages/workspace/src/types.ts:148), so the stored entry is
+      // narrowed instead of assumed: the assertion still checks the content that was actually written.
+      const storedPolicy = fetched.knowledge[0];
+      const storedContent = typeof storedPolicy === "object" && storedPolicy !== null && "content" in storedPolicy ? storedPolicy.content : undefined;
+      expect(storedContent).toContain("within 14 days");
     });
 
     // 6. Company isolation: Company A has secret A, Company B secret B -> zero cross leak
@@ -140,7 +147,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       const status = resolver.canExecute(
         {
           auth: tenantCtxA,
-          activeContext: { contextType: "company", companyId: "c-prod-1" },
+          activeContext: { contextType: "company", companyId: "c-prod-1", businessId: null },
           company: { id: "c-prod-1", revision: 1 },
           agent: {
             id: "agent-seo",
@@ -276,7 +283,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       const status = resolver.canExecute(
         {
           auth: tenantCtxA,
-          activeContext: { contextType: "company", companyId: "c-prod-1" },
+          activeContext: { contextType: "company", companyId: "c-prod-1", businessId: null },
           company: { id: "c-prod-1", revision: 1 },
           agent: { id: "a-prod-1", revision: 1, tools: ["*"] },
           activeConnections: [], // no connections active
@@ -303,8 +310,15 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       const cancelAi = {
         chat: vi.fn().mockResolvedValue({ content: "ok" }),
         a2aSend: vi.fn().mockImplementation(async () => {
-          // Trigger cancellation while planning
-          await store.cancelCompanyAgentRun(tenantCtxA, company.id, currentRunId, "User requested cancellation");
+          // Trigger cancellation while planning. `cancelCompanyAgentRun` never existed on the store: the
+          // cancellation API is `updateCompanyAgentRun` + `cancelRequested` (packages/workspace/src/
+          // types.ts:1495), which is what the surrounding assertions read back below. (This mock is not
+          // invoked by the scenario, which cancels explicitly further down.)
+          await store.updateCompanyAgentRun(tenantCtxA, company.id, currentRunId, {
+            status: "cancelled",
+            cancelRequested: true,
+            cancelReason: "User requested cancellation",
+          });
           return { content: '{"mode":"single","agentIds":[]}' };
         }),
         cancelA2ATask: vi.fn().mockResolvedValue(undefined),

@@ -91,8 +91,13 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+      // `OmniRouteComboInput.strategy` is required (packages/omniroute-adapter/src/types.ts:85). "priority"
+      // is the strategy the runtime itself uses for a plain fallback/load-balancing model chain
+      // (apps/agent-api/src/company-runtime.ts:1084); the fetch mock above ignores the request body, so the
+      // assertions below are unchanged.
       const combo = await engine.ensureCombo({
         name: "fast-fallback",
+        strategy: "priority",
         models: ["gpt-4o-mini", "claude-3-haiku"],
       });
 
@@ -116,7 +121,15 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
-      const res = await engine.a2aSend("orchestrator", "Plan delegation", "session-99");
+      // `a2aSend` takes one `A2AMessageRequest` (packages/omniroute-adapter/src/types.ts:54, engine at
+      // packages/omniroute-adapter/src/omniroute-engine.ts:507 — the same shape apps/agent-api/src/
+      // company-runtime.ts:399 sends). The old positional (agent, message, sessionId) call maps onto the
+      // user message plus the request idempotency key; the skill is pinned to "smart-routing" inside the
+      // engine, so a per-call agent argument has no field any more.
+      const res = await engine.a2aSend({
+        messages: [{ role: "user", content: "Plan delegation" }],
+        idempotencyKey: "session-99",
+      });
 
       expect(res.taskId).toBe("task-a2a-99");
       expect(res.content).toContain("ag-1");
@@ -245,7 +258,9 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
     it("Golden Scenario A: Neutral Chat yields NO_TOOL identically", () => {
       const decision = router.route({
         message: "Поясни основи мікросервісів",
-        resolutionContext: { auth: tenantCtx, activeContext: { contextType: "none" } },
+        // `ActiveContext` requires both ids explicitly; `null` is the neutral value the canonical
+        // `validateActiveContext({ contextType: "none" })` produces (packages/shared/src/index.ts:88,159).
+        resolutionContext: { auth: tenantCtx, activeContext: { contextType: "none", businessId: null, companyId: null } },
       });
       expect(decision.isNoTool).toBe(true);
       expect(decision.candidateTools).toHaveLength(0);
@@ -256,7 +271,7 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
         message: "Знайди актуальні новини сьогодні",
         resolutionContext: {
           auth: tenantCtx,
-          activeContext: { contextType: "company", companyId: "c-1" },
+          activeContext: { contextType: "company", companyId: "c-1", businessId: null },
           company: { id: "c-1", revision: 1 },
           agent: { id: "ag-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],

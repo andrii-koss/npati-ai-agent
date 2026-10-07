@@ -72,7 +72,12 @@ export interface SsrfFetchResult {
   decision: { allowed: true; host: string; phase?: string };
 }
 
-function defaultResolver(): ResolverPort {
+/**
+ * The production DNS resolver: the lookup the shared SSRF policy uses. Exported so a caller that must run the
+ * same validation (the C13 hook webhook transport, which goes through the webhook destination policy) uses
+ * **this** resolver instead of writing a second one.
+ */
+export function defaultResolver(): ResolverPort {
   return async (host: string) => {
     const { lookup } = await import("node:dns/promises");
     const entries = await lookup(host, { all: true, verbatim: true });

@@ -549,6 +549,31 @@ export const SECURITY_GATE_TESTS = [
   // with a negative control that pushes a capability into a store, asserts the same parity check fails, and
   // restores the store in `finally`.
   "tests/coding-agent-c13-capability-catalog-audit.test.ts",
+  // C13 (owner decisions 1, 2 and 9): project lifecycle hooks. Pins the gate order — the server-side
+  // `code.hooks` flag, then the project trust record, then the read of `.npati/hooks.json` — so an
+  // **untrusted** repository never has its hook config read, parsed or executed (proved with a spy that is
+  // not called, a config probe whose property access is counted, and an executor spy that stays empty); the
+  // closed result vocabulary (`{block, reason}` | `{context, trust}` | `{warnings}` only, with `allow`,
+  // `permission`, `approval`, `mode`, `role`, `flag`, a risk override and a capability grant refused by
+  // name, and a block that can only refuse); the position of `PreToolUse` in the tool pipeline — after the
+  // approval was consumed and after every structural refusal, proved with the **real** policy engine for a
+  // protected-branch hard deny and for an approval-classed command; that `PolicyRequest` has no hook field
+  // at all; and that hook context reaches the model as `untrusted_data` inside the tool envelope.
+  "tests/coding-agent-c13-hooks.test.ts",
+  // C13: the hook Activity events and, just as importantly, what is **not** Activity. Pins that an
+  // invocation is persisted through the real sink with metadata only (no config body, no command line, no
+  // hook output), that a credential in a hook's output is refused rather than stored, that the skip reasons
+  // (`hook_project_untrusted`, `hook_flag_disabled`) are recorded as codes, and that the hook subsystem
+  // holds no audit port — `code_activity_events` is not the tamper-evident AuditLog, while the trust and
+  // config changes that *are* journalled keep being audited before they are applied.
+  "tests/coding-agent-c13-hooks-activity.test.ts",
+  // C13: webhook hooks never become an egress channel of their own. Pins that a loopback, metadata,
+  // internal-name, literal-IP, single-label or plain-HTTP destination is refused before the transport is
+  // called, that a hostname merely *resolving* into a private or reserved range is refused on every
+  // delivery, that redirects are disabled so a webhook cannot be bounced to a second host, that the
+  // outbound exfiltration guard still refuses a credential in the body, and that the hooks module has one
+  // injected port and no HTTP client of its own.
+  "tests/coding-agent-c13-hooks-egress.test.ts",
 ];
 
 /**

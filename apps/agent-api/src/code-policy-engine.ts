@@ -37,6 +37,15 @@ import {
  */
 
 export type PolicyDecision = "allow" | "deny" | "require_approval";
+/**
+ * The reason an approval-classed request carries when it is deferred to a stronger boundary
+ * (`approvalDeferredByBoundary`). It is exported because C13's PreToolUse probe reuses the same deferral to
+ * ask the engine a question *without side effects* — the approval phase would otherwise create a second
+ * approval request for the same call — and then reads this marker to recognise "an approval would be
+ * required", which must withhold a project hook rather than let it run on an approval-required path.
+ */
+export const APPROVAL_DEFERRED_REASON = "approval:deferred_to_boundary";
+
 export type PolicyPhase =
   | "feature_flag" | "rbac" | "capability" | "capability_groups" | "hard_deny" | "network_enforcement" | "session_mode"
   | "trust" | "project_rules" | "risk_classification" | "approval";
@@ -898,7 +907,7 @@ export class PolicyEngine {
     if (request.approvalDeferredByBoundary === true) {
       return {
         decision: "allow", phase, risk, status: 200,
-        reasons: [...reasons, "approval:deferred_to_boundary"],
+        reasons: [...reasons, APPROVAL_DEFERRED_REASON],
       };
     }
     if (!approvals) return deny("approval_unavailable", "Approval system is not configured", 503, phase);

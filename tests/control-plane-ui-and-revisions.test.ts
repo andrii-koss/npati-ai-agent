@@ -4,7 +4,7 @@ import {
   CAPABILITY_MATRIX,
   EffectiveCapabilityResolver,
   defaultCapabilityRegistry,
-  type AgentExecutionInput,
+  type ResolutionContext,
 } from "@npati/shared";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 
@@ -91,7 +91,7 @@ describe("PHASE 8: Settings and Company UI as Control Plane", () => {
         "idemp-agent-1"
       );
 
-      const executionCtxBefore: AgentExecutionInput = {
+      const executionCtxBefore: ResolutionContext = {
         auth: context,
         activeContext: { contextType: "company", companyId: company.id, businessId: null },
         company: { id: company.id, revision: company.revision },
@@ -113,7 +113,7 @@ describe("PHASE 8: Settings and Company UI as Control Plane", () => {
         agent.revision
       );
 
-      const executionCtxAfter: AgentExecutionInput = {
+      const executionCtxAfter: ResolutionContext = {
         auth: context,
         activeContext: { contextType: "company", companyId: company.id, businessId: null },
         company: { id: company.id, revision: company.revision },

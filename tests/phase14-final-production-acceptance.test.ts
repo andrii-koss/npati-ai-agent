@@ -46,18 +46,20 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
       // 1a. Neutral Chat
       const neutralDec = router.route({
         message: "Поясни що таке Kubernetes",
-        resolutionContext: { auth: tenantA, activeContext: { contextType: "none" } },
+        // `ActiveContext` requires both ids explicitly; `null` is the neutral value the canonical
+        // `validateActiveContext({ contextType: "none" })` produces (packages/shared/src/index.ts:88,159).
+        resolutionContext: { auth: tenantA, activeContext: { contextType: "none", businessId: null, companyId: null } },
       });
       expect(neutralDec.isNoTool).toBe(true);
       expect(neutralDec.candidateTools).toHaveLength(0);
 
       // 1b. Business Context
-      const bizA = await store.createBusiness(tenantA, { name: "Business Alpha", ideaDescription: "AI Analytics" });
+      const bizA = await store.createBusiness(tenantA, { name: "Business Alpha", description: "AI Analytics" });
       const bizDec = router.route({
         message: "Як розрахувати CAC для B2B SaaS?",
         resolutionContext: {
           auth: tenantA,
-          activeContext: { contextType: "business", businessId: bizA.id },
+          activeContext: { contextType: "business", businessId: bizA.id, companyId: null },
         },
       });
       expect(bizDec.isNoTool).toBe(true);
@@ -68,7 +70,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Знайди актуальні новини ринку кави",
         resolutionContext: {
           auth: tenantA,
-          activeContext: { contextType: "company", companyId: compA.id },
+          activeContext: { contextType: "company", companyId: compA.id, businessId: null },
           company: { id: compA.id, revision: 1 },
           agent: { id: "ag-main-a", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres"],
@@ -221,13 +223,23 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         updatedAt: now,
       };
 
+      /**
+       * A complete `CompanyAgentToolAudit` (packages/workspace/src/types.ts:661). `buildRunTimeline`
+       * (`packages/shared/src/run-trace.ts:131`) reads `decision`, `agentId` and `inputSummary`, so the
+       * fixture supplies the real values from this test's company ("comp-sec-A") and agent ("ag-1") instead
+       * of leaving them `undefined`; `payloadHash` is not part of the audit record.
+       */
       const auditEntries = [
         {
           id: "audit-sec-01",
+          workspaceId: tenantA.workspaceId,
+          companyId: "comp-sec-A",
           runId: "run-sec-01",
+          agentId: "ag-1",
           toolName: "api.request",
+          decision: "allowed" as const,
           status: "succeeded" as const,
-          payloadHash: "hash-masked-payload",
+          inputSummary: {},
           createdAt: now,
         },
       ];
@@ -344,7 +356,7 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         message: "Знайди всі можливі новини та дослідження",
         resolutionContext: {
           auth: tenantA,
-          activeContext: { contextType: "company", companyId: "c-1" },
+          activeContext: { contextType: "company", companyId: "c-1", businessId: null },
           company: { id: "c-1", revision: 1 },
           agent: { id: "ag-1", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
@@ -398,6 +410,9 @@ describe("PHASE 14: Final Production Acceptance Gate", () => {
         run: mockRunForInspect,
         steps: [
           {
+            // `RunInspectorInput.steps` requires a step id (packages/shared/src/capability-inspector.ts:117);
+            // the report reads only stepOrder/agentId/status/toolCalls from it.
+            id: "step-insp-1",
             stepOrder: 1,
             agentId: "ag-insp",
             status: "completed",

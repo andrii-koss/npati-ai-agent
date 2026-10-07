@@ -82,7 +82,7 @@ describe("PHASE 11: Full Capability Regression Suite", () => {
         message: "Поясни як працює архітектура системи",
         resolutionContext: {
           auth: { workspaceId: "ws-test", userId: "u-test", permissions: ["workspace:read"] },
-          activeContext: { contextType: "company", companyId: "c-test" },
+          activeContext: { contextType: "company", companyId: "c-test", businessId: null },
         },
       });
 
@@ -101,7 +101,7 @@ describe("PHASE 11: Full Capability Regression Suite", () => {
       // When tool is omitted from agent's tools and in disabledCapabilities
       const denied = resolver.canExecute({
         auth: { workspaceId: "ws-test", userId: "u-test", permissions: ["workspace:read", "workspace:write", "business:manage"] },
-        activeContext: { contextType: "company", companyId: "c-123" },
+        activeContext: { contextType: "company", companyId: "c-123", businessId: null },
         company: { id: "c-123", revision: 1 },
         agent: {
           id: "a-123",
@@ -122,7 +122,7 @@ describe("PHASE 11: Full Capability Regression Suite", () => {
         message: "Search today latest tech news and crawl https://example.com",
         resolutionContext: {
           auth: { workspaceId: "ws-test", userId: "u-test", permissions: ["workspace:read", "workspace:write", "business:manage", "research:execute"] },
-          activeContext: { contextType: "company", companyId: "c-test" },
+          activeContext: { contextType: "company", companyId: "c-test", businessId: null },
           company: { id: "c-test", revision: 1 },
           agent: { id: "a-test", revision: 1, tools: ["*"] },
           activeConnections: ["crawler", "postgres", "redis"],
