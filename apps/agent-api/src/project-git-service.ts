@@ -1,10 +1,22 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AuthContext, Project, ProjectCheckpoint, CheckpointTrigger, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import { safeProjectPath, samePath, ProjectFileError } from "./project-workspace";
+import { gitApprovalPayload, normalizeGitBranch, pullRequestApprovalPayload, type GitWriteIntent } from "./code-git-write-policy";
+import type { CodeWorkspaceRevisionSnapshot, WorkspaceRevisionPhase } from "./code-workspace-revision";
+import {
+  CodeGitWorkflowError,
+  GIT_CONFLICT_ESCALATED,
+  MAX_GIT_MERGE_ATTEMPTS,
+  buildConflictEscalation,
+  pullRequestCommentApprovalPayload,
+  runMergeWithAutoResolve,
+  type GitConflictResolverPort,
+} from "./code-git-workflow";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,6 +25,16 @@ export class GitError extends Error {
     public readonly code: string,
     message: string,
     public readonly status = 400,
+    /**
+     * C11 (owner decision 13): structured detail for a refusal a caller can act on — currently
+     * `repository_not_initialized`, whose `requiresInitialization` tells a requester that this write is a
+     * *different* act that needs its own approval. It travels to the tool layer unchanged (`rethrowGit` copies
+     * it into the structured tool error), so the model learns *why* instead of parsing a message.
+     *
+     * The union with `string` is not new: `GitConflictEscalationError` has carried its escalation text in
+     * `details` since the merge-conflict work, and a subclass property must stay assignable to this one.
+     */
+    public readonly details: Record<string, unknown> | string = {},
   ) {
     super(message);
     this.name = "GitError";
@@ -33,14 +55,34 @@ export class GitConflictError extends GitError {
   }
 }
 
+/**
+ * C11 (owner decision 9): a merge that could not be finished automatically.
+ *
+ * The message is **factual**: it reports the number of merge attempts that were actually run and the budget
+ * they were run against. It used to claim "exceeded maximum automatic attempts (2)" while the method made
+ * exactly one attempt and had no resolver at all — a promise in a string. The counter below is the
+ * mechanism that message now describes, and `escalation` carries the structured decision a caller can act
+ * on (`code.ask_user` is the suggested tool).
+ */
 export class GitConflictEscalationError extends GitError {
   constructor(
     public readonly conflictingFiles: string[],
     public readonly details: string,
+    public readonly escalation?: {
+      attempts: number;
+      maxAttempts: number;
+      sourceBranch: string;
+      targetBranch: string;
+      suggestedTool: "code.ask_user";
+      question: string;
+    },
   ) {
+    const attempts = escalation?.attempts ?? 0;
+    const maxAttempts = escalation?.maxAttempts ?? MAX_GIT_MERGE_ATTEMPTS;
     super(
       "GIT_CONFLICT_ESCALATED",
-      `Git conflict resolution exceeded maximum automatic attempts (2). Escalating to user intervention for files: ${conflictingFiles.join(", ")}`,
+      `Git merge conflict in ${conflictingFiles.length} file(s) after ${attempts} of at most ${maxAttempts} automatic `
+      + `attempt(s); escalating to user intervention for files: ${conflictingFiles.join(", ")}`,
       409,
     );
     this.name = "GitConflictEscalationError";
@@ -74,6 +116,121 @@ export interface GitBranchResult {
   branches: string[];
 }
 
+/**
+ * C11 (owner decision 13, the last known issue): the **read-only** answer to "what state is this project's
+ * repository in?".
+ *
+ * `inspectRepository()` produces it and performs no mutation of any kind: it resolves the workspace path
+ * without creating it, `lstat`s `.git`, and — only when `.git` exists — runs the two read-only `git rev-parse`
+ * probes below. There is deliberately no `git init`, no `git config`, no `git add` and no write of any file,
+ * so a request that is still to be authorised cannot leave a trace on disk. `initialized: false` is a fact a
+ * caller reports (`repository_not_initialized`) rather than a state it silently repairs.
+ */
+export interface GitRepositoryInspection {
+  /** The project the workspace belongs to (loaded through the same authorization checks as `getProjectPath`). */
+  project: Project;
+  /** The project workspace directory. It may not exist yet; an inspection never creates it. */
+  dir: string;
+  /** `true` when `<dir>/.git` is a directory that belongs to this workspace. */
+  initialized: boolean;
+  /** The checked-out branch, or `null` when it cannot be established (never a guess). */
+  branch: string | null;
+}
+
+/**
+ * C11 (owner decision 13): the canonical workspace revision, as this boundary reads it.
+ *
+ * The shape is structural, so `ProjectGitService` does not import the guard implementation and the two stay
+ * independently testable. `CodeWorkspaceRevisionGuard` satisfies it as it stands.
+ */
+export interface ProjectGitRevisionPort {
+  capture(scope: { ctx: AuthContext; companyId: string; projectId: string }): Promise<CodeWorkspaceRevisionSnapshot>;
+  assertUnchanged(
+    scope: { ctx: AuthContext; companyId: string; projectId: string },
+    snapshot: CodeWorkspaceRevisionSnapshot,
+    phase: WorkspaceRevisionPhase,
+  ): Promise<unknown>;
+}
+
+/**
+ * C11 (owner decision 5): the proof a remote git write needs. `approvalId` names a **real approval
+ * record**, and `runId`/`agentId`/`toolName` are the context the record was created for; the port below
+ * consumes it atomically, which verifies status, single use, expiry **and the payload hash**.
+ */
+export interface GitWriteApprovalRequest {
+  approvalId: string;
+  runId: string;
+  agentId: string;
+  toolName: string;
+}
+
+/**
+ * C11 (owner decision 5): the approval record, consumed with the payload hash of the exact write.
+ *
+ * The structural shape is the existing durable-approval gateway (`CompanyApprovalsRepository
+ * .consumeApproved`), deliberately not a new mechanism: the SQL update is what makes "status approved,
+ * not consumed, not expired, payload hash matches" a single atomic decision.
+ */
+export interface GitApprovalPort {
+  consumeApproved(
+    ctx: AuthContext,
+    companyId: string,
+    approvalId: string,
+    params: { runId: string; agentId: string; toolName: string; inputPayload: Record<string, unknown> },
+  ): Promise<unknown>;
+}
+
+/** C11 (owner decision 6): one credential lease for exactly one host git invocation. */
+export interface HostGitCredentialLease {
+  leaseId: string;
+  /** Used only in the process-scoped environment of this single git invocation. */
+  value: string;
+}
+
+export interface HostGitCredentialPort {
+  /** Issues one lease and resolves its value; the caller revokes it in a `finally`. */
+  acquire(input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    credentialId: string;
+    toolCallId: string;
+    purpose: "git.push" | "pull_request.create" | "pull_request.comment";
+  }): Promise<HostGitCredentialLease>;
+  revoke(leaseId: string, reason: string): Promise<void>;
+}
+
+/**
+ * C11 (owner decisions 3, 5 and 6): the git-policy boundary of this service.
+ *
+ * Every member is optional at the type level and **mandatory in effect**: a remote write refuses
+ * (`GIT_POLICY_UNAVAILABLE`, `GIT_APPROVAL_UNAVAILABLE`, `GIT_APPROVAL_RECORD_REQUIRED`) when the
+ * corresponding port is missing, so a caller that builds the service by hand cannot accidentally push
+ * without the two checks. Injection is structural (no service import), which is what keeps this module
+ * free of the policy, approval and lease implementations.
+ */
+export interface ProjectGitBoundary {
+  /**
+   * The company protected-branch policy, re-consulted **immediately before** the write. This is a second,
+   * independent call: the policy engine already decided, but a direct service call (a route, a script, a
+   * future tool) would bypass the engine, and that is exactly the path this closes. `assertGitWriteAllowed`
+   * throws `CodeProtectedBranchError` (403, `protected_branch_write_denied` / `force_push_denied`).
+   */
+  assertGitWriteAllowed?: (ctx: AuthContext, companyId: string, input: GitWriteIntent) => Promise<unknown>;
+  /** The real approval record for this exact write (`payload_hash` included). */
+  approvals?: GitApprovalPort;
+  /** One-operation credential leases for the host git process. */
+  credentials?: HostGitCredentialPort;
+  /**
+   * C11 (owner decision 7 + 13): the canonical workspace revision. It is read **before** the approval is
+   * consumed and re-checked **after** the write's own initialization (if any) and immediately before the
+   * credential lease and the push, because the initialization itself changes the canonical workspace. A
+   * moved revision is `workspace_revision_mismatch` (409) with no push. Absent → no revision is claimed,
+   * which is the hand-built-service case (a test), never production.
+   */
+  workspaceRevisions?: ProjectGitRevisionPort;
+}
+
 export interface CheckpointThresholds {
   fileThreshold: number;
   lineThreshold: number;
@@ -99,8 +256,16 @@ export function safeAgentSlug(slug: string): string {
 
 function redactSecrets(text: string): string {
   return text.replace(/https:\/\/[^@\s]+@/g, "https://***@")
-    .replace(/(?:ghp_|github_pat_)[a-zA-Z0-9_]+/g, "***TOKEN***");
+    .replace(/(?:ghp_|github_pat_)[a-zA-Z0-9_]+/g, "***TOKEN***")
+    // C11: the git credential is delivered as an `Authorization: Basic <base64>` extraheader. A failing
+    // git command can echo the config it was given (`-c`/`GIT_CONFIG_VALUE_n` appear in some messages), and
+    // the base64 blob would not match either pattern above, so the header is masked explicitly.
+    .replace(/Authorization:\s*(?:Basic|Bearer)\s+[A-Za-z0-9+/=_-]+/gi, "Authorization: ***")
+    .replace(/GIT_CONFIG_VALUE_\d+=\S*/g, "GIT_CONFIG_VALUE_***");
 }
+
+/** Exported for the security-gate suite: redaction of a credential-bearing git error is pinned directly. */
+export { redactSecrets as redactGitSecrets };
 
 export class ProjectGitService {
   private readonly thresholds: CheckpointThresholds;
@@ -116,6 +281,12 @@ export class ProjectGitService {
      * a spooler so it can assert the exact argv (for example that a path-scoped revert never issues `reset --hard`).
      */
     private readonly runGitImpl?: (dir: string, args: string[], env: Record<string, string>) => Promise<{ stdout: string; stderr: string }>,
+    /**
+     * C11: the git-policy boundary — the protected-branch re-check performed immediately before a remote
+     * write, the approval record consumed with this write's payload hash, and the one-operation credential
+     * lease. Wired in `app.ts`; a missing member refuses the write rather than skipping a check.
+     */
+    private readonly boundary?: ProjectGitBoundary,
   ) {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
@@ -123,7 +294,22 @@ export class ProjectGitService {
     };
   }
 
-  async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {
+  /**
+   * The project workspace path, after every authorization check that is not about the repository's state:
+   * identifier shape, the project lookup, tenant/workspace ownership, the archived status, the git
+   * permission, and the "no symlinked workspace" check.
+   *
+   * `create` is what separates the two callers and is the whole point of C11's split: the ordinary path
+   * creates the workspace directories (the historical behaviour), while `inspectRepository` runs with
+   * `create: false` and therefore creates **nothing** — a missing segment is reported as "this workspace
+   * does not exist yet" instead of being materialised.
+   */
+  private async resolveProjectWorkspace(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: { create: boolean },
+  ): Promise<{ project: Project; dir: string }> {
     if (!validId(companyId) || !validId(projectId)) {
       throw new GitError("INVALID_IDENTIFIER", "Invalid company or project identifier", 400);
     }
@@ -137,11 +323,25 @@ export class ProjectGitService {
     if (!ctx.permissions.some((permission) => ["*", "owner", "business:manage", "workspace:read", "workspace:write"].includes(permission))) throw new GitError("PROJECT_ACCESS_DENIED", "Git permission denied", 403);
     const dir = path.join(this.workspaceRoot, companyId, projectId);
     for (const segment of [this.workspaceRoot, path.join(this.workspaceRoot, companyId), dir]) {
-      await mkdir(segment).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
-      const entry = await lstat(segment);
+      if (options.create) {
+        await mkdir(segment).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
+      }
+      // A read-only caller must tolerate a segment that does not exist, and must not create it: walking one
+      // level deeper would be meaningless (nothing below a missing directory exists) and every level above
+      // the missing one was already checked. The creating caller keeps the historical behaviour of a hard
+      // failure, because after its own `mkdir` a missing directory is a real error, not an absent workspace.
+      const entry = await lstat(segment).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" && !options.create) return null;
+        throw error;
+      });
+      if (!entry) break;
       if (!entry.isDirectory() || entry.isSymbolicLink()) throw new GitError("INVALID_WORKSPACE", "Symlink workspace is not allowed", 403);
     }
     return { project, dir };
+  }
+
+  async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {
+    return this.resolveProjectWorkspace(ctx, companyId, projectId, { create: true });
   }
 
   private async runGit(dir: string, args: string[], env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
@@ -222,8 +422,70 @@ export class ProjectGitService {
     return this.resolveGithubCredential(ctx, companyId, credentialId);
   }
 
-  async ensureRepository(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
-    const { dir } = await this.getProjectPath(ctx, companyId, projectId);
+  /**
+   * C11 (owner decision 13, the last known issue): **read-only** repository inspection.
+   *
+   * What it may do, exhaustively:
+   *  - `resolveProjectWorkspace(..., { create: false })` — the authorization checks (`getProjectPath`
+   *    without its `mkdir`), so no directory and no file is created;
+   *  - `lstat(<dir>/.git)` — a stat, never a write;
+   *  - when `.git` is a directory: `git rev-parse --show-toplevel` (the workspace-membership proof the old
+   *    `ensureRepository` made **after** initializing, now made before anything can happen) and
+   *    `git rev-parse --abbrev-ref HEAD` (the checked-out branch).
+   *
+   * Both git invocations are read-only `rev-parse` probes: they read the object database/HEAD and print a
+   * value. Neither creates `.git`, writes `config`, stages anything, nor touches the worktree — which is why
+   * this method is safe to call **before** policy, RBAC and the approval record, and why a request that is
+   * refused afterwards leaves the disk byte-identical (pinned by
+   * `tests/coding-agent-c11-git-init-approval.test.ts`).
+   *
+   * `initialized: false` therefore means exactly "there is no repository here yet". It is reported, never
+   * repaired: creating the repository is `ensureRepositoryInitialized()` and it happens only behind an
+   * approval that binds that fact.
+   */
+  async inspectRepository(ctx: AuthContext, companyId: string, projectId: string): Promise<GitRepositoryInspection> {
+    const { project, dir } = await this.resolveProjectWorkspace(ctx, companyId, projectId, { create: false });
+    const gitEntry = await lstat(path.join(dir, ".git")).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!gitEntry) return { project, dir, initialized: false, branch: null };
+    /**
+     * A `.git` that is not a directory is a pointer file (a linked worktree, a submodule, a `gitdir:` file).
+     * Running `git init` over it — which the pre-C11 code would do — writes into somebody else's checkout, so
+     * the state is refused instead of being "repaired". The membership probe below would reject it anyway;
+     * this refuses it before any git process starts.
+     */
+    if (!gitEntry.isDirectory()) {
+      throw new GitError("INVALID_WORKSPACE", "The project workspace is not an initialized repository of its own", 403);
+    }
+    const { stdout } = await this.runGit(dir, ["rev-parse", "--show-toplevel"]);
+    if (path.resolve(stdout.trim()).toLowerCase() !== path.resolve(dir).toLowerCase()) throw new GitError("INVALID_WORKSPACE", "Git repository must belong to the project workspace", 403);
+    let branch: string | null = null;
+    try {
+      const head = await this.runGit(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      const resolved = normalizeGitBranch(head.stdout);
+      // A detached HEAD answers with the literal `HEAD`, which is not a branch a write can name.
+      if (resolved && resolved !== "HEAD") branch = resolved;
+    } catch {
+      // An unresolvable checkout is `null`, never a guessed branch: the caller decides what that means (a
+      // named branch does not care, an unnamed one is refused as `BRANCH_UNRESOLVED`).
+    }
+    return { project, dir, initialized: true, branch };
+  }
+
+  /**
+   * C11 (owner decision 13): the **mutating** half, and the only place in this service that creates a
+   * repository.
+   *
+   * It runs `git init`, the four identity/hook settings, the `.gitignore` write and the initial commit when
+   * `.git` is absent, and then proves the repository belongs to this workspace. Every caller that can reach
+   * it with an uninitialized workspace must have passed policy, RBAC and — for a remote write — the approval
+   * record first; `push` calls it immediately before the credential lease and the push, after the approval
+   * that binds `repositoryInitialized: false` has been consumed. A read-only path must never call it.
+   */
+  async ensureRepositoryInitialized(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
+    const { dir } = await this.resolveProjectWorkspace(ctx, companyId, projectId, { create: true });
     const gitDir = path.join(dir, ".git");
     const exists = await lstat(gitDir).then((s) => s.isDirectory()).catch(() => false);
     if (!exists) {
@@ -267,6 +529,20 @@ export class ProjectGitService {
     const { stdout } = await this.runGit(dir, ["rev-parse", "--show-toplevel"]);
     if (path.resolve(stdout.trim()).toLowerCase() !== path.resolve(dir).toLowerCase()) throw new GitError("INVALID_WORKSPACE", "Git repository must belong to the project workspace", 403);
     return dir;
+  }
+
+  /**
+   * C11: the historical name of the mutating half, kept for the existing callers (the read paths — `status`,
+   * `diff`, `log`, `branch`, the checkpoint and worktree methods — and the project lifecycle code outside
+   * this module). It is deliberately an alias and not a second implementation: one place creates a
+   * repository. A **write** path must not use it before its checks; the C11 write path uses
+   * `inspectRepository()` and `ensureRepositoryInitialized()` instead.
+   *
+   * @deprecated mutating; use `inspectRepository()` to read the state and `ensureRepositoryInitialized()`
+   * after the authorization and approval of a write.
+   */
+  async ensureRepository(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
+    return this.ensureRepositoryInitialized(ctx, companyId, projectId);
   }
 
   async status(ctx: AuthContext, companyId: string, projectId: string): Promise<GitStatusResult> {
@@ -754,56 +1030,581 @@ export class ProjectGitService {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { branch?: string; credentialId?: string; approved?: boolean },
-  ): Promise<{ pushed: boolean; branch: string; remote: string }> {    this.requireWrite(ctx);
+    options: {
+      branch?: string;
+      /**
+       * C11: the local branch to publish, when it differs from the remote branch being written. The
+       * `code.git.push` tool names both, and the approval payload binds both, so the two must resolve to the
+       * same pair on the request side and at the boundary — collapsing them here would make the hashes
+       * disagree and refuse every approval.
+       */
+      sourceBranch?: string;
+      credentialId?: string;
+      approved?: boolean;
+      /** C11: `true` asks for a history rewrite. The policy judges it; the structured API then refuses it. */
+      force?: boolean;
+      /** C11: a remote the caller names explicitly, when one is meaningful (bound into the approval hash). */
+      remote?: string;
+      /** C11 (owner decision 5): the real approval record for this exact write. */
+      approval?: GitWriteApprovalRequest;
+    },
+  ): Promise<{ pushed: boolean; branch: string; remote: string }> {
+    this.requireWrite(ctx);
     if (!options.approved) throw new GitApprovalRequiredError();
-    const { project } = await this.getProjectPath(ctx, companyId, projectId);
+    /**
+     * C11 (owner decision 13, the last known issue): the order of this method is the fix.
+     *
+     *   inspect (read-only) -> repository_not_initialized -> policy -> approval -> ensureRepositoryInitialized
+     *   -> revision check -> lease -> git push
+     *
+     * Before it, an unnamed branch asked the checkout for its branch (`resolveWriteIntent` ->
+     * `currentBranch`), and `currentBranch` went through `ensureRepository`, which runs `git init` for a
+     * repository that does not exist yet. A request that was about to be refused — by the policy, by the
+     * missing approval record, by RBAC — still created `.git`, wrote `.gitignore` and made a commit. The
+     * inspection below cannot do any of that, and the two git calls it may make are read-only `rev-parse`
+     * probes, so every refusal below leaves the disk exactly as it was.
+     */
+    const inspection = await this.inspectRepository(ctx, companyId, projectId);
+    const project = inspection.project;
     if (project.repositoryProvider !== "github" || !project.repositoryUrl) throw new GitError("REPOSITORY_NOT_CONNECTED", "Connect a GitHub repository first", 400);
-    const branch = options.branch || project.repositoryBranch || "main";
-    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(branch) || branch.includes("..") || branch.includes("@{")) throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
-    const token = await this.githubToken(ctx, companyId, options.credentialId);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const auth = Buffer.from(`x-access-token:${token}`).toString("base64");
-    try {
-      await this.runGit(dir, ["push", project.repositoryUrl, branch], {
-        GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-        GIT_CONFIG_VALUE_0: `Authorization: Basic ${auth}`,
-      });
-    } catch {
-      throw new GitError("GIT_PUSH_FAILED", "GitHub push failed; inspect branch and repository permissions", 502);
+    const namedBranch = options.branch?.trim();
+    const namedSource = options.sourceBranch?.trim();
+    for (const candidate of [namedBranch, namedSource]) {
+      if (candidate && (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(candidate) || candidate.includes("..") || candidate.includes("@{"))) {
+        throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
+      }
     }
-    return { pushed: true, branch, remote: project.repositoryUrl };
+    // The credential reference must exist *before* anything privileged happens, but the lease itself is
+    // only issued after the two checks below: a refused write must not have touched the vault.
+    if (!options.credentialId || (!this.boundary?.credentials && !this.resolveGithubCredential)) {
+      throw new GitError("CREDENTIAL_MISSING", "A Company vault credential reference is required", 400);
+    }
+    /**
+     * C11 (owner decision 13): an uninitialized workspace is **not** a push target, and this is where the
+     * service says so instead of repairing it. The refusal is structured — `repository_not_initialized` with
+     * `requiresInitialization: true` and `repositoryInitialized: false` — and it is returned before the
+     * policy, before the approval is consumed and before any git process runs, so nothing is created.
+     *
+     * The act it names is a *different* act with a *different* approval: `create the repository and push`
+     * rather than `push`, which is exactly what `gitApprovalPayload` binds through `repositoryInitialized`.
+     * A caller that holds an approval record for it presents that record (the request side resolves the same
+     * fact through `inspectRepository`, so the two payload hashes are comparable); the record is then
+     * verified against the initialization payload below and, once consumed,
+     * `ensureRepositoryInitialized()` runs.
+     */
+    if (!inspection.initialized && !options.approval?.approvalId) {
+      throw new GitError(
+        "repository_not_initialized",
+        "The project workspace has no git repository yet, so this push would have to create one; that is a different "
+        + "approved act (it is bound to `repositoryInitialized: false`), and this request carries no approval record for it",
+        409,
+        { requiresInitialization: true, repositoryInitialized: false, projectId, repositoryState: "uninitialized" },
+      );
+    }
+    /**
+     * C11 (owner decision 3): the branch is resolved by the **service** when the caller names none — a
+     * `git push` without a refspec writes to the checked-out branch, which is a property of the checkout
+     * and never a configuration default. The resolved branch is what the policy is asked about. For an
+     * uninitialized workspace the branch comes from the caller or not at all: there is no checkout to ask,
+     * and the inspection never creates one.
+     */
+    const intent = await this.resolveWriteIntent(ctx, companyId, projectId, project, namedBranch, options.force === true, options.credentialId, namedSource, inspection);
+    /**
+     * C11 (owner decision 7 + 13): the canonical revision this write is prepared from, read **before** any
+     * side effect and re-checked after the write's own initialization. Without the port no revision is
+     * claimed (a hand-built service); with it, an unreadable revision refuses the write rather than letting
+     * it act on bytes nobody can name.
+     */
+    const authorisedRevision = await this.captureWorkspaceRevision(ctx, companyId, projectId);
+    // C11 (owner decision 3): the SECOND protected-branch check, at the git-policy boundary.
+    //
+    // It runs **before** the approval record is consumed, and that order is deliberate: a hard deny must
+    // not spend a human's one-shot approval (the same "hard deny before approval" rule the engine's phase
+    // order implements). Nothing that follows this call can change the target of the write — the refspec is
+    // built from `intent` — so the check still stands immediately in front of the side effect, and the only
+    // work between the two is bookkeeping (the approval consumption and the credential lease).
+    await this.assertGitWriteBoundary(ctx, companyId, intent);
+    // C11 (owner decision 5): the `approved` flag is not a trust boundary. A real approval record, bound
+    // to this payload hash, is consumed before the lease and before the push. The payload is built from the
+    // **typed request** (operation, branches, force, credential, and — decision 13 — whether this write has
+    // to create the repository), which is the same material the requester approved; the repository URL is
+    // deliberately not part of it (it is pinned by the stored, validated `repositoryUrl`, so a caller cannot
+    // choose a different remote). A record issued for a plain push therefore cannot be redeemed here, and a
+    // record issued for `create the repository and push` cannot be redeemed against an existing repository.
+    await this.requireGitWriteApproval(ctx, companyId, projectId, { ...intent, remote: options.remote ?? null }, "project.git.push", options.approval);
+    // The structured API performs no history rewrite. The refusal comes *after* the policy spoke, so a
+    // force push into a protected branch is reported as `force_push_denied` (the policy's own code) rather
+    // than as "unsupported": the reason a caller sees is the reason that actually stopped it. An
+    // unprotected force push is refused here — this service does not rewrite history through a tool call.
+    if (intent.force) {
+      throw new GitError(
+        "FORCE_PUSH_NOT_SUPPORTED",
+        "This API does not perform force pushes; the write was refused. A force push into a protected branch is force_push_denied",
+        403,
+      );
+    }
+    /**
+     * C11 (owner decision 13): **the only mutation in this method, and it happens here** — after RBAC
+     * (`requireWrite`), after the credential reference and the branch checks, after the protected-branch
+     * policy, and after the approval record for `repositoryInitialized: false` was consumed. A refused write
+     * never reaches this line.
+     */
+    if (!inspection.initialized) await this.ensureRepositoryInitialized(ctx, companyId, projectId);
+    /**
+     * C11 (owner decision 7 + 13): the revision is checked **after** the initialization, because the
+     * initialization is itself a change to the canonical workspace (`git init` plus the `.gitignore` write).
+     * Comparing a pre-init revision with a post-init one would refuse every first push for a reason nobody
+     * could act on, so the comparison the guard makes is: "is the canonical workspace still the revision this
+     * write was prepared from?" — with the initialization already applied. An already-initialized repository
+     * is unaffected except that the check now also covers the approval window, which is strictly stronger
+     * than before; an initialization that moved the workspace refuses the push as
+     * `workspace_revision_mismatch` (409, retryable): the approved initialization is on disk, the push is
+     * not, and the caller re-prepares against the revision that now exists.
+     */
+    await this.assertWorkspaceRevisionUnchanged(ctx, companyId, projectId, authorisedRevision);
+    // The directory the inspection resolved, and — when this call had to create the repository — the one
+    // `ensureRepositoryInitialized()` just proved belongs to this workspace. The write path therefore makes
+    // no second "ensure" call: one inspection, one (approved) initialization, then the push.
+    const dir = inspection.dir;
+    const credential = await this.acquireCredential(ctx, companyId, projectId, {
+      credentialId: options.credentialId,
+      purpose: "git.push",
+      toolCallId: options.approval?.approvalId ?? `git-push:${projectId}:${randomUUID()}`,
+    });
+    try {
+      await this.runGit(
+        dir,
+        ["push", project.repositoryUrl, `refs/heads/${intent.sourceBranch}:refs/heads/${intent.targetBranch}`],
+        this.credentialEnvironment(credential.value),
+      );
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw new GitError("GIT_PUSH_FAILED", "GitHub push failed; inspect branch and repository permissions", 502);
+    } finally {
+      // The lease never outlives the call, whatever happened.
+      if (credential.leaseId && this.boundary?.credentials) {
+        await this.boundary.credentials.revoke(credential.leaseId, "call_finished").catch(() => undefined);
+      }
+    }
+    return { pushed: true, branch: intent.targetBranch, remote: project.repositoryUrl };
   }
 
   async createPullRequest(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { title: string; body?: string; base?: string; head?: string; credentialId?: string; approved?: boolean },
+    options: {
+      title: string;
+      body?: string;
+      base?: string;
+      head?: string;
+      credentialId?: string;
+      approved?: boolean;
+      /**
+       * C11: the tool id the approval record was created under. It is part of the approval **payload**, so it
+       * must be the same string on both sides — the requester (`code-tool-runtime`) names the tool it was
+       * called with, and the boundary rebuilds the payload here. Defaulting to `project.git.pr` keeps every
+       * existing caller (`company-tool-runtime`) byte-for-byte identical, and the `code.git.pr.create`
+       * executor passes its own id, which is what makes the two hashes comparable.
+       */
+      toolName?: string;
+      /** C11 (owner decision 5): the real approval record for this exact pull request. */
+      approval?: GitWriteApprovalRequest;
+    },
   ): Promise<{ prNumber?: number; prUrl?: string; message: string }> {
     this.requireWrite(ctx);
     if (!options.approved) throw new GitApprovalRequiredError();
+    const recordTool = options.toolName?.trim() || "project.git.pr";
     const { project } = await this.getProjectPath(ctx, companyId, projectId);
     if (!options.title?.trim()) throw new GitError("PR_TITLE_REQUIRED", "Pull Request title is required", 400);
     if (project.repositoryProvider !== "github" || !project.repositoryUrl) throw new GitError("REPOSITORY_NOT_CONNECTED", "Connect a GitHub repository first", 400);
     const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\.git$/.exec(project.repositoryUrl);
     if (!match) throw new GitError("INVALID_REPOSITORY_URL", "Invalid configured GitHub URL", 400);
-    const token = await this.githubToken(ctx, companyId, options.credentialId);
+    const base = normalizeGitBranch(options.base);
+    const head = normalizeGitBranch(options.head);
+    // C11 (owner decision 5): the approval for a pull request is bound to the (base, head) pair, so both
+    // have to be named. An unnamed target would produce an approval that authorises "some pull request".
+    if (!base || !head) {
+      throw new GitError(
+        "GIT_PR_TARGET_REQUIRED",
+        "A pull request must name the branch it targets (`base`) and the branch under review (`head`); an approval cannot be bound to an unnamed target",
+        400,
+      );
+    }
+    for (const branch of [base, head]) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(branch) || branch.includes("..") || branch.includes("@{")) {
+        throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
+      }
+    }
+    if (!options.credentialId || (!this.boundary?.credentials && !this.resolveGithubCredential)) {
+      throw new GitError("CREDENTIAL_MISSING", "A Company vault credential reference is required", 400);
+    }
+    // C11 (owner decision 5): opening a pull request is the same class of remote write as a push (it
+    // publishes a branch for review), so it needs the same proof — and its payload binds the (base, head)
+    // pair and the remote, not "some pull request".
+    await this.requireGitWriteApproval(
+      ctx,
+      companyId,
+      projectId,
+      {
+        projectId,
+        tool: recordTool,
+        payload: pullRequestApprovalPayload({
+          projectId, tool: recordTool, base, head, credentialId: options.credentialId,
+        }),
+      },
+      recordTool,
+      options.approval,
+    );
+    const credential = await this.acquireCredential(ctx, companyId, projectId, {
+      credentialId: options.credentialId,
+      purpose: "pull_request.create",
+      toolCallId: options.approval?.approvalId ?? `git-pr:${projectId}:${randomUUID()}`,
+    });
     const [, owner, repo] = match;
     let response: Response;
     try {
       response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
         method: "POST",
-        headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "User-Agent": "NPATI-Agent-Website-Builder" },
-        body: JSON.stringify({ title: options.title.trim(), body: options.body || "", base: options.base || "main", head: options.head || project.repositoryBranch || "main" }),
+        headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${credential.value}`, "User-Agent": "NPATI-Agent-Website-Builder" },
+        body: JSON.stringify({ title: options.title.trim(), body: options.body || "", base, head }),
       });
     } catch {
       throw new GitError("GITHUB_PR_FAILED", "GitHub pull request request failed", 502);
+    } finally {
+      if (credential.leaseId && this.boundary?.credentials) {
+        await this.boundary.credentials.revoke(credential.leaseId, "call_finished").catch(() => undefined);
+      }
     }
     if (!response.ok) throw new GitError("GITHUB_PR_FAILED", "GitHub rejected the pull request", response.status);
     const data = await response.json() as { number?: number; html_url?: string };
     return { prNumber: data.number, prUrl: data.html_url, message: `Pull Request #${data.number} created successfully.` };
+  }
+
+  /**
+   * C11 (owner decisions 10 and 11): post one comment on an existing pull request.
+   *
+   * This is the sanctioned way a `REVIEW_CODE` session says something about a pull request. Reviewing is
+   * read-only, and the only thing a review may *write* is a comment — which is not repository state, and
+   * which therefore needs neither a branch nor a protected-branch decision. It does need an approval, and it
+   * gets its **own** binding: the pull-request number and a hash of the comment text. An approval obtained
+   * for a push or for opening a pull request produces a different payload hash, so the durable approval
+   * gateway refuses to redeem it here — that is what "PR comments require a separate approval" means in
+   * code rather than in a comment.
+   *
+   * The credential is a one-operation lease whose value only ever reaches the `Authorization` header of this
+   * single request and which is revoked in the `finally`, exactly like a push.
+   */
+  async commentOnPullRequest(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    options: {
+      pullNumber: number;
+      body: string;
+      credentialId?: string;
+      approved?: boolean;
+      approval?: GitWriteApprovalRequest;
+    },
+  ): Promise<{ commentId?: number; commentUrl?: string; pullNumber: number; message: string }> {
+    this.requireWrite(ctx);
+    if (!options.approved) throw new GitApprovalRequiredError();
+    const { project } = await this.getProjectPath(ctx, companyId, projectId);
+    if (project.repositoryProvider !== "github" || !project.repositoryUrl) throw new GitError("REPOSITORY_NOT_CONNECTED", "Connect a GitHub repository first", 400);
+    const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\.git$/.exec(project.repositoryUrl);
+    if (!match) throw new GitError("INVALID_REPOSITORY_URL", "Invalid configured GitHub URL", 400);
+    const pullNumber = Number(options.pullNumber);
+    if (!Number.isInteger(pullNumber) || pullNumber < 1 || pullNumber > 1_000_000) {
+      throw new GitError("GIT_PR_NUMBER_REQUIRED", "A pull-request comment must name the pull request it belongs to", 400);
+    }
+    const body = String(options.body ?? "").trim();
+    if (!body) throw new GitError("GIT_PR_COMMENT_BODY_REQUIRED", "A pull-request comment needs a body", 400);
+    if (!options.credentialId || (!this.boundary?.credentials && !this.resolveGithubCredential)) {
+      throw new GitError("CREDENTIAL_MISSING", "A Company vault credential reference is required", 400);
+    }
+    await this.requireGitWriteApproval(
+      ctx,
+      companyId,
+      projectId,
+      {
+        projectId,
+        tool: "code.git.pr.comment",
+        payload: pullRequestCommentApprovalPayload({
+          projectId, tool: "code.git.pr.comment", pullNumber, body, credentialId: options.credentialId,
+        }),
+      },
+      "code.git.pr.comment",
+      options.approval,
+    );
+    const credential = await this.acquireCredential(ctx, companyId, projectId, {
+      credentialId: options.credentialId,
+      purpose: "pull_request.comment",
+      toolCallId: options.approval?.approvalId ?? `git-pr-comment:${projectId}:${randomUUID()}`,
+    });
+    const [, owner, repo] = match;
+    let response: Response;
+    try {
+      response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${pullNumber}/comments`, {
+        method: "POST",
+        headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${credential.value}`, "User-Agent": "NPATI-Agent-Website-Builder" },
+        body: JSON.stringify({ body }),
+      });
+    } catch {
+      throw new GitError("GITHUB_PR_COMMENT_FAILED", "GitHub pull request comment request failed", 502);
+    } finally {
+      if (credential.leaseId && this.boundary?.credentials) {
+        await this.boundary.credentials.revoke(credential.leaseId, "call_finished").catch(() => undefined);
+      }
+    }
+    if (!response.ok) throw new GitError("GITHUB_PR_COMMENT_FAILED", "GitHub rejected the pull request comment", response.status);
+    const data = await response.json() as { id?: number; html_url?: string };
+    return {
+      commentId: data.id,
+      commentUrl: data.html_url,
+      pullNumber,
+      message: `Comment posted on pull request #${pullNumber}.`,
+    };
+  }
+
+  /**
+   * C11 (owner decision 3): the branch a remote write targets, as the **typed** intent the policy and the
+   * approval both read. A named branch is used as given; without one the **inspection** is asked (never the
+   * configured default, never a `git init`), and an unresolvable checkout refuses instead of guessing.
+   *
+   * C11 (owner decision 13): the intent also carries the initialization fact the inspection resolved. It is
+   * what `gitApprovalPayload` binds as `repositoryInitialized: false`, so the approval covers the act of
+   * creating the repository — and only that act.
+   */
+  private async resolveWriteIntent(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    project: Project,
+    namedBranch: string | undefined,
+    force: boolean,
+    credentialId?: string,
+    namedSourceBranch?: string,
+    inspection?: GitRepositoryInspection,
+  ): Promise<GitWriteIntent> {
+    const target = namedBranch || await this.currentBranch(ctx, companyId, projectId, inspection);
+    const branch = normalizeGitBranch(target);
+    if (!branch || !/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(branch) || branch.includes("..") || branch.includes("@{")) {
+      throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
+    }
+    /**
+     * C11: the local branch is the target unless the caller named a different one. When it did, the source
+     * is normalised the same way and validated the same way — the two are separate fields of the intent
+     * because the approval hash covers both, and the refspec below is built from both.
+     */
+    const source = namedSourceBranch ? normalizeGitBranch(namedSourceBranch) : branch;
+    if (!source || !/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(source) || source.includes("..") || source.includes("@{")) {
+      throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
+    }
+    return {
+      gitOperation: force ? "force_push" : "push",
+      sourceBranch: source,
+      targetBranch: branch,
+      remoteBranch: branch,
+      // The configured URL is credential-free by construction (`connectRepository` refuses a URL that
+      // carries a user or a password), so no secret can enter the approval payload through it.
+      remote: project.repositoryUrl ?? null,
+      force,
+      credentialId: credentialId ?? null,
+      // C11 (owner decision 13): the resolved fact, from the read-only inspection — never from an argument.
+      // `gitApprovalPayload` writes it into the payload only when it is `false`.
+      ...(inspection ? { repositoryInitialized: inspection.initialized } : {}),
+    };
+  }
+
+  /**
+   * The branch the project checkout is on, from a **read-only** inspection.
+   *
+   * Before C11 this called `ensureRepository`, which initializes a repository that does not exist — so
+   * asking "which branch is this?" could create `.git`, write `.gitignore` and commit, for a request that
+   * was on its way to being refused. The inspection answers the same question with `lstat` and two
+   * `rev-parse` probes, and an uninitialized workspace is reported as what it is.
+   */
+  private async currentBranch(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    inspection?: GitRepositoryInspection,
+  ): Promise<string> {
+    const state = inspection ?? await this.inspectRepository(ctx, companyId, projectId);
+    if (!state.initialized) {
+      // A caller that names no branch cannot be answered from a repository that does not exist, and this is
+      // the refusal that says so without creating one.
+      throw new GitError(
+        "repository_not_initialized",
+        "The project workspace has no git repository yet, so the branch of its checkout cannot be resolved; name the branch explicitly",
+        409,
+        { requiresInitialization: true, repositoryInitialized: false, projectId, repositoryState: "uninitialized" },
+      );
+    }
+    if (state.branch) return state.branch;
+    // A detached HEAD (or an unreadable checkout) answers nothing usable, which is not a branch to push by
+    // name: an unresolvable checkout is never a branch name to guess at.
+    throw new GitError(
+      "BRANCH_UNRESOLVED",
+      "The branch of the project checkout could not be resolved; name the branch explicitly",
+      409,
+    );
+  }
+
+  /**
+   * C11 (owner decision 5): consume the real approval record for this write.
+   *
+   * Two refusals are possible and both are deliberate: no approval port means the deployment cannot verify
+   * an approval at all (503, fail closed), and no approval *record* means the caller presented only the
+   * `approved` flag — which is not proof (`GIT_APPROVAL_RECORD_REQUIRED`).
+   */
+  private async requireGitWriteApproval(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    binding: GitWriteIntent | { projectId: string; tool: string; payload: Record<string, unknown> },
+    toolName: string,
+    approval?: GitWriteApprovalRequest,
+  ): Promise<void> {
+    const port = this.boundary?.approvals;
+    if (!port) {
+      throw new GitError(
+        "GIT_APPROVAL_UNAVAILABLE",
+        "Git write approval verification is not configured; the remote write is refused",
+        503,
+      );
+    }
+    if (!approval?.approvalId) {
+      throw new GitError(
+        "GIT_APPROVAL_RECORD_REQUIRED",
+        "A remote git write requires an approved Company run: the approval record is missing and the `approved` flag alone is not proof",
+        403,
+      );
+    }
+    /**
+     * C11 (owner decision 5, corrected): the tool id inside the payload is the one the **record** was created
+     * under, because that is the name the request side hashed and the name `consumeApproved` matches on. For
+     * a push the request side is `code.git.push` (the tool the runtime gated), not this service's historical
+     * `project.git.push`; rebuilding the payload under the wrong name produced a different hash and made every
+     * record unredeemable. A record without a name cannot get here (`GIT_APPROVAL_RECORD_REQUIRED` above), and
+     * the caller-supplied name is only a fallback so a hand-built caller keeps working.
+     */
+    const recordTool = approval?.toolName?.trim() || toolName;
+    const inputPayload = "payload" in binding
+      ? binding.payload
+      : gitApprovalPayload({ projectId, tool: recordTool, intent: binding });
+    try {
+      await port.consumeApproved(ctx, companyId, approval.approvalId, {
+        runId: approval.runId ?? "",
+        agentId: approval.agentId ?? "",
+        toolName: recordTool,
+        inputPayload,
+      });
+    } catch (error) {
+      const code = String((error as { code?: string }).code ?? "GIT_APPROVAL_INVALID");
+      throw new GitError(
+        code,
+        "The approval record does not authorise this git write (status, single use, expiry and payload hash are all verified)",
+        403,
+      );
+    }
+  }
+
+  /**
+   * C11 (owner decision 3): the second, independent protected-branch check, immediately before the write.
+   * No port means no check, and no check means no write.
+   */
+  private async assertGitWriteBoundary(ctx: AuthContext, companyId: string, intent: GitWriteIntent): Promise<void> {
+    const assertAllowed = this.boundary?.assertGitWriteAllowed;
+    if (!assertAllowed) {
+      throw new GitError(
+        "GIT_POLICY_UNAVAILABLE",
+        "The protected-branch policy is not wired to the git boundary; the remote write is refused",
+        503,
+      );
+    }
+    await assertAllowed(ctx, companyId, intent);
+  }
+
+  /**
+   * C11 (owner decision 7 + 13): the canonical revision this write is prepared from, read **before** the
+   * approval is consumed and before any side effect. `null` means no guard is wired (a service built by hand
+   * in a test), in which case no revision is claimed rather than assumed unchanged. A guard that cannot read
+   * the revision throws (`workspace_revision_mismatch`) — an unprovable revision is a refusal, never a pass.
+   */
+  private async captureWorkspaceRevision(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+  ): Promise<CodeWorkspaceRevisionSnapshot | null> {
+    const guard = this.boundary?.workspaceRevisions;
+    if (!guard) return null;
+    return guard.capture({ ctx, companyId, projectId });
+  }
+
+  /**
+   * C11 (owner decision 7 + 13): the second half of the revision proof, run **after** the write's own
+   * initialization and immediately before the credential lease and the push. A moved revision is
+   * `workspace_revision_mismatch` (409, retryable) with no push at all.
+   */
+  private async assertWorkspaceRevisionUnchanged(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    snapshot: CodeWorkspaceRevisionSnapshot | null,
+  ): Promise<void> {
+    if (!snapshot) return;
+    const guard = this.boundary?.workspaceRevisions;
+    if (!guard) return;
+    await guard.assertUnchanged({ ctx, companyId, projectId }, snapshot, "git_push");
+  }
+
+  /**
+   * C11 (owner decision 6): the credential for one git operation.
+   *
+   * The lease port is the production path (one lease, one operation, revoked in the caller's `finally`).
+   * The legacy resolver stays as the fallback for non-production hosts; in both cases the value only ever
+   * reaches `credentialEnvironment`, i.e. the process-scoped environment of one invocation — never
+   * `.git/config`, never a log, never the returned result.
+   */
+  private async acquireCredential(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    input: { credentialId?: string; purpose: "git.push" | "pull_request.create" | "pull_request.comment"; toolCallId: string },
+  ): Promise<{ value: string; leaseId: string | null }> {
+    if (this.boundary?.credentials && input.credentialId) {
+      const lease = await this.boundary.credentials.acquire({
+        ctx, companyId, projectId, credentialId: input.credentialId, toolCallId: input.toolCallId, purpose: input.purpose,
+      });
+      return { value: lease.value, leaseId: lease.leaseId };
+    }
+    return { value: await this.githubToken(ctx, companyId, input.credentialId), leaseId: null };
+  }
+
+  /**
+   * C11 (owner decision 6): the git hardening of a credentialed invocation, all of it scoped to this one
+   * process.
+   *
+   * `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` sits at **command-line scope**, so the authorization extraheader
+   * is given to this invocation only and `.git/config` is never written. The same scope *neutralises* the
+   * credential surfaces too: an empty `credential.helper` resets the helper list (a helper configured in
+   * the repository or in a user config cannot run), an empty `core.askPass` disables a configured askpass,
+   * and `GIT_TERMINAL_PROMPT=0` is already set by `runGit`. `GIT_CONFIG_NOSYSTEM=1` removes the system
+   * config from the same invocation.
+   */
+  private credentialEnvironment(token: string): Record<string, string> {
+    const auth = Buffer.from(`x-access-token:${token}`).toString("base64");
+    return {
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_COUNT: "3",
+      GIT_CONFIG_KEY_0: "credential.helper",
+      GIT_CONFIG_VALUE_0: "",
+      GIT_CONFIG_KEY_1: "core.askPass",
+      GIT_CONFIG_VALUE_1: "",
+      GIT_CONFIG_KEY_2: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_2: `Authorization: Basic ${auth}`,
+    };
   }
 
   private readonly mergeLocks = new Map<string, Promise<void>>();
@@ -914,12 +1715,34 @@ export class ProjectGitService {
     };
   }
 
+  /**
+   * C11 (owner decision 9): merge an agent worktree with a **real** automatic-resolution budget.
+   *
+   * The loop is the mechanism the escalation message used to describe without implementing. It runs the
+   * merge, and when the attempt conflicts it detects the unmerged paths with `--diff-filter=U`, aborts the
+   * in-progress merge so the workspace is left clean, and — only if a resolver produced a concrete strategy
+   * and the budget is not spent — retries with that strategy. `runMergeWithAutoResolve` counts the attempts
+   * that were actually run, so the number in the escalation is evidence.
+   *
+   * The resolver is injected and optional. Without one, attempt 1 is the only attempt and the escalation says
+   * `1` rather than promising two. With one (a model-driven resolution, a project policy, a two-person
+   * decision), attempt 2 really runs and can really succeed. `code.ask_user` is the suggested next step,
+   * because the agent that called this owns the run that has to wait.
+   */
   async mergeAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { agentSlug: string; targetBranch?: string; message?: string },
-  ): Promise<{ merged: boolean; commitHash: string; targetBranch: string; sourceBranch: string }> {
+    options: {
+      agentSlug: string;
+      targetBranch?: string;
+      message?: string;
+      /** C11: the automatic-resolution strategy provider; absent means no automatic retry is attempted. */
+      conflictResolver?: GitConflictResolverPort | null;
+      /** C11: overrides the budget. Clamped to `MAX_GIT_MERGE_ATTEMPTS` so a caller cannot raise it. */
+      maxAttempts?: number;
+    },
+  ): Promise<{ merged: boolean; commitHash: string; targetBranch: string; sourceBranch: string; attempts: number }> {
     this.requireWrite(ctx);
     const lockKey = `${companyId}:${projectId}`;
     const prev = this.mergeLocks.get(lockKey) ?? Promise.resolve();
@@ -944,33 +1767,54 @@ export class ProjectGitService {
       // Switch to targetBranch in main repo
       await this.runGit(dir, ["checkout", targetBranch]);
 
-      try {
-        await this.runGit(dir, ["merge", "--no-ff", "-m", commitMsg, sourceBranch]);
-      } catch (mergeError: any) {
-        // Detect conflicting unmerged files
-        let conflictFiles: string[] = [];
-        try {
-          const { stdout: unmerged } = await this.runGit(dir, ["diff", "--name-only", "--diff-filter=U"]);
-          conflictFiles = unmerged.split(/\r?\n/).filter(Boolean);
-        } catch {
-          if (mergeError instanceof GitConflictError) {
-            conflictFiles = mergeError.conflictingFiles;
-          }
-        }
-
-        // Always abort the in-progress merge immediately to leave main workspace clean
-        try {
+      const outcome = await runMergeWithAutoResolve({
+        sourceBranch,
+        targetBranch,
+        ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
+        resolver: options.conflictResolver ?? null,
+        merge: async (strategy) => {
+          const args = ["merge", "--no-ff", "-m", commitMsg];
+          if (strategy !== "none") args.push(`-X${strategy}`);
+          args.push(sourceBranch);
+          await this.runGit(dir, args);
+        },
+        readConflicts: async () => {
+          const { stdout } = await this.runGit(dir, ["diff", "--name-only", "--diff-filter=U"]);
+          return stdout.split(/\r?\n/).filter(Boolean);
+        },
+        abort: async () => {
           await this.runGit(dir, ["merge", "--abort"]);
-        } catch {}
-
-        if (conflictFiles.length > 0) {
+        },
+      }).catch((error: unknown) => {
+        /**
+         * The workflow module reports the escalation as its own structured error; this service's callers
+         * (`project-git-routes.ts`, `project-multi-agent.ts`, the worktree suite) catch
+         * `GitConflictEscalationError`, and the escalation payload travels with it so a caller can act on the
+         * attempt count and the suggested next tool instead of re-deriving them from a message.
+         */
+        if (error instanceof CodeGitWorkflowError && error.code === GIT_CONFLICT_ESCALATED) {
+          const escalation = (error.details as { escalation?: {
+            attempts: number; maxAttempts: number; conflictingFiles: string[]; sourceBranch: string;
+            targetBranch: string; suggestedTool: "code.ask_user"; question: string;
+          } }).escalation;
+          const built = escalation ?? buildConflictEscalation({
+            attempts: 1, conflictingFiles: [], sourceBranch, targetBranch,
+          });
           throw new GitConflictEscalationError(
-            conflictFiles,
-            `Merge conflict detected between ${sourceBranch} and ${targetBranch} in: ${conflictFiles.join(", ")}`,
+            built.conflictingFiles,
+            `Merge conflict detected between ${sourceBranch} and ${targetBranch} in: ${built.conflictingFiles.join(", ")}`,
+            {
+              attempts: built.attempts,
+              maxAttempts: built.maxAttempts,
+              sourceBranch,
+              targetBranch,
+              suggestedTool: built.suggestedTool,
+              question: built.question,
+            },
           );
         }
-        throw mergeError;
-      }
+        throw error;
+      });
 
       const { stdout: headOut } = await this.runGit(dir, ["rev-parse", "HEAD"]);
       return {
@@ -978,6 +1822,7 @@ export class ProjectGitService {
         commitHash: headOut.trim(),
         targetBranch,
         sourceBranch,
+        attempts: outcome.attempts,
       };
     } finally {
       release();

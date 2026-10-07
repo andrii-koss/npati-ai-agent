@@ -10,7 +10,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -63,7 +63,7 @@ import { ProjectSandboxService } from "./project-sandbox-service";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { registerProjectTerminalRoutes } from "./project-terminal-routes";
 import { registerProjectPreviewRoutes } from "./project-preview-routes";
-import { ProjectGitService } from "./project-git-service";
+import { ProjectGitService, type HostGitCredentialPort } from "./project-git-service";
 import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectImportService } from "./project-import-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
@@ -150,11 +150,16 @@ import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-dep
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
 import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
 import { allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
+import { ensureSessionBranch } from "./code-tool-git-executors";
+import { gitWriteIntentForTool, sessionBranchName } from "./code-git-workflow";
+import { CodeWorkspaceRevisionGuard } from "./code-workspace-revision";
+import { buildPullRequestDescription } from "./code-pr-description";
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
 import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
 import { SecretLeaseProvider } from "./code-secret-lease";
-import { isAgentPrincipal, matrixModeFor, PolicyEngine } from "./code-policy-engine";
+import { isAgentPrincipal, isReviewSafeTool, matrixModeFor, PolicyEngine } from "./code-policy-engine";
+import type { GitWriteIntent } from "./code-git-write-policy";
 import { classifyShellCommand } from "./code-shell-classifier";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
 import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
@@ -1193,7 +1198,84 @@ export function buildApp(config: AppConfig = {}) {
   }, auditConfig.anchorIntervalMs) : undefined;
   auditAnchorTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
-  const projectGitService = new ProjectGitService(workspaceStore, projectService, config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), undefined, async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; });
+  /**
+   * C11 (owner decisions 2, 7, 8 and 10): the git workflow wiring.
+   *
+   * Four ports, and each one exists because the thing it does must have exactly one implementation:
+   *
+   *  - `codeWorkspaceRevisions` reads the **canonical** revision from the existing `ProjectWorkspace.info`
+   *    (the content digest of the workspace's file set). The tool runtime captures it when it authorises a
+   *    call and the git executors re-check it before a commit or a push, so "which bytes did this operation
+   *    act on" is provable and a moved revision is `workspace_revision_mismatch` (owner decision 7);
+   *  - `assertProtectedBranch` is `CodeProtectedBranchService.assertGitWriteAllowed` — the **same** decision
+   *    phase 4b and the git boundary make. A git tool therefore cannot reach a branch decision that the other
+   *    two checks would not have made;
+   *  - `sessionBranch` is `sessionBranchName(sessionId)` (`npati/<session-short-id>`), so a commit or a push
+   *    asserts it is on the branch the session was told to work on (owner decision 8);
+   *  - `describeRun` reuses the run's own `CodingAgentRunSummary` for a pull-request body (owner decision 11).
+   *    It reads the live summary the runner publishes, and a call outside a run answers `null` — the tool then
+   *    says `descriptionSource: "unavailable"` rather than inventing a description.
+   *
+   * The guard is built **here**, above the git-policy boundary, because owner decision 13 gives the boundary
+   * a third port: the revision must be read before the write's own initialization and re-checked after it. It
+   * is one guard instance for the tool runtime and the boundary, so there is one answer to "what revision is
+   * this workspace on".
+   */
+  const codeWorkspaceRevisions = new CodeWorkspaceRevisionGuard({
+    read: async ({ ctx, companyId, projectId }) => {
+      const info = await projectWorkspace.info(ctx, companyId, projectId);
+      return { currentRevision: info.currentRevision, currentBranch: info.currentBranch ?? null };
+    },
+  });
+  /**
+   * C11: the git-policy boundary of `ProjectGitService`. The policy and credential ports are assigned further
+   * down — the protected-branch service and the secret-lease provider are built after this line — and are read
+   * **lazily** here, exactly like the other late-bound ports in this file. The closure resolves them at
+   * call time (a git write happens long after startup); while a port is unset the write is refused, so the
+   * lazy indirection cannot turn a missing check into a skipped one. The revision guard above is passed
+   * directly: it is a read-only port whose instance exists already.
+   */
+  let codeGitPolicyBoundary: { assertGitWriteAllowed: (ctx: AuthContext, companyId: string, input: GitWriteIntent) => Promise<unknown> } | null = null;
+  let hostGitCredentialLease: HostGitCredentialPort | null = null;
+  const projectGitService = new ProjectGitService(
+    workspaceStore,
+    projectService,
+    config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"),
+    undefined,
+    async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; },
+    undefined,
+    {
+      // The second protected-branch check, performed immediately before the write (owner decision 3).
+      assertGitWriteAllowed: (ctx, companyId, input) => {
+        const boundary = codeGitPolicyBoundary;
+        if (!boundary) throw new Error("The protected-branch policy is unavailable; the git write is refused");
+        return boundary.assertGitWriteAllowed(ctx, companyId, input);
+      },
+      // C11 (owner decision 7 + 13): the canonical revision, read before the approval and re-checked after the
+      // write's own initialization (`workspace_revision_mismatch`, no push).
+      workspaceRevisions: codeWorkspaceRevisions,
+      // The real approval record, consumed with the payload hash of the exact write (owner decision 5).
+      ...(approvalsRepo
+        ? {
+            approvals: {
+              consumeApproved: (ctx: AuthContext, companyId: string, id: string, params: { runId: string; agentId: string; toolName: string; inputPayload: Record<string, unknown> }) =>
+                approvalsRepo!.consumeApproved(ctx, companyId, id, params as never),
+            },
+          }
+        : {}),
+      // One credential lease per git operation (owner decision 6).
+      credentials: {
+        acquire: async (input) => {
+          const leases = hostGitCredentialLease;
+          if (!leases) throw new Error("Git credential leasing is unavailable in this deployment");
+          return leases.acquire(input);
+        },
+        revoke: async (leaseId, reason) => {
+          await hostGitCredentialLease?.revoke(leaseId, reason);
+        },
+      },
+    },
+  );
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
   // C1: code projects and code sessions. No tools and no agent loop here; the runner is C6.
   // C1a: the Coding Agent is dark by default; every code mutation (and later every tool) passes here.
@@ -1250,6 +1332,28 @@ export function buildApp(config: AppConfig = {}) {
   // it, so the terminal policy sees one consistent caller identity.
   const codeSandboxExecPort = projectSandbox ? {
     execute: async (ctx: AuthContext, companyId: string, request: { projectId: string; command: string; cwd?: string; timeoutMs?: number }) => {
+      /**
+       * C11 (owner decision 7): the canonical revision the execution environment is about to receive.
+       *
+       * The sandbox is an execution environment, never a second source of truth, so the question a build has
+       * to be able to answer is "which canonical revision did you see?". The revision is read here — the one
+       * place a command leaves the API — and **recorded as the sandbox binding**, so the answer is a stored
+       * fact rather than a reconstruction, and a later git operation in the same session is compared against
+       * the same canonical digest. Reading it is best effort: a workspace that cannot be enumerated must not
+       * break a command that previously ran, and "no revision recorded" is reported as exactly that instead
+       * of a fabricated one. The fail-closed half is on the git side, where a moved revision is
+       * `workspace_revision_mismatch`.
+       */
+      try {
+        const snapshot = await codeWorkspaceRevisions.capture({ ctx, companyId, projectId: request.projectId, sessionId: null });
+        codeWorkspaceRevisions.recordSandboxBinding(
+          { ctx, companyId, projectId: request.projectId, sessionId: null },
+          snapshot.revision,
+          "sandbox_exec",
+        );
+      } catch (error) {
+        app.log.warn({ err: error, projectId: request.projectId }, "code_sandbox_revision_unavailable");
+      }
       const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "code-tool-runtime", ...(request.cwd ? { cwd: request.cwd } : {}) };
       const result = await projectSandbox!.execute(ctx, companyId, terminalRequest);
       const shaped = result as { stdout?: string; output?: string; exitCode?: number };
@@ -1277,7 +1381,54 @@ export function buildApp(config: AppConfig = {}) {
     resolveCredential: browserCredentials
       ? async (context, companyId, credentialId) => browserCredentials!.describe(context, companyId, credentialId)
       : undefined,
+    /**
+     * C11 (owner decision 6): the value access the **host** git delivery target needs. Adding it does not
+     * enable tmpfs delivery (`materializeFile` also requires `writeSecretFile`, which stays unwired), and
+     * the value is only ever read through `SecretLeaseProvider.hostProcessValue`, i.e. for a lease issued
+     * with `target: "hostProcess"` and consumed exactly once.
+     */
+    resolveField: browserCredentials
+      ? async (context, companyId, credentialId, field) => {
+          const fields = await browserCredentials!.resolve(context, companyId, credentialId);
+          const value = fields?.[field];
+          return typeof value === "string" ? value : null;
+        }
+      : undefined,
   });
+  /**
+   * C11 (owner decision 6): the host-git credential lease. One lease per git operation; the value is read
+   * once, used only in the process-scoped environment of that single `git` invocation (see
+   * `ProjectGitService.credentialEnvironment`) and revoked by the caller in a `finally`. The lease is
+   * issued for `target: "hostProcess"`, which `environmentReferences` refuses — so the same credential can
+   * never be delivered into an agent shell's environment.
+   */
+  hostGitCredentialLease = {
+    acquire: async ({ ctx, companyId, projectId, credentialId, toolCallId, purpose }) => {
+      const sessionId = `git:${projectId}`;
+      const lease = await secretLeases.issue(ctx, {
+        companyId,
+        projectId,
+        sessionId,
+        purpose,
+        toolCallId,
+        variableName: "NPATI_GIT_TOKEN",
+        credentialId,
+        field: "token",
+        target: "hostProcess",
+      });
+      try {
+        const value = await secretLeases.hostProcessValue(ctx, lease.leaseId, toolCallId, sessionId);
+        return { leaseId: lease.leaseId, value: value.value };
+      } catch (error) {
+        // A lease that could not be redeemed is revoked immediately: no window in which it stays active.
+        await secretLeases.revoke(lease.leaseId, "acquire_failed").catch(() => undefined);
+        throw error;
+      }
+    },
+    revoke: async (leaseId, reason) => {
+      await secretLeases.revoke(leaseId, reason).catch(() => undefined);
+    },
+  };
   /**
    * C4 (owner decision): every code tool execution decision passes through this single server-side
    * engine in a fixed phase order — feature flag, RBAC, capability, hard deny, session mode, project
@@ -1445,6 +1596,16 @@ export function buildApp(config: AppConfig = {}) {
     guard: resolveProtectedBranchGuardConfig(process.env),
     logger: app.log,
   });
+  /**
+   * C11 (owner decision 3): the git-policy boundary of `ProjectGitService` reads the same service the
+   * engine's hard-deny phase reads. `assertGitWriteAllowed` is a **separate** call, made immediately before
+   * the git side effect, because a direct service call (a route, a script, a future tool) never reaches the
+   * engine — that is the path this assignment closes.
+   */
+  codeGitPolicyBoundary = {
+    assertGitWriteAllowed: (ctx: AuthContext, companyId: string, input: GitWriteIntent) =>
+      codeProtectedBranches.assertGitWriteAllowed(ctx, companyId, input),
+  };
   const policyEngine = new PolicyEngine({
     flags: featureFlagService,
     capabilities: {
@@ -2183,6 +2344,33 @@ export function buildApp(config: AppConfig = {}) {
       };
     },
   };
+  /**
+   * C11 (owner decisions 2, 7, 8, 10 and 13): the `code.git.*` executors' ports.
+   *
+   *  - `revisions` is the single `CodeWorkspaceRevisionGuard` built above, next to the git boundary: the
+   *    runtime captures the canonical revision it authorises a call against and the executors re-check it
+   *    before a commit or a push (owner decision 7);
+   *  - `assertProtectedBranch` is `CodeProtectedBranchService.assertGitWriteAllowed` — the **same** decision
+   *    phase 4b and the git boundary make. A git tool therefore cannot reach a branch decision that the other
+   *    two checks would not have made;
+   *  - `sessionBranch` is `sessionBranchName(sessionId)` (`npati/<session-short-id>`), so a commit or a push
+   *    asserts it is on the branch the session was told to work on (owner decision 8);
+   *  - `describeRun` reuses the run's own `CodingAgentRunSummary` for a pull-request body (owner decision 11).
+   *    It reads the live summary the runner publishes, and a call outside a run answers `null` — the tool then
+   *    says `descriptionSource: "unavailable"` rather than inventing a description.
+   */
+  /**
+   * Owner decision 11: the pull-request description is generated from the run's **own**
+   * `CodingAgentRunSummary` — the live one the runner publishes — and never from a second format. A tool call
+   * outside a run (or a run whose summary is not published) answers `null`, which the executor reports as
+   * `descriptionSource: "unavailable"` instead of inventing prose that reads like a verified summary.
+   */
+  const describeCodeRunForPullRequest = async (): Promise<{ title: string; body: string } | null> => {
+    const summary = codeRunEnvironment.runSummary();
+    if (!summary) return null;
+    const description = buildPullRequestDescription({ summary });
+    return { title: description.title, body: description.body };
+  };
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
@@ -2284,6 +2472,28 @@ export function buildApp(config: AppConfig = {}) {
         }
         return null;
       },
+      /**
+       * C11 (owner decision 2): the `code.git.*` executors. They are **adapters over the existing
+       * `ProjectGitService`** — the service is passed as-is, so there is no wrapping layer that could grow a
+       * second git implementation, and every rule (the protected-branch hard deny, the approval record bound
+       * to the payload hash of the write, the one-operation credential lease) stays where C11 put it.
+       *
+       * `assertProtectedBranch` and `sessionBranch` are the preconditions: the first is the same decision
+       * phase 4b and the git boundary make, the second is the branch the session is supposed to be on.
+       */
+      git: projectGitService,
+      revisions: codeWorkspaceRevisions,
+      assertProtectedBranch: async ({ ctx, companyId, intent }) => {
+        const decision = await codeProtectedBranches.evaluateGitWrite(ctx, companyId, intent);
+        return {
+          allowed: decision.allowed,
+          branch: decision.branch,
+          ...(decision.code ? { code: decision.code } : {}),
+          ...(decision.reason ? { reason: decision.reason } : {}),
+        };
+      },
+      sessionBranch: async ({ sessionId }) => (sessionId ? sessionBranchName(sessionId) : null),
+      describeRun: describeCodeRunForPullRequest,
     }),
     checkpoints: codeCheckpointPort,
     approvals: codeApprovalPort,
@@ -2308,6 +2518,23 @@ export function buildApp(config: AppConfig = {}) {
     } : undefined,
     turns: codeTurnTracker,
     writePort: codeProjectWorkspaceWritePort,
+    /**
+     * C11 (owner decision 13): the read-only repository state for the **approval request** of a git write.
+     *
+     * "This push would create the repository" is part of what a human approves, so it has to be in the payload
+     * the request is created with — and it has to come from the repository, not from the model's arguments.
+     * This is the git service's own `inspectRepository` (`lstat` plus two read-only `rev-parse` probes, no
+     * `git init`, no write); the git boundary asks the same method again immediately before the write, so both
+     * sides of the approval hash are computed from one implementation. A call that fails is treated by the
+     * runtime as "state unknown", which claims nothing: a write that really needs initialization is then
+     * refused at the boundary as a payload mismatch, never approved.
+     */
+    repositoryState: {
+      inspect: async ({ ctx, companyId, projectId }) => {
+        const state = await projectGitService.inspectRepository(ctx, companyId, projectId);
+        return { initialized: state.initialized };
+      },
+    },
     // Formatter/syntax hooks run in the sandbox and only when the deployment configures them; their
     // output is a warning on the tool result and never blocks (or silently rewrites) a change.
     postWriteHooks: codeSandboxExecPort ? {
@@ -2316,6 +2543,41 @@ export function buildApp(config: AppConfig = {}) {
     } : undefined,
     toPort: () => createProjectWorkspaceReadPort(projectWorkspace, codeSandboxExecPort),
     activity: activitySinkForKind(codeActivitySink, "code_tool_activity"),
+    /**
+     * C11 (owner decisions 3 and 10): the two ports the runtime needs to authorise a git tool.
+     *
+     * `gitPolicy` is the call site where a git **tool** hands its typed intent
+     * (`gitWriteIntentFromToolInput`) to the policy engine, so phase 4b judges the protected-branch policy on
+     * the same fields the git boundary will write. `approvalDeferredByBoundary` is stated here because this
+     * path's approval is enforced with a stronger binding at that boundary — it consumes the record against
+     * the payload hash of the exact write. The deferral cannot lift a hard deny: the hard-deny phases have
+     * already returned by the time it is read.
+     *
+     * `reviewScope` is the read-only intent's allowlist, taken from the engine's own `isReviewSafeTool` so
+     * "read-only" has exactly one definition.
+     */
+    gitPolicy: {
+      evaluate: async ({ ctx, companyId, projectId, sessionId, tool, args, toolCallId, agentId }) => {
+        const intent = gitWriteIntentForTool(tool, args);
+        const result = await enrichedPolicyEngine.evaluate({
+          ctx, companyId, projectId,
+          ...(sessionId ? { sessionId } : {}),
+          ...(agentId ? { agentId } : {}),
+          tool,
+          toolCallId,
+          git: intent,
+          approvalDeferredByBoundary: true,
+        });
+        return {
+          decision: result.decision === "deny" ? "deny" : result.decision === "require_approval" ? "require_approval" : "allow",
+          ...(result.code ? { code: result.code } : {}),
+          ...(result.reasons ? { reasons: result.reasons } : {}),
+          status: result.status ?? 200,
+        };
+      },
+    },
+    reviewScope: { allows: (tool: string) => isReviewSafeTool(tool) },
+    revisions: codeWorkspaceRevisions,
   });
   // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
   // published checksum), so a session can always be read with the exact tool versions it used.
@@ -4181,6 +4443,15 @@ ${localized.next}`;
         return { linked: false, reason: error instanceof Error ? error.message : "session_run_link_failed" };
       }
     },
+    /**
+     * C11 (owner decision 8): the session branch. It delegates to the existing `ProjectGitService` through
+     * the git executors' own helper, so "does the branch exist" is answered by listing branches (a real git
+     * query) rather than by parsing a failed `checkout`. The runner calls it before the first model step and
+     * **stops the run** if the branch cannot be established, because continuing would mean working on
+     * whatever branch happens to be checked out.
+     */
+    ensureSessionBranch: async ({ ctx, companyId, projectId, sessionId }) =>
+      ensureSessionBranch({ git: projectGitService, ctx, companyId, projectId, sessionId }),
     // C6b: the snapshot is real, not the null provider. The provider is built once per process, so the facts
     // that only exist per run (the admitted image digest and the policy composition) travel through the
     // holder below. Every source that this deployment genuinely cannot answer returns `null` with the reason
@@ -4372,6 +4643,12 @@ ${localized.next}`;
           prompt: invocation.request,
           ...(invocation.sessionId ? { turnId: invocation.sessionId } : {}),
           ...(invocation.signal ? { signal: invocation.signal } : {}),
+          /**
+           * C11 (owner decision 10): the resolved intent decides whether this run may write. The value comes
+           * from the same `codeIntentIsReadOnly` predicate the routing decision carries, so a `REVIEW_CODE`
+           * run is read-only on the server as well as in the prompt.
+           */
+          ...(codeIntentIsReadOnly(invocation.intent) ? { readOnlyIntent: true } : {}),
         });
         return { status: result.status, reason: result.reason, summary: result.summary };
       },
@@ -6227,6 +6504,9 @@ ${localized.next}`;
                 prompt: message,
                 signal: isBackground ? backgroundSink!.signal : streamController.signal,
                 cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
+                // C11 (owner decision 10): `REVIEW_CODE` is a read-only intent, and this is the flag the
+                // runtime refuses writes on. It is derived from the routing decision, never from the message.
+                ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
               });
             } catch (error) {
               runResult = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };

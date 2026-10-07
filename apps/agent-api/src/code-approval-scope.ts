@@ -141,6 +141,18 @@ export const SCOPED_RULE_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "code.deps.install",
   "code.deps.update",
   "code.git.push",
+  /**
+   * C11: the rest of the git writes whose effect a standing rule must not be able to repeat.
+   *
+   * `code.git.restore` destroys uncommitted work; `code.git.pr.create` publishes a branch for review; and
+   * `code.git.pr.comment` publishes text under the reviewer's name. **`code.git.commit` is deliberately not
+   * here** — it is a local, reversible action, and a standing rule for it is the ordinary case ("the agent may
+   * commit its work"), while the push that would publish those commits is denied above. The three entries are
+   * listed explicitly as well as by pattern because the pattern net only catches `push`.
+   */
+  "code.git.restore",
+  "code.git.pr.create",
+  "code.git.pr.comment",
   "code.secret_lease",
   "code.secrets.lease",
   "code.network.allowlist.add",

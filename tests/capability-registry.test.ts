@@ -38,10 +38,12 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("Coverage of 306 Inventory IDs", () => {
     it("covers 100% of the 306 inventory items without omissions", () => {
       const validation = defaultCapabilityRegistry.validate();
-      // C9 added three agent-callable code tools: ids 371/372 (`code.plan.propose`, `code.plan.update`) and 373
-      // (`code.ask_user`), so the catalog grew from 370 to 373. The assertion is kept exact on purpose: it is what
-      // proves the catalog has no uncovered inventory id, and relaxing it to a range would stop proving that.
-      expect(validation.coveredInventoryCount).toBe(373);
+      // C9 added three agent-callable code tools (ids 371/372 for the planning pair and 373 for
+      // `code.ask_user`), so the catalog grew from 370 to 373; C11 (owner decision 2) added eleven
+      // agent-callable git tools on ids 374-384, so it grew to **384**. The assertion is kept exact on
+      // purpose: it is what proves the catalog has no uncovered inventory id, and relaxing it to a range would
+      // stop proving that.
+      expect(validation.coveredInventoryCount).toBe(384);
       expect(validation.missingInventoryIds).toEqual([]);
     });
 
@@ -68,7 +70,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const callable = defaultCapabilityRegistry.listAgentCallable();
       // 106 + the three C9 code tools (ids 371–373). Only `tool`-type capabilities may be callable, which the
       // loop below still checks one by one.
-      expect(callable.length).toBe(109);
+      expect(callable.length).toBe(120);
 
       for (const cap of callable) {
         expect(cap.type).toBe("tool");
@@ -89,7 +91,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("Registry API, Filtering and Startup Performance", () => {
     it("filters capabilities accurately by type, domain and risk", () => {
       const tools = defaultCapabilityRegistry.list({ type: "tool" });
-      expect(tools.length).toBe(109); // 106 + the three C9 code tools (ids 371–373)
+      expect(tools.length).toBe(120); // 106 + C9's three code tools + C11's eleven git tools (ids 374-384)
 
       const runtimes = defaultCapabilityRegistry.list({ type: "runtime" });
       expect(runtimes.length).toBe(160);
@@ -112,8 +114,8 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const item306 = defaultCapabilityRegistry.getByInventoryId(306);
       const durationMs = performance.now() - start;
 
-      expect(all.length).toBe(373); // C9 added ids 371-373
-      expect(callable.length).toBe(109);
+      expect(all.length).toBe(384); // C11 added the eleven git tools on ids 374-384
+      expect(callable.length).toBe(120);
       expect(item100).toBeDefined();
       expect(item306).toBeDefined();
       expect(durationMs).toBeLessThan(50); // Well within sub-50ms bound
@@ -127,12 +129,12 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const res = await app.inject({ method: "GET", url: "/capabilities?type=tool" });
       expect(res.statusCode).toBe(200);
       const data = res.json();
-      expect(data.length).toBe(109);
+      expect(data.length).toBe(120);
       expect(data.every((c: any) => c.type === "tool")).toBe(true);
 
       const callableOnly = await app.inject({ method: "GET", url: "/capabilities?callable=true" });
       expect(callableOnly.statusCode).toBe(200);
-      expect(callableOnly.json().length).toBe(109);
+      expect(callableOnly.json().length).toBe(120);
 
       await app.close();
     }, 40_000);

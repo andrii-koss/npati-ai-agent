@@ -343,7 +343,7 @@ export interface CodeRunStatePort {
 }
 
 export interface CodeRunActivityEvent {
-  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished";
+  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch";
   companyId: string;
   projectId: string;
   sessionId?: string;
@@ -357,6 +357,14 @@ export interface CodeRunActivityEvent {
   durationMs?: number;
   reason?: string;
   snapshotId?: string;
+  /**
+   * C11 (owner decision 8): the branch a run works on. It is a branch **name**, not a path or a diff, so it
+   * is metadata in the sense the Activity rules require — and "which branch did this run work on" is the
+   * question the escalation path needs answered.
+   */
+  branch?: string;
+  branchCreated?: boolean;
+  branchSwitched?: boolean;
 }
 
 /**
@@ -394,6 +402,18 @@ export interface CodeRunEnvironmentHolder {
    */
   setProjectInstructions(value: { contentHash: string | null; trustStatus: "trusted" | "untrusted" } | null): void;
   projectInstructions(): { contentHash: string | null; trustStatus: "trusted" | "untrusted" } | null;
+  /**
+   * C11 (owner decision 11): the **live** summary of the run in this process, published by the runner as soon
+   * as it exists and cleared when the run finishes.
+   *
+   * It exists because the pull-request description must be generated from the run's own
+   * `CodingAgentRunSummary` — not from a second format and not from the persisted estimate, which carries
+   * counts and no path list. A run-scoped fact published through the process-wide holder is exactly what this
+   * holder is for (see its type comment); `code.git.pr.create` runs *inside* the run, so the summary it reads
+   * is the run that is opening the pull request.
+   */
+  setRunSummary(value: CodingAgentRunSummary | null): void;
+  runSummary(): CodingAgentRunSummary | null;
 }
 
 export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
@@ -407,6 +427,7 @@ export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
   let systemPrompt: { version: number | null; contentHash: string | null } | null = null;
   let modelProfileVersion: string | number | null = null;
   let projectInstructions: { contentHash: string | null; trustStatus: "trusted" | "untrusted" } | null = null;
+  let runSummary: CodingAgentRunSummary | null = null;
   return {
     setSandboxImage(next) { image = next; },
     setPolicyComposition(next) { composition = next; },
@@ -428,6 +449,8 @@ export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
     modelProfileVersion() { return modelProfileVersion; },
     setProjectInstructions(next) { projectInstructions = next; },
     projectInstructions() { return projectInstructions; },
+    setRunSummary(next) { runSummary = next; },
+    runSummary() { return runSummary; },
   };
 }
 
@@ -601,6 +624,22 @@ export interface CodingAgentRunnerPorts {
   policyCompositionSources?: CodeRunPolicyCompositionSources;
   /** C6b: system-prompt and model-profile version registries (deduplicated by content hash). */
   snapshotConfigVersions?: CodeRunSnapshotConfigVersions;
+  /**
+   * C11 (owner decision 8): puts the session on its own branch (`npati/<session-short-id>`) before the first
+   * model step, so a run never accumulates work on the repository's main branch.
+   *
+   * It is a port rather than a call into git because the runner owns no git: the application wires it to the
+   * existing `ProjectGitService` (create if missing, switch if present). The result is recorded in the run's
+   * Activity, so "which branch did this run work on" is an answerable question. A port that throws is
+   * reported and the run **stops**: starting work on the wrong branch is exactly the outcome this step
+   * exists to prevent, and continuing would be worse than refusing.
+   */
+  ensureSessionBranch?: (input: {
+    ctx: AuthContext;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+  }) => Promise<{ branch: string; created: boolean; switched: boolean; previousBranch: string | null }>;
   /**
    * C8: the effective project instructions for this run. Optional and fail-soft: without it (or when it
    * throws) the run proceeds with no project instructions block, because an unreadable instruction file must
@@ -784,6 +823,14 @@ export interface CodingAgentRunInput {
    * for this run, which is how a caller opts out without a new flag.
    */
   verificationTools?: readonly string[];
+  /**
+   * C11 (owner decision 10): the session's resolved intent is read-only (`REVIEW_CODE`, `EXPLAIN_CODE`).
+   * The value comes from `codeIntentIsReadOnly(intent)` in the chat entry point — never from a model
+   * argument — and it has two effects: only the review-safe tools are *offered* to the model, and every tool
+   * call carries the flag into the runtime, which refuses anything else on the server. Offering less is a
+   * courtesy; the refusal is the guarantee.
+   */
+  readOnlyIntent?: boolean;
 }
 
 export interface CodingAgentRunSummary {
@@ -973,6 +1020,20 @@ export function assertMetadataOnly(event: Record<string, unknown>, label = "acti
 export function isReadOnlyRunTool(name: string): boolean {
   return CODE_RUN_READ_ONLY_TOOLS.has(name);
 }
+
+/**
+ * C11 (owner decision 10): the git tools a read-only intent may call. It mirrors
+ * `REVIEW_SAFE_GIT_TOOLS` in the policy engine — deliberately as a *name list*, because the runner may not
+ * import the policy engine (the runner is wired by the application and the engine is one of its ports) — and
+ * `tests/coding-agent-c11-git-workflow.test.ts` asserts the two lists are equal, so the mirror cannot drift
+ * silently.
+ */
+export const REVIEW_SAFE_RUN_GIT_TOOLS: ReadonlySet<string> = new Set([
+  "code.git.status",
+  "code.git.diff",
+  "code.git.log",
+  "code.git.pr.comment",
+]);
 
 /** Stable serialisation used only for hashing policy matrices, so key order cannot change the hash. */
 function stableStringify(value: unknown): string {
@@ -1189,12 +1250,23 @@ export class CodingAgentRunner {
     this.selfReviewDiffChars = Math.max(1_000, ports.selfReviewDiffChars ?? DEFAULT_SELF_REVIEW_DIFF_CHARS);
   }
 
-  /** Tool definitions offered to the model. In `plan` mode only read-only tools are offered at all. */
-  toolDescriptors(session: CodeSession): CodeRunToolDescriptor[] {
+  /**
+   * Tool definitions offered to the model.
+   *
+   * `plan` mode offers read/search tools plus the narrow, explicit planning list — never a workspace, sandbox
+   * or git mutation. The list is separate from the read-only set on purpose: a new read tool must not become
+   * available in `plan` just because it is read-only (see PLAN_SAFE_TOOLS).
+   *
+   * C11 (owner decision 10): a **read-only intent** (`REVIEW_CODE`) offers the review-safe set — the read
+   * tools, the plan-safe metadata tools and the read-only git tools, plus the separately approved pull-request
+   * comment. This is the courtesy half of the enforcement; the runtime refuses anything else even if the model
+   * names it anyway.
+   */
+  toolDescriptors(session: CodeSession, options: { readOnlyIntent?: boolean } = {}): CodeRunToolDescriptor[] {
     const available = this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
-    // `plan` mode offers read/search tools plus the narrow, explicit planning list — never a workspace,
-    // sandbox or git mutation. The list is separate from the read-only set on purpose: a new read tool must
-    // not become available in `plan` just because it is read-only (see PLAN_SAFE_TOOLS).
+    if (options.readOnlyIntent === true) {
+      return available.filter((tool) => isReadOnlyRunTool(tool.name) || isPlanSafeTool(tool.name) || REVIEW_SAFE_RUN_GIT_TOOLS.has(tool.name));
+    }
     if (session.mode === "plan") {
       return available.filter((tool) => isReadOnlyRunTool(tool.name) || isPlanSafeTool(tool.name));
     }
@@ -1264,6 +1336,13 @@ export class CodingAgentRunner {
       costUsd: 0,
       remaining: "",
     };
+    /**
+     * C11 (owner decision 11): the run's own summary is published to the environment holder as soon as it
+     * exists, so `code.git.pr.create` can generate the pull-request description from **this** run's summary
+     * rather than from a second format. The reference is live — the loop mutates the same object — so a pull
+     * request opened at the end of the run sees the change set and the verification result as they stand.
+     */
+    this.ports.environment?.setRunSummary(summary);
     let snapshotId: string = EMPTY_SNAPSHOT_ID;
     /**
      * C6b: the replay recorder, assigned once the run id, the snapshot id and the environment facts exist.
@@ -1343,6 +1422,12 @@ export class CodingAgentRunner {
       code?: string,
     ): CodingAgentRunResult => {
       stopHeartbeat();
+      /**
+       * C11: the live summary is cleared on every terminal path. Leaving it behind would let a *later* run —
+       * or a direct tool call outside any run — read a finished run's summary and generate a pull-request
+       * description that describes somebody else's change set.
+       */
+      this.ports.environment?.setRunSummary(null);
       const finishedAt = this.now();
       return {
         status,
@@ -1722,6 +1807,7 @@ export class CodingAgentRunner {
           turnId,
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
+          ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
         });
       } catch (error) {
         const failure = error as { code?: string; message?: string };
@@ -2176,6 +2262,7 @@ export class CodingAgentRunner {
           turnId,
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
+          ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
         });
       } catch (error) {
         const failure = error as { code?: string; message?: string };
@@ -2413,7 +2500,44 @@ export class CodingAgentRunner {
       heartbeatTimer.unref?.();
     }
 
-    const tools = this.toolDescriptors(session);
+    /**
+     * C11 (owner decision 8): a coding session works on its own branch, never on the repository's main branch.
+     *
+     * The step runs **before** the first model step and before any tool call, so there is no window in which
+     * the agent could already have written to main. It is skipped for a read-only intent: a review must not
+     * change the checkout either.
+     *
+     * A failure to establish the branch **stops the run**. That is the fail-closed direction: the alternative
+     * is to keep working on whatever branch happens to be checked out, which is the outcome this step exists
+     * to prevent — and a run that silently worked on main would be indistinguishable from one that honoured
+     * the rule until somebody looked at the repository.
+     */
+    let sessionBranch: { branch: string; created: boolean; switched: boolean; previousBranch: string | null } | null = null;
+    if (this.ports.ensureSessionBranch && input.readOnlyIntent !== true) {
+      try {
+        sessionBranch = await this.ports.ensureSessionBranch({ ctx, companyId, projectId, sessionId });
+        await record({
+          kind: "session_branch",
+          companyId,
+          projectId,
+          sessionId,
+          ...(stateRunId ? { runId: stateRunId } : {}),
+          branch: sessionBranch.branch,
+          branchCreated: sessionBranch.created,
+          branchSwitched: sessionBranch.switched,
+          reason: sessionBranch.previousBranch ? `from:${sessionBranch.previousBranch}` : "from:none",
+        });
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        return finish(
+          "failed",
+          "refused",
+          `The session branch could not be established, so the run was not started (${failure.code ?? "branch_unavailable"}): ${failure.message ?? "unknown error"}`,
+        );
+      }
+    }
+
+    const tools = this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true });
     const modelName = input.model ?? "auto";
     // Profiles come from configuration (injected registry/overrides/enabled ids); an unknown model with no
     // configuration falls back to the conservative profile rather than a guessed capability set.
@@ -2553,14 +2677,14 @@ export class CodingAgentRunner {
       systemPrompt: this.ports.environment?.systemPrompt() ?? null,
       modelProfileVersion: this.ports.environment?.modelProfileVersion() ?? null,
       toolVersions: Object.fromEntries(
-        this.toolDescriptors(session).map((tool) => [tool.name, tool.version]),
+        this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true }).map((tool) => [tool.name, tool.version]),
       ),
       dataClassification: session.dataClassification,
       retentionClass: session.retentionClass,
     });
     /** Tool schema versions, so a recorded call carries the contract it was made under. */
     const toolVersionByName = new Map(
-      this.toolDescriptors(session).map((tool) => [tool.name, tool.version] as const),
+      this.toolDescriptors(session, { readOnlyIntent: input.readOnlyIntent === true }).map((tool) => [tool.name, tool.version] as const),
     );
 
     const messages: ChatMessage[] = [
@@ -3108,6 +3232,12 @@ export class CodingAgentRunner {
           ...(input.runId ? { runId: input.runId } : {}),
           ...(stateRunId ? { runId: stateRunId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
+          /**
+           * C11 (owner decision 10): the read-only intent travels with every call, so the runtime refuses a
+           * write even when the model names a tool the session was never offered. Offering less is a
+           * courtesy; this flag is the guarantee.
+           */
+          ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
         };
         let result: CodeToolInvokeResult | CodeToolInvokeFailure;
         try {

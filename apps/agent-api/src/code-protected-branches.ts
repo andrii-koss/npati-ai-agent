@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { AuthContext } from "@npati/workspace";
 import { classifyPrincipal } from "./code-rbac";
 import { productionPayloadHash, type CodePrivilegedAuditPort } from "./code-step-up";
+import { normalizeGitBranch, type GitWriteIntent, type GitWriteOperation } from "./code-git-write-policy";
 
 /**
  * C5a (part 2B) — company-level protected-branch policy.
@@ -38,24 +39,15 @@ import { productionPayloadHash, type CodePrivilegedAuditPort } from "./code-step
  *    system is introduced: authorisation is the existing `code-rbac.ts` vocabulary plus the company role
  *    from `code-membership.ts`.
  *  - `CodeProtectedBranchRepository` below implements the port for PostgreSQL (with the revision guard in
- *    SQL) and in-process for development/tests. Its DDL is owned by the migration owner:
+ *    SQL) and in-process for development/tests. Its DDL is owned by the migration owner and **has been
+ *    added**: migration 073 (`packages/workspace/src/migration-073.ts`) creates
+ *    `company_protected_branches` with exactly the columns below, `revision` included, plus
+ *    `company_protected_branches_scope_idx` on `workspace_id`. Because the table exists, a policy read
+ *    answers from it and only falls back to `DEFAULT_PROTECTED_BRANCHES` when the company has no row —
+ *    never to an empty set, and never by pretending a missing table is an empty policy.
  *
- *      TODO(C5a migration owner): add, as the next additive migration,
- *        CREATE TABLE IF NOT EXISTS company_protected_branches (
- *          company_id TEXT PRIMARY KEY,
- *          workspace_id TEXT NOT NULL,
- *          branches TEXT[] NOT NULL DEFAULT '{}',
- *          revision INTEGER NOT NULL DEFAULT 1,
- *          updated_by TEXT NOT NULL,
- *          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
- *          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
- *        );
- *        CREATE INDEX IF NOT EXISTS company_protected_branches_scope_idx
- *          ON company_protected_branches(workspace_id);
- *
- *      This file does not create tables (migrations are not owned here). Until the table exists a
- *      policy *read* falls back to `DEFAULT_PROTECTED_BRANCHES` for enforcement decisions (never to an
- *      empty set), while a policy *change* refuses rather than pretending to have stored anything.
+ *    The historical TODO that stood here is closed; it is kept in the description rather than deleted so
+ *    that a reader who remembers it can see where the DDL went. This file still creates no tables.
  */
 
 /** Branches protected when a company has no stored policy. Mirrors `code-shell-classifier.ts`. */
@@ -69,7 +61,7 @@ export const MAX_PROTECTED_BRANCHES = 100;
 /** The only keys a policy change accepts. Anything else is rejected (see the module doc comment). */
 export const PROTECTED_BRANCH_POLICY_INPUT_KEYS: readonly string[] = ["branches", "expectedRevision", "challengeId"];
 
-export type ProtectedBranchOperation = "push" | "force_push";
+export type ProtectedBranchOperation = GitWriteOperation;
 
 export type ProtectedBranchDenialCode = "protected_branch_write_denied" | "force_push_denied";
 
@@ -149,9 +141,16 @@ export function resolveProtectedBranchGuardConfig(
   };
 }
 
-export interface GitWriteAttempt {
-  operation: ProtectedBranchOperation;
-  branch: string;
+/**
+ * C11 (owner decision 3): the policy request for a git write is **typed**.
+ *
+ * `GitWriteIntent` (`code-git-write-policy.ts`) carries `gitOperation`, `sourceBranch`, `targetBranch`,
+ * `remoteBranch`, `remote`, `force` and the credential reference as explicit fields. Nothing in this
+ * module parses a command string: an unrefspec'd shell push is resolved (or refused) *before* it reaches
+ * here, and a git tool supplies the same shape through its own typed arguments. `viaPullRequestMerge` is
+ * the one policy-only fact and stays outside the shared intent because a tool input must never set it.
+ */
+export interface GitWriteAttempt extends GitWriteIntent {
   /**
    * Set only by the pull-request/merge flow (a human merging a reviewed PR). A tool input must never be
    * able to set it — that is the caller's responsibility, and an agent principal is refused anyway.
@@ -162,8 +161,14 @@ export interface GitWriteAttempt {
 export interface ProtectedBranchDecision {
   allowed: boolean;
   protected: boolean;
+  /** The branch the decision was made on: the intent's `targetBranch`. */
   branch: string;
   operation: ProtectedBranchOperation;
+  /** C11: the typed facts the decision was made on, echoed so no caller can claim a different target. */
+  sourceBranch: string | null;
+  remoteBranch: string | null;
+  remote: string | null;
+  force: boolean;
   code: ProtectedBranchDenialCode | null;
   reason: string;
   policyRevision: number;
@@ -197,11 +202,14 @@ export interface UpdateProtectedBranchPolicyInput {
 /** Git branch name: no whitespace, no wildcards, no `..`, no leading dash. */
 const BRANCH_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 
-/** Strips the ref prefix so `refs/heads/main` and `main` are the same branch. */
+/**
+ * Strips the ref prefix so `refs/heads/main` and `main` are the same branch. The implementation lives in
+ * `code-git-write-policy.ts` so the typed git intent, the protected-branch policy and the git-policy
+ * boundary cannot disagree about which branch a write targets; the name is kept here because this is
+ * where the policy surface is read from.
+ */
 export function normalizeBranchName(value: unknown): string {
-  return String(value ?? "")
-    .trim()
-    .replace(/^refs\/heads\//, "");
+  return normalizeGitBranch(value);
 }
 
 /**
@@ -386,6 +394,10 @@ export class CodeProtectedBranchService {
    * The hard deny for a git write. Hard means hard: the owner's role, `admin:all`, `*` and an explicit
    * privileged permission are all irrelevant here — this method never consults the RBAC matrix, so no
    * grant can lift it. Only a human merging a reviewed pull request reaches a protected branch.
+   *
+   * C11: the input is the **typed** intent. The decision is made on `targetBranch` and `gitOperation` and
+   * `force` — never on a command line — and an intent whose branch is empty is refused upstream
+   * (`git_push_requires_resolved_branch`) rather than being read as "no branch to protect".
    */
   async evaluateGitWrite(
     ctx: AuthContext,
@@ -393,15 +405,32 @@ export class CodeProtectedBranchService {
     input: GitWriteAttempt,
   ): Promise<ProtectedBranchDecision> {
     const policy = await this.loadPolicyForDecision(companyId);
-    const branch = normalizeBranchName(input.branch);
-    const protectedBranch = policy.branches.includes(branch);
+    const branch = normalizeBranchName(input.targetBranch);
+    const operation: ProtectedBranchOperation = input.force === true || input.gitOperation === "force_push"
+      ? "force_push"
+      : "push";
+    const protectedBranch = branch ? policy.branches.includes(branch) : true;
     const base = {
       protected: protectedBranch,
       branch,
-      operation: input.operation,
+      operation,
+      sourceBranch: input.sourceBranch ? normalizeBranchName(input.sourceBranch) : null,
+      remoteBranch: input.remoteBranch ? normalizeBranchName(input.remoteBranch) : null,
+      remote: input.remote ?? null,
+      force: operation === "force_push",
       policyRevision: policy.revision,
       decidedOn: "branch_name_and_operation_only" as const,
     };
+    if (!branch) {
+      // Fail closed. A git write with no target branch is exactly the shape the C11 finding named: it must
+      // never be answered with "not in the protected list", which would read as "safe to write".
+      return this.recordDenial(ctx, companyId, {
+        ...base,
+        allowed: false,
+        code: "protected_branch_write_denied",
+        reason: "A git write with no resolved target branch cannot be evaluated against the protected-branch policy",
+      });
+    }
     if (!protectedBranch) {
       return {
         ...base,
@@ -411,7 +440,7 @@ export class CodeProtectedBranchService {
       };
     }
     // Force push is refused first: it is never a merge and never a reviewable change.
-    if (input.operation === "force_push") {
+    if (operation === "force_push") {
       return this.recordDenial(ctx, companyId, {
         ...base,
         allowed: false,
@@ -464,6 +493,12 @@ export class CodeProtectedBranchService {
         operation: decision.operation,
         protected: decision.protected,
         policyRevision: decision.policyRevision,
+        // C11: the typed facts travel into the refusal so the caller that was refused can be sure which
+        // target was judged (a service boundary refusal must be actionable, and provable in a test).
+        targetBranch: decision.branch,
+        sourceBranch: decision.sourceBranch,
+        remote: decision.remote,
+        force: decision.force,
       });
     }
     return decision;
@@ -764,6 +799,12 @@ export class CodeProtectedBranchService {
           reason: decision.code,
           branch: decision.branch,
           operation: decision.operation,
+          // C11: the journalled facts are the typed intent's, so an auditor sees the exact target that was
+          // refused — including the remote, which the command line never had to name (it is the checkout's).
+          sourceBranch: decision.sourceBranch,
+          remoteBranch: decision.remoteBranch,
+          remote: decision.remote,
+          force: decision.force,
           principal: classifyPrincipal(ctx),
           policyRevision: decision.policyRevision,
           repositoryContentConsulted: false,

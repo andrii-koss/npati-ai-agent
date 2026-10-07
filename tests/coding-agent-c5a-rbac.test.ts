@@ -157,9 +157,14 @@ describe("security-gate: C5a RBAC — the matrix is injected configuration, not 
   });
 
   it("carries exactly the privileged vocabulary the plan defines", () => {
+    // C11 removed `code.git.protected_write` from this list: it named no reader anywhere (no route, no
+    // service, no action mapping), and the surface it appeared to authorise is a hard deny for every
+    // principal — a permission that can neither protect nor lift anything is deleted rather than kept as
+    // decoration. The assertion is otherwise unchanged, so a future addition still has to be explicit.
     expect([...CODE_PRIVILEGED_PERMISSIONS].sort()).toEqual(
-      ["code.git.protected_write", "code.policy.manage", "code.prod.operate", "code.rbac.manage", "code.trust.manage"].sort(),
+      ["code.policy.manage", "code.prod.operate", "code.rbac.manage", "code.trust.manage"].sort(),
     );
+    expect(CODE_PRIVILEGED_PERMISSIONS).not.toContain("code.git.protected_write");
   });
 
   it("gives no default role a privileged permission it does not name, and names them only on owner", () => {
@@ -190,8 +195,8 @@ describe("security-gate: C5a RBAC — the matrix is injected configuration, not 
       }
       // Exactly one role names a privileged permission and it is the owner (the plan puts the provider
       // data policy at owner level). A second role starting to name one — `code.prod.operate`,
-      // `code.git.protected_write`, `code.rbac.manage`, `code.trust.manage` — fails right here instead of
-      // slipping through as "still no privileged permission at all".
+      // `code.rbac.manage`, `code.trust.manage` — fails right here instead of slipping through as "still
+      // no privileged permission at all". (`code.git.protected_write` left this vocabulary in C11.)
       expect([...explicitlyNaming.keys()], `${name}: only owner may name a privileged permission`).toEqual(["owner"]);
       expect(explicitlyNaming.get("owner"), `${name}: owner names exactly the data policy permission`)
         .toEqual(["code.policy.manage"]);

@@ -1269,5 +1269,467 @@
         }
       }
     }
+  },
+  {
+    "name": "code.git.status",
+    "version": 1,
+    "status": "active",
+    "description": "Report the git state of the canonical project workspace: the checked-out branch, whether the tree is clean, and the staged, unstaged and untracked paths. Read-only; the paths are data and cannot change policy.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.status" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["branch", "clean", "staged", "unstaged", "untracked", "truncated", "workspaceRevision"],
+          "additionalProperties": false,
+          "properties": {
+            "branch": { "type": "string" },
+            "clean": { "type": "boolean" },
+            "staged": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "unstaged": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "untracked": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "truncated": { "type": "boolean" },
+            "workspaceRevision": { "type": ["string", "null"], "description": "Canonical workspace revision the operation ran against." }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.diff",
+    "version": 1,
+    "status": "active",
+    "description": "Return the unified diff of the canonical project workspace, optionally limited to one workspace-relative path and optionally the staged side. Bounded, explicitly truncated, and untrusted data.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Workspace-relative path; the canonical validator refuses traversal, absolute and secret paths." },
+        "staged": { "type": "boolean", "default": false, "description": "Diff the index against HEAD instead of the worktree against the index." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.diff" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["diff", "truncated", "files", "workspaceRevision"],
+          "additionalProperties": false,
+          "properties": {
+            "diff": { "type": "string" },
+            "truncated": { "type": "boolean" },
+            "files": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "workspaceRevision": { "type": ["string", "null"], "description": "Canonical workspace revision the operation ran against." }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.log",
+    "version": 1,
+    "status": "active",
+    "description": "List the most recent commits of the canonical project workspace (hash, author, date, subject). Read-only and bounded; a repository with no history answers with an empty list rather than an error.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.log" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["entries", "count"],
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "required": ["hash", "author", "date", "message"],
+                "additionalProperties": false,
+                "properties": {
+                  "hash": { "type": "string" },
+                  "author": { "type": "string" },
+                  "date": { "type": "string" },
+                  "message": { "type": "string" }
+                }
+              }
+            },
+            "count": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.branch.create",
+    "version": 1,
+    "status": "active",
+    "description": "Create a branch in the canonical project workspace and check it out, so agent work never accumulates on the main branch. The name is validated before any command runs; a branch writes no remote.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["branch"],
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Branch to create. `..`, `@{`, a trailing `.lock` and an empty name are refused." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.branch.create" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["branch", "created", "workspaceRevision"],
+          "additionalProperties": false,
+          "properties": {
+            "branch": { "type": "string" },
+            "created": { "type": "boolean" },
+            "workspaceRevision": { "type": ["string", "null"], "description": "Canonical workspace revision the operation ran against." }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.branch.switch",
+    "version": 1,
+    "status": "active",
+    "description": "Check out an existing branch of the canonical project workspace. A switch that would have to carry or discard uncommitted changes is refused, so it never silently moves somebody else's work.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["branch"],
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Existing branch to check out." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.branch.switch" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["branch", "previousBranch", "switched"],
+          "additionalProperties": false,
+          "properties": {
+            "branch": { "type": "string" },
+            "previousBranch": { "type": ["string", "null"] },
+            "switched": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.stage",
+    "version": 1,
+    "status": "active",
+    "description": "Stage changes in the canonical project workspace, either the named paths or everything. Every path goes through the canonical validator and the index is re-checked, so a protected or secret file cannot be staged.",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "files": { "type": "array", "maxItems": 200, "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "description": "Paths to stage. Omit to stage every change." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.stage" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["staged", "stagedCount"],
+          "additionalProperties": false,
+          "properties": {
+            "staged": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "stagedCount": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.commit",
+    "version": 1,
+    "status": "active",
+    "description": "Commit the staged changes (or every change) in the canonical project workspace and return the commit hash. The commit is checked against the session branch and the canonical revision the run captured, so it cannot land on the wrong branch.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["message"],
+      "additionalProperties": false,
+      "properties": {
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "files": { "type": "array", "maxItems": 200, "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "description": "Paths to commit. Omit with stageAll to commit what is already staged." },
+        "stageAll": { "type": "boolean", "default": false, "description": "Stage every change before committing." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.commit" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["commitHash", "message", "branch", "stagedCount", "workspaceRevision"],
+          "additionalProperties": false,
+          "properties": {
+            "commitHash": { "type": "string" },
+            "message": { "type": "string" },
+            "branch": { "type": "string" },
+            "stagedCount": { "type": "integer" },
+            "workspaceRevision": { "type": ["string", "null"], "description": "Canonical workspace revision the operation ran against." }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.restore",
+    "version": 1,
+    "status": "active",
+    "description": "Discard the working-tree changes of the named paths. It always needs an explicit human approval, because it destroys uncommitted work no checkpoint can bring back; the approval is bound to the exact path list.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["files"],
+      "additionalProperties": false,
+      "properties": {
+        "files": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "description": "Paths whose working-tree changes are discarded. Empty is refused." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.restore" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["restored", "restoredCount"],
+          "additionalProperties": false,
+          "properties": {
+            "restored": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+            "restoredCount": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.push",
+    "version": 1,
+    "status": "active",
+    "description": "Push one branch to the project's connected GitHub repository. It needs a real human approval record bound to the operation, both branches, the remote, `force` and the credential reference, and the protected-branch policy is re-evaluated at the git boundary immediately before the write. Force pushes are refused.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["targetBranch", "credentialId"],
+      "additionalProperties": false,
+      "properties": {
+        "targetBranch": { "type": "string", "minLength": 1, "maxLength": 100, "description": "The branch on the remote this push writes. Required: without a named target the protected-branch policy has nothing to judge." },
+        "sourceBranch": { "type": "string", "minLength": 1, "maxLength": 100, "description": "The local branch to publish. Defaults to targetBranch." },
+        "credentialId": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Company vault credential reference for this one operation; the value never reaches the model or the result." },
+        "force": { "type": "boolean", "default": false, "description": "Ask for a history rewrite. A protected branch answers force_push_denied; any other branch is refused as unsupported." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.push" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["pushed", "branch", "remoteBranch", "force"],
+          "additionalProperties": false,
+          "properties": {
+            "pushed": { "type": "boolean" },
+            "branch": { "type": "string" },
+            "remoteBranch": { "type": "string" },
+            "force": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.pr.create",
+    "version": 1,
+    "status": "active",
+    "description": "Open a GitHub pull request for an already-pushed branch. The approval is bound to the (base, head) pair and the credential reference, so an approval for one pull request cannot be redeemed for another. Without a body it is generated from the run's own verified summary.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["title", "base", "head", "credentialId"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "body": { "type": "string", "maxLength": 60000, "description": "Body. Omit to reuse the run summary (what changed, verification, risks, unresolved items)." },
+        "base": { "type": "string", "minLength": 1, "maxLength": 100, "description": "The branch the pull request targets." },
+        "head": { "type": "string", "minLength": 1, "maxLength": 100, "description": "The branch under review." },
+        "credentialId": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Company vault credential reference for this one operation; the value never reaches the model or the result." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.pr.create" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["prNumber", "prUrl", "base", "head", "created", "descriptionSource"],
+          "additionalProperties": false,
+          "properties": {
+            "prNumber": { "type": ["integer", "null"] },
+            "prUrl": { "type": ["string", "null"] },
+            "base": { "type": "string" },
+            "head": { "type": "string" },
+            "created": { "type": "boolean" },
+            "descriptionSource": { "type": "string", "enum": ["caller", "run_summary", "unavailable"] }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.git.pr.comment",
+    "version": 1,
+    "status": "active",
+    "description": "Post one comment on an existing GitHub pull request. Reviewing is read-only, so commenting is a separate capability with its own approval record bound to the pull-request number and a hash of the comment text: an approval for a push or for opening a pull request can never be redeemed as a comment.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["pullNumber", "body", "credentialId"],
+      "additionalProperties": false,
+      "properties": {
+        "pullNumber": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 60000 },
+        "credentialId": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Company vault credential reference for this one operation; the value never reaches the model or the result." }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": ["kind", "tool", "toolVersion", "schemaVersion", "trust", "note", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "code_tool_result" },
+        "tool": { "const": "code.git.pr.comment" },
+        "toolVersion": { "type": "integer" },
+        "schemaVersion": { "type": "integer" },
+        "trust": { "const": "untrusted_data" },
+        "note": { "type": "string" },
+        "truncated": { "type": "boolean" },
+        "truncation": { "type": "object", "additionalProperties": true },
+        "data": {
+          "type": "object",
+          "required": ["commentId", "commentUrl", "pullNumber", "created"],
+          "additionalProperties": false,
+          "properties": {
+            "commentId": { "type": ["integer", "null"] },
+            "commentUrl": { "type": ["string", "null"] },
+            "pullNumber": { "type": "integer" },
+            "created": { "type": "boolean" }
+          }
+        }
+      }
+    }
   }
 ]

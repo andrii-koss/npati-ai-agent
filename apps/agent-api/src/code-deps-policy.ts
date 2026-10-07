@@ -381,6 +381,49 @@ export function gitConfigHardeningArgs(hooksDir = `${DEFAULT_DEPS_POLICY_LIMITS.
   ];
 }
 
+/**
+ * C11 (owner decision 6): the git hardening for the **agent shell** (`code.shell.exec` and the Project
+ * terminal), built from the same primitives and the same values the installer path already uses.
+ *
+ * Why the shell path needs it: `/workspace/.git/config` (and a container-global config) persists for the
+ * lifetime of the sandbox, so a `git push` started from an agent command could pick up a credential
+ * helper, an authorization `extraheader` or an askpass that some earlier step left there. The environment
+ * below is delivered with **command-line scope** (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`), which wins over
+ * the repository config, and it *resets* the credential surfaces rather than merely adding to them:
+ *
+ *   - `credential.helper=` with an empty value resets the helper list, so no stored helper can run;
+ *   - `core.askPass=` and `GIT_ASKPASS=/bin/true` mean an interactive prompt cannot become a credential;
+ *   - `http.https://github.com/.extraheader=` with an empty value neutralises an `extraheader` that was
+ *     persisted in the repository config;
+ *   - `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` remove the system and user configs
+ *     (`/dev/null` exists in the container, so no bootstrap file has to be provisioned for this to hold);
+ *   - `GIT_TERMINAL_PROMPT=0` and `GIT_LFS_SKIP_SMUDGE=1` are the same values `gitHooksDisabledEnv` uses.
+ *
+ * `scrubbedEnvironment`/`INSTALL_HARDENING_ENV` are deliberately **not** reused here: they carry the
+ * installer's package-manager knobs (`npm_config_ignore_scripts`, `PIP_NO_INPUT`, ...), and this
+ * environment is applied to *every* sandboxed command, including the `pnpm install` the terminal path
+ * runs for a project without `node_modules`. The git-specific half of that function is what is borrowed.
+ */
+export function gitShellHardeningEnv(limits: DepsPolicyLimits = DEFAULT_DEPS_POLICY_LIMITS): Record<string, string> {
+  const paths = gitIsolationPaths(limits);
+  return {
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "/bin/true",
+    GIT_LFS_SKIP_SMUDGE: "1",
+    NPATI_GIT_HOOKS_PATH: paths.emptyHooksDir,
+    GIT_CONFIG_COUNT: "3",
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+    GIT_CONFIG_KEY_1: "core.askPass",
+    GIT_CONFIG_VALUE_1: "",
+    GIT_CONFIG_KEY_2: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_2: "",
+  };
+}
+
 /** Exact-or-subdomain registry check: `registry.npmjs.org.evil.com` is not allowlisted. */
 export function assertRegistryAllowed(host: string, allowlist: string[] = DEFAULT_DEPS_POLICY_LIMITS.registries): boolean {
   const target = String(host ?? "").trim().toLowerCase().replace(/\.$/, "");

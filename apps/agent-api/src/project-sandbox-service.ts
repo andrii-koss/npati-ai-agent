@@ -6,6 +6,7 @@ import { SandboxProviderError, SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST } from "./s
 import { classifyTerminalCommand, normalizeTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { logTerminalPolicy } from "./terminal-policy-log";
+import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 import type { ProjectService } from "./project-service";
 
 export interface TerminalSecretReference { id: string; field: string; }
@@ -307,6 +308,15 @@ export class ProjectSandboxService {
       for (const name of PROJECT_API_SANDBOX_VARIABLES) if (apiEnvironment[name]) environment[name] = apiEnvironment[name];
     }
     for (const name of Object.keys(environment)) if (isForbiddenSandboxVariable(name)) delete environment[name];
+    /**
+     * C11 (owner decision 6): every sandboxed command runs with the git credential surfaces neutralised,
+     * from the same primitives the installer path uses (`code-deps-policy.ts`). `/workspace/.git/config`
+     * and a container-global config persist for the life of the sandbox, so without this a later `git push`
+     * could use a credential helper or an `extraheader` an earlier step left behind. Applied **after** the
+     * secret values were captured for redaction (these values are not secrets) and after the
+     * forbidden-variable filter, and it can only add git-scoped variables.
+     */
+    Object.assign(environment, gitShellHardeningEnv(resolveDepsPolicyLimits()));
 
     const timeoutMs = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
     let sandboxId = project.sandboxId ?? "";

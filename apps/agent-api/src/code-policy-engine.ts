@@ -5,6 +5,17 @@ import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
 import { hasAdminPermission, type CodeCanonicalSessionMode } from "./code-rbac";
 import { detectGitWriteAttempts } from "./code-shell-classifier";
 import {
+  GIT_PUSH_REQUIRES_RESOLVED_BRANCH,
+  GIT_WRITE_INTENT_INVALID,
+  GIT_WRITE_INTENT_REQUIRED,
+  bindsRepositoryInitialization,
+  gitWriteIntentFromShellAttempt,
+  isGitWriteTool,
+  normalizeGitBranch,
+  normalizeGitWriteIntent,
+  type GitWriteIntent,
+} from "./code-git-write-policy";
+import {
   evaluateMigrationSafety,
   inferMigrationTargetFromCommand,
   resolveMigrationTarget,
@@ -110,6 +121,15 @@ export interface PolicyRequest {
    */
   repositoryInstructions?: { policyMutationAttempts?: number; notes?: string[] } | null;
   /**
+   * C11 (owner decision 3): the **typed** git write this request performs, when it is a git write.
+   *
+   * A git tool has no `command`, so the branch, the remote and `force` cannot be read from a command line
+   * and have to travel as fields. Phase 4b evaluates exactly this shape (and the command line as well,
+   * when both are present), and `payloadHashFor` folds it into the approval hash, so an approval is bound
+   * to the branch it was granted for rather than to "some push".
+   */
+  git?: GitWriteIntent | null;
+  /**
    * C6a: database-migration context. The engine derives the migration *action* from `command` itself
    * (`code-migration-safety.ts`); this field carries what the command text cannot know — the resolved
    * target, the migration files in the diff, whether the call is routed through the Data Studio migration
@@ -122,6 +142,26 @@ export interface PolicyRequest {
     rollbackPlan?: boolean;
     sandboxEphemeral?: boolean;
   };
+  /**
+   * C11 (owner decision 10): the request comes from a session whose **intent is read-only** (`REVIEW_CODE`,
+   * `EXPLAIN_CODE`). This is the server-side enforcement of that intent: the field is set from the session's
+   * resolved intent, never from a model argument and never from a caller-supplied `readOnly` flag, and when
+   * it is `true` every tool outside `READ_TOOLS` / `PLAN_SAFE_TOOLS` / the read-only git tools is refused
+   * with `review_code_read_only`. A review therefore cannot write to the repository, run a command or push a
+   * branch — not because the prompt asked it not to, but because the engine will not authorise it.
+   */
+  readOnlyIntent?: boolean;
+  /**
+   * C11 (owner decision 5): the caller states that this request's approval is enforced at a **boundary with
+   * a stronger binding** than this phase can compute — the git boundary consumes the record against the
+   * payload hash of the exact write, rebuilt from the resolved branch. When it is `true` the approval phase
+   * records the deferral instead of creating or consuming a record.
+   *
+   * Only two things set it: the internal git pre-flight, and nothing else. It is a server-side field on a
+   * request the caller builds, never a model argument, and it cannot turn a hard deny into an allow — the
+   * hard-deny phases (4, 4b, 4c) have already returned by the time it is read.
+   */
+  approvalDeferredByBoundary?: boolean;
 }
 
 export interface PolicyResult {
@@ -181,7 +221,7 @@ export interface PolicyEngineDeps {
     evaluateGitWrite(
       ctx: AuthContext,
       companyId: string,
-      input: { operation: "push" | "force_push"; branch: string },
+      input: GitWriteIntent,
     ): Promise<{
       allowed: boolean;
       code: string | null;
@@ -192,6 +232,17 @@ export interface PolicyEngineDeps {
       policyRevision: number;
     }>;
   };
+  /**
+   * C11 (owner decision 3): the branch an unrefspec'd `git push` would write to.
+   *
+   * `git push` with no refspec pushes the **checked-out** branch, which is a property of the checkout and
+   * not of the command line — the parser deliberately reports `branch: ""` for it. This port is how a
+   * caller that can genuinely establish that branch (a sandbox probe, the host git service) supplies it.
+   * When the port is absent, or answers with nothing, the write is **refused**
+   * (`git_push_requires_resolved_branch`) instead of being treated as "no branch to protect". Wiring it is
+   * an explicit, reviewable decision; the fail-closed default is the refusal.
+   */
+  gitBranchResolver?: (request: PolicyRequest) => Promise<string | null> | string | null;
   sessionMode?: (ctx: AuthContext, companyId: string, sessionId: string) => Promise<CodeSessionModeName | null>;
   /**
    * C5: records every decision (allow, deny and require_approval) as a structured Activity event.
@@ -221,6 +272,13 @@ export const MASTER_FLAG = "coding_agent.enabled";
 export const READ_FLAG = "code.read";
 export const WRITE_FLAG = "code.write";
 export const SHELL_FLAG = "code.shell";
+/**
+ * C11: git tooling has its own declared sub-flag (`feature-flags.ts`, off by default) and its own
+ * capability group (`code-capability-groups.ts`). Before C11 the sub-flag existed while the mapping sent
+ * every git tool to `code.write`, so enabling "writes" silently enabled git tooling too — the flag was
+ * decorative. Git tools are named here so the mapping and the flag agree.
+ */
+export const GIT_FLAG = "code.git";
 
 /**
  * Tools whose capability declaration demands a human approval. Derived from the shared capability
@@ -280,6 +338,19 @@ const READ_TOOLS = new Set([
  */
 export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update", "code.ask_user"]);
 
+/**
+ * C11 (owner decision 10): the tools a **read-only intent** may call beyond the reads and the plan-safe
+ * metadata tools.
+ *
+ * `code.git.status/diff/log` write nothing — not the working tree, not the index, not the remote — so a
+ * review may inspect history and the change set. `code.git.pr.comment` is here for the other half of the
+ * owner's decision: a review's finding belongs on the pull request, and posting it is *not* a repository
+ * write, so it is permitted — but only through **its own** approval record, bound to the pull-request number
+ * and a hash of the comment text (`gitToolApprovalPayload`). An approval for a push or for opening a pull
+ * request cannot be redeemed as a comment, because the payloads differ.
+ */
+export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff", "code.git.log", "code.git.pr.comment"]);
+
 const SHELL_TOOLS = new Set(["code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 const WRITE_TOOLS = new Set([
   "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move",
@@ -292,6 +363,9 @@ export function subFlagForTool(tool: string): string {
   // `code.shell` sub-flag, so an operator can forbid command execution while still allowing edits.
   if (tool.startsWith("code.shell.")) return SHELL_FLAG;
   if (SHELL_TOOLS.has(tool)) return SHELL_FLAG;
+  // C11: a git write is gated by the git sub-flag, not by `code.write`. Both are off by default, but
+  // they are different blast radii: enabling file edits must not enable pushing to a remote.
+  if (tool.startsWith("code.git.") || isGitWriteTool(tool)) return GIT_FLAG;
   if (READ_TOOLS.has(tool)) return READ_FLAG;
   // Plan/question tools never touch the workspace, so they follow the read flag rather than the write flag:
   // gating a *question* behind "writes allowed" would push the agent to guess instead of asking.
@@ -301,12 +375,28 @@ export function subFlagForTool(tool: string): string {
 export function permissionForTool(tool: string): "workspace:read" | "workspace:write" {
   // Plan/question tools act on session metadata only, so the minimum workspace permission is a read — the
   // same level their capability records declare. Requiring `workspace:write` here would be stricter than
-  // the tool's blast radius and would contradict the catalogue.
-  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) ? "workspace:read" : "workspace:write";
+  // the tool's blast radius and would contradict the catalogue. The read-only git tools only read the
+  // repository's state, so they are reads too.
+  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) || REVIEW_SAFE_GIT_TOOLS.has(tool)
+    ? "workspace:read"
+    : "workspace:write";
 }
+/**
+ * `isReadOnlyTool` keeps its original meaning — the C2/C3 `READ_TOOLS` class — because `plan` mode reads it:
+ * a git read tool must not become available in `plan` merely by being read-only. The read-only *git* class
+ * is `REVIEW_SAFE_GIT_TOOLS`, and only the review gate below consults it.
+ */
 export function isReadOnlyTool(tool: string): boolean { return READ_TOOLS.has(tool); }
 export function isShellTool(tool: string): boolean { return SHELL_TOOLS.has(tool); }
 export function isPlanSafeTool(tool: string): boolean { return PLAN_SAFE_TOOLS.has(tool); }
+/**
+ * C11 (owner decision 10): the complete set of tools a **read-only intent** may call. It is the union of the
+ * three narrow lists the engine already keeps — the read tools, the plan-safe metadata tools and the
+ * read-only git tools — so "read-only" has exactly one definition and a new tool cannot join it by accident.
+ */
+export function isReviewSafeTool(tool: string): boolean {
+  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) || REVIEW_SAFE_GIT_TOOLS.has(tool);
+}
 
 export function isAdmin(ctx: AuthContext): boolean {
   // C5a: one definition of the admin vocabulary, shared with `code-rbac.ts`.
@@ -457,6 +547,31 @@ export class PolicyEngine {
       return deny("project_not_trusted", "This action applies repository instructions and the project is not trusted", 403, "trust");
     }
 
+    /**
+     * C11 (owner decision 10) — the **read-only intent**, enforced here rather than requested in a prompt.
+     *
+     * `READ_ONLY_CODE_INTENTS` lists `EXPLAIN_CODE` and `REVIEW_CODE`, and until now the flag it produced was
+     * carried around and read by nobody: a review session could ask for `code.git.push` and the request
+     * would be judged like any other. This phase closes that: when the session's resolved intent is
+     * read-only, any tool outside `READ_TOOLS` / `PLAN_SAFE_TOOLS` / the read-only git tools is refused
+     * outright, before the session mode, the project rules and the approval phase — so an approval cannot
+     * buy a write in a review either.
+     *
+     * The gate runs with the other hard-deny checks because it is one: "this session may not write" is not a
+     * preference that a mode or a rule can widen.
+     */
+    if (request.readOnlyIntent === true && !isReviewSafeTool(tool)) {
+      return {
+        ...deny(
+          "review_code_read_only",
+          `This session's intent is read-only, so ${tool} cannot run: a review inspects the repository and writes nothing`,
+          403,
+          "hard_deny",
+        ),
+        risk: "hard_deny",
+      };
+    }
+
     // Phase 4 — hard deny: unreachable by any mode, role or approval.
     for (const path of request.paths ?? []) {
       if (isUnsafePath(path)) return deny("path_outside_workspace", `Unsafe path: ${path}`, 403, "hard_deny");
@@ -464,19 +579,25 @@ export class PolicyEngine {
         return deny("git_dir_protected", "Writes inside .git are never allowed", 403, "hard_deny");
       }
     }
-    // Phase 4b — protected branches (C5a D9). This is the call site where the enforcement layer reads
+    // Phase 4b — protected branches (C5a D9, C11). This is the call site where the enforcement layer reads
     // the **company** protected-branch policy: the port below is `CodeProtectedBranchService
     // .evaluateGitWrite` (wired in `app.ts`), which loads `company_protected_branches` and answers
     // `protected_branch_write_denied` / `force_push_denied` for a git write. It runs before the mode,
     // the rules and the approval phase, and it deliberately consults no permission, role or approval —
     // so a protected-branch write cannot be lifted by an owner, by `admin:all`, by a session rule or by
     // `approved: true`. An unprotected branch falls through untouched and keeps its `approval` class.
-    if (request.command !== undefined && this.deps.protectedBranches) {
-      const attempts = detectGitWriteAttempts(request.command);
-      for (const attempt of attempts) {
+    //
+    // C11: the subject is a **typed** intent, never a command string. A git tool has no `command`, so the
+    // phase reads `request.git` (and detects a git-write tool that carries none, refusing it), and an
+    // unrefspec'd shell push is resolved or refused — the `branch: ""` hole is closed in
+    // `gitWriteIntentsFor`. When both a command and a declared intent are present, **both** are evaluated.
+    if (this.deps.protectedBranches) {
+      const resolved = await this.gitWriteIntentsFor(request);
+      if ("refusal" in resolved) return resolved.refusal;
+      for (const intent of resolved.intents) {
         let decision: Awaited<ReturnType<NonNullable<PolicyEngineDeps["protectedBranches"]>["evaluateGitWrite"]>>;
         try {
-          decision = await this.deps.protectedBranches.evaluateGitWrite(ctx, request.companyId, attempt);
+          decision = await this.deps.protectedBranches.evaluateGitWrite(ctx, request.companyId, intent);
         } catch (error) {
           // Fail closed: a policy port that throws is not evidence that the branch is unprotected.
           this.deps.logger?.warn({ err: error, companyId: request.companyId }, "policy_protected_branch_check_failed");
@@ -674,11 +795,112 @@ export class PolicyEngine {
     return { decision: "allow", phase: "approval", reasons, risk, status: 200 };
   }
 
+  /**
+   * C11 (owner decision 3): every git write this request performs, as a typed intent.
+   *
+   * Three sources, and a refusal is always preferred over a guess:
+   *  - `request.git` — the typed intent a git tool supplies. It must be complete and internally
+   *    consistent, otherwise `git_write_intent_invalid` (a `force: true` "push", or no branch at all, is
+   *    not something to resolve in either direction);
+   *  - `request.command` — the shell path. A refspec names its branch; a push with **no** refspec gets its
+   *    branch from `gitBranchResolver` and is refused with `git_push_requires_resolved_branch` when the
+   *    resolver is absent, throws or answers with nothing. `branch: ""` therefore never reaches a decision;
+   *  - a git-write **tool** that supplies neither is refused with `git_write_intent_required`, because a
+   *    tool call has no command line and must not slip past the protected-branch phase.
+   *
+   * A command and a declared intent are both evaluated when both are present: a caller cannot declare a
+   * harmless target while the command line writes to another one.
+   */
+  private async gitWriteIntentsFor(
+    request: PolicyRequest,
+  ): Promise<{ intents: GitWriteIntent[] } | { refusal: PolicyResult }> {
+    const intents: GitWriteIntent[] = [];
+    if (request.git) {
+      const declared = normalizeGitWriteIntent(request.git);
+      if (!declared) {
+        return {
+          refusal: {
+            ...deny(
+              GIT_WRITE_INTENT_INVALID,
+              "The git write request is incomplete or inconsistent (operation, target branch and force must agree)",
+              403,
+              "hard_deny",
+            ),
+            risk: "hard_deny",
+          },
+        };
+      }
+      intents.push(declared);
+    }
+    if (request.command !== undefined) {
+      for (const attempt of detectGitWriteAttempts(request.command)) {
+        let resolved: string | null = null;
+        if (!normalizeGitBranch(attempt.branch)) {
+          try {
+            resolved = normalizeGitBranch((await this.deps.gitBranchResolver?.(request)) ?? "");
+          } catch (error) {
+            // A resolver that fails is not evidence that the branch is unprotected.
+            this.deps.logger?.warn({ err: error, companyId: request.companyId }, "policy_git_branch_resolution_failed");
+            resolved = "";
+          }
+        }
+        const intent = gitWriteIntentFromShellAttempt(attempt, resolved);
+        if (!intent) {
+          return {
+            refusal: {
+              ...deny(
+                GIT_PUSH_REQUIRES_RESOLVED_BRANCH,
+                "A git push without a refspec writes to the branch of the checkout; that branch could not be " +
+                  "resolved, so the write is refused rather than assumed to be unprotected",
+                403,
+                "hard_deny",
+              ),
+              risk: "hard_deny",
+            },
+          };
+        }
+        intents.push(intent);
+      }
+    }
+    if (!intents.length && isGitWriteTool(request.tool)) {
+      return {
+        refusal: {
+          ...deny(
+            GIT_WRITE_INTENT_REQUIRED,
+            `Tool ${request.tool} performs a remote git write, so it must carry the typed git intent ` +
+              "(operation, target branch, remote, force); without it the write cannot be checked against the " +
+              "protected-branch policy",
+            403,
+            "hard_deny",
+          ),
+          risk: "hard_deny",
+        },
+      };
+    }
+    return { intents };
+  }
+
   private async requireApproval(
     request: PolicyRequest, reasons: string[], risk: PolicyRisk | undefined, phase: PolicyPhase,
     details?: Record<string, unknown>,
   ): Promise<PolicyResult> {
     const approvals = this.deps.approvals;
+    /**
+     * C11 (owner decision 5): the approval is deferred to a boundary that binds it more strongly than this
+     * phase can. The git boundary rebuilds the payload from the branch it is about to write and consumes the
+     * record with that hash, so creating a record here (or spending the caller's) would be strictly worse:
+     * it would either add a second, weaker approval or leave the boundary with nothing to verify.
+     *
+     * The check sits **after** every hard-deny phase, so a deferred approval can never turn a refusal into an
+     * allow; and it sits before the missing-port refusal, because a deployment whose approval gateway is not
+     * wired here may still have a fully wired git boundary.
+     */
+    if (request.approvalDeferredByBoundary === true) {
+      return {
+        decision: "allow", phase, risk, status: 200,
+        reasons: [...reasons, "approval:deferred_to_boundary"],
+      };
+    }
     if (!approvals) return deny("approval_unavailable", "Approval system is not configured", 503, phase);
     if (request.approved === true || request.approvalId) {
       const expected = payloadHashFor(request);
@@ -764,6 +986,18 @@ function deny(code: string, message: string, status: number, phase: PolicyPhase,
 /**
  * Deterministic payload hash: an approval must be consumed with exactly the payload that was
  * approved, so substituting the command or paths between approval and execution is detected.
+ *
+ * C11: when the request is a git write, the **typed target** is part of the material — `gitOperation`,
+ * `sourceBranch`, `targetBranch`, `remoteBranch`, `remote`, `force` and the credential reference. Before
+ * C11 a branch or a remote was not in the hash at all, so an approval granted for one push could be
+ * consumed for a push to a different branch of the same repository. The key is added only when a git
+ * intent is present, so every non-git request keeps its previous hash.
+ *
+ * C11 (owner decision 13): the same material carries the **repository initialization** fact, and only when
+ * the write has to create the repository (`bindsRepositoryInitialization`, shared with
+ * `gitApprovalPayload` so the two hashers cannot drift). An approval granted for "push into an existing
+ * repository" therefore hashes differently from one granted for "create the repository and push", while
+ * every write against an existing repository keeps the exact bytes — and the exact hash — it had before.
  */
 export function payloadHashFor(request: PolicyRequest): string {
   const material = JSON.stringify({
@@ -772,6 +1006,20 @@ export function payloadHashFor(request: PolicyRequest): string {
     paths: [...(request.paths ?? [])].sort(),
     projectId: request.projectId ?? null,
     sessionId: request.sessionId ?? null,
+    ...(request.git
+      ? {
+          git: {
+            gitOperation: request.git.gitOperation,
+            sourceBranch: request.git.sourceBranch ?? null,
+            targetBranch: request.git.targetBranch ?? null,
+            remoteBranch: request.git.remoteBranch ?? null,
+            remote: request.git.remote ?? null,
+            force: request.git.force === true,
+            credentialId: request.git.credentialId ?? null,
+            ...(bindsRepositoryInitialization(request.git) ? { repositoryInitialized: false } : {}),
+          },
+        }
+      : {}),
   });
   return fnv1a(material);
 }

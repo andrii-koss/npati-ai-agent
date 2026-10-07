@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 7,
-  "checksum": "44d742ad69ebebca93daccf91ca2be6f3937d344cfb5e03182d6d493c90740da",
+  "manifestVersion": 8,
+  "checksum": "921d6029dc39122ccda4d71fe426cc4d9c4ca45856c6711fd6908dcdfa7a3233",
   "tools": [
     {
       "key": "code.ask_user@1",
@@ -106,6 +106,83 @@
       "version": 1,
       "status": "active",
       "checksum": "2aa3e6fe7110e3522f640e134e445edfddcd2eeda3010d6f9954529a70d7e61d"
+    },
+    {
+      "key": "code.git.branch.create@1",
+      "name": "code.git.branch.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "1417ba430ee786f72ee78f728d10f0703580f123d2785e1495f89b309fc3e11e"
+    },
+    {
+      "key": "code.git.branch.switch@1",
+      "name": "code.git.branch.switch",
+      "version": 1,
+      "status": "active",
+      "checksum": "f8b5df7988edf0be623a74e9f6d960499e58a3ccd6395dd5711df7f0e6664925"
+    },
+    {
+      "key": "code.git.commit@1",
+      "name": "code.git.commit",
+      "version": 1,
+      "status": "active",
+      "checksum": "8df18e869b90b6c4a1bef8269d4abe9c3f6062f034db02d935b90d71aa7f3a3b"
+    },
+    {
+      "key": "code.git.diff@1",
+      "name": "code.git.diff",
+      "version": 1,
+      "status": "active",
+      "checksum": "de5adc03198bb56bcd34913e7a1d71a43c3877ddca4a409e89e1ee1ed081b319"
+    },
+    {
+      "key": "code.git.log@1",
+      "name": "code.git.log",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d6ee633a216dddfaba63f6a845dd643a862841f25ad320c88bb8343909148ef"
+    },
+    {
+      "key": "code.git.pr.comment@1",
+      "name": "code.git.pr.comment",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d8ab5654d1f5d222a247531508bcf34214f8f6e5410e8ac30470fcd56ee254f"
+    },
+    {
+      "key": "code.git.pr.create@1",
+      "name": "code.git.pr.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "d806741d0c236e66ad96e92e667b45b255f09d8faa983476753a341821a12840"
+    },
+    {
+      "key": "code.git.push@1",
+      "name": "code.git.push",
+      "version": 1,
+      "status": "active",
+      "checksum": "3d4fec90d74828217412090f05396f6204da6a305445fb0d56a145c167ed69ab"
+    },
+    {
+      "key": "code.git.restore@1",
+      "name": "code.git.restore",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d45e82c2918416c1414e374a5d8deb0d34ec37ca642f576edf546d40ef2f1d3"
+    },
+    {
+      "key": "code.git.stage@1",
+      "name": "code.git.stage",
+      "version": 1,
+      "status": "active",
+      "checksum": "1fd998a26f8249502611ec50d8d01aea244cfdd0af3505324f9810fc4d1565b4"
+    },
+    {
+      "key": "code.git.status@1",
+      "name": "code.git.status",
+      "version": 1,
+      "status": "active",
+      "checksum": "10ba1b4f1e34e4beba71d9cbaad258ef58906f0788466fb69892913b1201478e"
     },
     {
       "key": "code.plan.propose@1",
