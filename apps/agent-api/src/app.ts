@@ -102,6 +102,7 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { registerNetworkRoutes } from "./network-routes";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
+import { DEFAULT_CODE_MODEL_PROFILES, resolveEnabledModelProfileIds } from "./code-model-profiles";
 import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder, createCodeRunPolicyComposition, type CodeRunPolicyCompositionSources, type CodingAgentRunResult } from "./coding-agent-runner";
 import { ReplayBundleRecorder } from "./code-replay-bundle";
 import { ensureModelProfilesVersion, ensureSystemPromptVersion } from "./code-snapshot-versioning";
@@ -126,6 +127,10 @@ import { CodeSessionResumeService } from "./code-session-resume";
 import { CodeSessionRewindService } from "./code-session-rewind";
 import { CodeSessionForkService } from "./code-session-fork";
 import { collectCodeSessionUsage } from "./code-session-usage";
+// C14 (owner decision 3): the aggregated metrics of a tenant, computed from the run states and Activity rows the
+// two readers below already return — no new table, no second record of what a run did.
+import { collectCodeMetrics } from "./code-metrics";
+import { registerCodeMetricsRoutes } from "./code-metrics-routes";
 import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-context-store";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
 import { registerCodeProjectInstructionsRoutes } from "./code-project-instructions-routes";
@@ -1458,9 +1463,12 @@ export function buildApp(config: AppConfig = {}) {
   };
   /**
    * C4 (owner decision): every code tool execution decision passes through this single server-side
-   * engine in a fixed phase order — feature flag, RBAC, capability, hard deny, session mode, project
-   * rules, risk classification, approval. A direct API or tool call cannot skip it: the shell runtime
-   * refuses to run anything when no policy engine is injected.
+   * engine, in this fixed phase order — the long form of the same list is the engine's header comment
+   * (`code-policy-engine.ts`), which is where the order is defined:
+   *   1 feature_flag -> 2 rbac -> 3 capability -> 4 capability_groups -> 5 trust -> 6 hard_deny ->
+   *   7 session_mode -> 8 project_rules -> 9 network_enforcement -> 10 approval -> 11 risk_classification
+   * A direct API or tool call cannot skip it: the shell runtime refuses to run anything when no
+   * policy engine is injected.
    */
   // C4b (owner decision): the **sandbox runner** is the authoritative component for network enforcement,
   // because it owns the Docker daemon and creates the run network. This process therefore does not probe
@@ -4799,6 +4807,13 @@ ${localized.next}`;
        */
       runtimeProviderCapabilities: async ({ workspaceId, companyId }) =>
         readRuntimeMcpManifest({ workspaceId, companyId }),
+      /**
+       * C14: **why** the conservative model profile was used, from the same per-run holder the profile version
+       * comes from. The runner publishes the whole trace (including the id that matched and the ids that were
+       * allowed); the snapshot records the reason, because that is the part a reader has to act on — "the
+       * deployment enabled no profile" and "this model has no profile" are different incidents.
+       */
+      modelProfileFallbackReason: async () => codeRunEnvironment.modelProfileTrace()?.fallbackReason ?? null,
     },
     resolveRole: async () => null,
   });
@@ -4913,6 +4928,26 @@ ${localized.next}`;
     runtimeCapabilities: mcpRunPath,
     engine: aiEngine,
     schemas: CODE_TOOL_SCHEMAS,
+    /**
+     * C6/C14: model profiles are configuration, and this is where the deployment's configuration is connected.
+     *
+     * The port existed since C6 and the runner read it, but nothing ever supplied it: `enabledProfileIds` — the
+     * only handle the `code.model_profile.<id>` flags have on profile resolution — never reached
+     * `resolveModelProfile`, so the documented flag mechanism could not enable or exclude a single profile and
+     * every run silently resolved against the whole built-in registry. The registry is the **existing**
+     * `DEFAULT_CODE_MODEL_PROFILES` (no second one is created here) and the enabled ids come from the
+     * **existing** `FeatureFlagService`.
+     *
+     * The flags are resolved **per run**, not once at composition time: the service resolves rows per
+     * workspace/company, and a cached-at-boot list would keep honouring a switch an operator has since turned
+     * off. A flag that is off excludes its profile, and a flag store that cannot be read enables nothing — the
+     * run then continues on the conservative profile instead of the full registry.
+     */
+    modelProfiles: {
+      profiles: DEFAULT_CODE_MODEL_PROFILES,
+      enabledProfileIdsForRun: async ({ ctx, companyId }) =>
+        resolveEnabledModelProfileIds({ flags: featureFlagService, ctx, companyId }),
+    },
     imageAdmission: sandboxImagePolicy,
     runState: codeRunStateLog,
     /**
@@ -5502,6 +5537,50 @@ ${localized.next}`;
     ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeLifecycleContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  /**
+   * C14 (owner decision 3): the metrics surface.
+   *
+   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
+   * there is no second auth path (and the C10 wiring guard sees this map written).
+   *
+   * The aggregation reads the two existing readers: the tenant-scoped run rows (`listCodeRunStates`, the C14
+   * read over `code_run_states`) and the durable Activity rows (`listCodeActivityEvents`, the same reader the
+   * snapshot/Activity surface uses). Nothing is duplicated: `status` is the run's outcome the reaper and the
+   * resume already trust, and `details.estimate` is the runner's own summary that `collectCodeSessionUsage`
+   * reads back for a single session. A metric the data cannot support answers `null` with a reason — the route
+   * forwards that, so the UI shows "unavailable: <reason>" and never a fabricated zero.
+   */
+  const codeMetricsContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/metrics$/.test(path)) return;
+    codeMetricsContexts.set(request, await authProvider.authenticate(request));
+  });
+  registerCodeMetricsRoutes(app, {
+    metrics: async (_ctx, { companyId, since, runLimit, eventLimit }) => collectCodeMetrics(
+      {
+        listRuns: (input) => workspaceStore.listCodeRunStates({
+          companyId: input.companyId,
+          ...(input.statuses ? { statuses: input.statuses } : {}),
+          ...(input.startedAfter ? { startedAfter: input.startedAfter } : {}),
+          ...(input.limit ? { limit: input.limit } : {}),
+        }),
+        listActivityEvents: (input) => workspaceStore.listCodeActivityEvents({
+          companyId: input.companyId,
+          limit: input.limit ?? 500,
+        }),
+      },
+      {
+        companyId,
+        since: since ?? null,
+        runLimit: runLimit ?? 500,
+        eventLimit: eventLimit ?? 500,
+      },
+    ),
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeMetricsContexts.get(request as object) ?? null,
     logger: app.log,
   });
   registerCodeSnapshotRoutes(app, {
@@ -6353,6 +6432,56 @@ ${localized.next}`;
     }
     const report = capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
     /**
+     * C14 (owner decision 2): the **model-profile rollout state** of this context, added to the report.
+     *
+     * The conservative profile stays the fail-closed answer, and C14 deliberately does **not** turn an empty
+     * `enabledProfileIds` into pattern matching — that would hand every deployment the behaviour the
+     * `code.model_profile.<id>` flags are supposed to gate. What was missing is that the degradation was
+     * *invisible*: an operator could not tell "no profile is enabled yet" from "the registry broke". This
+     * section says which ids the deployment allows, whether that list is empty, and whether the flag store
+     * could be read at all; `fallbackReason` is `profile_flag_disabled` exactly when the list is empty, because
+     * then **every** run falls back whatever model it asks for. A non-empty list carries `null` here: whether a
+     * run falls back then depends on its model, and that is recorded per run in the ExecutionSnapshot.
+     */
+    const registryProfileIds = DEFAULT_CODE_MODEL_PROFILES.map((profile) => profile.id);
+    let modelProfiles: {
+      registryProfileIds: string[];
+      enabledProfileIds: string[];
+      enabledProfileIdsIsEmpty: boolean;
+      flagSourceAvailable: boolean;
+      fallbackReason: "profile_flag_disabled" | null;
+      note: string;
+    } = {
+      registryProfileIds,
+      enabledProfileIds: [],
+      enabledProfileIdsIsEmpty: true,
+      flagSourceAvailable: false,
+      fallbackReason: "profile_flag_disabled",
+      note: "No flag source is available, so no profile is enabled and every run resolves to the conservative profile (fail closed).",
+    };
+    if (featureFlagService) {
+      try {
+        const enabled = await resolveEnabledModelProfileIds({
+          flags: featureFlagService,
+          ctx: auth,
+          ...(request.query.companyId ? { companyId: request.query.companyId } : {}),
+        });
+        const empty = enabled.length === 0;
+        modelProfiles = {
+          registryProfileIds,
+          enabledProfileIds: [...enabled],
+          enabledProfileIdsIsEmpty: empty,
+          flagSourceAvailable: true,
+          fallbackReason: empty ? "profile_flag_disabled" : null,
+          note: empty
+            ? "No code.model_profile.<id> flag is enabled for this context, so every run uses the conservative profile (fail closed) until a rollout enables one."
+            : "These profiles are eligible for a run; a model that matches none of them still falls back to the conservative profile (no_matching_profile).",
+        };
+      } catch {
+        // Fail closed and say so: a flag store that cannot be read enables nothing, which is what the defaults above state.
+      }
+    }
+    /**
      * C13 (owner decision 5 and 8): the **combined** view, when asked for. `includeRuntime=true` first runs a
      * discovery pass for the requested Company (so the runtime list is current rather than whatever the process
      * happened to hold) and then returns the static Inspector report plus the tenant's runtime overlay, each with
@@ -6366,6 +6495,7 @@ ${localized.next}`;
       const combined = buildCombinedCapabilityView(mcpRuntimeCapabilities.overlayFor(tenant), capabilityInspector);
       return {
         ...report,
+        modelProfiles,
         runtime: {
           discovery,
           counts: combined.counts,
@@ -6374,7 +6504,7 @@ ${localized.next}`;
         },
       };
     }
-    return report;
+    return { ...report, modelProfiles };
   });
 
   app.post<{ Body: { message: string; contextType?: string; companyId?: string; businessId?: string; projectId?: string } }>("/router/evaluate", async (request) => {

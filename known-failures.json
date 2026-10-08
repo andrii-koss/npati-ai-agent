@@ -1,0 +1,160 @@
+{
+  "$comment": [
+    "C14 known-failures quarantine (owner decision 1).",
+    "",
+    "This file is the *only* place a known-red test may be declared. `npm test` is still run in full by CI and by",
+    "`scripts/check-known-failures.mjs`; nothing here excludes, filters or skips a test. The manifest is compared",
+    "against the **actual** failures of the run, and the job is GREEN only while `actual failures ⊆ this list`.",
+    "",
+    "Every entry is therefore a debt record, not a permission: a test that goes green must be removed from here",
+    "(a stale entry is RED), an undocumented failure is RED, and an entry whose `expires_at` has passed is RED",
+    "whether or not the test is still failing — so the quarantine cannot quietly become permanent.",
+    "",
+    "`file` is the repository-relative suite path and `title` is the full vitest title",
+    "(`<describe> > <describe> > <test>`), exactly as `failedTests` in `scripts/run-security-gate.mjs` builds it",
+    "from the JSON report. `evidence` records where the id came from, so a reader can re-check it instead of",
+    "trusting it: every id below is a verbatim `FAIL` line of an escalated full-suite run",
+    "(`D:\\npati\\c14b-test.txt`, `Test Files 10 failed | 342 passed | 2 skipped (354)`, `Tests 15 failed |",
+    "3940 passed | 6 skipped (3961)`), which is the run whose 15 failures this list documents."
+  ],
+  "version": 1,
+  "updated_at": "2026-10-07",
+  "default_owner": "repo-maintainer",
+  "entries": [
+    {
+      "file": "tests/company-runtime.test.ts",
+      "title": "Company delegation runtime > uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency",
+      "reason": "Pre-existing Company delegation runtime defect, unrelated to the Coding Agent: `Error: Test timed out in 10000ms.` — the A2A planning run never settles.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (title confirmed, line 2177 of D:\\npati\\c14b-test.txt) + `Error: Test timed out in 10000ms.`"
+    },
+    {
+      "file": "tests/company-runtime.test.ts",
+      "title": "Company delegation runtime > uses OmniRoute Fusion for parallel workers and blocks forbidden tools in backend audit",
+      "reason": "Pre-existing Company delegation runtime defect: `AssertionError: expected { …(24) } to match object { status: 'completed', …(1) }` — the Fusion run does not reach a completed state.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2191) + the assertion message above"
+    },
+    {
+      "file": "tests/company-runtime.test.ts",
+      "title": "Company delegation runtime > cancels an active A2A planning request and does not execute a duplicate run",
+      "reason": "Pre-existing Company delegation runtime defect: `Error: Test timed out in 10000ms.` — the cancelled A2A planning request does not settle.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2215) + `Error: Test timed out in 10000ms.`"
+    },
+    {
+      "file": "tests/company-runtime.test.ts",
+      "title": "Company delegation runtime > persists provider failures and enforces the overall run timeout",
+      "reason": "Pre-existing Company delegation runtime defect: `AssertionError: expected 200 to be 502` — a failing provider is answered with a completed run instead of an error status. This is the last remaining behavioural (non-count) failure recorded in `docs/coding-agent/current-state.md`.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2229) + `AssertionError: expected 200 to be 502 // Object.is equality`"
+    },
+    {
+      "file": "tests/company-orchestration.test.ts",
+      "title": "PHASE 5: Company Main Agent + Specialist Agent Orchestration > successfully orchestrates Main -> Specialist delegation with tool execution",
+      "reason": "Pre-existing Phase 5 orchestration defect, unrelated to the Coding Agent: `AssertionError: expected 'failed' to be 'completed'` — the delegated run ends failed.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2146) + `AssertionError: expected 'failed' to be 'completed' // Object.is equality`"
+    },
+    {
+      "file": "tests/company-orchestration.test.ts",
+      "title": "PHASE 5: Company Main Agent + Specialist Agent Orchestration > cancels active run across all delegated agents",
+      "reason": "Pre-existing Phase 5 orchestration defect: `Error: Test timed out in 10000ms.` — the run is not settled by the cancellation.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2163) + `Error: Test timed out in 10000ms.`"
+    },
+    {
+      "file": "tests/long-ai-company-chat.test.ts",
+      "title": "long AI Company creation through production chat > creates the company, all named agents, responsibilities, hierarchy, and no unsolicited memory, then remains idempotent",
+      "reason": "Pre-existing production-chat defect: `AssertionError: expected 'Оберіть активний проєкт для додавання…' to contain 'NovaScale Labs'` — the turn answers with the \"select an active project\" notice instead of creating the Company, so no company card is produced.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2285) + the assertion message above"
+    },
+    {
+      "file": "tests/long-ai-company-chat.test.ts",
+      "title": "long AI Company creation through production chat > recovers from repeated memory-only model responses using the semantic company plan",
+      "reason": "Pre-existing production-chat defect, the same one as the sibling entry above: `AssertionError: expected 'Оберіть активний проєкт для додавання…' to contain '```card:'` — the semantic-plan recovery path does not produce the company card either.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2302) + the assertion message above"
+    },
+    {
+      "file": "tests/chat-entity-mutations.test.ts",
+      "title": "business and goal mutations through production chat > creates five separate ideas with one goal and memory per chat turn",
+      "reason": "Pre-existing production-chat mutation defect: `AssertionError: Створи ще одну бізнес ідею, ціль і меморі. Idea 2: expected [ { …(9) } ] to have a length of 2 but got …` — the second idea of the turn is not created.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2125) + the assertion message above"
+    },
+    {
+      "file": "tests/per-request-no-memory-production.test.ts",
+      "title": "Per-request no-memory production wiring > does not create neutral history and blocks Company memory tools with an audited reason",
+      "reason": "Pre-existing no-memory defect in the Company run path, the same family as `expected 200 to be 502`: `AssertionError: expected { …(25) } to match object { status: 'failed', …(1) } (31 matching properties omitted from actual)` — the Company run does not fail with the blocking reason.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2332) + the assertion message above"
+    },
+    {
+      "file": "tests/manual-product-e2e-web.test.ts",
+      "title": "Manual Product E2E: Full Web User Flow > executes the complete user flow from Registration to Run Trace",
+      "reason": "Pre-existing, documented at C13 step 0: the end-to-end run reports `model_unavailable` because `CompanyDelegationRuntime` is built with `strictInferenceRouting = true` while the fixture seeds no added model and passes no `dataDirectory`. `AssertionError: expected [ 'completed', 'queued', 'running' ] to include 'failed'`.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2319) + its assertion message + frame `tests/manual-product-e2e-web.test.ts:312:48`"
+    },
+    {
+      "file": "tests/production-wasm-exec.test.ts",
+      "title": "Production WebAssembly Exec sandbox > runs through Company Agent only after one exact durable approval",
+      "reason": "Pre-existing durable-approval resume defect: `Error: Run is not awaiting approval` from `CompanyDelegationRuntime.process` (`apps/agent-api/src/company-runtime.ts:278:82`) — the resumed run never reaches the awaiting-approval state the resume path requires.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2365) + `Error: Run is not awaiting approval` + frame `apps/agent-api/src/company-runtime.ts:278:82`"
+    },
+    {
+      "file": "tests/production-durable-approvals.test.ts",
+      "title": "Production durable approvals and route tiers > stops a high-risk tool, then consumes one exact approval before execution",
+      "reason": "Pre-existing durable-approval resume defect, the same one as the `production-wasm-exec` entry: `Error: Run is not awaiting approval` from `CompanyDelegationRuntime.process` (`apps/agent-api/src/company-runtime.ts:278:82`).",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2356) + `Error: Run is not awaiting approval` + frame `apps/agent-api/src/company-runtime.ts:278:82`"
+    },
+    {
+      "file": "tests/advanced-memory-production.test.ts",
+      "title": "advanced memory production contracts > injects action-sensitive memory before delegation planning",
+      "reason": "Pre-existing action-sensitive-memory defect: `AssertionError: expected 'import { classifyTerminalCommand, nor…' to contain 'plan.toolRequests.map(request=>reques…'` — the injected runtime text is the command classifier's source, not the delegation plan's tool list.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 714) + the assertion message above"
+    },
+    {
+      "file": "tests/data-studio-d5-completion.test.ts",
+      "title": "D5 completion — sandbox process environment > starts the Live Preview dev server with the Project API variables and without secrets",
+      "reason": "Pre-existing D5 defect in the sandbox process environment: `AssertionError: expected { …(16) } to deeply equal { …(2) }` — the Live Preview dev-server environment is not exactly the public Project API variable set.",
+      "owner": "repo-maintainer",
+      "added_at": "2026-10-07",
+      "expires_at": "2026-11-06",
+      "evidence": "full-suite run FAIL line verbatim (line 2249) + the assertion message above"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType,
   CodeRunStateRecord, CodeRunStateStatus, CodeRunTurnRecord, CodeRunToolCallRecord, CreateCodeRunStateInput,
   ApplyCodeRunStateEventInput, UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput,
+  ListCodeRunStatesInput,
   CodeRunScanPage, CreateExecutionSnapshotInput, ExecutionSnapshotRecord, ExecutionSnapshotDiff,
   ListExecutionSnapshotsInput, SnapshotConfigKind, SnapshotConfigVersionRecord,
   CreateSnapshotConfigVersionInput, CodeActivityEventRecord, CreateCodeActivityEventInput,
@@ -2163,6 +2164,23 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone([...this.codeRunTurns.values()]
       .filter((record) => record.runId === runId && record.companyId === companyId)
       .sort((a, b) => a.turnIndex - b.turnIndex));
+  }
+
+  /**
+   * C14: mirrors the postgres semantics of the same read — tenant predicate first, then the optional status and
+   * window filters, newest first, bounded by `limit`. A run of another company is never visible, and there is no
+   * system scope on this read (unlike `listCodeRunStatesForScan`), so a metrics caller cannot widen it.
+   */
+  async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
+    const statuses = input.statuses ? new Set(input.statuses) : null;
+    return structuredClone([...this.codeRunStates.values()]
+      .filter((record) => record.companyId === input.companyId)
+      .filter((record) => !statuses || statuses.has(record.status))
+      .filter((record) => !input.startedAfter || record.startedAt.getTime() >= input.startedAfter.getTime())
+      .filter((record) => !input.startedBefore || record.startedAt.getTime() < input.startedBefore.getTime())
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime() || a.runId.localeCompare(b.runId))
+      .slice(0, limit));
   }
 
   /**

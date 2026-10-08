@@ -45,7 +45,14 @@ import {
   type NormalizeToolCallsResult,
   type NormalizedToolCall,
 } from "./code-tool-call-adapter";
-import { resolveEffectiveToolCallingMode, resolveModelProfile, type CodeModelProfile } from "./code-model-profiles";
+import {
+  modelProfileFallbackTrace,
+  resolveEffectiveToolCallingMode,
+  resolveModelProfile,
+  type CodeModelProfile,
+  type CodeModelProfileFallbackReason,
+  type CodeModelProfileFallbackTrace,
+} from "./code-model-profiles";
 import { resolveModelRequestPressure, type ModelRequestPressure } from "./code-context-budget";
 import {
   COMPACTION_SCHEMA_VERSION,
@@ -86,8 +93,8 @@ import {
   type SelfReviewVerdict,
 } from "./code-self-review";
 import {
-  bundleHash,
   canonicalizeSettledToolResult,
+  replayArgumentsHash,
   type ReplayBundleStepPayload,
 } from "./code-replay-bundle";
 import {
@@ -478,6 +485,17 @@ export interface CodeRunActivityEvent {
   branch?: string;
   branchCreated?: boolean;
   branchSwitched?: boolean;
+  /**
+   * C14: why this run's model is on the conservative profile — `profile_flag_disabled` when the deployment has
+   * enabled no profile (or the flag store could not be read) and `no_matching_profile` when profiles are
+   * enabled but none matches the model.
+   *
+   * It is attached to every Activity event written **after** the profile was resolved, so a reader of the run's
+   * Activity sees the degradation next to what the run actually did. Absent means "the model matched a
+   * profile", which is the normal case. The value is a closed vocabulary, not free text: no model id, no
+   * provider, no prompt, nothing that could carry content into an Activity payload.
+   */
+  modelProfileFallbackReason?: CodeModelProfileFallbackReason;
 }
 
 /**
@@ -522,6 +540,16 @@ export interface CodeRunEnvironmentHolder {
   setModelProfileVersion(value: string | number | null): void;
   modelProfileVersion(): string | number | null;
   /**
+   * C14: **which** profile drove the run and why — the id, how it matched, and the fallback reason when the
+   * conservative profile was used because the rollout is off or the model matched nothing.
+   *
+   * It is published next to `modelProfileVersion` rather than instead of it: the version is the immutable
+   * registry reference a replay compares, while the trace is the decision the run made. A version alone cannot
+   * say "this run silently lost native tool calling", which is exactly the degradation C14 makes visible.
+   */
+  setModelProfileTrace(value: CodeModelProfileFallbackTrace | null): void;
+  modelProfileTrace(): CodeModelProfileFallbackTrace | null;
+  /**
    * C8: the effective project instructions of this run — the content hash the execution snapshot records and
    * the trust label it records alongside it. Published from the same value that produced the prompt block, so
    * the snapshot cannot describe a different set of instructions than the model actually received.
@@ -562,6 +590,7 @@ export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
   let modelSelection: { provider: string; model: string } | null = null;
   let systemPrompt: { version: number | null; contentHash: string | null } | null = null;
   let modelProfileVersion: string | number | null = null;
+  let profileTrace: CodeModelProfileFallbackTrace | null = null;
   let projectInstructions: { contentHash: string | null; trustStatus: "trusted" | "untrusted" } | null = null;
   let skillInstructions: readonly CodeRunSkillProvenance[] | null = null;
   let runSummary: CodingAgentRunSummary | null = null;
@@ -584,6 +613,8 @@ export function createCodeRunEnvironmentHolder(): CodeRunEnvironmentHolder {
     systemPrompt() { return systemPrompt; },
     setModelProfileVersion(next) { modelProfileVersion = next; },
     modelProfileVersion() { return modelProfileVersion; },
+    setModelProfileTrace(next) { profileTrace = next; },
+    modelProfileTrace() { return profileTrace; },
     setProjectInstructions(next) { projectInstructions = next; },
     projectInstructions() { return projectInstructions; },
     setSkillInstructions(next) { skillInstructions = next; },
@@ -680,7 +711,17 @@ export interface CodeRunReplayRecorderPort {
       model?: string | null;
       provider?: string | null;
       usage?: { totalTokens?: number; promptTokens?: number; completionTokens?: number } | null;
-      toolCalls: Array<{ id: string; name: string; argumentsHash: string }>;
+      toolCalls: Array<{
+        id: string;
+        name: string;
+        argumentsHash: string;
+        /**
+         * C14 (provider cassette): the provider's own argument text beside the hash of it. Additive and
+         * optional — a recorder that ignores it records exactly what it recorded before — and required for the
+         * cassette to rebuild a `ChatResult` without inventing a tool call (`code-replay-cassette.ts`).
+         */
+        arguments?: string;
+      }>;
     };
   }): void;
   recordToolCall(step: {
@@ -992,6 +1033,23 @@ export interface CodingAgentRunnerPorts {
     profiles?: readonly CodeModelProfile[];
     overrides?: readonly CodeModelProfile[];
     enabledProfileIds?: readonly string[];
+    /**
+     * C6/C14: the enabled profile ids of **this** run.
+     *
+     * `enabledProfileIds` above is a static list, but the flags that decide it (`code.model_profile.<id>`) are
+     * resolved per workspace/company through `featureFlagService.isEnabled(...)`, so the enabled set cannot be
+     * computed once at composition time. When this resolver is supplied it replaces the static list for the
+     * run; returning `null` keeps the static list, and returning `[]` enables nothing.
+     *
+     * A resolver that throws fails **closed** on no enabled profile — the conservative profile — because a
+     * deployment that cannot read its flags must not silently run the whole built-in registry.
+     */
+    enabledProfileIdsForRun?: (input: {
+      ctx: AuthContext;
+      companyId: string;
+      projectId: string;
+      sessionId?: string;
+    }) => Promise<readonly string[] | null>;
   };
   /**
    * C9 (requirement 4): the self-review call. It is the **same engine call** the loop makes (`chat`) with a
@@ -2157,12 +2215,26 @@ export class CodingAgentRunner {
       }
     };
 
+    /**
+     * C14: the profile degradation of this run, as a closed vocabulary — `null` until the profile is resolved
+     * and whenever the model matched a profile. It is a `let` in the run's own scope, read by `record` **at call
+     * time**, so every event written after the resolution carries the reason and every event written before it
+     * (the refusal paths, `run_started`, `session_branch`) honestly carries none: at that point there was no
+     * profile yet, and inventing one would be a claim about a decision that had not been made.
+     */
+    let modelProfileFallbackReason: CodeModelProfileFallbackReason | null = null;
+
     const record = async (event: CodeRunActivityEvent): Promise<void> => {
       // Activity is a log, never a gate: a rejected shape or a failing sink must not change the run.
       try {
-        assertMetadataOnly(event as unknown as Record<string, unknown>);
+        // C14: the reason travels with the event rather than being written once, because a reader of a single
+        // event (a timeline row, a support ticket) must not have to find and correlate an earlier one.
+        const withProfileReason = modelProfileFallbackReason === null
+          ? event
+          : { ...event, modelProfileFallbackReason };
+        assertMetadataOnly(withProfileReason as unknown as Record<string, unknown>);
         if (!this.ports.activity) return;
-        await this.ports.activity.record({ ...event, snapshotId: snapshotId || undefined });
+        await this.ports.activity.record({ ...withProfileReason, snapshotId: snapshotId || undefined });
       } catch {
         // Swallowed on purpose; the metadata-only property is asserted directly in the security-gate suite.
       }
@@ -3230,15 +3302,58 @@ export class CodingAgentRunner {
 
     const tools = this.toolDescriptors(session, toolOptions);
     const modelName = input.model ?? "auto";
+    /**
+     * C6b/C14: the provider this run is about to use, derived from the engine/model id (`anthropic/claude-…`
+     * -> `anthropic`). It is computed **here**, before the profile is resolved, for one reason: a profile may
+     * match on the provider (`profileMatchSpecificity` ranks an exact model above a pattern above a provider),
+     * and the same value is what the ExecutionSnapshot records as `modelSelection.provider`. Deriving it once
+     * keeps the profile the model was driven with and the provider the run claims in step.
+     */
+    const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
+    /**
+     * C6/C14: which registry profiles this run may match. The composition supplies a per-run resolver over the
+     * `code.model_profile.<id>` flags; a deployment that supplies only the static list keeps working, and a
+     * resolver that throws narrows to **no** profile instead of widening to all of them.
+     */
+    let enabledProfileIds = this.ports.modelProfiles?.enabledProfileIds;
+    if (this.ports.modelProfiles?.enabledProfileIdsForRun) {
+      try {
+        const resolved = await this.ports.modelProfiles.enabledProfileIdsForRun({
+          ctx,
+          companyId,
+          projectId,
+          ...(sessionId ? { sessionId } : {}),
+        });
+        if (resolved) enabledProfileIds = resolved;
+      } catch {
+        // Fail closed: an unreadable flag store disables every profile, so the run continues on the
+        // conservative default (one call at a time, auto-detected tool calling) rather than the whole registry.
+        enabledProfileIds = [];
+      }
+    }
     // Profiles come from configuration (injected registry/overrides/enabled ids); an unknown model with no
     // configuration falls back to the conservative profile rather than a guessed capability set.
     const profileResolution = resolveModelProfile({
+      provider: modelProviderHint,
       model: modelName,
       ...(this.ports.modelProfiles?.profiles ? { profiles: this.ports.modelProfiles.profiles } : {}),
       ...(this.ports.modelProfiles?.overrides ? { overrides: this.ports.modelProfiles.overrides } : {}),
-      ...(this.ports.modelProfiles?.enabledProfileIds ? { enabledProfileIds: this.ports.modelProfiles.enabledProfileIds } : {}),
+      // An empty list is a real answer ("nothing is enabled"), so it is passed on: `undefined` would mean
+      // "no filter", which is the widening this port exists to prevent.
+      ...(enabledProfileIds ? { enabledProfileIds } : {}),
     });
     const profile: CodeModelProfile = profileResolution.profile;
+    /**
+     * C14: which profile this run got, how it matched, and — when it is the conservative one — **why**.
+     *
+     * The reason is the whole point: `conservative-default` reads the same whether the operator has not enabled
+     * a profile yet (`profile_flag_disabled`) or the model simply has none (`no_matching_profile`), and those two
+     * need different actions. It is published through the holder (the snapshot's source) *and* kept for the
+     * Activity events of this run, so a degradation is visible in both records rather than only in the log.
+     */
+    const resolvedProfileTrace = modelProfileFallbackTrace(profileResolution, { enabledProfileIds: enabledProfileIds ?? null });
+    modelProfileFallbackReason = resolvedProfileTrace.fallbackReason;
+    this.ports.environment?.setModelProfileTrace(resolvedProfileTrace);
     const schemaByName = this.toolSchemaByName(runtimeToolDescriptors);
     // The canonical schemas feed both the tool definitions and the argument validator. A tool without a
     // published schema is offered with an empty one, which the canonical validator treats as "no
@@ -3341,7 +3456,6 @@ export class CodingAgentRunner {
     // published first; the snapshot that references them is created immediately after. The snapshot is created
     // **after** the run row exists (its `run_id` is the durable run id and `getSnapshotForRun` finds it), and
     // before the first model call. A failure here never aborts the run: the empty id is honest.
-    const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
     this.ports.environment?.setModelSelection({ provider: modelProviderHint, model: modelName });
     if (this.ports.snapshotConfigVersions) {
       const configVersions = this.ports.snapshotConfigVersions;
@@ -3536,7 +3650,14 @@ export class CodingAgentRunner {
           toolCallId: approved.toolCallId,
           tool: approved.tool,
           toolVersion: toolVersionByName.get(approved.tool) ?? null,
-          argumentsHash: bundleHash(approved.args ?? {}),
+          /**
+           * C14 (arguments-hash blocker): the **same** derivation the model step used, through the one canonical
+           * conversion (`replayArgumentsHash`). The model step holds the provider's argument text and this step
+           * holds the admitted object; hashing either of them directly made one call carry two hashes, and
+           * `code-replay-engine.ts` compares them — so a runner-recorded bundle could never replay. The
+           * authoritative material is the argument *value*, canonicalised once for both sides.
+           */
+          argumentsHash: replayArgumentsHash(approved.args),
           settledResult: text,
           outcome: outcome.ok ? "ok" : "failed",
           ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
@@ -3824,7 +3945,21 @@ export class CodingAgentRunner {
           toolCalls: (result.toolCalls ?? []).map((call) => ({
             id: call.id,
             name: call.function?.name ?? "",
-            argumentsHash: bundleHash(call.function?.arguments ?? ""),
+            /**
+             * The provider's own argument text, converted to the canonical argument value by the **same**
+             * function the tool step uses (`replayArgumentsHash`). Hashing the raw text here and the parsed
+             * object there produced two hashes for one call, which is exactly what made a runner-recorded
+             * bundle diverge at `arguments_hash` on replay.
+             */
+            argumentsHash: replayArgumentsHash(call.function?.arguments),
+            /**
+             * C14 (provider cassette): the argument text beside its hash. Additive and optional in the recorded
+             * format (the format version therefore stays 3), and the only way the cassette can hand a consumer
+             * the same call instead of an invented one. The whole recording — these bytes included — goes
+             * through the existing secret scan, so a credential here refuses the bundle loudly rather than
+             * being stripped.
+             */
+            arguments: call.function?.arguments ?? "",
           })),
         },
       });
@@ -4196,7 +4331,7 @@ export class CodingAgentRunner {
           toolCallId: outcome.call.id,
           tool: outcome.call.name,
           toolVersion: toolVersionByName.get(outcome.call.name) ?? null,
-          argumentsHash: bundleHash(outcome.call.arguments ?? {}),
+          argumentsHash: replayArgumentsHash(outcome.call.arguments),
           settledResult: text,
           outcome: outcome.result.ok ? "ok" : "failed",
           ...(outcome.result.ok ? {} : { errorCode: outcome.result.error.code }),

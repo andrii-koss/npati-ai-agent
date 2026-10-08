@@ -10,6 +10,7 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
   CodeRunStateRecord, CodeRunTurnRecord, CodeRunTurnStatus, CreateCodeRunStateInput, ApplyCodeRunStateEventInput,
   UpsertCodeRunTurnInput, CodeRunStateScanInput, CodeRunTurnScanInput, CodeRunScanPage,
+  ListCodeRunStatesInput,
   CodeRunRequestRecord,
   CodeProjectRefScanInput, CodeProjectRefScanPage,
   CreateExecutionSnapshotInput, ExecutionSnapshotRecord, ExecutionSnapshotTrigger, ExecutionSnapshotDiff,
@@ -3650,6 +3651,36 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
        ORDER BY started_at ASC
        LIMIT $2`,
       [input.now, Math.max(1, input.limit)],
+    );
+    return result.rows;
+  }
+
+  /**
+   * C14 (owner decision 3): the tenant-scoped read of run rows the metrics aggregation is built from.
+   *
+   * Three details are deliberate:
+   *
+   *   1. **`company_id=$1` is unconditional.** Unlike `listCodeRunStatesForScan` (whose `$1::text IS NULL` is the
+   *      reaper's documented system scope) there is no null branch here, so this read cannot be turned into a
+   *      cross-tenant scan by passing `null`.
+   *   2. **Every other filter is an optional parameter**, so one prepared statement serves "the finished runs of
+   *      this tenant", "the runs started since yesterday" and the unbounded first page without a second query
+   *      shape that could drift from this one.
+   *   3. **It selects existing columns only.** The success rate, the turn counts and the cost come from `status`
+   *      and the `details` bag the terminal state already carries; nothing here is a second record of a run.
+   */
+  async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
+    const statuses = input.statuses && input.statuses.length > 0 ? [...input.statuses] : null;
+    const result = await this.pool.query<CodeRunStateRecord>(
+      `SELECT ${codeRunStateColumns} FROM code_run_states
+        WHERE company_id=$1
+          AND ($2::text[] IS NULL OR status = ANY($2::text[]))
+          AND ($3::timestamptz IS NULL OR started_at >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR started_at < $4::timestamptz)
+        ORDER BY started_at DESC, run_id ASC
+        LIMIT $5`,
+      [input.companyId, statuses, input.startedAfter ?? null, input.startedBefore ?? null, limit],
     );
     return result.rows;
   }

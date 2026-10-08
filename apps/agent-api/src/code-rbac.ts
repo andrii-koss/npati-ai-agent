@@ -376,6 +376,10 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.session.list": "workspace:read",
   "code.changes.read": "workspace:read",
   "code.session.usage.read": "workspace:read",
+  // C14 (owner decision 3): the aggregated metrics of a tenant. A read surface — it counts rows the same caller
+  // can already read one by one through the snapshot/activity routes — so it reuses the ordinary read permission
+  // and gets its own action name, which is what stops a metrics label from authorizing anything else.
+  "code.metrics.read": "workspace:read",
   "code.active_context.read": "workspace:read",
   // C8: reading project instructions and drafting one are read surfaces. **Drafting writes nothing**: the
   // draft is returned, and persisting it goes through `code.fs.write`, which carries its own authorisation,

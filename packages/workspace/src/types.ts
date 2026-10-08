@@ -1215,6 +1215,33 @@ export interface CodeRunStateScanInput {
 }
 
 /**
+ * C14 (owner decision 3): the read the metrics aggregation needs, over the rows `code_run_states` **already**
+ * holds.
+ *
+ * It exists because the two reads that were available answer different questions and neither can be reused:
+ * `listCodeRunStatesForScan` only ever returns `status='running'` rows (it is the reaper's scan, and a finished
+ * run is deliberately invisible to it), and `getCodeRunState` addresses one run by id. A success rate needs the
+ * **finished** runs of a tenant, which is exactly the set the scan excludes.
+ *
+ * `companyId` is a plain `string` — not a nullable system scope — so this read cannot be used to page through
+ * another tenant's runs; the system scope stays where it belongs, on the reaper's own scan. Every filter is
+ * optional and additive, and it reads the existing columns only: no new column, no derived table, no second
+ * record of what happened.
+ */
+export interface ListCodeRunStatesInput {
+  /** Required tenant predicate; there is no system scope on this read. */
+  companyId: string;
+  /** Restrict to these run statuses. Omitted means every status. */
+  statuses?: readonly CodeRunStateStatus[];
+  /** Only rows started at or after this instant. */
+  startedAfter?: Date;
+  /** Only rows started strictly before this instant. */
+  startedBefore?: Date;
+  /** Bounded page size; the store clamps it and never returns more than it. */
+  limit?: number;
+}
+
+/**
  * C10 (ТЗ item 7): one project that owns a code session, as the sandbox-retention sweep needs to see it.
  *
  * Why a scan is required rather than a per-project walk: a sandbox is referenced only by `projects.sandbox_id`, and
@@ -1650,6 +1677,13 @@ export interface WorkspaceStore {
    * follow, so a reaper cannot pull an unbounded result set into memory on a busy deployment.
    */
   listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>>;
+  /**
+   * C14 (owner decision 3): the tenant-scoped read of finished **and** running run rows that the metrics
+   * aggregation is built from. It is a different question from the reaper's scan above (`status='running'` only)
+   * and from `getCodeRunState` (one run by id), and it reads the same rows both already read — no column, table
+   * or derived record is added, so there is still exactly one source of truth for a run's outcome and estimate.
+   */
+  listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]>;
   /**
    * C10 (ТЗ item 7): enumerate the projects that own a code session, tenant-scoped by the same system-scope rule
    * the run scans use. The sandbox-retention sweep needs this to find a sandbox whose owning project is no longer

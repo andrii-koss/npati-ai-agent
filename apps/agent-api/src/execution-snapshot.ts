@@ -116,6 +116,20 @@ export interface ExecutionSnapshotSources {
    * and every already-persisted snapshot remains readable as exactly what it was.
    */
   runtimeProviderCapabilities?(input: { workspaceId: string; companyId: string; projectId: string; sessionId?: string }): Promise<Record<string, unknown> | null>;
+  /**
+   * C14: **why** the run's model was driven with the conservative profile, or `null` when it matched a profile.
+   *
+   * `modelProfileVersion` above records *which* immutable registry the run resolved against; it cannot say that
+   * the run silently lost native tool calling and parallel writes. The two readings of that degradation need
+   * different operator action — no profile is enabled at all (`profile_flag_disabled`) versus none of the
+   * enabled profiles matches this model (`no_matching_profile`) — so both are recorded here as the closed
+   * vocabulary of `CodeModelProfileFallbackReason`, never as free text.
+   *
+   * Optional on purpose (rule 13): a deployment that does not supply it keeps the payload's previous key set, so
+   * every already-persisted snapshot stays readable as exactly what it was and `EXECUTION_SNAPSHOT_SCHEMA_VERSION`
+   * does not move.
+   */
+  modelProfileFallbackReason?(): Promise<string | null>;
 }
 
 export interface ExecutionSnapshotPayload extends Record<string, unknown> {
@@ -160,6 +174,7 @@ export async function collectExecutionSnapshotPayload(input: {
   const s = input.sources;
   const readPolicyComposition = s.policyComposition;
   const readRuntimeProviderCapabilities = s.runtimeProviderCapabilities;
+  const readModelProfileFallbackReason = s.modelProfileFallbackReason;
   const payload: ExecutionSnapshotPayload = {
     snapshotSchemaVersion: EXECUTION_SNAPSHOT_SCHEMA_VERSION,
     trigger: input.trigger,
@@ -193,6 +208,12 @@ export async function collectExecutionSnapshotPayload(input: {
             unavailable,
           ),
         }
+      : {}),
+    // C14: why the conservative profile was used, recorded only when the deployment supplies the source. The key
+    // is absent for a run that matched a profile *and* for a deployment that does not wire the source, which is
+    // why the snapshot schema version stays where it is (rule 13).
+    ...(readModelProfileFallbackReason
+      ? { modelProfileFallbackReason: await readSource("modelProfileFallbackReason", () => readModelProfileFallbackReason(), unavailable) }
       : {}),
   };
   return { payload, unavailable };

@@ -16,7 +16,29 @@
     "noEmit": true
   },
   "include": [
+    "tests/coding-agent-c6-eval.test.ts",
     "tests/coding-agent-c13-capability-catalog-audit.test.ts",
+    "tests/coding-agent-c14-attack-catalogue.test.ts",
+    "tests/coding-agent-c14-ci-and-lint-gates.test.ts",
+    "tests/coding-agent-c14-eval-metrics-and-profiles.test.ts",
+    "tests/coding-agent-c14-gate-mutation-sensitivity.test.ts",
+    "tests/coding-agent-c14-known-failures.test.ts",
+    "tests/coding-agent-c14-metrics-aggregation.test.ts",
+    "tests/coding-agent-c14-model-profile-fallback.test.ts",
+    "tests/coding-agent-c14-model-profile-flags.test.ts",
+    "tests/coding-agent-c14-redteam-command-output-injection.test.ts",
+    "tests/coding-agent-c14-redteam-fork-bomb.test.ts",
+    "tests/coding-agent-c14-redteam-new-channels.test.ts",
+    "tests/coding-agent-c14-redteam-path-and-zip-slip.test.ts",
+    "tests/coding-agent-c14-redteam-resource-exhaustion.test.ts",
+    "tests/coding-agent-c14-replay-cassette-engine.test.ts",
+    "tests/coding-agent-c14-replay-cassette-store.test.ts",
+    // C14 (owner decision 4): the SLO calibration and the anomaly detector it configures. Added to this gate
+    // with the suite itself, so the new file is type-clean by construction rather than by hope.
+    "tests/coding-agent-c14-slo-calibration.test.ts",
+    // C14 (post-step cleanup): the source guard over the phase order and the security-gate suite count. It is
+    // added here together with the suite itself, for the same reason.
+    "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
     "tests/control-plane-ui-and-revisions.test.ts",
     "tests/full-capability-regression.test.ts",
     "tests/invariants-and-anti-patterns.test.ts",

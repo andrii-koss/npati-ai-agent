@@ -1,7 +1,56 @@
 name: CI
 
+# C14: this workflow used to be `workflow_dispatch` only, so **nothing ran on a push or a pull request** and
+# the acceptance criterion "CI blocks regressions" was not true. It now runs on:
+#   - `push` and `pull_request`, path-filtered to the trees that can change behaviour (application and package
+#     source, tests, guard scripts, the Docker/compose definitions, the dependency and TS/vitest configuration
+#     and the workflows themselves) — a docs-only change does not need a 3-OS test matrix;
+#   - a weekly `schedule`, which **ignores** the path filter, so a week of docs-only pushes cannot leave the
+#     security gate unverified;
+#   - `workflow_dispatch`, kept for a manual run.
+#
+# Two invariants this file must keep (pinned by `tests/coding-agent-c14-ci-and-lint-gates.test.ts`):
+#   1. no step uses `continue-on-error`, so a failure in any step fails its job;
+#   2. the security-gate job keeps **no** path filter and no `if:` — its own fixed suite list is the contract,
+#      and it is the only job that runs on every trigger that reaches this file.
 on:
   workflow_dispatch:
+  schedule:
+    # Monday 04:00 UTC, before the working week (the sandbox image rebuild runs at 03:00 the same day).
+    - cron: "0 4 * * 1"
+  push:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/**"
+      - "scripts/**"
+      - "docker/**"
+      - "services/**"
+      - "docker-compose*.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "vitest*.ts"
+      - ".env.example"
+      - ".github/workflows/**"
+  pull_request:
+    # The same list as `push`, repeated rather than YAML-aliased: the two are pinned as identical by
+    # `tests/coding-agent-c14-ci-and-lint-gates.test.ts`, so they cannot drift, and the file stays plain YAML
+    # that any parser (and the reviewer) reads without anchor semantics.
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/**"
+      - "scripts/**"
+      - "docker/**"
+      - "services/**"
+      - "docker-compose*.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "vitest*.ts"
+      - ".env.example"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -44,10 +93,66 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # C14: `npm run typecheck` only walks each workspace's own tsconfig, which does not include `tests/**`.
+      # The test-suite type gate existed but was never run by CI, so a test file could drift out of type
+      # correctness unnoticed; it is a step of this job now.
+      - name: Typecheck the test suites
+        run: npm run typecheck:tests
+      # C14: the lint step. There was no `lint` script and no linter configuration in the repository at all,
+      # so rule 10 ("typecheck, lint, tests, build") had nothing behind its third word. The script is the
+      # dependency-free source-invariant guard (`scripts/lint-guard.mjs`, self-testing) plus the existing
+      # web XSS source scan. A full ESLint/Prettier/Biome setup needs a dependency decision by the owner —
+      # see the C14 report — and is deliberately not smuggled in here.
+      - name: Lint (source-invariant guards)
+        run: npm run lint
       - run: npm run audit:capabilities
       - run: npm run audit:sandbox-images
-      - run: npm test
+      # C14 (owner decision 1): the **one** test step, and it is not a plain `npm test`.
+      #
+      # The suite is still run in full — `scripts/check-known-failures.mjs` invokes exactly `vitest run` with no
+      # file filter and no `--exclude` — but the verdict is a comparison against `known-failures.json`: GREEN
+      # only while every actual failure is a documented, unexpired entry. A new failure is RED, a quarantined
+      # test that went green is RED (the entry must be deleted), and an entry past its `expires_at` is RED, so
+      # the 15 pre-existing failures are *tracked* instead of either blocking every change forever or being
+      # hidden behind `--exclude`/`continue-on-error` (neither of which appears anywhere in this file).
+      - name: Full test suite vs known-failures quarantine
+        run: npm run test:known-failures
+      - name: Keep the quarantine verdict as evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: known-failures-report
+          path: artifacts/known-failures-report.json
+          if-no-files-found: warn
       - run: npm run build
+
+  # C14: the coding-agent eval smoke, as its own job so it is visible on its own and runs once (the platform
+  # job repeats it on three operating systems for no extra evidence). It is hermetic by construction — the
+  # C6/C9 harness drives scripted transcripts through the real tool runtime with no network, no Docker and no
+  # live model (`NPATI_CODE_EVAL_LIVE` unset ⇒ recorded mode) — and it is the **existing** corpus suite, not a
+  # second runner: `tests/coding-agent-c6-eval.test.ts` is where the corpus's wiring lives.
+  evals:
+    name: Coding-agent eval smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: npm ci
+      - name: Prepare the report directory
+        run: mkdir -p artifacts
+      - name: Run the eval corpus (JSON report, non-zero exit on any failed task)
+        run: npm run eval:smoke
+      # `if-no-files-found: error` is the point: the report is evidence, so a run that produced none fails.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coding-agent-eval-smoke-report
+          path: artifacts/coding-agent-eval-smoke-report.json
+          if-no-files-found: error
 
   docker:
     name: Docker / Ubuntu
@@ -64,7 +169,8 @@ jobs:
   release-gate:
     name: Release gate
     runs-on: ubuntu-24.04
-    needs: [platform, docker]
+    # C14: the eval job blocks the release as well. A gate that runs but blocks nothing is decoration.
+    needs: [platform, docker, evals]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -75,4 +181,3 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run gate:upgrade
-

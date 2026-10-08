@@ -31,6 +31,16 @@ interface I18nContextType {
 
 const I18nContext = createContext<I18nContextType | null>(null);
 
+/**
+ * The context itself, for a consumer that must be renderable **outside** a provider.
+ *
+ * `useTranslation` throws outside its provider, which is right for a page and wrong for a presentational panel
+ * this repository's Node-only web test project renders directly (no jsdom, no provider harness). Reading the
+ * context with `useContext` is always called, so such a component can fall back to an injected resolver without
+ * ever making a hook call conditional.
+ */
+export const I18nContextRef = I18nContext;
+
 function getInitialLanguage(): SupportedLanguage {
   try {
     const saved = localStorage.getItem(STORAGE_KEY) as SupportedLanguage | null;

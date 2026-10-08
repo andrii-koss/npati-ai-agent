@@ -1,11 +1,13 @@
 {
-  "schemaVersion": 2,
-  "description": "Deterministic coding-agent eval tasks. Each task ships its own tiny repository, a scripted model transcript and a post-run verification. No network, no Docker, no live model: the eval runs identically in CI. Schema 1 tasks are the eight C6 tasks (file_contains/command_succeeds over tool and message steps); schema 2 adds the C9 step kind 'check' (a project check at a point in the transcript with the exit status it must report) and the change-set verifications 'test_integrity', 'self_review' (over a RECORDED provider answer) and 'repair_loop', plus 'command_fails' for the negative controls. The additions are additive: every schema-1 task stays valid verbatim.",
+  "schemaVersion": 3,
+  "description": "Deterministic coding-agent eval tasks (schema 3). Each task ships its own tiny repository, a scripted model transcript and a post-run verification. No network, no Docker, no live model and no process spawn: every command a task names is a SIMULATOR inside tests/coding-agent-c6-eval.test.ts, so the corpus runs identically in CI and in a sandbox with no toolchain at all. The simulators are named for what they are. `npm test` is a REGEX SIMULATOR: it evaluates only `expect(<fn>(a, b)).toBe(n)` against `export function f(a, b) { return a <op> b; }` in JavaScript/TypeScript-shaped files and honours .skip/.todo/.only. It has NO understanding of Python, Go or any other language, and the corpus never asks it to run one: the Python and Go tasks carry no command at all and are verified by `file_contains`/`diff_stats` over the change set, which is a statement about the fixture text, never about execution. `npm run build` parses the project JSON configuration with the real JSON.parse (a build that cannot read its own configuration fails). `npm run deps:check` scans import/require specifiers and the manifest and reports undeclared imports and declared-but-unused dependencies, the two directions of a dependency migration. Neither resolves a package and no simulator spawns anything. Schema 1 tasks are the eight C6 tasks (file_contains/command_succeeds over tool and message steps); schema 2 added the C9 step kind 'check' and the change-set verifications 'test_integrity', 'self_review' (over a RECORDED provider answer), 'repair_loop' and 'command_fails'; schema 3 (C14) adds the 'diff_stats' verification plus the per-task 'taskType'/'language' coverage metadata and the turns/diffStats/costUsd scores the harness derives for every task. Every addition is additive: an older task stays valid verbatim.",
   "tasks": [
     {
       "id": "fix-bug-arithmetic",
       "title": "Fix an arithmetic bug so the sum is correct",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n"
       },
@@ -20,6 +22,8 @@
       "id": "add-function-multiply",
       "title": "Add a multiply helper",
       "intent": "CREATE_CODE",
+      "taskType": "feature",
+      "language": "javascript",
       "files": {
         "src/math.js": "export function add(a, b) {\n  return a + b;\n}\n"
       },
@@ -34,6 +38,8 @@
       "id": "refactor-rename-parser",
       "title": "Refactor: rename the parser and keep behaviour",
       "intent": "REFACTOR_CODE",
+      "taskType": "refactor",
+      "language": "javascript",
       "files": {
         "src/legacy.js": "export function cfg(x) {\n  return JSON.parse(x);\n}\n"
       },
@@ -48,6 +54,8 @@
       "id": "write-unit-test",
       "title": "Write a unit test for the sum helper",
       "intent": "TEST_CODE",
+      "taskType": "tests",
+      "language": "javascript",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a + b;\n}\n"
       },
@@ -62,6 +70,8 @@
       "id": "fix-build-config",
       "title": "Fix a broken package.json so the build can read it",
       "intent": "DEBUG_CODE",
+      "taskType": "build_repair",
+      "language": "json",
       "files": {
         "package.json": "{\n  \"name\": \"fixture\"\n  \"version\": \"1.0.0\"\n}\n"
       },
@@ -76,6 +86,8 @@
       "id": "fix-failing-test",
       "title": "Fix a failing test by correcting the assertion",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "files": {
         "tests/assert.js": "expect(sum(1, 1)).toBe(3);\n"
       },
@@ -90,6 +102,8 @@
       "id": "fix-typescript-type",
       "title": "Fix a TypeScript type error",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "typescript",
       "files": {
         "src/types.ts": "export function label(id: number): number {\n  return id;\n}\n"
       },
@@ -104,6 +118,8 @@
       "id": "update-tsconfig",
       "title": "Enable strict mode in the TypeScript config",
       "intent": "EDIT_CODE",
+      "taskType": "build_repair",
+      "language": "json",
       "files": {
         "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"es2022\"\n  }\n}\n"
       },
@@ -118,6 +134,8 @@
       "id": "repair-after-failing-check",
       "title": "A failing check is repaired and re-run until it passes",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `sum` add its two arguments so the failing test passes.",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
@@ -136,6 +154,8 @@
       "id": "repair-limit-exhausted-stops",
       "title": "Three failed repair attempts stop the run instead of claiming a fix",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `sum` add its two arguments so the failing test passes.",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
@@ -161,6 +181,8 @@
       "id": "weakened-test-skip-reported",
       "title": "Skipping the failing test turns the suite green and is reported, not accepted",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `sum` add its two arguments so the failing test passes.",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
@@ -179,6 +201,8 @@
       "id": "deleted-test-reported",
       "title": "Deleting the failing test file is reported as a weakened suite",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `sum` add its two arguments so the failing test passes.",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
@@ -195,6 +219,8 @@
       "id": "deleted-test-case-reported",
       "title": "Deleting the failing case to go green is reported as a weakened suite",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `sum` add its two arguments so the failing test passes.",
       "files": {
         "src/sum.js": "export function sum(a, b) {\n  return a - b;\n}\n",
@@ -213,6 +239,8 @@
       "id": "focused-test-reported",
       "title": "Focusing the suite with .only hides the failing case and is reported",
       "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Make `divide` return zero when the divisor is zero.",
       "files": {
         "src/divide.js": "export function divide(a, b) {\n  return a / b;\n}\n",
@@ -231,6 +259,8 @@
       "id": "added-test-not-flagged",
       "title": "Adding a case is not reported as weakening the suite",
       "intent": "TEST_CODE",
+      "taskType": "tests",
+      "language": "javascript",
       "goal": "Fix `multiply` and cover the zero case.",
       "files": {
         "src/multiply.js": "export function multiply(a, b) {\n  return a + b;\n}\n",
@@ -254,6 +284,8 @@
       "id": "self-review-finds-secret",
       "title": "The self-review reports a credential the change committed",
       "intent": "EDIT_CODE",
+      "taskType": "feature",
+      "language": "javascript",
       "goal": "Round the invoice total to two decimals in src/invoice.js.",
       "files": {
         "src/invoice.js": "export function total(amount) {\n  return Math.round(amount);\n}\n"
@@ -273,6 +305,8 @@
       "id": "self-review-flags-unrelated-change",
       "title": "The self-review reports a change the goal never asked for",
       "intent": "EDIT_CODE",
+      "taskType": "bug_fix",
+      "language": "javascript",
       "goal": "Fix the tax rate in src/cart/tax.js.",
       "files": {
         "src/cart/tax.js": "export function tax(amount) {\n  return amount * 0.2;\n}\n",
@@ -290,6 +324,356 @@
         "answer": "One change is outside the goal.\n```npati-self-review\n{\"status\":\"findings\",\"findings\":[{\"category\":\"scope\",\"severity\":\"major\",\"file\":\"src/billing/legacy-invoice.js\",\"reason\":\"The billing module is not part of the stated goal.\",\"suggested_fix\":\"Revert the change or explain why the goal requires it.\"}]}\n```",
         "expect": [{ "category": "scope", "file": "src/billing/legacy-invoice.js" }]
       }
+    },
+    {
+      "id": "python-fix-bug-average",
+      "title": "Fix a Python off-by-one so the average returns the mean",
+      "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "python",
+      "goal": "Make average(values) return the arithmetic mean.",
+      "files": {
+        "src/stats.py": "def average(values):\n    total = sum(values)\n    return total / len(values) - 1\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/stats.py" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/stats.py", "old_string": "return total / len(values) - 1", "new_string": "return total / len(values)" } },
+        { "kind": "message", "text": "Removed the stray - 1 so average returns the mean." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/stats.py", "contains": "return total / len(values)\n" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 1, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "python-feature-clamp",
+      "title": "Add a clamp helper to the Python ranges module",
+      "intent": "CREATE_CODE",
+      "taskType": "feature",
+      "language": "python",
+      "goal": "Add clamp(value, low, high) to src/ranges.py and keep in_range unchanged.",
+      "files": {
+        "src/ranges.py": "def in_range(value, low, high):\n    return low <= value <= high\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/ranges.py" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/ranges.py", "old_string": "def in_range(value, low, high):", "new_string": "def clamp(value, low, high):\n    return max(low, min(value, high))\n\n\ndef in_range(value, low, high):" } },
+        { "kind": "message", "text": "Added clamp above in_range." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/ranges.py", "contains": "def clamp(value, low, high):" },
+        { "type": "file_contains", "path": "src/ranges.py", "contains": "return max(low, min(value, high))" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 2, "linesRemoved": 0 } }
+      ]
+    },
+    {
+      "id": "python-refactor-extract-helper",
+      "title": "Refactor the Python report renderer by extracting a row formatter",
+      "intent": "REFACTOR_CODE",
+      "taskType": "refactor",
+      "language": "python",
+      "goal": "Extract the row formatting out of render() without changing the output.",
+      "files": {
+        "src/report.py": "def render(rows):\n    lines = []\n    for row in rows:\n        lines.append(row[\"name\"] + \": \" + str(row[\"total\"]))\n    return \", \".join(lines)\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/report.py" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/report.py", "content": "def _format_row(row):\n    return row[\"name\"] + \": \" + str(row[\"total\"])\n\n\ndef render(rows):\n    return \", \".join(_format_row(row) for row in rows)\n" } },
+        { "kind": "message", "text": "Extracted _format_row and reduced render to a join." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/report.py", "contains": "def _format_row(row):" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 3, "linesRemoved": 4 } }
+      ]
+    },
+    {
+      "id": "python-tests-add-case",
+      "title": "Add a Python test case for the inclusive bounds of in_range",
+      "intent": "TEST_CODE",
+      "taskType": "tests",
+      "language": "python",
+      "goal": "Cover the inclusive bounds of in_range with a test file.",
+      "files": {
+        "src/ranges.py": "def in_range(value, low, high):\n    return low <= value <= high\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/ranges.py" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "tests/test_ranges.py", "content": "from src.ranges import in_range\n\n\ndef test_in_range_includes_bounds():\n    assert in_range(5, 5, 10)\n" } },
+        { "kind": "message", "text": "Added tests/test_ranges.py covering the inclusive bounds." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "tests/test_ranges.py", "contains": "def test_in_range_includes_bounds():" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 3, "linesRemoved": 0 } }
+      ]
+    },
+    {
+      "id": "python-multi-file-package",
+      "title": "Add a perimeter function, a package export and a test in one patch",
+      "intent": "CREATE_CODE",
+      "taskType": "multi_file",
+      "language": "python",
+      "goal": "Add perimeter to src/geo.py, export it from the package and cover it with a test.",
+      "files": {
+        "src/geo.py": "def area(width, height):\n    return width * height\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/geo.py" } },
+        { "kind": "tool", "tool": "code.fs.apply_patch", "args": { "patch": "*** Begin Patch\n*** Update File: src/geo.py\n@@ -1,1 +1,3 @@\n+def perimeter(width, height):\n+    return 2 * (width + height)\n+\n*** Add File: src/__init__.py\n+from .geo import area, perimeter\n*** Add File: tests/test_geo.py\n+from src.geo import area, perimeter\n+\n+\n+def test_area():\n+    assert area(3, 4) == 12\n*** End Patch" } },
+        { "kind": "message", "text": "One atomic patch: perimeter, the package export and the test." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/geo.py", "contains": "def perimeter(width, height):" },
+        { "type": "file_contains", "path": "src/__init__.py", "contains": "from .geo import area, perimeter" },
+        { "type": "file_contains", "path": "tests/test_geo.py", "contains": "def test_area():" },
+        { "type": "diff_stats", "expect": { "files": 3, "linesAdded": 6, "linesRemoved": 0 } }
+      ]
+    },
+    {
+      "id": "go-fix-bug-off-by-one",
+      "title": "Fix the Go loop bound that reads one element past the slice",
+      "intent": "DEBUG_CODE",
+      "taskType": "bug_fix",
+      "language": "go",
+      "goal": "total(items) must not index past the end of the slice.",
+      "files": {
+        "main.go": "package main\n\nfunc total(items []int) int {\n\tsum := 0\n\tfor i := 0; i <= len(items); i++ {\n\t\tsum += items[i]\n\t}\n\treturn sum\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "main.go" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "main.go", "old_string": "for i := 0; i <= len(items); i++ {", "new_string": "for i := 0; i < len(items); i++ {" } },
+        { "kind": "message", "text": "The loop bound is exclusive again, so no read past the slice." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "main.go", "contains": "for i := 0; i < len(items); i++ {" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 1, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "go-feature-multiply",
+      "title": "Add a Multiply function to the Go math file",
+      "intent": "CREATE_CODE",
+      "taskType": "feature",
+      "language": "go",
+      "goal": "Add Multiply(a, b int) int next to Add without changing Add.",
+      "files": {
+        "math.go": "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "math.go" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "math.go", "content": "package main\n\nfunc Multiply(a int, b int) int {\n\treturn a * b\n}\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n" } },
+        { "kind": "message", "text": "Added Multiply above Add." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "math.go", "contains": "func Multiply(a int, b int) int {" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 2, "linesRemoved": 0 } }
+      ]
+    },
+    {
+      "id": "go-tests-add-case",
+      "title": "Add a Go test for Add",
+      "intent": "TEST_CODE",
+      "taskType": "tests",
+      "language": "go",
+      "goal": "Cover Add with a Go test file.",
+      "files": {
+        "math.go": "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "math.go" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "math_test.go", "content": "package main\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Fatalf(\"Add(2, 3) = %d\", Add(2, 3))\n\t}\n}\n" } },
+        { "kind": "message", "text": "Added math_test.go." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "math_test.go", "contains": "func TestAdd(t *testing.T) {" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 7, "linesRemoved": 0 } }
+      ]
+    },
+    {
+      "id": "typescript-feature-optional-param",
+      "title": "Add a fallback parameter to the TypeScript label helper",
+      "intent": "EDIT_CODE",
+      "taskType": "feature",
+      "language": "typescript",
+      "goal": "label(value, fallback) must return the fallback for an empty value.",
+      "files": {
+        "src/format.ts": "export function label(value: string): string {\n  return value.trim();\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/format.ts" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/format.ts", "content": "export function label(value: string, fallback = \"unknown\"): string {\n  if (!value) return fallback;\n  return value.trim();\n}\n" } },
+        { "kind": "message", "text": "label takes a fallback and uses it for an empty value." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/format.ts", "contains": "fallback = \"unknown\"" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 2, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "typescript-refactor-extract-type",
+      "title": "Refactor the TypeScript API signature by naming its return type",
+      "intent": "REFACTOR_CODE",
+      "taskType": "refactor",
+      "language": "typescript",
+      "goal": "Name the inline return shape of request() as RequestShape.",
+      "files": {
+        "src/api.ts": "export function request(url: string, method: string): { url: string; method: string } {\n  return { url, method };\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/api.ts" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/api.ts", "content": "export interface RequestShape {\n  url: string;\n  method: string;\n}\n\nexport function request(url: string, method: string): RequestShape {\n  return { url, method };\n}\n" } },
+        { "kind": "message", "text": "Extracted RequestShape and used it as the return type." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/api.ts", "contains": "export interface RequestShape {" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 4, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "typescript-multi-file-rename-export",
+      "title": "Rename an exported TypeScript helper across both files that use it",
+      "intent": "REFACTOR_CODE",
+      "taskType": "multi_file",
+      "language": "typescript",
+      "goal": "Rename toCents to amountToCents in src/money.ts and in every caller.",
+      "files": {
+        "src/money.ts": "export function toCents(amount: number): number {\n  return Math.round(amount * 100);\n}\n",
+        "src/cart.ts": "import { toCents } from \"./money\";\n\nexport function cartTotal(amounts: number[]): number {\n  return amounts.reduce((sum, amount) => sum + toCents(amount), 0);\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/money.ts" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/money.ts", "old_string": "export function toCents(amount: number)", "new_string": "export function amountToCents(amount: number)" } },
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/cart.ts" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/cart.ts", "old_string": "import { toCents } from \"./money\";", "new_string": "import { amountToCents } from \"./money\";" } },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "src/cart.ts", "old_string": "sum + toCents(amount)", "new_string": "sum + amountToCents(amount)" } },
+        { "kind": "message", "text": "Renamed the export and both of its uses." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/money.ts", "contains": "export function amountToCents(amount: number)" },
+        { "type": "file_contains", "path": "src/cart.ts", "contains": "sum + amountToCents(amount)" },
+        { "type": "diff_stats", "expect": { "files": 2, "linesAdded": 3, "linesRemoved": 3 } },
+        { "type": "test_integrity", "expect": "clean" }
+      ]
+    },
+    {
+      "id": "build-repair-broken-manifest",
+      "title": "Repair a package.json the build cannot parse",
+      "intent": "DEBUG_CODE",
+      "taskType": "build_repair",
+      "language": "json",
+      "goal": "Make the build able to read package.json again.",
+      "files": {
+        "package.json": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"build\": \"node build.mjs\"\n  }\n  \"dependencies\": {}\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "package.json" } },
+        { "kind": "check", "command": "npm run build", "expect": "fail" },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "package.json", "content": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"build\": \"node build.mjs\"\n  },\n  \"dependencies\": {}\n}\n" } },
+        { "kind": "check", "command": "npm run build", "expect": "pass" },
+        { "kind": "message", "text": "The manifest was missing a comma; the build reads it again." }
+      ],
+      "verify": [
+        { "type": "command_succeeds", "command": "npm run build" },
+        { "type": "file_contains", "path": "package.json", "contains": "  },\n  \"dependencies\": {}" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 1, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "build-repair-tsconfig-trailing-comma",
+      "title": "Repair the tsconfig trailing comma that stops the build reading its config",
+      "intent": "DEBUG_CODE",
+      "taskType": "build_repair",
+      "language": "json",
+      "goal": "Make the build able to read tsconfig.json without dropping strict mode.",
+      "files": {
+        "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"es2022\",\n    \"strict\": true,\n  },\n  \"include\": [\"src\"]\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "tsconfig.json" } },
+        { "kind": "check", "command": "npm run build", "expect": "fail" },
+        { "kind": "tool", "tool": "code.fs.edit", "args": { "path": "tsconfig.json", "old_string": "\"strict\": true,\n  },", "new_string": "\"strict\": true\n  }," } },
+        { "kind": "check", "command": "npm run build", "expect": "pass" },
+        { "kind": "message", "text": "Removed the trailing comma; strict mode is untouched." }
+      ],
+      "verify": [
+        { "type": "command_succeeds", "command": "npm run build" },
+        { "type": "file_contains", "path": "tsconfig.json", "contains": "\"strict\": true\n" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 1, "linesRemoved": 1 } }
+      ]
+    },
+    {
+      "id": "dep-migration-replace-left-pad",
+      "title": "Migrate off the left-pad dependency onto a local helper",
+      "intent": "REFACTOR_CODE",
+      "taskType": "dependency_migration",
+      "language": "javascript",
+      "goal": "Remove the left-pad dependency and keep the padding behaviour with local code.",
+      "files": {
+        "package.json": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"left-pad\": \"^1.3.0\"\n  }\n}\n",
+        "src/pad.js": "import pad from \"left-pad\";\n\nexport function padLeft(value, width) {\n  return pad(value, width);\n}\n",
+        "src/report.js": "import padLeft from \"left-pad\";\n\nexport function renderRow(name, amount) {\n  return padLeft(name, 12) + amount;\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/pad.js" } },
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/report.js" } },
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "package.json" } },
+        { "kind": "check", "command": "npm run deps:check", "expect": "pass" },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/text.js", "content": "export function padStart(value, width) {\n  const text = String(value);\n  return text.length >= width ? text : \" \".repeat(width - text.length) + text;\n}\n" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/pad.js", "content": "import { padStart } from \"./text.js\";\n\nexport function padLeft(value, width) {\n  return padStart(value, width);\n}\n" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/report.js", "content": "import { padLeft } from \"./pad.js\";\n\nexport function renderRow(name, amount) {\n  return padLeft(name, 12) + amount;\n}\n" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "package.json", "content": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\"\n}\n" } },
+        { "kind": "check", "command": "npm run deps:check", "expect": "pass" },
+        { "kind": "message", "text": "left-pad is gone from the manifest and from every import." }
+      ],
+      "verify": [
+        { "type": "command_succeeds", "command": "npm run deps:check" },
+        { "type": "file_contains", "path": "src/pad.js", "contains": "from \"./text.js\"" },
+        { "type": "file_contains", "path": "src/text.js", "contains": "export function padStart(value, width) {" },
+        { "type": "diff_stats", "expect": { "files": 4, "linesAdded": 8, "linesRemoved": 7 } }
+      ]
+    },
+    {
+      "id": "dep-migration-drop-dead-dependency",
+      "title": "Drop the declared-but-unused dependency the manifest still carries",
+      "intent": "EDIT_CODE",
+      "taskType": "dependency_migration",
+      "language": "javascript",
+      "goal": "Remove the unused dependency and keep the used one declared.",
+      "files": {
+        "package.json": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"left-pad\": \"^1.3.0\",\n    \"lodash\": \"^4.17.21\"\n  }\n}\n",
+        "src/strings.js": "import pad from \"left-pad\";\n\nexport function padCode(code) {\n  return pad(code, 6);\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "package.json" } },
+        { "kind": "check", "command": "npm run deps:check", "expect": "fail" },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "package.json", "content": "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"left-pad\": \"^1.3.0\"\n  }\n}\n" } },
+        { "kind": "check", "command": "npm run deps:check", "expect": "pass" },
+        { "kind": "message", "text": "lodash was declared but imported nowhere, so it is gone; left-pad stays." }
+      ],
+      "verify": [
+        { "type": "command_succeeds", "command": "npm run deps:check" },
+        { "type": "file_contains", "path": "package.json", "contains": "\"left-pad\": \"^1.3.0\"" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 1, "linesRemoved": 2 } }
+      ]
+    },
+    {
+      "id": "javascript-feature-parse-args",
+      "title": "Add an argv parser to the JavaScript CLI module",
+      "intent": "CREATE_CODE",
+      "taskType": "feature",
+      "language": "javascript",
+      "goal": "Add parseArgs(argv) and keep usage() unchanged.",
+      "files": {
+        "src/cli.js": "export function usage() {\n  return \"usage: app [--name value]\";\n}\n"
+      },
+      "script": [
+        { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/cli.js" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/cli.js", "content": "export function parseArgs(argv) {\n  const args = {};\n  for (let index = 0; index < argv.length; index += 2) {\n    args[argv[index].replace(/^--/, \"\")] = argv[index + 1];\n  }\n  return args;\n}\n\nexport function usage() {\n  return \"usage: app [--name value]\";\n}\n" } },
+        { "kind": "message", "text": "Added parseArgs above usage." }
+      ],
+      "verify": [
+        { "type": "file_contains", "path": "src/cli.js", "contains": "export function parseArgs(argv) {" },
+        { "type": "diff_stats", "expect": { "files": 1, "linesAdded": 6, "linesRemoved": 0 } }
+      ]
     }
   ]
 }
