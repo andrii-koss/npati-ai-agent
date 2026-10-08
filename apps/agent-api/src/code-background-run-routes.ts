@@ -180,6 +180,24 @@ export async function registerCodeBackgroundRunRoutes(instance: FastifyInstance,
     if (result.kind === "unknown") {
       throw new CodeBackgroundRunRouteError("background_run_not_found", "Background run not found", 404, {});
     }
+    /**
+     * C15 — the tenant barrier on the **stream** path.
+     *
+     * Until C15 this read was keyed by `runId` alone: the authorization gate asked whether the caller may read
+     * *a* run's changes, the anti-oracle compared the id it was given with the id in the path, and nothing compared
+     * the run's own tenant with the `companyId` in the path. The record it returns carries `sessionId`, `userId`
+     * and `projectId` and the SSE route then streams every event of that run, so a caller who learned another
+     * tenant's run id could read that tenant's run by putting its *own* company id in the URL. The id is random and
+     * server-minted (which is why this was never reachable in practice), but "unreachable because the id is
+     * unguessable" is a property of the id, not an access control — and the run-start route added in C15 makes run
+     * ids much easier to obtain legitimately, so the check belongs here.
+     *
+     * A foreign run answers the **same** 404 with the same empty details as a nonexistent one, so this is not a new
+     * oracle: it narrows what a caller can read without telling it anything about what exists.
+     */
+    if (result.snapshot.companyId !== companyId) {
+      throw new CodeBackgroundRunRouteError("background_run_not_found", "Background run not found", 404, {});
+    }
     return { result, fromSeq };
   };
 

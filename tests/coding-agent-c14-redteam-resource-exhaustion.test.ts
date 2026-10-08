@@ -98,6 +98,41 @@ describe("security-gate: C14 red-team — disk and memory exhaustion", () => {
     expect(1536 * 1024 * 1024 > 0).toBe(true);
   });
 
+  it("mounts a confirmed local folder only when one is asked for, and never two workspaces at once", () => {
+    // C15 adds exactly one host path to this command line, and only for a project whose folder an owner/admin
+    // confirmed. The assertions above describe the input **without** a mount and stay exactly as they were; this
+    // is the positive case that shows the mount is what changes the workspace argument, so the C14 ceiling is a
+    // property of the input rather than of a line that always looks the same.
+    const withMount = buildSandboxCreateArgs({
+      ...{
+        sandboxName: "npati-sb-c14",
+        sandboxId: "c14",
+        network: "npati-net-c14",
+        scope: SCOPE,
+        image: "npati/project-sandbox:local",
+        cpus: "1",
+        memory: "1536m",
+        pids: 128,
+        diskBytes: 1536 * 1024 * 1024,
+      },
+      mount: { source: "/host/repo", target: "/workspace", readOnly: true },
+    });
+    const line = withMount.join(" ");
+    // One bind, at the container's workspace, read-only at the Docker level (the owner decision: an `ro` mount is
+    // enforced by the container, not only by the API).
+    expect(line).toContain("--mount type=bind,source=/host/repo,target=/workspace,readonly");
+    // …and no tmpfs at the same destination: a shadowed bind would silently leave the agent working in a
+    // throwaway filesystem while the user's folder stayed untouched.
+    expect(line.includes("--tmpfs /workspace:")).toBe(false);
+    // The runtime directory stays bounded, which is what keeps the mount from becoming an unbounded disk.
+    expect(line).toContain("--tmpfs /workspace/.npati-runtime:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=268435456");
+    // The escape hatches C14 pins are still absent with a mount present.
+    expect(line.includes("--privileged")).toBe(false);
+    expect(line.includes("/var/run/docker.sock")).toBe(false);
+    expect(withMount.filter((argument) => argument === "--mount").length).toBe(1);
+    expect(withMount.includes("-v")).toBe(false);
+  });
+
   it("refuses a limit that would make the ceilings decorative (fail closed, no container is created)", () => {
     expect(() => new DockerSandboxProvider({ diskBytes: 0 })).toThrow(/resource limits/);
     expect(() => new DockerSandboxProvider({ diskBytes: 16_000_000 - 1 })).toThrow(/resource limits/);

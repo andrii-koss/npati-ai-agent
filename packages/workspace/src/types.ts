@@ -467,6 +467,51 @@ export interface ProjectCodeTrustInput {
   expectedRevision: number;
 }
 
+/**
+ * C15: a **mounted local folder** — the explicit, owner/admin-confirmed allowlist entry that makes one
+ * directory outside the managed workspace root the canonical workspace of one project.
+ *
+ * Why this is a record rather than a column on `projects`: the folder is a *security decision* about the
+ * deployment's host filesystem. It carries the actor and time of the confirmation, its own optimistic
+ * `revision`, and a revocation; a column on `projects` would be rewritten by the product's own project
+ * update path (so a `PATCH` could silently repoint a workspace at another directory) and would be invisible
+ * to the sandbox runner, which must be able to re-read the allowlist **itself** — without trusting the API —
+ * immediately before `docker create`.
+ *
+ * `mode` is the only writability statement there is: `rw` writes straight into the canonical folder, `ro` is
+ * mounted `readonly` at the container level, so the refusal is a kernel/Docker fact and not only an API check.
+ */
+export interface ProjectMountedFolder {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  projectId: string;
+  /** The canonical absolute path, as confirmed. Every use re-validates it (realpath + lstat). */
+  path: string;
+  mode: MountedFolderMode;
+  confirmedBy?: string | null;
+  confirmedAt?: string | null;
+  revokedBy?: string | null;
+  revokedAt?: string | null;
+  reason?: string | null;
+  revision: number;
+  updatedAt: string;
+}
+
+export type MountedFolderMode = "ro" | "rw";
+
+export interface ProjectMountedFolderInput {
+  /** The canonical absolute path the confirmation applies to; validated at the API boundary before the write. */
+  path: string;
+  mode: MountedFolderMode;
+  /** Confirmed (`confirmedBy`/`confirmedAt`) or revoked (`revokedBy`/`revokedAt`). */
+  confirmed: boolean;
+  actor: string;
+  reason?: string;
+  /** Optimistic concurrency token: must match the current record revision (0 for a first write). */
+  expectedRevision: number;
+}
+
 export interface CodeSessionInput {
   mode?: CodeSessionMode;
   agentId?: string;
@@ -1499,6 +1544,20 @@ export interface WorkspaceStore {
   /** C5: project trust. Owner/admin only at the API layer; the store is the single writer. */
   getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null>;
   setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust>;
+  /**
+   * C15: the mounted-folder allowlist. `getProjectMountedFolder` is the tenant-scoped read the API and the
+   * workspace resolver use; `setProjectMountedFolder` is the single writer (revision-checked).
+   */
+  getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null>;
+  setProjectMountedFolder(context: AuthContext, companyId: string, projectId: string, input: ProjectMountedFolderInput): Promise<ProjectMountedFolder>;
+  /**
+   * C15: the same record, read **without a user context**, for the sandbox runner. The runner is the component
+   * that really creates the container, so it must re-read the allowlist itself right before `docker create`
+   * instead of trusting a path the API sent: between the confirmation and the create the path could have
+   * become a symlink, and a client could simply have sent another one. `null` for an unknown id, so a runner
+   * without the database mounts nothing (fail closed).
+   */
+  getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null>;
   createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint>;
   listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
   getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint>;

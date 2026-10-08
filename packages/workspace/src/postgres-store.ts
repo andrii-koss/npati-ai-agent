@@ -4,7 +4,7 @@ import { Pool } from "pg";
 import migration001 from "./migration-001";
 import migration002 from "./migration-002";
 import migration003 from "./migration-003";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
@@ -22,6 +22,7 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
 import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError, codeRunRequestStatus } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
+import { mountedFolderPathKey } from "./mounted-folder";
 import { CompanyMembershipError, ProviderDataPolicyStoreError, CodeRunStateStoreError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
 // C9: goals, plan revisions and session todos. The logic lives in its own module so the Postgres and
 // in-memory backends share one implementation of the rules instead of two that drift apart.
@@ -89,6 +90,11 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   tool_manifest_version AS "toolManifestVersion", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
   const projectCodeTrustColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
   trusted, trusted_by AS "trustedBy", trusted_at AS "trustedAt", revoked_by AS "revokedBy", revoked_at AS "revokedAt",
+  reason, revision, updated_at AS "updatedAt"`;
+  // C15: `path_key` is deliberately not selected — it is a comparison key, not a fact a caller acts on, and
+  // exposing it would invite a second spelling of the canonical path.
+  const projectMountedFolderColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
+  path, mode, confirmed_by AS "confirmedBy", confirmed_at AS "confirmedAt", revoked_by AS "revokedBy", revoked_at AS "revokedAt",
   reason, revision, updated_at AS "updatedAt"`;
   const auditEntryColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", sequence,
   created_at AS "createdAt", actor, actor_role AS "actorRole", request_id AS "requestId",
@@ -1229,6 +1235,21 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+    // C15: the mounted local folder allowlist. Additive: 086 creates one new table with its per-project unique
+    // key and two reader indexes, so a previous application version keeps working — it never reads the table,
+    // and a project without a row keeps the managed workspace root (no mount is implied by its absence).
+    const mountedFolderMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='086_project_mounted_folders'");
+    if (!mountedFolderMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration086 } = await import("./migration-086");
+        await runMigration086(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('086_project_mounted_folders')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
   }
 
   // --- C9: `code.ask_user` — the persistent question --------------------------------------------------
@@ -2271,6 +2292,62 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [randomUUID(), context.workspaceId, companyId, projectId, input.trusted, input.actor,
         input.trusted ? new Date().toISOString() : null, input.trusted ? null : input.actor,
         input.trusted ? null : new Date().toISOString(), input.reason ?? null]);
+    return result.rows[0]!;
+  }
+
+  // --- C15: the mounted local folder allowlist ------------------------------------------------
+
+  async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    const result = await this.pool.query<ProjectMountedFolder>(`SELECT ${projectMountedFolderColumns} FROM project_mounted_folders
+      WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3`,
+      [context.workspaceId, companyId, projectId]);
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * The runner-side read: the same row, addressed by ids alone, because the sandbox runner has no user
+   * session. It is a point lookup on the per-project unique key, and `null` (unknown ids, no database) is the
+   * fail-closed answer — a runner that cannot read the allowlist mounts nothing.
+   */
+  async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    const result = await this.pool.query<ProjectMountedFolder>(`SELECT ${projectMountedFolderColumns} FROM project_mounted_folders
+      WHERE company_id=$1 AND project_id=$2`,
+      [companyId, projectId]);
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * The single writer of the allowlist. Revision-checked exactly like project trust: a missing row means
+   * "revision 0, no mount", so the first write must pass `expectedRevision: 0`, and a later confirmation
+   * cannot overwrite a decision another request made in the meantime.
+   */
+  async setProjectMountedFolder(context: AuthContext, companyId: string, projectId: string, input: ProjectMountedFolderInput): Promise<ProjectMountedFolder> {
+    const existing = await this.getProjectMountedFolder(context, companyId, projectId);
+    if (input.expectedRevision !== (existing?.revision ?? 0)) {
+      throw new WorkspaceAccessError("Mounted folder changed by another request. Reload and try again.");
+    }
+    const result = await this.pool.query<ProjectMountedFolder>(`INSERT INTO project_mounted_folders
+      (id, workspace_id, company_id, project_id, path, path_key, mode, confirmed_by, confirmed_at, revoked_by, revoked_at, reason, revision)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1)
+      ON CONFLICT (company_id, project_id) DO UPDATE SET
+        path=$5,
+        path_key=$6,
+        mode=$7,
+        confirmed_by=CASE WHEN $13 THEN $8 ELSE project_mounted_folders.confirmed_by END,
+        confirmed_at=CASE WHEN $13 THEN $9 ELSE project_mounted_folders.confirmed_at END,
+        revoked_by=CASE WHEN $13 THEN project_mounted_folders.revoked_by ELSE $10 END,
+        revoked_at=CASE WHEN $13 THEN project_mounted_folders.revoked_at ELSE $11 END,
+        reason=$12,
+        revision=project_mounted_folders.revision+1,
+        updated_at=now()
+      RETURNING ${projectMountedFolderColumns}`,
+      [randomUUID(), context.workspaceId, companyId, projectId, input.path, mountedFolderPathKey(input.path), input.mode,
+        input.confirmed ? input.actor : null,
+        input.confirmed ? new Date().toISOString() : null,
+        input.confirmed ? null : input.actor,
+        input.confirmed ? null : new Date().toISOString(),
+        input.reason ?? null,
+        input.confirmed]);
     return result.rows[0]!;
   }
 

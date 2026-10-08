@@ -22,7 +22,9 @@ import {BrowserCredentialsRepository} from "./browser-credentials-repository";
 import {BrowserUseClient} from "./browser-tool";
 import {ChatFileService} from "./chat-file-service";
 import { ProjectService } from "./project-service";
-import { LocalProjectWorkspace } from "./project-workspace";
+import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
+import { ProjectWorkspaceBaseResolver } from "./workspace-base-resolver";
+import { FeatureFlagService } from "./feature-flags";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { RemoteSandboxProvider } from "./sandbox-provider";
@@ -55,7 +57,21 @@ const memoryEngines=new ProductionMemoryEngineRegistry([
 ]);
 const knowledgeProcessor=new CompanyKnowledgeProcessor(knowledge,files,storage,ai,memoryEngines);
 const projects = new ProjectService(store);
-const projectWorkspace = new LocalProjectWorkspace(projects, { root: process.env.NPATI_PROJECT_WORKSPACE_ROOT ?? path.join(process.env.NPATI_DATA_DIR ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+/**
+ * C15: the worker resolves a project's canonical workspace through the **same** resolver and the **same**
+ * allowlist the API reads, so a mounted project is the same directory for a background run as it is for an
+ * interactive one. A managed-only resolver here would be a second source of truth for the same project — the
+ * exact thing this step forbids — and the flag is read from the same store, so a kill switch is felt in both
+ * processes.
+ */
+const projectWorkspaceRoot = process.env.NPATI_PROJECT_WORKSPACE_ROOT ?? path.join(process.env.NPATI_DATA_DIR ?? ".data", "project-workspaces");
+const projectWorkspaceBases = new ProjectWorkspaceBaseResolver({
+  root: projectWorkspaceRoot,
+  mounts: { lookup: async (ctx, companyId, projectId) => store.getProjectMountedFolder(ctx, companyId, projectId).catch(() => null) },
+  flags: new FeatureFlagService(store),
+  protectedRoots: process.env.NPATI_DATA_DIR ? [path.resolve(process.env.NPATI_DATA_DIR)] : [],
+});
+const projectWorkspace = new MountedWorkspaceProvider(projects, { root: projectWorkspaceRoot, bases: projectWorkspaceBases, maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
 const terminalEvents = new ProjectTerminalEventsRepository(projects, (store as any).pool);
 const runnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL, runnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
 const projectSandbox = runnerUrl && runnerSecret ? new ProjectSandboxService(projects, store, projectWorkspace, new RemoteSandboxProvider(runnerUrl, runnerSecret), terminalEvents, browserCredentials, {

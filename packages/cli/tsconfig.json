@@ -1,0 +1,25 @@
+{
+  // C15 (owner decision 2): the CLI is plain ESM JavaScript with JSDoc types, so `checkJs` is the only way it is
+  // type-checked at all. The alternative — TypeScript plus a `bin` that needs a build step — was rejected because
+  // the package would then install a binary that cannot run until someone compiles it, and because relying on
+  // Node's experimental type stripping would only work on part of the `engines` range.
+  //
+  // No new dependency is introduced: `typescript` is the repository's own devDependency and `@types/node` is
+  // already present at the root (hoisted from the app workspaces), which is why `typeRoots` points there instead
+  // of adding a second copy.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "typeRoots": ["../../node_modules/@types"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "strict": true
+  },
+  "include": ["src", "bin"]
+}

@@ -1,14 +1,17 @@
 import Fastify from "fastify";
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure } from "./sandbox-runner-diagnostics";
-import { SandboxProviderError, type SandboxScope } from "./sandbox-provider";
+import { SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type WorkspaceStore } from "@npati/workspace";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
 import { dockerEgressProbe, resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
+import { RunnerMountGate, type MountedFolderAllowlistPort } from "./mounted-folder-gate";
+import { mountedFolderRoots } from "./project-mount-policy";
 import { authenticateRunnerRequest, createRunnerReadiness } from "./runner-readiness";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 
@@ -20,21 +23,29 @@ import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
  * digests, signature, scan freshness and waivers are still enforced, but a revocation issued through
  * the API is only visible once the runner can reach the database — so a production runner must have
  * `DATABASE_URL` set.
+ *
+ * C15 adds the second reason the runner needs that database: the **mounted-folder allowlist**. The runner
+ * re-reads the confirmed folder of a project from the same store, immediately before `docker create`, instead of
+ * trusting the path an API sent — that read is what makes the TOCTOU re-validation an independent check rather
+ * than a echo of the caller. Without a database the runner's store is the in-memory fallback, which cannot
+ * contain an API-confirmed mount, so it mounts nothing (fail closed).
  */
-async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
-  const config = sandboxImagePolicyConfig(process.env);
+async function createRunnerStore(): Promise<{ store: WorkspaceStore; database: boolean }> {
   const databaseUrl = process.env.DATABASE_URL ?? process.env.NPATI_DATABASE_URL;
-  let store: WorkspaceStore;
   if (databaseUrl) {
     const postgres = new PostgresWorkspaceStore(databaseUrl);
     await postgres.initialize().catch((error) => console.error(`[sandbox-image-policy] database unavailable ${error instanceof Error ? error.message : ""}`));
-    store = postgres;
-  } else {
-    const memory = new InMemoryWorkspaceStore();
-    await memory.initialize();
-    console.warn("[sandbox-image-policy] DATABASE_URL is not set: image revocations from the API are not visible to this runner");
-    store = memory;
+    return { store: postgres, database: true };
   }
+  const memory = new InMemoryWorkspaceStore();
+  await memory.initialize();
+  console.warn("[sandbox-image-policy] DATABASE_URL is not set: image revocations from the API are not visible to this runner");
+  return { store: memory, database: false };
+}
+const runnerStore = createRunnerStore();
+async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
+  const config = sandboxImagePolicyConfig(process.env);
+  const { store } = await runnerStore;
   return new SandboxImagePolicy(store, {
     ...config,
     verifier: config.signer?.identity && config.signer?.issuer ? new CosignImageSignatureVerifier() : undefined,
@@ -42,6 +53,30 @@ async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
 }
 const runnerImagePolicy = createRunnerImagePolicy();
 const imageAdmission: SandboxImageAdmission = { admit: async (context, input) => (await runnerImagePolicy).admit(context, input) };
+
+/**
+ * C15: the runner's mount gate. It reads the allowlist **itself** (the store above, with no user context) and
+ * re-runs the path validation immediately before the bind argument is built, so neither a path that changed
+ * after the confirmation nor one a caller invented can reach a container. A mount is refused outright outside
+ * `local` runner mode, where a host path the runner validates would not be the host path the daemon mounts.
+ *
+ * Deployment precondition, stated because it is real and not a detail: in local mode the runner must be able to
+ * see the confirmed folder at the **same absolute path** the API recorded (the folder bound into the runner, or
+ * the runner running on the host). The runner validates that path with `realpath`/`lstat`, and a path it cannot
+ * resolve is a refusal (`mounted_folder_not_found`) — never an assumption that the daemon will find it.
+ */
+const runnerMountGate = new RunnerMountGate({
+  allowlist: {
+    getConfirmed: async (companyId, projectId) => {
+      const { store } = await runnerStore;
+      return store.getProjectMountedFolderForSystem(companyId, projectId).catch(() => null);
+    },
+  },
+  roots: mountedFolderRoots(),
+  protectedRoots: process.env.NPATI_DATA_DIR ? [path.resolve(process.env.NPATI_DATA_DIR)] : [],
+  projectWorkspacesRoot: process.env.NPATI_PROJECT_WORKSPACE_ROOT ?? path.join(process.env.NPATI_DATA_DIR ?? ".data", "project-workspaces"),
+  runnerMode: process.env.NPATI_SANDBOX_RUNNER_MODE,
+});
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
@@ -91,7 +126,7 @@ const provider = new DockerSandboxProvider({
   allowedHosts: sandboxAllowedHostsWithProjectApi(
     process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({ env: process.env })),
     process.env.NPATI_PROJECT_API_PUBLIC_URL),
-}, imageAdmission, egressEnforcement);
+}, imageAdmission, egressEnforcement, runnerMountGate);
 const runnerPreflight = async (): Promise<void> => {
   const socketPresent = await stat("/var/run/docker.sock").then((value) => value.isSocket()).catch(() => false);
   const check = async (args: string[]) => dockerExec("docker", args, { timeout: 10_000, maxBuffer: 64_000 }).then(({ stdout }) => ({ ok: true, output: stdout.trim() })).catch((error: NodeJS.ErrnoException & { stderr?: string }) => ({ ok: false, code: dockerFailure(args.slice(0, 2).join("."), error.stderr ?? error.message ?? "", false, error.code).code, output: "" }));
@@ -136,7 +171,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     sandboxId = id;
     let result: unknown;
     switch (operation) {
-      case "createSandbox": result = await provider.createSandbox(requestScope); break;
+      case "createSandbox": result = await provider.createSandbox(requestScope, p.options as SandboxCreateOptions | undefined); break;
       case "startSandbox": result = await provider.startSandbox(requestScope, id); break;
       case "stopSandbox": result = await provider.stopSandbox(requestScope, id); break;
       case "destroySandbox": result = await provider.destroySandbox(requestScope, id); break;

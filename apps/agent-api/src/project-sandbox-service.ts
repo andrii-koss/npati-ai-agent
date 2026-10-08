@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
-import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
+import { ProjectFileError, safeProjectPath, type ProjectMountRequest, type ProjectWorkspace } from "./project-workspace";
 import type { SandboxBrowserQaOptions, SandboxProvider, SandboxScope, SandboxStatus, SandboxCommandResult, SandboxFile } from "./sandbox-provider";
 import { SandboxProviderError, SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST } from "./sandbox-provider";
 import { classifyTerminalCommand, normalizeTerminalCommand, redactTerminalText, type TerminalCommandDecision } from "./terminal-command-policy";
@@ -240,6 +240,14 @@ export class ProjectSandboxService {
   }
   private async ensure(ctx: AuthContext, project: Project) {
     const scope = scopeOf(ctx, project);
+    /**
+     * C15: the mount this project's canonical workspace is, resolved **before** the container exists. It comes
+     * from the workspace provider's own resolver (`mountFor`), so the directory handed to Docker is the one the
+     * provider reads and writes — not a second path derived from a request. The runner re-derives it from the
+     * allowlist it reads itself and refuses a disagreement, so a path that changed since the confirmation (or a
+     * forged one) cannot become a bind mount.
+     */
+    const mount = this.workspace.mountFor ? await this.workspace.mountFor(ctx, project.companyId, project.id) : null;
     let sandboxId = project.sandboxId;
     if (sandboxId) {
       try {
@@ -252,16 +260,22 @@ export class ProjectSandboxService {
       }
     }
     if (!sandboxId) {
-      const created = await this.provider.createSandbox(scope, { runtime: project.runtime });
+      const created = await this.provider.createSandbox(scope, { runtime: project.runtime, ...(mount ? { mount } : {}) });
       try { project = await this.store.setProjectSandbox(ctx, project.companyId, project.id, created.id, project.sandboxId ?? null); }
       catch (error) { await this.provider.destroySandbox(scope, created.id).catch(() => undefined); throw error; }
       sandboxId = created.id;
       await this.provider.startSandbox(scope, sandboxId);
     }
     this.touch(ctx, { ...project, sandboxId });
-    return { project: { ...project, sandboxId }, scope, sandboxId };
+    return { project: { ...project, sandboxId }, scope, sandboxId, mount };
   }
-  private async upload(ctx: AuthContext, project: Project, scope: SandboxScope, sandboxId: string) {
+  private async upload(ctx: AuthContext, project: Project, scope: SandboxScope, sandboxId: string, mount: ProjectMountRequest | null) {
+    /**
+     * C15: nothing is uploaded into a mounted workspace. The container's `/workspace` **is** the canonical
+     * folder, so a copy would be a second writer of the same files — and on an `ro` mount it could not be
+     * written at all (which is the correct outcome, not an error to work around).
+     */
+    if (mount) return new Map<string, SandboxFile>();
     const entries = await this.workspace.listFiles(ctx, project.companyId, project.id);
     const files: SandboxFile[] = [];
     let total = 0;
@@ -325,12 +339,22 @@ export class ProjectSandboxService {
       sandboxId = ready.sandboxId;
       if (request.sandboxId && request.sandboxId !== sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
       logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId, projectId: project.id, decision: "allow", reason: request.approved && decision.requiresApproval ? "human_approved" : "sandbox_execution", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
-      const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId);
+      const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId, ready.mount);
       const raw = startProcess
         ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd })
         : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd });
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
-      if (!startProcess) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
+      /**
+       * C15: for a **mounted** project the sandbox writes into the canonical folder through the bind mount, so
+       * there is nothing to copy back — and copying back would be actively wrong: it would make the sandbox a
+       * second writer of the same directory (whichever copy landed last would win, and a file the agent deleted
+       * would reappear from the container's view of it) and it would apply the sync size ceilings
+       * (`syncMaxFiles`/`syncMaxBytes`) to a folder the user owns rather than to the project's own quota. The
+       * upload is skipped for the same reason: the files are already there, because the container *is* mounted
+       * on them. The read-before-write `originals` map is therefore empty for a mounted project, and the
+       * download below is the only place the distinction is observable.
+       */
+      if (!startProcess && !ready.mount) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
       const commandKind = decision.reason === "Install dependencies inside sandbox" ? "install" : normalized.args.includes("build") ? "build" : startProcess ? "preview" : "command";
       const failureCode = raw.status === "timed_out" ? "command_timeout" : raw.exitCode === 127 ? "command_not_found" : commandKind === "install" ? "install_failed" : commandKind === "build" ? "build_failed" : commandKind === "preview" ? "preview_start_failed" : "command_failed";
       const detail = (raw.stderr || raw.stdout || "").trim();

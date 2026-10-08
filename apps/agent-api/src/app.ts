@@ -56,7 +56,8 @@ import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { ProjectApiGatewayService } from "./data-studio/gateway-service";
 import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
 import { AgentDataStudioService } from "./data-studio/agent-data-service";
-import { LocalProjectWorkspace } from "./project-workspace";
+import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
+import { ProjectWorkspaceBaseResolver, type MountedFolderFlagPort } from "./workspace-base-resolver";
 import { registerProjectFileRoutes } from "./project-file-routes";
 import { RemoteSandboxProvider } from "./sandbox-provider";
 import { ProjectSandboxService } from "./project-sandbox-service";
@@ -145,6 +146,11 @@ import { createCodeUserQuestionReaperPort } from "./code-ask-user-reaper";
 import { registerCodeAskUserRoutes } from "./code-ask-user-routes";
 import { registerCodeProjectTrustRoutes } from "./code-project-trust-routes";
 import { isRepositoryInstructionsTrusted } from "./code-project-trust";
+// C15: the mounted-folder allowlist — its service (flag, owner/admin, path validation, audit before apply) and
+// the route that exposes it.
+import { CodeMountedFolderService } from "./code-mounted-folder";
+import { registerCodeMountedFolderRoutes } from "./code-mounted-folder-routes";
+import { mountedFolderRoots } from "./project-mount-policy";
 import { createCodeCommandRegistry } from "./code-command-registry";
 import { createCodeSkillsService } from "./code-skills-instructions";
 import { CodeRunCancellationRegistry } from "./code-run-cancellation";
@@ -179,7 +185,9 @@ import { isAgentPrincipal, isReviewSafeTool, matrixModeFor, PolicyEngine } from 
 import type { GitWriteIntent } from "./code-git-write-policy";
 import { classifyShellCommand } from "./code-shell-classifier";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
-import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
+import { CodeSessionRunExecutor } from "./code-session-run-executor";
+// C15 (owner decisions 2 and 3): the run-start surface the CLI and, later, an IDE extension call.
+import { registerCodeCliRunRoutes } from "./code-cli-run-routes";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
@@ -1155,7 +1163,41 @@ export function buildApp(config: AppConfig = {}) {
       return undefined;
     }
   });
-  const projectWorkspace = new LocalProjectWorkspace(projectService, { root: config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"), maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
+  /**
+   * C15: the **one** resolver of a project's canonical workspace, and the one `WorkspaceProvider` that serves it.
+   *
+   * The owner decision for this step is that a mounted local folder becomes a real `WorkspaceProvider` rather
+   * than a bypass: the provider below is the ordinary one, its base comes from this resolver, and the allowlist
+   * read and the feature flag are wired into it. `ProjectGitService` receives the *same* resolver object further
+   * down, so git, the file tools and the sandbox all act on the one directory this object names — there is no
+   * second join of a workspace root anywhere in this file.
+   *
+   * `protectedRoots` carries the data directory (and the workspace root is added by the validator itself),
+   * because a mount that contains either would expose it one level down.
+   */
+  const projectWorkspaceRoot = config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces");
+  /**
+   * The flag reader is bound late, like the other late-bound ports in this file: the feature-flag service is
+   * built further down (it depends on the audit log), and the resolver must not hold a second flag reader.
+   * While it is unset the resolver answers "disabled", so an unwired build mounts nothing instead of mounting
+   * without a gate — the fail-closed direction for a handle that does not exist yet.
+   */
+  let mountedFolderFlags: MountedFolderFlagPort | null = null;
+  const projectWorkspaceBases = new ProjectWorkspaceBaseResolver({
+    root: projectWorkspaceRoot,
+    mounts: {
+      lookup: async (ctx, companyId, projectId) => workspaceStore.getProjectMountedFolder(ctx, companyId, projectId).catch(() => null),
+    },
+    flags: {
+      isEnabled: async (ctx, flagKey, options) => {
+        const flags = mountedFolderFlags;
+        if (!flags) throw new Error("The mounted-folder feature flag service is not wired yet");
+        return flags.isEnabled(ctx, flagKey, options);
+      },
+    },
+    protectedRoots: config.dataDirectory ? [path.resolve(config.dataDirectory)] : [],
+  });
+  const projectWorkspace = new MountedWorkspaceProvider(projectService, { root: projectWorkspaceRoot, bases: projectWorkspaceBases, maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
   // The gateway vendors the Project API client into the Project workspace, so it needs the workspace handle.
   const projectApiGatewayService = dataBackendRepository && databaseProvisioner
     ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, databaseProvisioner, projectAuthService, dataProvider, undefined, projectWorkspace, quotaService)
@@ -1272,7 +1314,9 @@ export function buildApp(config: AppConfig = {}) {
   const projectGitService = new ProjectGitService(
     workspaceStore,
     projectService,
-    config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces"),
+    // C15: the **same** resolver the workspace provider reads, not a second join of the same root. This is what
+    // makes "one canonical workspace" true for git as well: a mounted project's repository is the user's own.
+    projectWorkspaceBases,
     undefined,
     async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; },
     undefined,
@@ -1324,6 +1368,9 @@ export function buildApp(config: AppConfig = {}) {
     } catch { /* ignore */ }
     return stopped;
   });
+  // C15: the late-bound flag reader of the workspace resolver is bound to the one feature-flag service, so a
+  // `code.mounted_folder` kill switch is felt by the next resolution (the service caches for at most 30 s).
+  mountedFolderFlags = featureFlagService;
   // C1b: sandbox image admission control. Created here so the routes and the runner-facing services
   // share one policy; without a configured signer identity it denies every image (see the policy).
   const sandboxImageConfig = sandboxImagePolicyConfig(process.env, config.dataDirectory);
@@ -5383,6 +5430,17 @@ ${localized.next}`;
    */
   const codeRunCancellation = new CodeRunCancellationRegistry();
   /**
+   * C15: the one driver of a code session. Both entry points use this instance — the chat branch of `/chat/stream`
+   * and the CLI/IDE run-start route — so the cancellation registration and the terminal-status normalisation are
+   * literally the same code, not two copies that agree today. It is built here, next to the cancellation registry
+   * it writes to and the runner it drives, because all three must be the same objects the Stop route already uses.
+   */
+  const codeSessionRunExecutor = new CodeSessionRunExecutor({
+    runner: codingAgentRunner,
+    control: codeRunCancellation,
+    logger: { warn: (payload, message) => { app.log.warn(payload as Record<string, unknown>, message ?? "code_session_run_warning"); } },
+  });
+  /**
    * C7: the project lifecycle and session-control surfaces.
    *
    * One path-scoped preHandler with its own context map — the same mechanism the session-mode, production,
@@ -5938,6 +5996,118 @@ ${localized.next}`;
     logger: app.log,
   });
   /**
+   * C15 (owner decisions 2 and 3): the run-start surface a terminal (`npati code`) and, later, an IDE extension
+   * call. It is wired **after** the background-run registry it registers into, because a run this route starts must
+   * be readable and streamable through the existing `…/background` and `…/background-stream` routes — that is what
+   * makes the CLI's follow-up subscription reuse an existing SSE surface instead of adding a fourth one.
+   *
+   * Three things are deliberately shared with the chat entry point rather than re-derived:
+   *
+   *  - the master kill switch (`codeService` reads it too, but a run over an *existing* session would otherwise
+   *    bypass it, so it is asserted here as well);
+   *  - the **existing** `CodeRunQueue`, so the CLI cannot run more concurrent work than the UI can;
+   *  - the **existing** `codeSessionRunExecutor`, so the cancellation registration and the terminal-status
+   *    normalisation are the same code the chat branch drives — one loop, one Stop path.
+   */
+  registerCodeCliRunRoutes(app, {
+    auth: authProvider,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    isCodeRunsEnabled: async (ctx, companyId) => {
+      try {
+        await featureFlagService.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    loadProject: async (ctx, companyId, projectId) => {
+      const project = await projectService.get(ctx, companyId, projectId).catch(() => null);
+      return project ? { id: project.id, type: project.type } : null;
+    },
+    loadSession: async (ctx, companyId, sessionId) => {
+      const session = await codeService.getSession(ctx, companyId, sessionId).catch(() => null);
+      return session && session.status !== "archived" ? session : null;
+    },
+    createSession: async (ctx, companyId, projectId) => codeService.createSession(ctx, companyId, projectId, { mode: "edit" }),
+    admit: async (ctx, companyId, sessionId) => codeRunQueue.acquire({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      companyId,
+      sessionId,
+    }, { timeoutMs: codeRunQueueLimits.queueTimeoutMs }),
+    registerRun: ({ runId, ctx, companyId, sessionId, projectId }) => {
+      const sink = codeBackgroundRuns.start({
+        runId,
+        sessionId,
+        companyId,
+        userId: ctx.userId,
+        projectId,
+        // The same terminal hook the chat path uses: a run nobody is watching still says how it ended.
+        onTerminal: async (snapshot) => {
+          const detail = snapshot.status === "completed"
+            ? `Run ${snapshot.runId} finished successfully.`
+            : `Run ${snapshot.runId} ended with status ${snapshot.status}${snapshot.reason ? `: ${snapshot.reason}` : "."}`;
+          await notifyMessagingConnections({
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userId,
+            companyId,
+            kind: "background_run",
+            title: snapshot.status === "completed" ? "Code run completed" : "Code run needs your attention",
+            detail,
+          }).catch((error) => { app.log.warn({ err: error, runId }, "code_cli_run_notify_failed"); });
+        },
+      });
+      return {
+        signal: sink.signal,
+        emitResult: (result) => sink.emit("result", { routed: "code_runner", runId, run: result }),
+        emitTerminal: (status, reason) => sink.finish(status, reason),
+        abort: (reason?: string) => codeBackgroundRuns.abort(runId, reason ?? "Stopped by an explicit request"),
+      };
+    },
+    execute: async ({ ctx, companyId, projectId, session, prompt, readOnlyIntent, registration, onSettled }) => {
+      let outcome: Awaited<ReturnType<CodeSessionRunExecutor["execute"]>> | null = null;
+      try {
+        outcome = await codeSessionRunExecutor.execute({
+          ctx,
+          session,
+          prompt,
+          // A read-only request is a narrowing the server enforces (`readOnlyIntent` reaches the tool runtime, which
+          // refuses every write on that run), so it is passed through rather than treated as a display preference.
+          ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
+          // The signal the run executes under is the registry's own, so the existing Stop route and the reconnect
+          // surface reach the same run; `abort` routes an abort back through the registry rather than mutating a
+          // controller this route owns.
+          sink: {
+            signal: registration.signal,
+            // The events are already in the registry: `CodeSessionRunExecutor` emits its result and terminal state
+            // through this same sink, so re-emitting here would put two `terminal` events in one run's buffer.
+            emitResult: () => {},
+            emitTerminal: () => {},
+          },
+          abort: (reason?: unknown) => { registration.abort(reason instanceof Error ? reason.message : undefined); },
+          cancelRequested: () => codeRunCancellation.isSessionCancelled(session.id),
+        });
+      } finally {
+        // The sandbox is released after the run on every path — success, failure and cancellation — exactly as the
+        // chat entry point does. The project is re-read because the pre-run object's `sandboxId` is empty.
+        if (projectSandbox) {
+          try {
+            const current = await projectService.get(ctx, companyId, projectId);
+            await projectSandbox.destroy(ctx, current);
+          } catch (error) {
+            app.log.warn({ err: error, projectId }, "code_cli_run_sandbox_release_failed");
+          }
+        }
+        await onSettled({
+          terminalStatus: outcome?.terminalStatus ?? "failed",
+          reason: outcome?.reason ?? null,
+          needsApproval: outcome?.needsApproval ?? false,
+        });
+      }
+    },
+    logger: app.log,
+  });
+  /**
    * C10 (ТЗ item 8): exporting a session to Markdown. The route reads the same transcript reader the Workspace
    * uses, applies the same turn/result bounds and refuses the whole document when either secret scanner finds a
    * credential — so the export cannot become a wider read path than the API it reuses.
@@ -6017,7 +6187,7 @@ ${localized.next}`;
   const codeInstructionsContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
-    if (!/\/code\/(?:instructions(?:\/init)?|trust(?:\/revoke)?)$/.test(path)) return;
+    if (!/\/code\/(?:instructions(?:\/init)?|trust(?:\/revoke)?|mounted-folder(?:\/revoke)?)$/.test(path)) return;
     codeInstructionsContexts.set(request, await authProvider.authenticate(request));
   });
   registerCodeProjectInstructionsRoutes(app, {
@@ -6043,6 +6213,49 @@ ${localized.next}`;
       // the route adds transport only, so the fail-closed ordering cannot be lost in a wrapper.
       trust: async (ctx, companyId, projectId, input) => codeProjectTrust.trust(ctx, companyId, projectId, input),
       revoke: async (ctx, companyId, projectId, input) => codeProjectTrust.revoke(ctx, companyId, projectId, input),
+    },
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
+    logger: app.log,
+  });
+  /**
+   * C15: the mounted-folder allowlist. It shares the path-scoped preHandler above because it is the same kind of
+   * surface (an owner/admin decision about one project, read fresh on every request), and it shares the flag
+   * service and the workspace resolver built earlier — the resolver is what makes a confirmed folder the
+   * project's workspace, and the service is what makes confirming one possible at all.
+   *
+   * The service validates the path with the **same** function the sandbox runner uses
+   * (`validateMountedFolder`), so "what the API accepted" and "what the runner will accept before docker create"
+   * cannot drift into two policies.
+   */
+  const codeMountedFolder = new CodeMountedFolderService({
+    store: workspaceStore,
+    flags: featureFlagService,
+    roots: mountedFolderRoots(),
+    protectedRoots: config.dataDirectory ? [path.resolve(config.dataDirectory)] : [],
+    projectWorkspacesRoot: projectWorkspaceRoot,
+    audit: auditLogService
+      ? {
+          record: async (input) => {
+            await auditLogService.record(
+              { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+              {
+                companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
+                resourceType: input.resourceType, resourceId: input.resourceId,
+                decision: input.decision === "deny" ? "denied" : "allowed",
+                payload: { action: input.action, target: input.resourceId },
+                metadata: input.metadata ?? {},
+              },
+            );
+          },
+        }
+      : undefined,
+  });
+  registerCodeMountedFolderRoutes(app, {
+    mountedFolder: {
+      get: async (ctx, companyId, projectId) => codeMountedFolder.get(ctx, companyId, projectId),
+      confirm: async (ctx, companyId, projectId, input) => codeMountedFolder.confirm(ctx, companyId, projectId, input),
+      revoke: async (ctx, companyId, projectId, input) => codeMountedFolder.revoke(ctx, companyId, projectId, input),
     },
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
@@ -7269,100 +7482,77 @@ ${localized.next}`;
             send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId, background: isBackground, runId: isBackground ? runKey : null });
             let runResult: unknown;
             /**
-             * The terminal status the registry records. Normalised to the three states the registry understands, so
-             * a "stopped" run is never reported as a successful completion.
+             * C15: the loop itself, the cancellation registration and the terminal-status normalisation live in
+             * `code-session-run-executor.ts`, because the CLI/IDE run-start route drives the same loop and a second
+             * copy of "register the controller, clear a stale Stop, unregister in `finally`" is how a Stop ends up
+             * reaching one entry point and not the other. Only the transport differs: this branch adapts the chat
+             * SSE writer (`send`) onto the executor's sink, the run-start route passes the background registry's.
+             *
+             * The sink re-emits the same two chat events the branch emitted before the extraction, in the same
+             * order: `result` with the runner's own result (the `result` carrying the project card is still sent
+             * below it, once the card exists), then the background run's terminal state.
              */
-            let runTerminalStatus: "completed" | "failed" | "cancelled" = "completed";
-            let runReason: string | null = null;
-            /**
-             * A live `AbortController` facade over the background run's own signal: the registry's `abort()` is the
-             * only thing that can stop the run, so the Stop route and the reconnect surface cannot disagree about
-             * whether a stop happened. Declared outside the `try` because the `finally` must unregister the very
-             * same object it registered.
-             */
-            const runController: AbortController = isBackground
-              ? {
-                  signal: backgroundSink!.signal,
-                  abort: (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); },
-                } as unknown as AbortController
-              : streamController;
-            try {
-              // C7: Stop must be able to reach this loop. A cancellation left over from a previous Stop is
-              // cleared first (a stale flag would cancel work the user never asked to stop), then the run's
-              // controller is registered so Stop can interrupt a step that is already in flight.
-              //
-              // C10: the registered controller is the **background run's** when there is one, so a stop request
-              // reaches the run after the tab is gone. The transport controller keeps serving `cancelRequested`
-              // for the streaming work.
-              codeRunCancellation.clearSession(codeSession.id);
-              codeRunCancellation.registerController(codeSession.id, runController);
-              runResult = await codingAgentRunner.run({
-                ctx: auth,
-                session: codeSession,
-                prompt: message,
+            const executed = await codeSessionRunExecutor.execute({
+              ctx: auth,
+              session: codeSession,
+              prompt: message,
+              // C11 (owner decision 10): `REVIEW_CODE` is a read-only intent, and this is the flag the runtime
+              // refuses writes on. It is derived from the routing decision, never from the message.
+              ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
+              sink: {
                 signal: isBackground ? backgroundSink!.signal : streamController.signal,
-                cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
-                // C11 (owner decision 10): `REVIEW_CODE` is a read-only intent, and this is the flag the
-                // runtime refuses writes on. It is derived from the routing decision, never from the message.
-                ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
-              });
-            } catch (error) {
-              runResult = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };
-            } finally {
-              codeRunCancellation.unregisterController(codeSession.id, runController);
-              const finished = runResult && typeof runResult === "object" ? (runResult as Partial<CodingAgentRunResult>) : null;
-              runTerminalStatus = finished?.status === "cancelled" ? "cancelled" : finished?.status === "completed" ? "completed" : finished?.status === "stopped" ? "failed" : "failed";
-              runReason = typeof finished?.reason === "string" ? finished.reason : null;
-              const needsApproval = finished
-                ? finished.status === "waiting_for_user"
-                  || finished.summary?.remaining === VERIFICATION_APPROVAL_REQUIRED
-                  || finished.code === "approval_required"
-                : false;
-              if (backgroundSink) {
-                backgroundSink.emit("result", { routed: "code_runner", intent: codeDecision.intent, run: runResult });
-                backgroundSink.finish(runTerminalStatus, runReason);
+                emitResult: (result) => { send("result", { routed: "code_runner", intent: codeDecision.intent, run: result }); },
+                emitTerminal: (status, reason) => { backgroundSink?.finish(status, reason); },
+              },
+              abort: isBackground
+                ? (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); }
+                : (reason?: unknown) => { streamController.abort(reason instanceof Error ? reason : new Error("Client disconnected")); },
+              cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
+            });
+            runResult = executed.result;
+            const runTerminalStatus = executed.terminalStatus;
+            const runReason = executed.reason;
+            const needsApproval = executed.needsApproval;
+            /**
+             * ТЗ item 5: an approval request is pushed over the **existing** Integrations channels, because a run
+             * that stopped for a human decision and told nobody is a run that never continues. The detection is
+             * structural rather than guessed: the run's own status (`waiting_for_user`), the verification
+             * summary's `remaining` code, or the run's machine-readable refusal code.
+             *
+             * It is sent whenever there is a decision to make, also when the run is not a background run — an
+             * approval needs an answer either way, and the connection's own `notifications` switches decide
+             * whether anything is delivered at all.
+             */
+            if (needsApproval) {
+              try {
+                await notifyMessagingConnections({
+                  workspaceId: auth.workspaceId,
+                  userId: auth.userId,
+                  companyId: activeCompanyId!,
+                  kind: "approval",
+                  title: "Code run needs your approval",
+                  detail: `Run ${runKey} in "${codeProject?.name ?? "the project"}" is waiting for a decision${runReason ? ` (${runReason})` : ""}. Open the Code Workspace to approve or deny it.`,
+                });
+              } catch (error) {
+                request.log.warn({ err: error }, "code_run_approval_notify_failed");
               }
-              /**
-               * ТЗ item 5: an approval request is pushed over the **existing** Integrations channels, because a run
-               * that stopped for a human decision and told nobody is a run that never continues. The detection is
-               * structural rather than guessed: the run's own status (`waiting_for_user`), the verification
-               * summary's `remaining` code, or the run's machine-readable refusal code.
-               *
-               * It is sent whenever there is a decision to make, also when the run is not a background run — an
-               * approval needs an answer either way, and the connection's own `notifications` switches decide
-               * whether anything is delivered at all.
-               */
-              if (needsApproval) {
-                try {
-                  await notifyMessagingConnections({
-                    workspaceId: auth.workspaceId,
-                    userId: auth.userId,
-                    companyId: activeCompanyId!,
-                    kind: "approval",
-                    title: "Code run needs your approval",
-                    detail: `Run ${runKey} in "${codeProject?.name ?? "the project"}" is waiting for a decision${runReason ? ` (${runReason})` : ""}. Open the Code Workspace to approve or deny it.`,
-                  });
-                } catch (error) {
-                  request.log.warn({ err: error }, "code_run_approval_notify_failed");
-                }
-              }
-              // C6/C10: release the sandbox after the run — on success, failure and cancellation. The project
-              // object that `destroy` needs is read **fresh**: `codeProject` above was loaded before the run, so
-              // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
-              // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
-              // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
-              if (projectSandbox) {
-                try {
-                  const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
-                  await projectSandbox.destroy(auth, current);
-                } catch (error) {
-                  request.log.warn({ err: error }, "code_run_sandbox_release_failed");
-                }
-              } else {
-                request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
-              }
-              lease.release();
             }
+            // C6/C10: release the sandbox after the run — on success, failure and cancellation. The project
+            // object that `destroy` needs is read **fresh**: `codeProject` above was loaded before the run, so
+            // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
+            // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
+            // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
+            if (projectSandbox) {
+              try {
+                const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
+                await projectSandbox.destroy(auth, current);
+              } catch (error) {
+                request.log.warn({ err: error }, "code_run_sandbox_release_failed");
+              }
+            } else {
+              request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
+            }
+            lease.release();
             // C7: the chat answer carries a card for the code project/session, so the conversation offers
             // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
             // run actually reported (never from a guess) and persisted through the existing chat-card store.
