@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateVitestReport, findMissingSuites, suiteKey, SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
+import { evaluateVitestReport, findEmptySuites, findMissingSuites, suiteKey, SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
 
 /**
  * C4a: the mandatory security-gate job must be strict about the rule "security-gate tests are never
@@ -61,5 +61,43 @@ describe("security-gate: C4a gate verdict", () => {
     // A suite that genuinely did not run must still be reported, so the check is not weakened.
     const partial = { testResults: [{ name: absolute }] };
     expect(findMissingSuites(partial, ["tests/coding-agent-c4a-deps-guard.test.ts", "tests/coding-agent-c1-foundation.test.ts"])).toEqual(["tests/coding-agent-c1-foundation.test.ts"]);
+  });
+
+  it("names a suite that did not run and one that reported no tests, but cannot see a suite that ran fewer tests", () => {
+    // Both silent-looking failure modes are in fact loud, and this is where that is pinned rather than assumed:
+    // a suite that never ran is named by `findMissingSuites`, and a suite whose import failed reports zero
+    // assertions and is named by `findEmptySuites` — the gate prints both as `FAILED: …` lines with the file.
+    //
+    // What the gate does **not** pin is the number of tests a suite defines. A suite that loads and generates
+    // fewer cases than it names (a data-driven loop over a fixture that shrank, a `describe` behind a
+    // condition) passes every reader here. That is a recorded limitation, and it is where the 95-test deficit
+    // of the first G1 item-3 escalated run (2029 tests in the mirrored worktree against 2124 in the repository,
+    // report § 7.5.1) could hide without a named file. The fix would be a per-suite expected count, which this
+    // repository does not declare anywhere.
+    const configured = ["tests/a.test.ts", "tests/b.test.ts"];
+    const assertion = (title: string) => ({ status: "passed", title, ancestorTitles: [] });
+
+    const didNotRun = { testResults: [{ name: "tests/a.test.ts", assertionResults: [assertion("one")] }] };
+    expect(findMissingSuites(didNotRun, configured)).toEqual(["tests/b.test.ts"]);
+
+    const reportedNoTests = {
+      testResults: [
+        { name: "tests/a.test.ts", assertionResults: [assertion("one")] },
+        { name: "tests/b.test.ts", assertionResults: [] },
+      ],
+    };
+    expect(findEmptySuites(reportedNoTests)).toEqual(["tests/b.test.ts"]);
+    expect(findMissingSuites(reportedNoTests, configured)).toEqual([]);
+
+    // The hole: two cases where thirty were written is neither "did not run" nor "no tests at all".
+    const fewerTests = {
+      testResults: [
+        { name: "tests/a.test.ts", assertionResults: [assertion("one")] },
+        { name: "tests/b.test.ts", assertionResults: [assertion("one"), assertion("two")] },
+      ],
+    };
+    expect(evaluateVitestReport({ numPassedTests: 3, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 })).toMatchObject({ ok: true });
+    expect(findMissingSuites(fewerTests, configured)).toEqual([]);
+    expect(findEmptySuites(fewerTests)).toEqual([]);
   });
 });

@@ -31,6 +31,7 @@
     "gate:upgrade": "node scripts/upgrade-gate.mjs",
     "gate:agent": "tsx scripts/execute-agent-mediated-gate.mjs",
     "security-gate": "node scripts/run-security-gate.mjs",
+    "mutation:branch": "node scripts/security-gate-mutation-branch.mjs",
     "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
     "docker:config": "docker compose config --quiet"
   },

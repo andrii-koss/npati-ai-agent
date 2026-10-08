@@ -23,7 +23,22 @@ Companion documents: `docs/coding-agent/c14-eval-corpus-and-profiles.md` (corpus
 | `:999` (5) | Tune R1 limits and SLO; per-model budgets, cost/behaviour anomaly detection, threshold calibration from evals | — | **Out of this document's scope** (a parallel stream owns SLO calibration; not measured here) |
 | `:1000` (6) | Documentation: architecture, permission modes, security, model profiles, how to add a model and a tool | `architecture.md`, `permission-modes.md`, `security.md`, `model-profiles.md`, `adding-a-model-and-a-tool.md` | **Delivered** |
 | `:1001` (7) | Thresholds: edit-tool success ≥ 95 %, 0 successful red-team attacks, 0 sandbox escapes | §6, §8 | **§6 met; §8 met under the stated limits** |
-| `:1003` | Acceptance: a report with per-model metrics, all red-team tests passing, documentation ready, CI blocks regressions | this document + `security-gate-report.md` | Per-model **quality** metrics are the one unmet part (§5) |
+| `:1003` | Acceptance: a report with per-model metrics, all red-team tests passing, documentation ready, CI blocks regressions | this document + `security-gate-report.md` | Per-model **quality** metrics are the one unmet part (§5); see the **G1 supersession note** below for the "CI blocks regressions" half |
+
+> **G1 supersession note (2026-10-08) — read this before quoting the CI claims below.**
+> This document was written when `.github/workflows/ci.yml` ran on `push`, `pull_request` and a weekly
+> `schedule`, and every statement in it about CI was accurate for that configuration. The owner has since
+> **disabled every automatic trigger** — the repository is private and has no paid Actions minutes, and on the
+> last automatic run *all* jobs failed in about 2 seconds **without starting**, so the checks were never evidence
+> (they were only a permanent red signal). All three workflows are now `workflow_dispatch`-only; no workflow file,
+> job or step was removed, and the removed trigger contract is kept in each file as a machine-readable
+> `RE-ENABLE RECIPE`. Consequently, wherever this document says "CI blocks regressions" or "the quarantine gate
+> runs the whole suite as CI's only test step", read it as **"the configuration would do that if it were
+> triggered; it is not triggered, and nothing blocks a merge or a release today"**. That consequence is recorded
+> as an **accepted risk with an owner and an expiry** in `security-gate-report.md` §6 item 11, its effect on the
+> G1 "mandatory CI job" requirement is stated in `current-state.md` (section "Current step"), and the exact
+> change, the new pins and the non-vacuity proof are in `security-gate-report.md` §7.6. Nothing else in this
+> document is superseded: every number below is a measurement of the code and the suites, not of a GitHub run.
 
 ---
 
@@ -319,7 +334,7 @@ newline, so a multi-line fork bomb fell into `approval` (a human could have appr
 | Profile resolution | Conformance matrix re-derived by the real resolver; `not_run` has no numeric field | `tests/coding-agent-c14-model-profile-flags.test.ts`, `tests/coding-agent-c14-model-profile-fallback.test.ts` |
 | Red team | Catalogue guard in three places + 5 mutation controls + 7 new suites | `tests/coding-agent-c14-redteam-*`, `-gate-mutation-sensitivity`, `-attack-catalogue` |
 | Full suite | `npm test` has a known-red baseline of **10 files / 15 tests**; the quarantine gate is GREEN only while every actual failure is documented and unexpired, and it runs the whole suite as CI's **only** test step | `package.json` (`test` = `vitest run`, `test:known-failures`), `scripts/check-known-failures.mjs:10-23`; `known-failures.json` = 15 entries / 10 files |
-| CI workflow | Pins `npm ci`, security-gate, both typechecks, lint, both audits, the quarantine gate, build, `eval:smoke`, upgrade gate; no `continue-on-error` anywhere | `tests/coding-agent-c14-ci-and-lint-gates.test.ts:142-181` |
+| CI workflow | Pins `npm ci`, security-gate, both typechecks, lint, both audits, the quarantine gate, build, `eval:smoke`, upgrade gate; no `continue-on-error` anywhere. **Superseded by G1 (see the note in §1):** the workflow is now `workflow_dispatch`-only, so it verifies all of that when a human runs it, and blocks nothing automatically | `tests/coding-agent-c14-ci-and-lint-gates.test.ts` (`:142-181` at C14; the trigger pins were replaced by the stronger G1 ones — exact trigger set, complete re-enable recipe, repo-wide no-automatic-trigger regression tests) |
 
 ---
 
@@ -328,9 +343,15 @@ newline, so a multi-line fork bomb fell into `approval` (a human could have appr
 These are the limits of the whole C14 step. None of them is a defect hidden behind a green number; each is
 stated where it was measured.
 
-1. **CI has never run on GitHub.** The workflow is configured and its content is pinned by tests, and the same
-   commands were run locally, but no GitHub Actions run has ever executed. "CI blocks regressions" is therefore
-   a *configured* claim, verified statically plus locally, not an observed one.
+1. **CI has never run on GitHub — and since G1 it is not even triggered.** The workflow is configured and its
+   content is pinned by tests, and the same commands were run locally, but no GitHub Actions run has ever
+   executed successfully here. "CI blocks regressions" was therefore always a *configured* claim, verified
+   statically plus locally, not an observed one; and the owner has now **disabled every automatic trigger**
+   (private repository, no paid Actions minutes, every job of the last automatic run failed in ~2 s without
+   starting), so the claim is not merely unobserved — it is **not in force**. The workflow runs only when a human
+   dispatches it, which means nothing blocks a merge or a release, and the mandatory security gate no longer
+   runs on a push. That is an accepted risk with a named owner slot and an expiry, not a fix:
+   `security-gate-report.md` §6 item 11 and §7.6, plus `current-state.md` (section "Current step").
 2. **C4b Docker E2E has not been performed.** The egress allowlist and the container ceilings are not proven in
    a real container; this is why the policy gate refuses network commands until enforcement is guaranteed.
 3. **There is no Docker in the test environment**, so sandbox ceilings are verified on the argument line and by

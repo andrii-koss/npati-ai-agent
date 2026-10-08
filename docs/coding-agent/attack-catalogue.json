@@ -235,6 +235,17 @@
       "negativeControlSuite": "tests/coding-agent-c14-attack-catalogue.test.ts",
       "negativeControlTitle": "negative control: the title scanner is not vacuous — it finds real titles and ignores commented ones",
       "status": "covered"
+    },
+    {
+      "id": "RT-24",
+      "class": "command_obfuscation.unreadable_execution",
+      "suite": "tests/coding-agent-c4a-classifier.test.ts",
+      "title": "hard-denies obfuscated execution: a decoded payload piped into a shell, a dynamic eval, an alias and a PATH rewrite",
+      "negativeControl": "The same suite keeps the four rules from becoming a blanket ban: a readable command, `echo alias`, a base64 *encode* written to a file, a literal `eval \"echo hi\"`, `sh -c 'echo hi'`, `echo $PATH` and `source ./env.sh` are each asserted to stay below hard deny and to fire none of the four rule ids — and the positive test additionally removes one rule from the evaluated set and shows its own case degrade to `approval`, then restores it and shows the refusal return, so the rules are measured rather than declared.",
+      "negativeControlSuite": "tests/coding-agent-c4a-classifier.test.ts",
+      "negativeControlTitle": "negative control: the obfuscation rules ignore a readable command, a literal eval, a decoded file and a PATH read",
+      "hardDenyRuleIds": ["decode_pipe_shell", "eval_dynamic", "shell_alias_definition", "path_manipulation"],
+      "status": "covered"
     }
   ],
   "hardDenyRuleExemptions": [

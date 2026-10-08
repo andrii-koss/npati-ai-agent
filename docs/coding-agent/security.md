@@ -198,22 +198,26 @@ reported in `docs/coding-agent/security-gate-report.md`.
 
 | Fact | Value | Source |
 | --- | --- | --- |
-| Catalogue rows | **23**: 15 attack classes (RT-01…RT-15) + 8 gate-integrity rows (RT-16…RT-23) | `attack-catalogue.json` → `classes` |
-| Status breakdown | **22** `covered`, **1** `measured-limitation` (RT-12, Unicode normalisation in zip dedup) | same, grouped by `status` |
-| Hard-deny rule coverage | 12 classifier `HARD_DENY_RULES` accounted for: the rest are covered by **11** exempted rules, each with a probe command that really fires the rule | `attack-catalogue.json` → `hardDenyRuleExemptions`; `security-gate-report.md:23-26`, `:84-91` |
+| Catalogue rows | **24**: 15 attack classes (RT-01…RT-15) + 8 gate-integrity rows (RT-16…RT-23) + RT-24 (obfuscated command execution, added by G1/D10) | `attack-catalogue.json` → `classes` |
+| Status breakdown | **23** `covered`, **1** `measured-limitation` (RT-12, Unicode normalisation in zip dedup) | same, grouped by `status` |
+| Hard-deny rule coverage | 16 classifier `HARD_DENY_RULES` accounted for: RT-24 claims the four G1/D10 rules (`decode_pipe_shell`, `eval_dynamic`, `shell_alias_definition`, `path_manipulation`) and the rest are covered by **11** exempted rules, each with a probe command that really fires the rule | `attack-catalogue.json` → `hardDenyRuleExemptions`; `security-gate-report.md:23-26`, `:84-91`, § 7.4 |
 | Row schema | `id`, `class`, `suite`, `title`, `negativeControl`, `negativeControlSuite`, `negativeControlTitle`, `hardDenyRuleIds`, `status` | `attack-catalogue.json` |
 | Guard levels | (1) static validation **before** vitest, (2) dynamic validation against the vitest JSON report **after**, (3) the same functions exercised in the suite itself | `security-gate-report.md:46-63` |
 | Fabrication proof | Five kinds of fabricated row all produce `ok=false` with their own codes; the real catalogue produces `ok=true, issues=0` | `security-gate-report.md:65-82` |
 | New red-team suites | 7 suites, 34 tests, `failed=0` | `security-gate-report.md:250` |
-| Mutation controls | **5**, each neutralised **in memory** (no file on disk changes), each asserting the attack now succeeds and then that the refusal returns | `security-gate-report.md:171-204` |
-| Current gate size | `node scripts/run-security-gate.mjs --list` → **144** lines | reproduction command |
+| Mutation controls (in memory) | **5**, each neutralised **in memory** (no file on disk changes), each asserting the attack now succeeds and then that the refusal returns | `security-gate-report.md:171-210` |
+| Branch mutations (decoy branch) | **3** rows in `mutation-controls.json`: 2 `decoy` rows (the `fork_bomb` rule removed; the workspace-relative traversal guard weakened) that must make the **real** `run-security-gate.mjs` exit non-zero with the named test among its failures, and 1 `cosmetic` row that must leave it green. Guarded **in the gate** (file, anchor uniqueness, gate suite, test title, both directions); the run itself is `npm run mutation:branch` — it needs git and two full gate runs, so it is not a PR blocker | `mutation-controls.json`, `security-gate-report.md` § 5.1, § 7.5 |
+| Current gate size | `node scripts/run-security-gate.mjs --list` → **150** lines (149 before G1 registered the mutation-matrix guard suite) | reproduction command |
 
 **How "0 successful attacks" is demonstrated.** The catalogue is a list of *attack classes under test*, each
 tied to a named test title and a named negative control ≥ 40 characters long, so a row cannot be satisfied by
 an empty or "n/a" justification; a renamed, moved or `.skip`-ped attack test is reported **by catalogue id**
 (`security-gate-report.md:48-63`). On top of that, five guards are deliberately removed in memory and the
 corresponding test must fail — if neutralisation changes nothing, the control is declared decorative and the
-test fails (`:171-204`).
+test fails (`:171-210`). A sixth claim — that the **gate itself** goes red when a guard is deleted from the
+source — is a different one and is carried by the decoy branch (`npm run mutation:branch`), which copies the
+tree under review into an isolated `git worktree`, weakens exactly one guard, runs the real gate and requires
+the named test among its failures, with a cosmetic mutation as the negative control (§ 5.1).
 
 **What "0 successful attacks" therefore is *not*.** No live model attacked this build. The rows are rules
 under test with scripted attacks, and the mutation evidence is about the **suite's sensitivity**, not about a
@@ -222,10 +226,13 @@ model's behaviour. RT-12 is recorded as `measured-limitation`, not as covered: p
 entries there and one file on a normalisation-sensitive filesystem (APFS). The test asserts only what stays
 true after a fix, and the catalogue says `measured-limitation` (`security-gate-report.md:144-150`).
 
-> **Documentation divergence (report vs current run).** `security-gate-report.md:37` and `:248-249` state
-> **138** suites (`was 131 → 138`). The current fixed list is **144** (`node scripts/run-security-gate.mjs
-> --list`). The report is accurate for the moment it was written; six further suites were registered
-> afterwards. The current number is the one to quote, and it is reproducible with the command above.
+> **Documentation divergence (closed by G1).** This paragraph used to report that `security-gate-report.md:37`
+> and `:248-249` stated **138** suites while the current fixed list was **144**. Both numbers are now the same
+> one: the report states **150** (`node scripts/run-security-gate.mjs --list` → 150 lines, `suites=150
+> present=150 missing=0`) and the fixed list in `scripts/run-security-gate.mjs` holds 150 entries, because the
+> C14 gate-size guard reads the number **out of the document** (`security-gate-report.md` § 7.4/§ 5.1). The history is
+> kept as history: 131 → 138 (C14) → 144 (guard suite) → 145/146 → 148 (C15) → 149 (G1: `c1a-flags`) → **150**
+> (G1: the mutation-matrix guard suite).
 
 ---
 
@@ -255,11 +262,17 @@ and is deliberately not usable from CI (`check-known-failures.mjs:33-34`).
 
 ## 10. Honest limits
 
-1. **CI has never run on GitHub.** The workflow is configured and pinned by tests
-   (`tests/coding-agent-c14-ci-and-lint-gates.test.ts:121-190`) and states exactly which gates it runs
-   (`npm ci`, security-gate, both typechecks, lint, both audits, the quarantine gate, build, `eval:smoke`,
-   upgrade gate) — but its execution is verified statically plus locally with equivalent commands, never by a
-   real GitHub Actions run.
+1. **CI has never run on GitHub — and since G1 it is not triggered at all.** The workflow is configured and
+   pinned by tests (`tests/coding-agent-c14-ci-and-lint-gates.test.ts` — the trigger pins were replaced in G1 by
+   the stricter ones: the trigger set must be exactly `["workflow_dispatch"]`, and the removed trigger contract
+   is kept as a machine-readable re-enable recipe) and states exactly which gates it runs (`npm ci`,
+   security-gate, both typechecks, lint, both audits, the quarantine gate, build, `eval:smoke`, upgrade gate) —
+   but its execution is verified statically plus locally with equivalent commands, never by a real GitHub Actions
+   run. On top of that, the owner has **disabled every automatic trigger** (private repository, no paid Actions
+   minutes, every job of the last automatic run failed in ~2 s without starting), so the mandatory security gate
+   currently blocks **no** merge and **no** release and the quarantine does not fire on a push. That consequence
+   is an accepted risk with an owner slot and an expiry, not a fix: `security-gate-report.md` §6 item 11 and
+   §7.6, `current-state.md` (section "Current step").
 2. **No Docker in the test environment.** Containment ceilings are proven on the argument line and by the
    provider's validation, not by a real OOM/disk-full event (`security-gate-report.md:210-211`).
 3. **C4b Docker E2E has not been performed**, and the sandbox egress allowlist is therefore still an

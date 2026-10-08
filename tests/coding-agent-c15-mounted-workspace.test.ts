@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, link, lstat, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
@@ -387,6 +387,72 @@ describe("security-gate: C15 mounted provider — one canonical workspace, one w
     } finally {
       await rm(fx.root, { recursive: true, force: true });
       await rm(fx.allowRoot, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * G1 (D9) — the hardlink case, **measured** rather than assumed.
+   *
+   * A hardlink is a second *name* for an inode, not a link that is followed, so neither half of the path
+   * guard can see it: `lstat` reports a regular file (not a symbolic link) and `realpath` resolves *inside*
+   * the workspace, which is why a component check and a resolved-path comparison both pass. This test pins
+   * both halves of the answer:
+   *
+   *  - **what the path guard cannot do** — measured: the linked name is a regular file with `nlink > 1`, and
+   *    it carries no target to compare, so a name-based protection would be a name-length away from useless;
+   *  - **what actually refuses the secret** — the workspace provider checks the **content**, not the name
+   *    (`project-workspace.ts`: `secret_content`, 403), and a private-key block is refused under the innocent
+   *    name `notes.txt`. The negative control is a second hardlink whose content is ordinary text: it is
+   *    served normally, so the refusal comes from the content rule and not from "hardlinks are blocked"
+   *    (which the guard does not even implement).
+   *
+   * Residual honest limitation (recorded, not papered over): the content rule is a pattern check with a
+   * manifest/lockfile exemption, so it recognises private-key blocks and the documented token shapes rather
+   * than "any secret". That limit is a property of the content rule and is identical for a **copied** file —
+   * a hardlink adds no capability the copy does not already have, which is why no hardlink-specific rule is
+   * added here (it would refuse the hardlinks `pnpm`/`npm` legitimately create in `node_modules` and protect
+   * nothing, and the read-side check covers both shapes).
+   */
+  it("measures the hardlink case: the path guard cannot see it, the content rule refuses the secret", async () => {
+    const fx = await fixture({ mode: "rw" });
+    const outside = await tempDir("npati-c15-hardlink-outside-");
+    try {
+      // Both files live OUTSIDE the mounted folder, in a directory the allowlist would refuse.
+      const secret = path.join(outside, "id_rsa");
+      const ordinary = path.join(outside, "ordinary.txt");
+      await writeFile(secret, "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----\n", "utf8");
+      await writeFile(ordinary, "an ordinary sentence\n", "utf8");
+
+      const linkedSecret = path.join(fx.mounted, "notes.txt");
+      const linkedOrdinary = path.join(fx.mounted, "notes2.txt");
+      await link(secret, linkedSecret);
+      await link(ordinary, linkedOrdinary);
+
+      // The path guard's blind spot, measured: a regular file, twice-linked inode, no link target to resolve.
+      const stats = await lstat(linkedSecret);
+      const source = await lstat(secret);
+      expect(stats.isSymbolicLink()).toBe(false);
+      expect(stats.nlink).toBeGreaterThan(1);
+      expect(stats.ino).toBe(source.ino);
+      expect(stats.dev).toBe(source.dev);
+
+      // What refuses it: the content rule, under a name no sensitive-path pattern matches.
+      expect(await rejection(fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes.txt")))
+        .toContain("secret_content");
+
+      // Negative control: the same link shape with ordinary content is served, so the refusal above is the
+      // content rule and not a blanket refusal of multiply-linked files.
+      const served = await fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes2.txt");
+      expect(served.content).toBe("an ordinary sentence\n");
+
+      // Containment, measured: a workspace written only through the API can never contain such a name,
+      // because the API writes content and produces single-link regular files.
+      await fx.workspace.createFile(owner, fx.companyId, fx.projectId, "written-by-api.txt", "same bytes\n");
+      expect((await lstat(path.join(fx.mounted, "written-by-api.txt"))).nlink).toBe(1);
+    } finally {
+      await rm(fx.root, { recursive: true, force: true });
+      await rm(fx.allowRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 });

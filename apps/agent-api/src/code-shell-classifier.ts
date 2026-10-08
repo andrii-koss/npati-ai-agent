@@ -139,6 +139,26 @@ export const HARD_DENY_RULES: readonly HardDenyRule[] = Object.freeze([
   // whitespace, and the process-substitution form are covered.
   { id: "download_pipe_shell", pattern: /(?:curl|wget)\b[^;&|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash)\b/, reason: "piping a download into a shell" },
   { id: "download_process_substitution", pattern: /(?:sh|bash|zsh|dash)\s+(?:-c\s+)?<\(\s*(?:curl|wget)\b/, reason: "running a downloaded script through process substitution" },
+  /**
+   * G1 (D10): four shapes whose *real* content is not visible on the command line. Each of them used to
+   * degrade to `approval` — a level a human may grant — which made the approval a formality: nobody can
+   * review a command that has to be decoded before it can be read. The rule is deliberately about
+   * **unreadability plus execution**, never about a word appearing somewhere (a decoded file written to
+   * disk, a literal `eval "echo hi"` or a PATH **read** all keep their previous level).
+   */
+  // A decoder piped into a shell: `base64 -d payload | sh`, `xxd -r -p <<< … | bash`. The analogue of
+  // `download_pipe_shell` for a payload that travels inside the command instead of over the network.
+  { id: "decode_pipe_shell", pattern: /(?:^|[\s;&|("'`=])(?:base64|xxd|uudecode|openssl|rev|gzip|zcat|gunzip|bzip2|bunzip2|xz|unxz)\b[^;&|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh|eval|source)\b/, reason: "piping decoded or de-obfuscated text into a shell" },
+  // `eval`/`source` applied to text the command line does not contain: a substitution, a backtick or a
+  // variable. A *literal* `eval "echo hi"` is not matched (it is readable, and it stays an approval).
+  { id: "eval_dynamic", pattern: /(?:^|[\s;&|("'`=])(?:eval|source)\s+(?:"|')?(?:\$\(|`|\$\{?[A-Za-z_])/, reason: "evaluating text that the command line does not show" },
+  // `alias` / `unalias`: the classifier judges a later segment by **name**, so redefining a name makes the
+  // rest of the command line a decision about a label instead of a program. Anchored at the start of a
+  // segment (leading `VAR=x` assignments allowed) so `echo alias` is not a hit.
+  { id: "shell_alias_definition", pattern: /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:alias|unalias)\b/, reason: "redefining a shell command name, which the classifier decided by name" },
+  // Rewriting (or clearing) `PATH`: every per-segment decision above is about a resolved program name, so a
+  // PATH prefix can point that name at a different binary. A PATH *read* (`echo $PATH`) is untouched.
+  { id: "path_manipulation", pattern: /^\s*(?:(?:export(?:\s+-n)?|declare\s+-x|typeset\s+-x|env)\s+)?(?:PATH\s*=|unset\s+PATH(?:\s|$))/, reason: "rewriting PATH changes which program a name resolves to" },
 ]);
 
 /** Registry configuration files: writing to them re-points every future install. */

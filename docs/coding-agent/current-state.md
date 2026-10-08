@@ -103,6 +103,74 @@ instead of editing code: the `PolicyEngine` header comment lists an eight-phase 
 `capability_groups`, `trust` and `network_enforcement` (see `architecture.md` §4).
 
 ## Current step
+- **G1 (Security Gate Phase 1) — CI UPDATE: automated GitHub Actions checks are DISABLED ON PURPOSE
+  (2026-10-08).** This is an owner decision, not a defect and not a workaround that was left unrecorded.
+  - **Why.** The repository (`andrii-koss/npati-ai-agent`) is **private** and its plan carries no Actions minutes
+    for it. On the last **automatic** run *every* job failed in about **2 seconds** — `Security gate (SG-1)`,
+    `Node 22 / ubuntu-24.04`, `Node 22 / windows-latest`, `Node 22 / macos-15-intel`, `Coding-agent eval smoke`
+    and `Docker / Ubuntu` alike — and `Release gate` was reported **`Skipped`**, because it `needs` the others.
+    The reading is decisive: **the jobs never started**, they did not run and fail. `macos-*` and `windows-*`
+    runners are not offered to a private repository without a paid plan at all, and the Linux jobs went the same
+    way. So those checks were **never evidence** — they only produced a permanent red signal, and a permanently
+    red signal is one nobody reads.
+  - **What was done — and what was deliberately NOT done.** Only the **triggers** were removed, from **all three**
+    workflows: `push`, `pull_request` and `schedule` are gone from `.github/workflows/ci.yml`, `schedule` and
+    `push` from `.github/workflows/sandbox-images.yml`, `schedule` from `.github/workflows/mutation-branch.yml`.
+    `workflow_dispatch` is kept everywhere, so the configuration can be run **by hand** the moment a plan exists.
+    **No workflow file was deleted and no job and no step was removed** — the five `ci.yml` jobs, the three
+    `sandbox-images` jobs, the mutation job, every `run:` command and every pinning invariant are still there.
+    The removed trigger contract is kept **verbatim** in each file as a machine-readable `RE-ENABLE RECIPE`
+    (`(triggers)` / `(paths)` / `(schedule)` blocks in comments), so re-enabling is **one commit** rather than a
+    restoration from git history.
+  - **How to turn it back on.** Put the `(triggers)` block back into `on:`, use the single `(paths)` list for
+    **both** `push:` and `pull_request:` (it is written once, so the two can no longer drift), restores the
+    `(schedule)` cron — and update the pins in `tests/coding-agent-c14-ci-and-lint-gates.test.ts`, which now pin
+    exactly this deliberate state.
+  - **How the change is pinned (so it cannot silently regress in either direction).**
+    `tests/coding-agent-c14-ci-and-lint-gates.test.ts` (already a security-gate suite, so the gate is still
+    **150** suites — no new suite was registered and the documented size did not move) asserts that `ci.yml`'s
+    trigger set is **exactly** `["workflow_dispatch"]`, and the old "`push`/`pull_request` have identical path
+    filters" pin was **replaced by a stronger one**: the re-enable recipe must contain the triggers
+    (`push`, `pull_request`, `schedule`), the cron, and **all 25** path entries including `docs/**` and the ten
+    named security-critical surfaces. A new `[G1]` describe then pins the same two properties over **every**
+    workflow in the repository: exactly one allowed trigger, `workflow_dispatch`, and no automatic trigger of any
+    kind — with the recipe itself used as the **mutation input** of the non-vacuity proof (restoring any trigger
+    the recipe names must turn the check red; emptying the `on:` block must turn it red too). Non-vacuity was
+    proved both on in-memory copies **and** on the real file: `push:` was put back into `ci.yml` (3 of the 20
+    tests went red with `trigger_automatic:push`), then removed, and the file's `sha256`
+    (`6ec46b0257b4488cecf6b3ec4dee3d7095d7e71f47cb87e1e6bfd724859c8225`, 12599 bytes) matches before and after
+    (the mutated copy hashed `cd49144d22d67b285e9f76d824168a258c54c1ed2ee9bb698da60b2e40766691`).
+  - **⚠️ What this means for G1 — stated plainly, not glossed over.** PLAN.md:783 requires the security-gate
+    suite to be *"окрема обов'язкова job (не skip-иться, блокує merge/release) … Запускається при кожній зміні в
+    sandbox/tools/policy/runner (path-filter) і за розкладом"*. **That CI half of the G1 requirement is NOT met in
+    this state.** The job is still mandatory *inside* the workflow (no `if:`, no `continue-on-error`, its own
+    fixed suite list is the contract), but with no automatic trigger it **blocks nothing**: it does not gate a
+    merge, it does not gate a release, and it never runs by itself. `npm run test:known-failures` — the quarantine
+    that tracks the 15 pre-existing failures — no longer fires on a push either, so a new failure stops nobody and
+    an entry past its `expires_at` reminds nobody. The sandbox-image age policy (14 days) and the weekly
+    decoy-branch proof are in the same position. **The compensating control is the owner's local escalated run**
+    (`npm run security-gate`, `npm test`, `npm run test:web`, both builds) and it is named here for what it is: a
+    **manual** control with no schedule, no notification and no mechanism that forces anyone to perform it. If it
+    is skipped, nothing turns red. G1 phase 1's *test-side* evidence is unaffected (the gate is still a fixed list
+    of **150** suites, `present=150 missing_count=0`, and the local gate runs green); what changed is only whether
+    anything **automatically acts** on it.
+  - **Recorded as an accepted risk** in `docs/coding-agent/security-gate-report.md` §6 item 11, in the
+    `known-failures.json` field format (`owner` / `added_at` / `expires_at` / `reason` / `evidence`).
+    **Placeholders pending owner confirmation:** `owner` = `OWNER_PENDING` (no name invented), `added_at` =
+    `2026-10-08` (the session date read from the system clock — confirm or correct) and `expires_at` =
+    `2026-11-07`, which is a **proposal** only (30 days, the interval `known-failures.json` already uses: the
+    author may not choose the owner's deadline). Full detail and exact outputs: `security-gate-report.md` §7.6.
+  - **Checks of this step (exit codes).** `npm run typecheck` **0** · `npm run typecheck:tests` **0** ·
+    `npm run lint` **0** · `node --check scripts/run-security-gate.mjs` **0** · `node scripts/run-security-gate.mjs
+    --list` = **150** rows, `suites=150 present=150 missing_count=0 duplicates=0` · YAML of all three workflows
+    structurally checked (`artifacts/g1-ci-triggers/check-workflows.mjs` → `issues=0`; there is **no** YAML parser
+    in the dependency tree — `node_modules/yaml` and `node_modules/js-yaml` are both absent) ·
+    `node scripts/mutation-controls-check.mjs` → `rows=3 decoy=2 cosmetic=1 issues=0` **0** · harness on the
+    touched and neighbouring suites (`c14-policy-phase-and-gate-size-guard`, `c14-ci-and-lint-gates`,
+    `c14-known-failures`, `c1a-flags`, `c14-mutation-branch-controls`, `c4a-security-gate`) →
+    `suites=20 tests=94 passed=94 failed=0` **0** · non-vacuity probe `artifacts/g1-ci-triggers/mutate.mjs` →
+    `failures=0` **0**. `npm test`, `security-gate`, `test:web` and both builds are the owner's escalated run and
+    are **not** claimed here.
 - **C15 COMPLETE (optional step) — mounted local folder, CLI, IDE protocol specification.** Final escalated
   evidence: `typecheck` 0, **`typecheck:tests` 0**, **`lint` 0**, `verify-capability-matrix.mjs` 0, `upgrade-gate.mjs` 0,
   **`security-gate` exit 0 — `passed=2080 failed=0`, 148 suites, `present=148 missing=0`**, `eval:smoke` 0,

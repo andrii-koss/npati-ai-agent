@@ -174,6 +174,26 @@ export class CompanyApprovalsRepository {
     return result.rows[0]!;
   }
 
+  /**
+   * Decide an approval as its **own requester** (the default `self` audience).
+   *
+   * G1 (D3) — the two-person invariant, applied to this path instead of assumed away:
+   *
+   *   - `get()` above is scoped to `user_id = ctx.userId`, so a caller that reaches this method **is** the
+   *     requester. For a `self`-audience request that is exactly right, and it is the owner decision recorded
+   *     in `code-step-up.ts`: step-up (the requester confirming their own action) is the default, and
+   *     two-person confirmation is *configuration*, never a requirement of a single-owner installation. The
+   *     exception is therefore **explicit here** — `approvalAudienceOf(current)` must be `null` — rather than
+   *     the silent absence of a check, which is what it was before this change.
+   *   - A `role`-audience request exists precisely so that **another** holder of `audienceRole` decides it
+   *     (`decideAsAudience`). Resolving one here would be the requester approving their own two-person
+   *     request, and it is refused with the **same** code the audience path already uses
+   *     (`TWO_PERSON_SAME_USER_DENIED`) through the **same** reader (`approvalAudienceOf`) — no second
+   *     mechanism and no second error shape. Before this check, `decide` silently resolved such a row.
+   *   - The refusal comes first, in the same position `decideAsAudience` checks it (before the expiry and the
+   *     `pending` checks), and it happens **before** the journalling and the UPDATE, so a refused decision
+   *     leaves neither an audit entry nor a state change behind.
+   */
   async decide(
     ctx: AuthContext,
     companyId: string,
@@ -182,6 +202,13 @@ export class CompanyApprovalsRepository {
     notes?: string
   ): Promise<CompanyApproval> {
     const current = await this.get(ctx, companyId, id);
+    const audience = approvalAudienceOf(current);
+    if (audience && (audience.requestedBy === ctx.userId || current.userId === ctx.userId)) {
+      throw Object.assign(new Error("The requester cannot resolve their own role-audience approval"), {
+        status: 403,
+        code: "TWO_PERSON_SAME_USER_DENIED",
+      });
+    }
     if (current.expiresAt && new Date(current.expiresAt).getTime() <= Date.now()) {
       await this.pool.query("UPDATE company_approvals SET status='expired' WHERE id=$1 AND status='pending'", [id]);
       throw Object.assign(new Error("Approval request has expired"), { status: 409, code: "APPROVAL_EXPIRED" });

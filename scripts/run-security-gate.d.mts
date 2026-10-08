@@ -9,6 +9,14 @@
 
 export declare const SECURITY_GATE_TESTS: string[];
 
+/**
+ * G1 (D20): the durable verdict artifact and its writer. The summary is `unknown` here for the same reason
+ * the report arguments are: the writer only serialises it, and the shape it is given is this script's own
+ * business. The writer returns a result instead of throwing, so a caller can assert both directions.
+ */
+export declare const GATE_ARTIFACT_PATH: string;
+export declare function writeGateArtifact(root: string, summary: unknown): { ok: boolean; path: string; error: string | null };
+
 export interface VitestReportVerdict {
   ok: boolean;
   failures: string[];

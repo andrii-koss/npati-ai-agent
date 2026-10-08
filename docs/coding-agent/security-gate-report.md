@@ -34,8 +34,12 @@
 | `docs/coding-agent/attack-catalogue.json` | каталог: рядок на клас атаки (`id`, `class`, `suite`, точна назва тесту, `negativeControl`, назва негативного контролю, `status`) + винятки для правил hard-deny |
 | `scripts/attack-catalogue-check.mjs` | чистий (без залежностей і без TS) валідатор: статична перевірка каталогу + перевірка по звіту vitest |
 | `scripts/attack-catalogue-check.d.mts` | типи для `typecheck:tests` (той самий патерн, що `scripts/run-security-gate.d.mts`) |
-| `scripts/run-security-gate.mjs` | гейт: фіксований список наборів — було 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → **148** фактично (7 red-team наборів кроку C14 + guard-набір пост-C14 очищення + набір C15 «CLI / run-start / стрім» + два набори C15 «mounted folder»: `coding-agent-c15-mounted-workspace` і `coding-agent-c15-mount-sandbox`, див. § 7.2), статична перевірка каталогу **до** vitest, перевірка по JSON-звіту **після** |
+| `scripts/run-security-gate.mjs` | гейт: фіксований список наборів (див. рядок про розмір нижче), статична перевірка каталогу атак **до** vitest, статична перевірка матриці мутацій **до** vitest, перевірка по JSON-звіту **після** |
 | `apps/agent-api/src/code-shell-classifier.ts` | єдина продуктивна зміна: таблиця `HARD_DENY_RULES` експортована (щоб каталог міг її перелічити), опція `hardDenyRules` для доказової мутації, і виправлений патерн `fork_bomb` (§ 5) |
+| `docs/coding-agent/mutation-controls.json` | **G1 п.3**: матриця мутацій decoy-branch — рядок на мутацію (`id`, `kind` = `decoy`/`cosmetic`, `op` = `replace`/`delete_line`, `file`, `find` (якір), `replace`, `expectedGateExit`, `expectedFailingSuite`, `expectedFailingTest`, `inMemoryCounterpart`, `rationale`) |
+| `scripts/mutation-controls-check.mjs` + `.d.mts` | **G1 п.3**: guard матриці (статичний, запускається гейтом **до** vitest: реальний файл, якір рівно один раз, набір із фіксованого списку, назва тесту як `it("…")`, обидва напрямки обов'язкові) і чистий рендерер мутації; CLI `--matrix <path>` для доказу невакуумності |
+| `scripts/security-gate-mutation-branch.mjs` + `.d.mts` | **G1 п.3**: decoy-branch runner: ізольований `git worktree`, дзеркало дерева під ревʼю, junction'и `node_modules` і підмодулів, одна мутація, **реальний** `run-security-gate.mjs`, класифікація вердикту, прибирання і пост-умови. Це **не** крок гейта |
+| `tests/coding-agent-c14-mutation-branch-controls.test.ts` | **G1 п.3**: 150-й набір гейта — матриця резолвиться, guard невакуумний (13 фабрикацій), а «гейт не зміг виміряти» ніколи не читається як «мутацію спіймано» |
 | 7 нових наборів у `tests/` | самі red-team тести (див. § 3–5) |
 | `docs/coding-agent/security-gate-report.md` | цей файл |
 
@@ -197,11 +201,146 @@ red-team тест мусить реально впасти.** Механіка �
 правило/guard був декоративним, крок 2 повернув би `refused`, і `expect(mutated.outcome).toBe("succeeded")`
 впав би.
 
-**Чесна межа.** `normalizeWorkspacePath` не має шва ін'єкції — це тотальна функція з жорстко закодованою
-політикою (правильний дизайн), а харнес, яким набори верифікуються (`artifacts/c5b-policy-probe`), не має
-модульного мокінгу (`vi.doMock`). Тому path-guard доведений парою «відмова/прийняття» + інваріантом
-утримання (§ 4.4), а мутаційно — через шар над ним (контроль 5/5: які шляхи взагалі дозволено читати).
-Усі guard'и, які **приймають** підставну залежність, нейтралізовані вище.
+**Чесна межа (in-memory).** `normalizeWorkspacePath` не має шва ін'єкції — це тотальна функція з жорстко
+закодованою політикою (правильний дизайн), а харнес, яким набори верифікуються (`artifacts/c5b-policy-probe`),
+не має модульного мокінгу (`vi.doMock`). Тому **в пам'яті** path-guard не мутується: він доведений парою
+«відмова/прийняття» + інваріантом утримання (§ 4.4) і через шар над ним (контроль 5/5: які шляхи взагалі
+дозволено читати). Усі guard'и, які **приймають** підставну залежність, нейтралізовані вище. Ця межа
+стосується лише in-memory підходу — decoy-branch (§ 5.1) мутує **файл**, тож шов ін'єкції йому не потрібен.
+
+### 5.1. Decoy branch — друге твердження: гейт червоніє, коли захист прибрано з **коду**
+
+Два твердження, які легко переплутати, і які тут розділені явно:
+
+| Твердження | Що доводить | Чим доведено | Де |
+| --- | --- | --- | --- |
+| контроль **несучий у своєму шві** | підстановка підставної залежності змінює результат, і атака проходить | нейтралізація **в пам'яті** (файли на диску не змінюються): `fork_bomb` через `hardDenyRules`, класифікатор `PolicyEngine` через порт, бюджет ZIP через документовані `overrides`, бюджет конверта через `maxChars`, політика читання чутливих файлів через `sensitivePolicy` | набір `tests/coding-agent-c14-gate-mutation-sensitivity.test.ts` (§ 5), 5 контролів |
+| **гейт червоніє, коли guard прибрано з коду** | видалення/послаблення правила у файлі валить **реальний** `scripts/run-security-gate.mjs`, а зміна рядка, який нічого не контролює, не валить | мутація **файлу** в ізольованому `git worktree` + повний прогін реального гейта | `docs/coding-agent/mutation-controls.json` + `scripts/security-gate-mutation-branch.mjs` (`npm run mutation:branch`) |
+
+Друге твердження не випливає з першого: in-memory нейтралізація ніколи не запускає гейт, тож «набір упав би»
+залишалося припущенням. Decoy-branch закриває саме цю дірку, і разом із нею — структурну межу § 5:
+`normalizeWorkspacePath` мутується **на диску**, тому шов ін'єкції більше не потрібен.
+
+**Механізм (точно).**
+
+1. **Ізольований worktree.** `git worktree add --detach <tmp>/worktree HEAD` — каталог створюється **поза**
+   репозиторієм (`os.tmpdir()`; `--worktree-dir` перекриває), тому робоче дерево користувача не чіпається
+   взагалі, а `git status` не може забруднитися навіть при падінні скрипта.
+2. **Дзеркало дерева під ревʼю.** `git worktree` дає **HEAD**, а не те, що зараз у робочому дереві. Поточний
+   стан переноситься точно: `git diff --name-status -z HEAD` (копіювання файлів, не патчі — байти
+   ідентичні, включно з кінцями рядків) плюс `git ls-files --others --exclude-standard -z` для файлів, які
+   Git ще не відстежує (саме вони — нові набори G1 і сама матриця; без них гейт у worktree побачив би
+   `missing` набір). Після копіювання кожен скопійований файл **порівнюється за sha256** з джерелом: помилка
+   розбору стає гучною помилкою, а не тихо іншим деревом. Обидва `git`-джерела **сліпі до `.gitignore`**,
+   тому окремо дзеркаляться ігноровані ресурси, які читає гейт (`GATE_IGNORED_RESOURCES`: `data/typosquat`,
+   `artifacts` — теж із звіркою sha256; відсутній ресурс створюється порожнім каталогом). Це не оздоблення:
+   без нього гейт у worktree **червоний до будь-якої мутації** (§ 7.5.1).
+3. **Залежності.** `node_modules` — junction на справжній (`npm ci` у worktree не потрібен). `git worktree add`
+   **не** матеріалізує підмодулі, тому кожен шлях із `.gitmodules`, який у дереві під ревʼю непорожній
+   (`vendor/omniroute`), теж junction'иться — інакше worktree був би іншим деревом (у гейті жоден набір не
+   читає `vendor/`, але це виміряно, а не припущено: `git ls-files -s` дає `160000` на `vendor/omniroute`).
+4. **Baseline без мутації.** Перший прогін реального гейта в готовому worktree йде **без жодної мутації**, і
+   його падіння стають точкою відліку (`observeGateRun`). Без цього кроку «гейт червоний» і «мутацію
+   спіймано» нерозрізненні: саме на цьому перший ескалований прогін і зламався (§ 7.5.1).
+5. **Одна мутація.** `renderMutation` (та сама чиста функція, яку валідує guard) застосовується до файлу в
+   worktree; до і після рахується sha256, і `byte-identical` результат — помилка. Перед кожним рядком **усі**
+   файли, змінені попередніми рядками, відновлюються з дзеркала — інакше мутації різних рядків накладаються,
+   і cosmetic-контроль біжить по вже зламаному дереві. Вердикт-артефакт гейта
+   (`<worktree>/artifacts/security-gate-report.json`) **видаляється** перед кожним прогоном, щоб жоден
+   попередній прогін не міг бути прочитаний як результат поточного.
+6. **Реальний гейт.** `node <worktree>/scripts/run-security-gate.mjs` — той самий entry point, який запускає CI,
+   з тим самим фіксованим списком. Вердикт рядка — чиста функція `classifyGateRun`, і кожне падіння
+   зараховується лише якщо його **не було в baseline** (`newFailures`); падіння, які baseline уже мав,
+   лишаються в `preExistingFailures` як діагностика:
+   * `decoy` → `caught` лише коли код виходу **ненульовий** і серед **нових** падінь є **саме той** набір і
+     **саме той** тест, які декларує рядок. Назва звіряється `failureTitleMatches` — матриця зберігає голий
+     `it("…")`, а гейт друкує ланцюг `describe > … > it`, тому матчиться або рівність, або **повний хвостовий
+     ланцюг** (ширшого збігу немає: `refuses X, loudly` проти `refuses X` — це `wrong_test`);
+     `not_caught` — якщо гейт зелений (це і є знахідка «набір не ловить»); `wrong_test` — якщо червоний, але
+     названий тест не падав;
+   * `cosmetic` → `ok` лише коли код виходу **нульовий**, vitest справді міряв і **нових** падінь немає;
+     інакше `unexpected_failure`;
+   * **`environment`** — якщо vitest не повідомив вимірювання (не стартував, `EPERM`, таймаут) незалежно від
+     коду виходу. Це головне правило: середовищна відмова теж дає ненульовий exit, і читати її як «мутацію
+     спіймано» — саме той оптимістичний результат, від якого цей проєкт уже потерпав;
+   * **`baseline_red`** — якщо прогін без мутації був не зелений: рядок називає власні `newFailures`, але
+     жодного вердикту з них не заявляє (навіть косметичний рядок — його не можна звинувачувати за чуже
+     червоне), а підсумок прогону — `inconclusive`, **exit 3**, ніколи `proven`.
+7. **Прибирання і пост-умови.** У `finally`: junction'и знімаються **без рекурсії** (рекурсивне видалення
+   пішло б у ціль), перевіряється sentinel справжнього `node_modules`, потім `git worktree remove --force`,
+   `git worktree prune`, видалення тимчасового каталогу. Після цього: `git status --porcelain` мусить бути
+   **байт-у-байт** як до прогону, а `git worktree list` — не містити worktree. Порушення будь-якої з умов
+   робить вердикт `failed` (exit 1), навіть якщо самі мутації повелися правильно.
+
+**Як запускати.**
+
+```
+npm run mutation:branch                    # baseline + усі рядки матриці (2 decoy + 1 cosmetic)
+npm run mutation:branch -- --only branch.workspace_path_traversal_guard   # baseline + один рядок
+npm run mutation:branch -- --dry-run       # worktree + дзеркало + мутація + прибирання, але БЕЗ прогону гейта
+npm run mutation:branch -- --json          # той самий вердикт машинно-читним JSON
+```
+
+Коди виходу: **0** — baseline зелений і кожен обраний рядок повівся точно так, як декларує матриця; **1** —
+доказ **не** підтверджений (decoy не спіймано, або cosmetic почервонів — справжня знахідка); **3** —
+**невідомо** (середовище не дало гейту виміряти, **або** прогін без мутації був червоний). Довговічний
+вердикт — `artifacts/security-gate-mutation-branch.json`: `git`-знімки до/після, `baseline` (exit, totals,
+падіння, власні рядки гейта `suite files:`/`missing:`/`empty:`, `green`), `ignoredResources` (що саме
+дзеркальовано), для кожного рядка — `passed/failed`, `observedFailures`, `newFailures`, а для не-«proof»
+рядків ще й хвіст виводу гейта та `failureMessages` (повідомлення під кожним `FAILED TEST:`). Поруч
+пишуться **повні** транскрипти кожного прогону — `artifacts/security-gate-mutation-branch.<baseline|row-id>.log`
+(без обрізання, шлях і розмір у байтах — в артефакті; саме їх вантажить CI-джоба). Запис артефакту й
+транскриптів не впливає на вердикт (це доказ, а не перевірка безпеки).
+
+**Матриця (`docs/coding-agent/mutation-controls.json`, 3 рядки).**
+
+| id | kind | файл і мутація | очікуваний exit | названий тест, який мусить упасти |
+| --- | --- | --- | --- | --- |
+| `branch.fork_bomb_rule_removed` | decoy | `apps/agent-api/src/code-shell-classifier.ts` — **видаляється рядок** правила `fork_bomb` з `HARD_DENY_RULES` | 1 | `tests/coding-agent-c14-redteam-fork-bomb.test.ts` > `hard-denies every spelling of a fork bomb, including the multi-line one the rule used to miss` |
+| `branch.workspace_path_traversal_guard` | decoy | `apps/agent-api/src/code-tools-path.ts` — `if (segment === "..")` → `if (segment === ".." && segments[0] === "..")` (traversal за першим сегментом проходить) | 1 | `tests/coding-agent-c14-redteam-path-and-zip-slip.test.ts` > `refuses the same separator and length spellings at the workspace-relative path guard` |
+| `control.comment_only_in_the_guarded_file` | cosmetic | **той самий файл** `apps/agent-api/src/code-tools-path.ts` — коментар модуля | 0 | — (жоден набір не читає прозу цього модуля) |
+
+Негативний напрямок — не прикраса: без cosmetic-рядка «гейт чутливий» неможливо відрізнити від «гейт падає
+на будь-що». Тому це вимога **guard'а**, а не побажання: матриця без `cosmetic` (і матриця без `decoy`) —
+червоний гейт (`mutation_no_cosmetic_control` / `mutation_no_decoy_control`).
+
+**Guard матриці — у гейті, і він невакуумний.** `validateMutationControls` викликається з `main()`
+`scripts/run-security-gate.mjs` **до** vitest (порядок піниться набором: `guardAt < vitestAt`), і для кожного
+рядка вимагає: реальний файл; якір, що трапляється **рівно один раз**; `op` зі списку; `replace ≠ find`;
+`expectedGateExit`, узгоджений із `kind`; `rationale` ≥ 40 символів; для decoy — набір, який **існує**, є
+членом фіксованого списку гейта, і назву тесту, що реально є в ньому як `it("…")`; для
+`inMemoryCounterpart` — id, який справді оголошений у наборі in-memory контролів. Вигаданий рядок тому не
+може пережити гейт. Невакуумність доведена двічі — у наборі (13 фабрикацій, кожна зі своїм кодом помилки) і
+**реальним CLI** на вигаданій матриці (файл у `%TEMP%`, не в репозиторії):
+
+```
+[mutation-controls] rows=3 decoy=3 cosmetic=0 ok=false issues=3
+[mutation-controls]   mutation_file_missing [fab.missing_file]: file does not exist: apps/agent-api/src/does-not-exist.ts
+[mutation-controls]   mutation_anchor_not_found [fab.missing_anchor]: the anchor is not present in apps/agent-api/src/code-tools-path.ts: "if (segment === \"nope\") {"
+[mutation-controls]   mutation_no_cosmetic_control [-]: the matrix has no `cosmetic` row, so a gate that fails on any change would look sensitive
+```
+
+Та сама матриця, але справжня: `[mutation-controls] rows=3 decoy=2 cosmetic=1 ok=true issues=0` (exit 0).
+Набір `tests/coding-agent-c14-mutation-branch-controls.test.ts` зареєстровано у фіксованому списку гейта, тож
+після цього кроку → **150** наборів (було 149).
+
+**Чесні межі decoy-branch (і чому він не всередині гейта).**
+
+1. Він **не герметичний**: потрібен `git` (worktree + `worktree list`), writable `.git`, і **baseline плюс один
+   повний прогін гейта на кожен рядок** (≈150 наборів кожен, тобто 4 прогони для трьох рядків) — тому він
+   **не** може бути кроком `security-gate` (той мусить лишатися швидким і герметичним) і **не** є обов'язковим
+   блокером PR. Див. § 7.5 про CI-рішення.
+2. Дзеркало переносить **поточний** стан робочого дерева, а не HEAD: доказ мусить стосуватися коду, який
+   рев'юють. У CI дерево чисте, тож там дзеркало порожнє і прогін іде проти HEAD — це видно у виводі
+   (`mirrored … file(s) copied`).
+3. Якщо мутація ламає **завантаження** набору (синтаксис), гейт також почервоніє; тому вердикт вимагає
+   саме **названий** тест серед **нових** падінь (тих, яких baseline не мав), а не просто ненульовий exit; і
+   назва звіряється як повний хвостовий ланцюг `describe > … > it`, бо гейт друкує саме його.
+4. **Спостереження потребує ескалації.** У файловій пісочниці агента, де писався цей крок, неможливі ані
+   `git worktree add` (запис у `.git` заборонений), ані сам `vitest` (сервіс `esbuild` — дочірній процес із
+   пайповим stdio → `spawn EPERM`, § 7.2). Тому рядки матриці **не** прогнані тут, і жодного «обидва напрямки
+   підтверджені» цей звіт не заявляє: команду запускає власник ескаловано. Див. § 7.5 — точний вивід того, що
+   скрипт робить у пісочниці (exit 3, `INCONCLUSIVE`), і точний вивід guard'а.
 
 ---
 
@@ -214,7 +353,10 @@ red-team тест мусить реально впасти.** Механіка �
    shell — ручний чекліст.
 3. **Unicode-нормалізація дедуплікації шляхів (RT-12)** — виміряний розрив, не захищена властивість;
    статус `measured-limitation`, пропозиція виправлення в § 4.4.
-4. **`normalizeWorkspacePath` без шва мутації** — див. § 5.
+4. **`normalizeWorkspacePath` без in-memory шва мутації** — див. § 5. Структурну межу знято decoy-branch
+   (§ 5.1: той самий guard мутується **у файлі**, і для нього є рядок матриці), але **спостереження** цього
+   рядка лишається за ескалованим запуском (`npm run mutation:branch`, § 7.5.6); поки він не прогнаний,
+   path-guard доведений парою «відмова/прийняття» + інваріантом утримання (§ 4.4), а не мутаційно.
 5. **11 винятків `hardDenyRuleExemptions`** посилаються на `tests/coding-agent-c4-classifier.test.ts` як на
    покриття **поведінки** (assert `hard_deny` для команд), а не ідентичності правила; ідентичність
    доводить `probe` кожного винятку. Це свідомо: C14 не додавав нових доказів для цих 11 класів і не
@@ -233,6 +375,31 @@ red-team тест мусить реально впасти.** Механіка �
 9. **Порядок у `run-security-gate.mjs`**: статична перевірка каталогу виконується **до** vitest, тому
    каталог-дефект видно навіть коли набір не запустився; перевірка по звіту — після. Обидві входять в
    `ok`, отже роблять гейт червоним.
+10. **Decoy-branch не герметичний і не в гейті** (§ 5.1, § 7.5): потрібні `git` (worktree), writable `.git` і
+    два **повні** прогони гейта, тому в `security-gate` живе лише guard матриці (секунди, без мутацій), а сам
+    прогін — окрема команда `npm run mutation:branch` і окремий необов'язковий CI-workflow. Коди виходу
+    розрізняють «доказ не підтверджено» (1) і «середовище не дало виміряти» (3) — друге **ніколи** не
+    зараховується як «мутацію спіймано».
+11. **ПРИЙНЯТИЙ РИЗИК (G1 п.6): автоматичні перевірки GitHub Actions вимкнено навмисно — гейт більше не блокує
+    нічого автоматично.** Записано тим самим форматом, що в `known-failures.json` (`owner` / `added_at` /
+    `expires_at` / `reason` / `evidence`), бо це той самий клас запису: не «полагоджено», а свідомо прийнятий
+    борг із власником і терміном. Деталі, доказ і точні виводи — § 7.6.
+
+    | Поле | Значення |
+    | --- | --- |
+    | `owner` | **`OWNER_PENDING`** — плейсхолдер. Імʼя тут **не** вигадане: його заповнює власник (або замінює на `repo-maintainer` — значення, яке `known-failures.json` уже використовує як `default_owner`). |
+    | `added_at` | **`2026-10-08`** — дата цієї сесії, прочитана з системного годинника (`Get-Date -Format 'yyyy-MM-dd'`), а не обрана автором. **Власник має підтвердити.** |
+    | `expires_at` | **`2026-11-07` — ПРОПОЗИЦІЯ, яка потребує явного підтвердження власника.** Це 30 днів від `added_at` — той самий інтервал, що вже прийнятий у `known-failures.json` (`2026-10-07` → `2026-11-06`). Автор не має права призначати дату сам, тому це саме пропозиція, а не рішення. |
+    | `reason` | **«CI не блокує нічого; гейт виконується лише локально на вимогу.»** Конкретно: (1) обов'язкова job `security-gate` (SG-1) більше не блокує жоден merge і жоден release — `release-gate.needs` її містить, але сам workflow тепер запускається тільки вручну, тож людина, яка натискає merge, не побачить червоного сигналу; (2) карантинний механізм `npm run test:known-failures` (15 передіснуючих падінь) більше **не** спрацьовує на push — нове падіння нікого не зупинить, а застарілий запис у `known-failures.json` більше нічим не нагадає про себе; (3) `npm run typecheck:tests`, `npm run lint`, `npm run test:web`, обидва `audit:*`, `eval:smoke`, `gate:upgrade`, `typecheck`, обидві збірки й Docker-джоба так само не запускаються автоматично; (4) щотижневий rescan образів пісочниці (`sandbox-images.yml`, політика віку каталогу 14 днів) і щотижневий decoy-branch доказ не виконуються взагалі; (5) **компенсуючий контроль — це локальний ескалований прогін власника** (`npm run security-gate`, `npm test`, `npm run test:web`, обидві збірки). Він **не** автоматичний, не має розкладу, не має сповіщень і не має жодної ознаки, яка б змусила когось його зробити: якщо його пропустити, червоним не стане ніщо. Це названо прямо, а не видано за «гейт тепер локальний» — локальний гейт без дисципліни еквівалентний відсутньому. |
+    | `evidence` | Джоби останнього **автоматичного** прогону в приватному репозиторії `andrii-koss/npati-ai-agent`: `Security gate (SG-1)` — Failed in 2 seconds; `Node 22 / macos-15-intel` — Failed in 2 seconds; `Coding-agent eval smoke` — Failed in 2 seconds; `Node 22 / windows-latest` — Failed in 2 seconds; `Node 22 / ubuntu-24.04` — Failed in 2 seconds; `Docker / Ubuntu` — Failed in 2 seconds; `Release gate` — **Skipped**. Тлумачення: **усі** джоби, на різних ОС, упали за однакові ~2 с — це не падіння тестів і не дефект коду, а «джоба не стартувала взагалі» (приватний репозиторій без оплачених хвилин; `macos-*`/`windows-*` на приватному репо взагалі потребують платного плану), тому `Release gate` і лишився `Skipped`. Отже ці перевірки **ніколи нічого не перевіряли** — вони давали лише червоний сигнал. Додатковий доказ стану після зміни: тригери всіх трьох workflow = `[workflow_dispatch]` і жодного автоматичного (`artifacts/g1-ci-triggers/check-workflows.mjs` → `issues=0`), `sha256(ci.yml)` до і після мутаційного доказу збігається (`6ec46b0257b4488cecf6b3ec4dee3d7095d7e71f47cb87e1e6bfd724859c8225`, 12599 байтів; у мутації — `cd49144d22d67b285e9f76d824168a258c54c1ed2ee9bb698da60b2e40766691`), пінований набір `tests/coding-agent-c14-ci-and-lint-gates.test.ts` — 20/20 зелений у стані-як-є і 17/20 червоний із повернутим `push:` (§ 7.6). |
+
+    **Що повертає ризик у норму (і чому це один коміт, а не відновлення з історії).** Тригери не видалені, а
+    збережені в кожному файлі як машиночитний `RE-ENABLE RECIPE` (`(triggers)` / `(paths)` / `(schedule)`), а
+    всі джоби й кроки лишились на місці. Повернення: розкоментувати рецепт у `on:`, оновити піни в
+    `tests/coding-agent-c14-ci-and-lint-gates.test.ts` (вони пінять саме новий навмисний стан) — і гейт знову
+    стає обов'язковою автоматичною job'ою. Поки цього не зроблено, вимога G1 «окрема обов'язкова job у CI (не
+    skip-иться, блокує merge/release)» **не виконується** — це прямо зафіксовано в
+    `docs/coding-agent/current-state.md` (розділ «Current step»), а не замовчане.
 
 ---
 
@@ -245,11 +412,11 @@ red-team тест мусить реально впасти.** Механіка �
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **148** рядків |
-| Фіксований список гейта | `suites=148 present=148 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start») |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/run-security-gate.mjs`) | **148** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 146 було до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **150** рядків |
+| Фіксований список гейта | `suites=150 present=150 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/run-security-gate.mjs`) | **150** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 149 було до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
-| Статична перевірка каталогу | `rows=23 ok=true issues=0` |
+| Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
 
 Команда харнесу (як задокументовано для цього репозиторію):
@@ -262,11 +429,13 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
 
 * **Розмір гейта.** У зрізі C14 цей документ говорив 138, фактичний фіксований список був 144, після
   реєстрації guard-набору нижче — **145**, після реєстрації набору C15 «CLI / run-start» (§ 7.2) — **146**,
-  після реєстрації двох наборів C15 «mounted folder» (§ 7.3) — **148**. Усі згадки в цьому
+  після реєстрації двох наборів C15 «mounted folder» (§ 7.3) — **148**, після реєстрації набору C1a
+  «dark launch / kill switch» кроком G1 (§ 7.4) — **149**, після реєстрації guard-набору матриці мутацій
+  кроком G1 (§ 5.1) — **150**. Усі згадки в цьому
   файлі зведені до фактичного числа, яке
-  читає guard-набір (`--list` = 148 рядків, `present=148 missing=0`); історія зростання лишена
+  читає guard-набір (`--list` = 150 рядків, `present=150 missing=0`); історія зростання лишена
   явно історичною: 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → 146 у C15 (CLI) → 148 у C15
-  (mounted folder).
+  (mounted folder) → 149 у G1 (C1a) → 150 у G1 (матриця мутацій).
 * **Опис фаз політики.** Два коментарі (`apps/agent-api/src/code-policy-engine.ts` — заголовок двигуна, і
   `apps/agent-api/src/app.ts` — місце wiring) перелічували 8 фаз і пропускали `capability_groups`,
   `trust` і `network_enforcement`. Реальний порядок виконання в `evaluateInternal` — 11 фаз:
@@ -393,10 +562,543 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
   сервіс адміністрування.
   Прогін харнесом (`vitest`) лишається за ескалованим запуском власника.
 
+### 7.4 G1 — Security Gate Phase 1 (закриття дір, що не потребують інфраструктури)
+
+Крок G1 закрив діри, для яких **не** потрібні Docker/Postgres/браузер. Що саме зроблено, чим доведено і що
+свідомо лишено власнику — нижче. Число наборів гейта: **150** (`--list` = 150 рядків, `present=150 missing=0`);
+каталог атак: **24 рядки** (доданий RT-24), `HARD_DENY_RULES`: **16** (було 12).
+
+* **D3 — self-approval у звичайному шляху `decide` (справжня вразливість).**
+  `CompanyApprovalsRepository.decide` (`apps/agent-api/src/approvals-repository.ts:177`) резолвив
+  **будь-який** рядок, знайдений через `get()`, а `get()` скоупиться `user_id = ctx.userId` — тобто викликач
+  **завжди є автором запиту**. Для аудиторії `self` це і є задокументований флоу власника (крок-ап: людина
+  підтверджує власну дію; «two-person — це конфігурація, не вимога», `code-step-up.ts`), але для аудиторії
+  `role` (two-person) це означало, що **автор запиту міг сам його затвердити**: `decideAsAudience` таку спробу
+  відхиляє з `TWO_PERSON_SAME_USER_DENIED` (`:277-282`), а `decide` — ні. Що зроблено: у `decide` одразу після
+  `get()` додано **той самий** інваріант через **той самий** рідер (`approvalAudienceOf`) і **той самий** код
+  (`TWO_PERSON_SAME_USER_DENIED`, 403), у тій самій позиції, що в `decideAsAudience` (до перевірок строку й
+  статусу, до журналу й до `UPDATE`) — жодного другого механізму. Легітимний випадок `requester = approver`
+  (аудиторія `self`) **не зламано і не лишено мовчки**: він тепер **явна гілка** (`approvalAudienceOf(...)`
+  порожній) із поясненням у коді, а не відсутність перевірки. Тести — `tests/coding-agent-c5-approval-bypass.test.ts`
+  (5 нових `it`: відмова в `decide`, відмова в `decideAsAudience`, позитивний контроль «інша людина може»,
+  невідповідність ролі, збережений `self`-флоу) — набір у гейті, тож кількість наборів не змінилася.
+* **D10 — обфусковані команди, які деградували до `approval`.** `apps/agent-api/src/code-shell-classifier.ts`:
+  додано **4** hard-deny правила, жодного наявного не послаблено й не змінено (вони лишаються **перед** новими,
+  тож пріоритет відмов не зсунувся): `decode_pipe_shell` (`base64 -d … | sh`, `xxd -r … | bash`, `… | eval`),
+  `eval_dynamic` (`eval "$(…)"`, `` eval `…` ``, `source $VAR`), `shell_alias_definition` (`alias`/`unalias`
+  на початку сегмента — інакше `echo alias` був би хибним спрацюванням), `path_manipulation`
+  (`PATH=…`, `export PATH=…`, `env PATH=…`, `unset PATH`). Кожна форма має тест у
+  `tests/coding-agent-c4a-classifier.test.ts`, негативний контроль (читабельна команда, літеральний
+  `eval "echo hi"`, `base64`-*кодування* у файл, `echo $PATH`, `source ./env.sh`, `sh -c 'echo hi'`) і
+  **мутаційний доказ у самому тесті**: правило вилучається з оцінюваного набору (`hardDenyRules` — той самий
+  сеам, що використовує C14 mutation-sensitivity), і його власний кейс справді падає до `approval`, після
+  відновлення — знову `hard_deny`. Каталог: рядок **RT-24** із чотирма `hardDenyRuleIds` (інакше guard вимагав би
+  винятків із probe).
+* **D12 — `c1a-flags` у гейті.** `tests/coding-agent-c1a-flags.test.ts` (політика G1 п.5: `gate_not_passed`,
+  майстер-прапорець, ізоляція per-company/per-user, адміністрування й **kill switch**) існував і **не був
+  зареєстрований у жодному гейті**. Набір герметичний (`InMemoryWorkspaceStore` + `Fastify.inject`, без порту,
+  мережі й Docker) і не має `.skip`/`.only`/`.todo`; доданий у `SECURITY_GATE_TESTS` четвертим рядком. Разом із
+  ним оновлено **всі** місця, де документ називає розмір гейта (їх читає guard
+  `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts`): 149 (на той момент — крок G1 п.3 підняв
+число до 150, див. § 5.1).
+* **D14 — роут protected branches без тестів.** `PUT …/code/protected-branches`
+  (`apps/agent-api/src/code-membership-routes.ts:427-448`) не мав жодного тесту. Додано route-level набір у
+  `tests/coding-agent-c5a-protected-branches.test.ts` (реальний реєстратор роутів + реальний RBAC-гейт,
+  заглушки лише для резолвера ролі та policy-сервісу): owner — 200 і тіло передано як є; **agent** і
+  **service** — 403 `agent_cannot_change_policy` **до** резолву ролі й до політики; неавтентифікований виклик
+  («Bearer-скіп») — 401 `unauthorized`; член компанії без прав (developer) і людина без членства — 403
+  `permission_denied`; негативний контроль — `GET` того самого роута працює для developer.
+  **Знайдений і виправлений дефект (аудит).** Тест показав, що для **service**-принципала спільний гейт
+  `CodeRbac.authorize` спершу **дозволяв** зміну політики й писав у журнал `code.rbac.allow`, і лише потім роут
+  відмовляв власним `throw`: типова allowlist автоматизації містить `business:manage`
+  (`AUTOMATION_PERMISSION_INVENTORY`), а інваріант «service не змінює політику» існував лише для **agent**.
+  Виправлено в `code-rbac.ts` (дзеркало агентського інваріанта, той самий код `agent_cannot_change_policy`,
+  після production/privileged-перевірки, щоб не змінити задокументовану відповідь C5b-поверхні) — журнал тепер
+  каже правду, HTTP-контракт не змінився. Перевірено наборами `c5a-rbac*`, `c5a-role-escalation`,
+  `c5a-membership`, `c5b-policy-rbac`, `c5b-policy-management`, `c5a-prod-operations`, `c5a-automations-identity`
+  (**197 тестів, failed=0**).
+* **D15 — субагент × provider data policy.** Структурно `ProviderDataGuard` навішується на **єдиний** engine
+  (`app.ts:930-933`), а агенція делегування віддає дитину тому самому `CodingAgentRunner` (`app.ts:2963-2979`),
+  і кожен виклик моделі несе `policyContext` (`coding-agent-runner.ts:3870-3875`) — але жоден тест не проганяв
+  provider-call **дитини** крізь guard. Додано в `tests/coding-agent-c12-subagent-scope.test.ts`: реальний
+  runner + **дитячий** run (`subagentScope: { parentRunId, allowedTools }`) із реальним guard'ом над
+  провайдером-шпигуном. Заборонений політикою вміст (`conservativeHostedPolicy`, сесія `confidential`) →
+  провайдер **не викликано жодного разу**, run `failed` із `provider_data_classification_exceeded`;
+  негативний контроль (дозвільна політика) → провайдер **викликано**, run `completed`.
+* **D9 — hardlink.** Заміряно, а не припущено (тест у `tests/coding-agent-c15-mounted-workspace.test.ts`).
+  `lstat` для hardlink повертає **регулярний файл** (`isSymbolicLink() === false`, `nlink > 1`, той самий
+  `dev`/`ino`), тому ні перевірка компонентів, ні порівняння `realpath` його не бачать — це зафіксовано як
+  виміряна межа. Але секрет при цьому **не виходить**: провайдер перевіряє **вміст**, а не ім'я
+  (`project-workspace.ts:443`, `secret_content`, 403), і приватний ключ відхилено під невинним ім'ям
+  `notes.txt`; негативний контроль — hardlink із звичайним текстом обслуговується, тож відмова походить від
+  правила вмісту, а не від «hardlink заборонено» (такого правила немає і воно не потрібне: копія тієї самої
+  вмісту відхиляється так само, а hardlink-специфічна заборона зламала б законні hardlink'и
+  `pnpm`/`npm` у `node_modules`). Додатково виміряно containment: власний запис API створює файл із `nlink === 1`.
+* **D16 — WebSocket-ізоляція: `NOT_APPLICABLE` (факт, не припущення).** У продукті **немає** жодної
+  WebSocket-**поверхні**: єдиний зареєстрований плагін Fastify — `cors` (`app.ts:4748`), у жодному
+  `package.json` немає `ws`/`@fastify/websocket`/`socket.io`. Усі згадки `WebSocket` — це **вихідні клієнти**
+  третіх сторін (Discord gateway `discord-messaging.ts:21`, Slack Socket Mode `slack-messaging.ts:18`), поле
+  типу `transport: "stdio" | "websocket" | "sse"` в описі ACP-харнеса
+  (`acp-harnesses-and-drivers.ts:20,92`), регулярка детектора коду під ревʼю (`auto-exec-reviewer.ts:36`),
+  URL debugger'а **чужого** headless-браузера (`browser-advanced-integrations.ts:176`) і текстовий **ярлик**
+  транспорту у відповіді роута (`messaging-integrations-routes.ts:61`). Реальна потокова поверхня coding
+  agent — **SSE**: `code-background-run-routes.ts:232` (`content-type: text/event-stream`) із тенант-бар'єром
+  на `:198` (`result.snapshot.companyId !== companyId`), який уже піниться наборами C10/C15. Тест на
+  неіснуючий шлях **не** написано — це і є вимога пункту.
+* **D23 — застарілий `TODO(C5)`.** У `tests/coding-agent-c5-approval-bypass.test.ts` випадок про ін'єкцію
+  чекав на `code-prompt-injection-guard.ts` («once it exists»), який уже існує. TODO прибрано, і той самий
+  випадок тепер **виконує** перевірку через реальний guard: `classifyRepositoryInstruction` бачить
+  `instruction_override` і `injection.safe === false`; `reviewRepositoryInstructions` із `trusted: true`
+  не застосовує нічого (`appliedPolicyChanges` порожній), а `repositoryContentCanChangePolicy() === false`.
+* **D5 — `test:web` у CI.** `npm run test:web` (9 файлів / 76 тестів: XSS-скан web-джерел і ізоляція Code
+  Workspace) не запускався в **жодному** workflow. Додано окремим кроком у job `platform`
+  (`.github/workflows/ci.yml`), **не** через `npm test`: `vitest.config.ts` навмисно не включає `apps/web`, тож
+  цей крок не змінює baseline карантину (10 файлів / 15 тестів). Піни `tests/coding-agent-c14-ci-and-lint-gates.test.ts`
+  оновлено: крок у списку команд, окремий тест на власний конфіг, і перевірка, що конфіги **не перетинаються**
+  (`apps/web` є лише у web-конфізі).
+* **D6 — `release-gate` залежить від `security-gate`.** `needs: [platform, docker, evals, security-gate]`: раніше
+  реліз міг бути зеленим при **червоному** обов'язковому гейті. Пін переписано так, щоб він **посилював**, а не
+  просто фіксував рядок: список `needs` парситься, і тест вимагає наявності всіх чотирьох job'ів та відсутності
+  старого рядка `needs: [platform, docker, evals]`.
+* **D20 — артефакт гейта.** Job `security-gate` не вантажив **жодного** артефакту: звіт vitest писався в
+  `mkdtempSync(...)` і видалявся у `finally`. `scripts/run-security-gate.mjs` тепер пише **durable** вердикт у
+  `artifacts/security-gate-report.json` (кількості наборів/каталогу/тестів, `ok`, `failedTests`, `steps`), а job
+  вантажить його через `upload-artifact` з `if-no-files-found: error` (той самий контракт, що в `evals`).
+  Невдалий запис **не** змінює вердикт гейта (це доказ, а не перевірка безпеки) і друкується як notice; у CI
+  відсутній артефакт = червоний job. Крок без `if:` — job має пінований інваріант «без умовних кроків».
+* **D21 — адресні path-фільтри.** У `push` і `pull_request` додано **іменовані** записи на
+  sandbox/tools/policy/runner (`sandbox-*.ts`, `sandbox-*.mjs`, `runner-readiness.ts`, `code-tool-runtime.ts`,
+  `code-tool-registry.ts`, `code-tool-executors.ts`, `code-policy-engine.ts`, `code-shell-classifier.ts`,
+  `coding-agent-runner.ts`, `approvals-repository.ts`), плюс `docs/**` (guard читає **число наборів із
+  документа**, тож docs-only зміна більше не є гарантовано нерелевантною) і `.env.production.example`.
+  Обидва списки лишаються ідентичними (це піниться) — 25 записів кожен.
+* **D22 — числа в `docs/coding-agent/security.md`.** Було `144`; тепер `149` (на той момент; крок G1 п.3 підняв
+  обидва документи до 150, див. § 5.1) (і заголовок про «розбіжність
+  документації» закрито: документ і список тепер кажуть одне число). Оновлено також покриття hard-deny:
+  `16` правил, з них 4 покриті новим рядком RT-24, `11` — винятками з probe; каталог `24` рядки
+  (`23 covered`, `1 measured-limitation`).
+* **Перевірки цього кроку (exit codes).** `npm run typecheck` — **0**; `npm run typecheck:tests` — **0**;
+  `npm run lint` — **0** (`lint-guard` self-test 19/19, 1025 файлів, allowances 7/7, ratchet `as any` не
+  зріс); `node --check scripts/run-security-gate.mjs` — **0**; `node --check scripts/attack-catalogue-check.mjs`
+  — **0**; `npm run audit:capabilities` — **0**; `npm run gate:upgrade` — **0**. Статична перевірка каталогу
+  (реальні `HARD_DENY_RULES` із транспільованого класифікатора) — `rows=24 rules=16 ok=true issues=0`, обидва
+  нові заголовки знайдені. Прогін харнесом усіх торкнутих наборів **разом із** регресійними (`c5-approval-bypass`,
+  `c4-classifier`, `c4a-classifier`, `c5a-rbac*`, `c5a-membership`, `c5a-role-escalation`, `c5a-prod-operations`,
+  `c5a-automations-identity`, `c5a-protected-branches`, `c5b-provider-guard`, `c5b-policy-rbac`,
+  `c5b-policy-management`, `c12-subagent-scope`, `c1a-flags`, `c14-ci-and-lint-gates`,
+  `c14-policy-phase-and-gate-size-guard`, `c14-attack-catalogue`, шість `c14-redteam-*`, `c15-mounted-workspace`,
+  `c15-mount-sandbox`) — **85 наборів, 378 тестів, `passed=378 failed=0`**. Єдиний набір, який у пісочниці
+  агента не проходить, — `tests/coding-agent-c15-cli-run-start.test.ts`, і **не** через код: він пише фікстуру
+  в `artifacts/c15-token-fixture.txt`, а пісочниця забороняє процесу Node запис під `artifacts/` (`EPERM`) — це
+  обмеження середовища, те саме, що описане в § 7.2/§ 7.3.
+* **Межа середовища агента (та сама, що в § 7.2/§ 7.3).** `vitest` у пісочниці агента не стартує
+  (`spawn EPERM` на сервісі esbuild), тому набори прогнані **in-process** харнесом
+  `artifacts/c5b-policy-probe/run.mjs` на `node --experimental-transform-types` (реальні модулі, той самий
+  шім vitest, що використовували C5b/C15). Харнес — **дозволяючий оракул** і в цьому проєкті вже давав
+  оптимістичний результат, тому він не є доказом сам по собі: він **знайшов** справжній дефект (allow-запис
+  для service-принципала, D14) і справжню відмову провайдера (D9), і саме тому його результати наведені разом
+  зі статичними перевірками. Остаточне підтвердження (`npm test`, `security-gate`, `test:web`, обидві збірки)
+  — за ескалованим запуском власника.
+* **Тимчасові файли цього кроку (не видалялися; `artifacts/` у `.gitignore`).**
+  `artifacts/g1-probe/d10-classifier-probe.cjs`, `artifacts/g1-probe/d10-catalogue-probe.cjs`,
+  `artifacts/g1-probe/d5-d6-d20-d21-workflow-probe.cjs` і робочий каталог транспільованої копії
+  `%TEMP%\npati-g1-d10-probe\` (перегенеровується кожним запуском probe). Передіснуючі
+  `artifacts/c5b-*`, `artifacts/c15-*` не чіпалися.
+* **Свідомо НЕ робилося (окремі рішення власника, інфраструктура):** D1 (Postgres у гейті), D2 (decoy-branch),
+  D7 (live-model job), D19 (звіт: власники/терміни/sign-off) і browser E2E. Вони не входять у цей крок і не
+  заявляються виконаними.
+
 ---
+
+### 7.5 G1 п.3 — decoy-branch: що виміряно, що ні (і точні виводи)
+
+Крок додає друге твердження § 5.1 і **не** заявляє його підтвердженим: у середовищі, де він писався, ні
+`git worktree`, ні `vitest` не запускаються (§ 7.2/§ 7.5.6). Нижче — усе, що справді прогнано, з точним
+виводом, і те, що лишається ескалованому запуску власника.
+
+### 7.5.1. Перший ескалований прогін: механізм був зламаний, а не захист чутливий
+
+Прогін `npm run mutation:branch` (ескаловано, справжнє дерево) дав **exit 1** і три вердикти, з яких
+**жоден** не є доказом чутливості:
+
+```
+rows: branch.fork_bomb_rule_removed           = wrong_test(exit 1)          tests=2015/14
+      branch.workspace_path_traversal_guard   = wrong_test(exit 1)          tests=2018/11
+      control.comment_only_in_the_guarded_file = unexpected_failure(exit 1) tests=2023/6
+```
+
+Артефакт — `artifacts/security-gate-mutation-branch.json` (`generatedAt 2026-10-08T10:48:47Z`); зелений гейт
+у самому репозиторії — `artifacts/security-gate-report.json` (`passed=2124 failed=0`, `10:33:58Z`).
+
+**Саме косметичний контроль це викрив.** Коментар у тому самому файлі (`code-tools-path.ts`), який за
+побудовою нічого не контролює, зробив гейт червоним: `gate exit 1; tests=2023/6; verdict=unexpected_failure`.
+Без негативного напрямку `wrong_test` на decoy-рядках виглядав би як «гейт реагує на прибраний guard». Це
+факт цінності негативного контролю, і він зберігається тут як знахідка, а не як незручність.
+
+**Тести, що падали в worktree незалежно від мутації** (з `observedFailures` усіх трьох рядків):
+
+| Набір → тест | Точна причина | Доказ |
+| --- | --- | --- |
+| `tests/coding-agent-c4a-typosquat-dataset.test.ts` → `ships a valid, versioned dataset for every ecosystem` | немає `data/typosquat/*.json` | `data/` — у `.gitignore:11`, `git ls-files data` = **0 файлів** (не відстежується), а набір читає `path.join(REPO_ROOT, "data", "typosquat")` (рядок 9) |
+| `…typosquat-dataset.test.ts` → `flags a typosquat when the real dataset is used` | те саме | `typosquatDatasetOptions: { directory: DATASET_DIRECTORY, … }` (рядок 105) |
+| `…typosquat-dataset.test.ts` → `still allows an ordinary package when the dataset is present…` | те саме | те саме (рядок 114) |
+| `tests/coding-agent-c4a-deps-guard.test.ts` → `requires approval for install scripts and names the typosquat target` | те саме | `datasetOptions` → `path.resolve(import.meta.dirname, "..", "data", "typosquat")` (рядки 41–44) |
+| `…c4a-deps-guard.test.ts` → `allows an existing, old, script-free package from an allowed registry` | те саме | те саме |
+| `tests/coding-agent-c15-cli-run-start.test.ts` → `reads the token from the environment or a file, and never from argv` | немає каталогу `artifacts/` | `artifacts/` — у `.gitignore:14`; тест пише туди фікстуру й першим ділом твердить `expect(existsSync(path.dirname(file))).toBe(true)` (рядок 751). Падав **лише в рядку 1**: гейт сам створює `artifacts/` у `writeGateArtifact` (наприкінці прогону), тому в рядках 2–3 каталог уже існував — це видно з артефакту (у рядку 1 тест є серед падінь, у 2–3 його немає) |
+| `tests/coding-agent-c5a-rbac-foundation.test.ts` → `is registered in the gate list, and every configured suite file exists` | **не встановлено** (див. нижче) | — |
+| **крок самого гейта** `typosquat dataset guard` | те саме `data/typosquat` | `gateTranscriptTail` усіх трьох рядків: `[typosquat] npm: dataset is stale` (×6) → `[security-gate] FAILED: typosquat dataset guard exited with 1` |
+
+Тобто гейт був **червоний до будь-якої мутації**, і три з чотирьох наборів падали з однієї причини: дзеркало
+(`git diff --name-status HEAD` + `git ls-files --others --exclude-standard`) **сліпе до `.gitignore`**, а гейт
+читає два ігноровані ресурси — `data/typosquat/**` і `artifacts/**`.
+
+**`c5a-rbac-foundation` — точна причина не встановлена, але межа звужена до одного твердження.** Що доведено
+фактами (симуляція дзеркала в `D:\npati\NPATI Agent\.mutation-probe\worktree`: `git archive HEAD` + рівно ті 18
+tracked і 7 untracked файлів, які копіює `mirrorWorkingTree`, кожен звірений за sha256):
+
+* усі **150** файлів наборів у такому worktree **є**, і `findMissingSuiteFiles(<worktree>, SECURITY_GATE_TESTS)`
+  → `[]` (та сама функція, той самий висновок, що й у репозиторії); список — 150 унікальних;
+* `test` обчислює `root` як `path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")` — і ця сама
+  формула в `tests/coding-agent-c15-cli-run-start.test.ts:78` у тому ж worktree **спрацювала**: її тест
+  `declares the bin, and the bin exists…` (`existsSync(path.join(workspaceRoot, …))`, рядок 857) пройшов;
+* граф імпортів 150 наборів резолвиться повністю (556 модулів; єдине «не знайдено» — `.gitignore`, який код
+  `code-tools-fs.ts` шукає від кореня workspace і який у worktree **є**);
+* `tests/coding-agent-c5b-policy-rbac.test.ts`, який **статично** імпортує той самий `run-security-gate.mjs` і
+  викликає ту саму `findMissingSuiteFiles`, **пройшов**.
+
+Отже падає не твердження про наявність файлів, а єдиний у тому тесті вираз, що не є асерцією, —
+`await import("../scripts/run-security-gate.mjs")` (рядок 439): або рівень Vite/SSR у worktree, або
+`testTimeout: 10_000` на «холодному» перетворенні модуля в тому воркері. Друга зачіпка вказує в той самий бік:
+worktree прогнав **2029** тестів проти **2124** у репозиторії (різниця **95**, однакова в усіх трьох рядках),
+тобто частина наборів не виконалася взагалі — це сумісно з відмовою на рівні воркера саме на цьому наборі.
+Розрізнити ці механізми має наступний прогін: раннер тепер зберігає в артефакті `failureMessages` (власні
+рядки-повідомлення гейта під кожним `FAILED TEST:`) і `suiteLines` (`missing:` / `empty:`), а червоний baseline
+друкується повністю (див. 7.5.2). Причина, яку не виміряно, тут **не** вигадується.
+
+### 7.5.2. Друга знахідка: `wrong_test` через порівняння назв (і чому path-guard таки покритий)
+
+Для `branch.workspace_path_traversal_guard` скрипт сказав «the gate went red (exit 1) but the test the matrix
+names did not fail» — **але цей тест є серед падінь**:
+
+```
+матриця:  expectedFailingTest: "refuses the same separator and length spellings at the workspace-relative path guard"
+vitest:   tests/coding-agent-c14-redteam-path-and-zip-slip.test.ts > security-gate: C14 red-team — zip-slip,
+          Unicode, NUL and long paths > refuses the same separator and length spellings at the workspace-relative path guard
+```
+
+`classifyGateRun` порівнював `entry.title === expectedTest` точно, а гейт друкує **повний ланцюг**
+`ancestorTitles > title` (`formatFailedTests` → `join(" > ")`), тоді як матриця (і `itTitlesIn`, яким
+`validateMutationControls` її перевіряє) зберігає **голий** заголовок `it("…")`. Виправлено не матрицю, а
+порівняння: `failureTitleMatches(observed, expected)` вимагає або рівності, або збігу **повного хвостового
+ланцюга** (`observed.endsWith(" > " + expected)`); «міститься десь усередині» не матчиться, тож
+`refuses X, loudly` проти `refuses X` і далі падає як `wrong_test`.
+
+Отже **матрицю не підганяли**: `branch.workspace_path_traversal_guard` дає `caught` на чистому baseline (тест
+справді падає), а `not_caught` для нього не спостерігався. Доказ чутливості path-guard'а (він не має
+injection seam — § 5.1) лишається за decoy-рядком.
+
+### 7.5.3. Виправлення: еквівалентне дзеркало + baseline як єдина точка відліку
+
+1. **Дзеркало ігнорованих ресурсів** (`GATE_IGNORED_RESOURCES`, `mirrorIgnoredResources`,
+   `mirrorResourceDirectory`): `data/typosquat` і `artifacts` копіюються у worktree байт-у-байт (вкладені
+   каталоги включно) з перевіркою sha256; ресурс, якого в дереві немає, створюється як **порожній** каталог —
+   саме такий стан гейт створює собі сам (`writeGateArtifact` → `mkdirSync`) і саме він потрібен C15-фікстурі.
+   Кожен запис декларує **споживачів** і рядок-доказ у їхньому коді, а набір перевіряє, що ці рядки досі на
+   місці: перейменований споживач робить набір червоним, а не лишає мертвий виняток. `.env` у списку
+   **немає** свідомо: він ігнорований і наявний, але жоден набір і жоден крок гейта його не читає (у
+   репозиторії немає dotenv), тому копіювати файл із секретами в тимчасовий worktree (який `--keep` лишає на
+   диску) — ризик без доказу.
+   **Чому це не маскування:** список не «все ігнороване», а лише те, без чого гейт червоніє *до* мутації, і
+   кожен запис доведений споживачем. Друга половина — новий baseline (пункт 2) — ловить будь-який ресурс, який
+   забули внести: тоді прогін чесно каже `BASELINE RED`, а не «мутацію спіймано».
+2. **Baseline перед мутаціями (головне).** Раннер робить **повний прогін реального гейта в тому самому
+   worktree без жодної мутації** і фіксує його падіння (`observeGateRun`). Кожен рядок судиться за **НОВИМИ**
+   падіннями відносно baseline (`newFailures`), а не за «exit ≠ 0». Якщо baseline не зелений — це стан
+   `environment`/`inconclusive`: скрипт друкує `BASELINE RED: …` з усіма падіннями та власними
+   повідомленнями гейта, кожен рядок отримує вердикт `baseline_red` (навіть косметичний — його не можна
+   звинувачувати за чуже червоне), а підсумок — **exit 3**, ніколи `proven`. Різниця між «мутація спричинила»
+   і «було червоне до мутації» — це буквально різниця множин падінь двох прогонів одного гейта в одному
+   дереві; жодного іншого джерела істини тут немає.
+3. **Доказовість для діагностики (окремий дефект інструмента, знайдений у першому прогоні).** Артефакт зберігав
+   лише **хвіст** виводу гейта (25 рядків), а рядки, які відповідають на питання «чому цей тест упав»,
+   друкуються **раніше**: `suite files: present=…`, `FAILED: N suite(s) reported no tests at all`,
+   `missing:`, `empty:` і повідомлення під кожним `FAILED TEST:`. Тобто доказ обрізав саме те, з чого вердикт
+   діагностується — через це `wrong_test` і `unexpected_failure` першого прогону лишилися без причини (і тому
+   `c5a-rbac-foundation` неможливо було доти діагностувати). Виправлено двома шляхами, і обидва — без
+   обрізання: (а) `failureMessages` і `suiteLines` тепер читаються з транскрипту **повністю** (межі — власні межі
+   гейта: 12 рядків повідомлення на тест, які він сам і друкує; секція про набори — один рядок на набір) і
+   лягають в артефакт для baseline і для кожного нечистого рядка; (б) **повний** транскрипт кожного прогону
+   пишеться окремим файлом `artifacts/security-gate-mutation-branch.<label>.log` (шлях, розмір у байтах і
+   помилка запису — в артефакті, а не виняток), і CI-джоба вантажить їх разом із вердиктом. `observeGateRun`
+   ідемпотентний: спостереження baseline передається в кожен рядок і не перечитується (інакше відсутній
+   `transcript` перетворив би зелений baseline на «не виміряно» — цю помилку знайшов харнес, див. 7.5.5, ще до
+   ескалованого прогону).
+
+### 7.5.4. Дві знахідки про сам гейт (не виправлені тут — це до власника)
+
+**(а) Обов'язковий `security-gate` залежить від gitignored даних, і ніщо в репозиторії їх не створює.**
+`data/typosquat/*.json` не відстежуються (`git ls-files data` → 0 файлів), ігноруються `.gitignore:11`, але їх
+читають п'ять тестів гейта і власний крок гейта. Перевірено, **чим** набір має відтворюватись:
+
+* `scripts/typosquat-dataset-generate.mjs` **без** `--check` справді його пише (`mkdirSync` + `writeFileSync`,
+  рядки 71–81), а з `--check` лише порівнює: `const current = existsSync(file) ? readFileSync(file, "utf8") : ""`
+  і при розбіжності друкує `[typosquat] <ecosystem>: dataset is stale`, після чого `process.exit(1)` (рядки
+  77–84). Тобто **відсутній** файл — це «stale» і **exit 1**, а не «згенерувати».
+* Цей виклик **без** `--check` не робить **ніхто**: у `package.json` немає жодного lifecycle-скрипта
+  (`prepare`/`postinstall`/`preinstall`/`pretest`/`presecurity-gate` — нуль збігів), у `.github/workflows/*` —
+  жодного кроку генерації, у документації — лише згадка про `--check` (`docs/coding-agent/current-state.md:1744`).
+* Джоба `security-gate` у `.github/workflows/ci.yml` (рядки 102–110) робить рівно `checkout → npm ci →
+  npm run security-gate`.
+
+**Наслідок: на чистому клоні (CI, нова машина) обов'язкова джоба гейта не може стати зеленою** — власний крок
+`typosquat dataset guard` виходить 1, а п'ять тестів падають на відсутньому наборі. Це дефект герметичності
+**гейта**, а не worktree: дзеркало лише відтворює дерево під перевіркою чесно. Рішення — за власником, і воно
+**не** приймалося тут (поза обсягом G1 п.3 і зачіпає пінований контракт `c14-ci-and-lint-gates`): (1)
+відстежити набір у Git; (2) додати крок генерації перед `npm run security-gate`; (3) зробити крок гейта
+«згенерувати **й** перевірити» — тоді прогін стає самодостатнім, а застарілість даних усе одно червона.
+
+**(б) Гейт ловить зниклий набір, але не бачить набору, який виконав менше тестів.** Перевірено окремо (у
+наборі `tests/coding-agent-c4a-security-gate.test.ts`, новий тест): набір, який **не запускався**, називається
+`findMissingSuites` → `FAILED: N configured suite(s) did not run` + `missing: <файл>`; набір, який **упав на
+завантаженні**, у звіті vitest має нуль `assertionResults` → `findEmptySuites` → `FAILED: N suite(s) reported
+no tests at all` + `empty: <файл>`. Обидва — **гучні**, з назвою файлу. Але набір, який завантажився й
+**згенерував менше тестів**, ніж оголошує (цикл по фікстуру, який зменшився; `describe` під умовою), не
+ловить **ніщо**: гейт пінить список файлів і наявність тестів, а не число тестів на набір — жодного
+очікуваного числа в репозиторії не оголошено. Саме в цій дірці могла б сховатися різниця **95 тестів**
+першого прогону (worktree `2029` проти репозиторію `2124`), і саме тому артефакт тепер зберігає секцію
+`missing:`/`empty:` **без обрізання** (7.5.3, пункт 3): питання «це було гучно чи тихо» закривається точним виводом
+наступного прогону, а не припущенням. Ремонт (якщо потрібен) — оголосити очікувану кількість тестів на
+набір; тут цього **не** робилося, бо це змінює контракт гейта, а не дзеркало.
+
+Гіпотезу «кілька наборів не завантажились, бо імпорт читає відсутній `data/`» перевірено окремо й вона
+**не** підтверджується статично: граф імпортів усіх 150 наборів (556 модулів, з резолвом розширень)
+не містить жодного **module-scope** читання з `data/`, `artifacts/` чи `.env`; п'ять наборів читають
+`data/typosquat` **усередині** тестів (тому вони й дають падіння тесту, а не «набір із нуль тестів»), а єдине
+посилання, яке не резолвиться від каталогу модуля, — `.gitignore` у `code-tools-fs.ts`, і він у worktree
+**є** (код шукає його від кореня workspace). Отже питання лишається відкритим рівно настільки, наскільки це
+дозволяє перший артефакт, і закривається виводом наступного прогону.
+
+### 7.5.5. Виміряно тут (exit codes точні)
+
+| Перевірка | Команда | Результат |
+| --- | --- | --- |
+| Реальна матриця | `node scripts/mutation-controls-check.mjs` | `rows=3 decoy=2 cosmetic=1 ok=true issues=0` — **exit 0** |
+| Розмір списку | `node scripts/run-security-gate.mjs --list` | **150** рядків, 150 унікальних, `missing_count=0` (число в § 7.5.1 не змінювалося: набір не додавався) |
+| Синтаксис зміненого `.mjs` | `node --check scripts/security-gate-mutation-branch.mjs` (і `run-security-gate.mjs`, `mutation-controls-check.mjs`) | **exit 0** кожен |
+| Типовий гейт тестів | `npm run typecheck:tests` | **exit 0** |
+| Типовий гейт додатків | `npm run typecheck` | **exit 0** |
+| Лінт | `npm run lint` | **exit 0**: self-test 19/19, 1026 файлів, allowances 7/7 |
+| Новий набір у харнесі | `node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/run.mjs tests/coding-agent-c14-mutation-branch-controls.test.ts tests/coding-agent-c4a-security-gate.test.ts` | `suites=7 tests=37 passed=37 failed=0` — **exit 0** (харнес — дозволяючий оракул, не заміна vitest; він **знайшов** помилку подвійного спостереження baseline — 7.5.3, пункт 3) |
+| Guard назв у звіті (той, що читає цей документ) | той самий харнес на `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` | `suites=2 tests=10 passed=10 failed=0` — **exit 0** (число наборів у документі не змінювалося: 150) |
+| Нова перевірка «гучно / тихо» (у гейті) | `tests/coding-agent-c4a-security-gate.test.ts` — доданий тест (набір не ослаблено) | пінить, що «набір не запускався» (`missing:`) і «набір із нуль тестів» (`empty:`) — **гучні з назвою файлу**, а «набір виконав менше тестів» не ловить ніщо (7.5.4б) |
+| CI-крок доказів | `.github/workflows/mutation-branch.yml` | вантажить не лише `security-gate-mutation-branch.json`, а й `security-gate-mutation-branch.*.log` (повні транскрипти; без обрізання) |
+| Ефект дзеркала ігнорованих ресурсів | симуляція worktree: `node .mutation-probe/worktree/scripts/typosquat-dataset-generate.mjs --check` | **до** копіювання — `[typosquat] npm: dataset is stale` ×6, **exit 1** (відтворення падіння гейта з 7.5.1); `existsSync('artifacts')` → **false**; **після** копіювання `data/typosquat/*.json` і створення `artifacts/` — `[typosquat] datasets are up to date`, **exit 0**, `artifacts` існує й доступний на запис |
+| `--dry-run` у пісочниці агента | `npm run mutation:branch -- --dry-run` | **exit 3**: `FAILED (preflight): git status failed: … (spawnSync git EPERM)` — див. 7.5.6 |
+| Пост-умови | `git status --porcelain --untracked-files=all`, `git worktree list`, `git stash list` | статус відрізняється від знімка до роботи **рівно одним рядком** — `M tests/coding-agent-c4a-security-gate.test.ts` (доданий тест 7.5.4б); жодного видалення, жодного зайвого untracked, `worktree list` — лише корінь, `stash` — порожньо |
+
+Тимчасові файли, які використовувалися і **видалені**: `D:\npati\NPATI Agent\.mutation-probe\` (HEAD-чек-аут
+для симуляції дзеркала + проби `probe-count.mjs`, `probe-ignored.mjs`, `probe-ignored2.mjs`,
+`probe-modscope.mjs`, `probe-graph.mjs`, `probe-refs.mjs`, `probe-classify.mjs`, `ignored.txt`),
+`%TEMP%\npati-head.tar`, `%TEMP%\npati-probe-check`; поза репозиторієм лишився лише знімок
+`%TEMP%\npati-git-status-baseline.txt`, з яким порівнювався `git status`. Дерево користувача не редагувалося:
+жодна мутація не застосовувалася ніде, крім симульованого копіювання у `.mutation-probe`.
+
+### 7.5.6. Що лишається ескалованому запуску (і чому)
+
+У пісочниці агента не запускаються ні `git worktree`, ні `vitest`, тому **точного виводу** `verdict=proven`
+тут немає — і він не вигадується. Точний вивід `npm run mutation:branch -- --dry-run`:
+
+```
+[mutation-branch] matrix docs/coding-agent/mutation-controls.json: rows=3 selected=3 (decoy=2, cosmetic=1)
+[mutation-branch] FAILED (preflight): git status failed: git status --porcelain --untracked-files=all exited ? (spawnSync git EPERM)
+[mutation-branch] notice: the verdict artifact could not be written (EPERM: operation not permitted, open 'D:\npati\NPATI Agent\artifacts\security-gate-mutation-branch.json'); the verdict is unaffected
+[mutation-branch] INCONCLUSIVE: preflight failed: git status failed: git status --porcelain --untracked-files=all exited ? (spawnSync git EPERM)
+[mutation-branch] baseline: not measured
+[mutation-branch] rows: none
+```
+
+**exit 3** — правильна поведінка: скрипт відмовився вимірювати, а не оголосив «мутацію спіймано» через
+ненульовий код. Причини перевірені окремо: будь-який `spawn` із пайповим stdio дає `EPERM` (`spawnSync git
+EPERM`, `spawnSync …node.exe EPERM`); `git worktree add` не проходить навіть без Node — запис у `.git`
+заборонений (`fatal: could not create leading directories of '.git/worktrees/…': Permission denied`); junction
+на `node_modules` — `Access is denied`; `vitest` не стартує, бо Vite бандлить конфіг через esbuild, а esbuild
+піднімає сервіс процесом (`Startup Error … esbuild … spawn EPERM`) — конфіг у `.mjs` цього не обходить. Саме
+тому весь локальний доказ вище зроблено на **симуляції дзеркала** (`git archive HEAD` + точний оверлей) і на
+чистих функціях раннера через харнес, а повний прогін виконує власник:
+
+```
+npm run mutation:branch -- --dry-run   # очікується exit 0, verdict=dry_run (worktree, дзеркало, junction'и,
+                                       #   дзеркало ігнорованих ресурсів, мутація, прибирання — без прогону гейта)
+npm run mutation:branch                # очікується exit 0, verdict=proven; у виводі — рядок
+                                       #   «baseline: … GREEN», далі три рядки caught/caught/ok,
+                                       #   і чотири транскрипти artifacts/security-gate-mutation-branch.*.log
+```
+
+Якщо `branch.workspace_path_traversal_guard` дасть `not_caught` — це **знахідка** (path-guard покритий
+недостатньо), а не привід правити матрицю. Якщо baseline виявиться не зеленим, прогін чесно завершиться
+**exit 3** з `BASELINE RED` і назве кожне падіння разом із власним повідомленням гейта — саме цього не
+вистачало першому прогону.
+
+### 7.5.7. CI: рішення і обґрунтування
+
+Додано **окремий** workflow `.github/workflows/mutation-branch.yml` (не на `push`/`pull_request`), який ставить
+залежності, запускає `npm run mutation:branch` і вантажить `artifacts/security-gate-mutation-branch.json` як
+доказ. **Оновлено кроком G1 п.6:** цей workflow мав `workflow_dispatch` + тижневий `schedule`, і `schedule`
+**прибрано** разом з усіма іншими автоматичними тригерами репозиторію (§ 7.6) — тепер він запускається лише
+вручну. Обґрунтування початкового рішення лишається чинним і наведене нижче; єдине, що змінилося, — «окремий
+необов'язковий workflow із тижневим розкладом» стало «окремий workflow, який запускає людина»:
+
+* **У межах G1.** Власник окреслив крок як «лише тести, звіт і CI», тож CI-джоба — у межах; але **не**
+  обов'язковий блокер PR: прогін коштує два повні прогони гейта (≈150 наборів кожен) плюс `npm ci`, тобто
+  десятки хвилин на кожен PR проти ~хвилин у наявного `security-gate`.
+* **Не в `ci.yml`.** Основний workflow має піновані інваріанти (обов'язковий `security-gate`-job без `if:` і
+  без `continue-on-error`, `release-gate.needs`); джоба, яка мусить бути необов'язковою, у ньому суперечила б
+  цим пінам. Окремий файл нічого не послаблює й не блокує реліз (`needs` його не містить).
+* **Не в гейті.** `security-gate` лишається герметичним: decoy-branch потребує `git`, writable `.git` і
+  повного прогону — саме тому в гейті живе лише **guard матриці** (секунди, без мутацій), а сам прогін — ні.
+* **Чесно:** workflow **не** запускався тут (GitHub Actions недоступний у пісочниці) — він перевірений лише
+  читанням і тим, що команда, яку він викликає, існує (`npm run mutation:branch` → `node
+  scripts/security-gate-mutation-branch.mjs`). Крок «Keep the mutation verdict and the gate transcripts as
+  evidence» вантажить і `artifacts/security-gate-mutation-branch.json`, і
+  `artifacts/security-gate-mutation-branch.*.log`: вердикт називає, **що** впало, а транскрипт — **чому**
+  (перша версія артефакту зберігала лише хвіст і втратила саме ці рядки, див. 7.5.3, пункт 3).
+* **Наслідок вимкнення (G1 п.6).** З прибраним `schedule` доказ decoy-branch більше не повторюється сам: він
+  виконується лише тоді, коли людина натисне Run workflow або запустить `npm run mutation:branch` локально.
+  Це входить у прийнятий ризик § 6 (пункт 11), а не подається як «доказ тепер на вимогу».
+
+### 7.6. G1 п.6 — автоматичні перевірки GitHub Actions вимкнено навмисно
+
+**Що саме змінено (точний перелік).** Змінено **лише тригери**; жоден workflow-файл не видалено, жодну джобу й
+жоден крок не викинуто.
+
+| Файл | Було (тригери) | Стало | Що зникло з коду | Що лишилось |
+| --- | --- | --- | --- | --- |
+| `.github/workflows/ci.yml` | `workflow_dispatch` + `schedule` (`0 4 * * 1`) + `push` (25 path-фільтрів) + `pull_request` (ті самі 25) | `workflow_dispatch` | `push:`, `pull_request:`, `schedule:` і обидва списки `paths:` | 5 джоб (`security-gate`, `platform`, `evals`, `docker`, `release-gate`), усі кроки, `permissions`, `concurrency`, `needs: [platform, docker, evals, security-gate]`, `if-no-files-found: error` — усе без змін |
+| `.github/workflows/sandbox-images.yml` | `workflow_dispatch` (з `inputs: variant`/`dry_run`) + `schedule` (`0 3 * * 1`) + `push` (3 шляхи) | `workflow_dispatch` (з тими самими `inputs`) | `schedule:` і `push:` зі списком | 3 джоби (`verify`, `build`, `rescan`), усі кроки, `env`, `permissions`; обидва `if:` зі `github.event_name` лишені **свідомо** (вони частина контракту повернення, і з `workflow_dispatch` обидві джоби досяжні) |
+| `.github/workflows/mutation-branch.yml` | `workflow_dispatch` + `schedule` (`0 5 * * 1`) | `workflow_dispatch` | `schedule:` | джоба `mutation-branch`, `timeout-minutes: 120`, крок `npm run mutation:branch`, крок артефакту з `if: always()` |
+
+**Як збережено можливість повернення за один коміт.** У кожному файлі одразу після `on:` стоїть
+`RE-ENABLE RECIPE` — три машиночитні блоки в коментарях:
+
+* `# --- BEGIN/END RE-ENABLE RECIPE (triggers) ---` — точні імена прибраних тригерів
+  (`ci.yml`: `push`, `pull_request`, `schedule`; `sandbox-images.yml`: `schedule`, `push`; `mutation-branch.yml`:
+  `schedule`);
+* `(paths)` — той самий список, **один** канонічний, який треба повернути **під обидва** тригери (`ci.yml` — 25
+  рядків, `sandbox-images.yml` — 3); саме так зникла потреба тримати два списки, які могли розійтися;
+* `(schedule)` — точний cron.
+
+**Як оновлено піни (що було, що стало і чому нове сильніше).** Файл `tests/coding-agent-c14-ci-and-lint-gates.test.ts`
+(набір **у гейті**, тому число наборів не змінилося — **150**). Обидва старі тести замінено, жодної асерції не
+видалено без заміни:
+
+| Було (C14) | Стало (G1) | Чому нове сильніше |
+| --- | --- | --- |
+| `runs on push, pull_request, a weekly schedule and manual dispatch` — `toContain("push:")`, `toContain("pull_request:")`, `toContain("schedule:")`, регексп на cron | `runs on manual dispatch only — no push, no pull_request, no schedule` — `toEqual(["workflow_dispatch"])` для всього списку тригерів, `automatic === []`, кожен із трьох названий окремо через `not.toContain`, і `ciCode.filter(/cron:/) === []` | Раніше перевірялась **наявність** трьох із чотирьох тригерів (четвертий, `workflow_run`, пройшов би непоміченим); тепер множина тригерів піниться **повністю**, тож додавання будь-якого нового тригера — червоний тест, а не тихе розширення |
+| `filters push and pull_request by the same behaviour-changing paths` — два списки, `pullPaths === pushPaths`, наявність 6 глобів і 7 іменованих файлів | `keeps the removed trigger contract in a re-enable recipe, complete and addressable` — рівно **25** записів у `(paths)`, наявність **усіх 15** глобів/файлів (включно з `docs/**` і `.env.production.example`) і **усіх 10** іменованих security-поверхонь, плюс `(triggers) === [push, pull_request, schedule]` і `(schedule) === ["0 4 * * 1"]` | Старий пін тримав два списки **однаковими**; новий тримає **один** список, який обидва тригери мусять використати (тож розійтися вони не можуть у принципі), і додатково пінить cron та імена тригерів, чого старий не робив. Кількість перевірених записів виросла (було 13 + 7, стало 25 + 10 + 3 + 1), і **жодна** стара асерція не послаблена — усі названі шляхи зі старого тесту присутні в новому |
+| (не було) | новий `describe("[G1] [security-gate] no workflow in this repository has an automatic trigger", …)` — 5 тестів | Регресійний тест рівня **репозиторію**: він дивиться не лише на `ci.yml`, а на **всі** workflow-файли, і вимагає `workflow_dispatch` як **єдиний** тригер кожного |
+
+Піни, які **не** чіпались і лишились як були: 12 команд у списку кроків (`npm ci`, `npm run security-gate`,
+`typecheck`, `typecheck:tests`, `lint`, `audit:capabilities`, `audit:sandbox-images`, `test:known-failures`,
+`test:web`, `build`, `eval:smoke`, `gate:upgrade`), «`npm test` у workflow немає», `test:web` окремим кроком на
+власному конфізі, `if-no-files-found: error` в обох job'ах, відсутність `continue-on-error` у **коді** файлу,
+`release-gate.needs` (парситься, містить `security-gate`), відсутність `if:`/`paths:` у job'і `security-gate`,
+піни `SECURITY_GATE_TESTS`, і всі піни `npm run lint`.
+
+**Механізм нового регресійного теста (точно).** Чиста функція `triggerVerdict(source)` над текстом workflow:
+
+1. `parseTriggers(source)` знімає коментарі (щоб `RE-ENABLE RECIPE` не читався як конфігурація) і читає
+   `on:` структурно — три написання: відображення (`on:` + ключі з відступом 2), flow-список
+   (`on: [push, pull_request]`) і скаляр (`on: push`). Порожній `on:` **повідомляється** (`trigger_list_empty`),
+   а не читається як «тригерів немає»;
+2. вердикт має коди `trigger_block_missing`, `trigger_list_empty`, `trigger_duplicate`,
+   `trigger_automatic:<t>`, `trigger_not_allowed:<t>`, `trigger_manual_missing`;
+3. «автоматичний» — замкнений словник з **40** подій GitHub (`push`, `pull_request`, `pull_request_target`,
+   `schedule`, `merge_group`, `workflow_run`, `repository_dispatch`, …), а «дозволений» — рівно
+   `["workflow_dispatch"]`, тож **невідома** подія теж червона (це сильніше за перелік заборонених).
+
+**Доказ невакуумності — на копії (в пам'яті), і кодом самого теста.** Вхід мутації — **сам рецепт**: для кожного
+workflow перебираються тригери з його блоку `(triggers)` і кожен повертається в копію (`withTrigger`), після чого
+вердикт мусить стати червоним із кодом, що **називає** цей тригер; додатково перевіряється, що **незмінений**
+файл лишається зеленим (інакше мутація й фікстура не розрізняються). Друга половина — `withoutAnyTrigger`:
+`on:` без жодного тригера мусить дати `trigger_manual_missing`. Тому рецепт, перевірка й доказ не можуть
+розійтися: рецепт **і є** входом мутації.
+
+**Доказ невакуумності — на реальному файлі (це найсильніша частина).** `push:` було **повернуто в
+`.github/workflows/ci.yml`** і знято знову:
+
+```
+node -e "...sha256(ci.yml)..."                → 6ec46b0257b4488cecf6b3ec4dee3d7095d7e71f47cb87e1e6bfd724859c8225 (12599 байтів)
+# в `on:` вставлено `  push:` (інструментом редагування файлів агента, див. нижче чому)
+#   → sha256 мутанта: cd49144d22d67b285e9f76d824168a258c54c1ed2ee9bb698da60b2e40766691
+node artifacts/g1-ci-triggers/check-workflows.mjs
+   → ci.yml: triggers=[push, workflow_dispatch]
+   → ci.yml: automatic trigger(s) present: push
+   → ci.yml: an automatic trigger appears in code:   push:
+   → issues=2                                         [exit 1]
+node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/run.mjs tests/coding-agent-c14-ci-and-lint-gates.test.ts
+   → harness: suites=3 tests=20 passed=17 failed=3   [exit 1]
+     ✗ … > runs on manual dispatch only — no push, no pull_request, no schedule
+       expected ["trigger_automatic:push"] to equal []
+     ✗ [G1] … > gives every workflow exactly one trigger, and it is manual dispatch
+       expected ["trigger_automatic:push"] to equal []
+     ✗ [G1] … > is not vacuous: restoring any trigger the recipe names is reported
+       expected ["trigger_automatic:push"] to equal []
+# після відкату:
+node -e "...sha256(ci.yml)..."                → 6ec46b0257b4488cecf6b3ec4dee3d7095d7e71f47cb87e1e6bfd724859c8225 (12599 байтів)  ← той самий хеш
+node artifacts/g1-ci-triggers/check-workflows.mjs → issues=0   [exit 0]
+… run.mjs tests/coding-agent-c14-ci-and-lint-gates.test.ts → suites=3 tests=20 passed=20 failed=0   [exit 0]
+```
+
+Друга, зворотна мутація — **порожній `on:`** (прибрано `workflow_dispatch`, рецепт-коментарі лишені):
+
+```
+node artifacts/g1-ci-triggers/check-workflows.mjs
+   → ci.yml: triggers=[]
+   → issues=2: «the `on:` block names no trigger», «no `workflow_dispatch`»      [exit 1]
+… run.mjs tests/coding-agent-c14-ci-and-lint-gates.test.ts
+   → harness: suites=3 tests=20 passed=17 failed=3   [exit 1]
+     ✗ expected ["trigger_list_empty: …","trigger_manual_missing: …"] to equal []
+# відкат → sha256 знову 6ec46b02…, probe issues=0, набір 20/20 (обидва exit 0)
+```
+
+**Чому мутацію застосовано інструментом агента, а не скриптом.** Пісочниця цієї сесії забороняє **будь-який**
+запис із процесу: `fs.writeFileSync` і `fs.copyFileSync` → `EPERM`, `Copy-Item`/`Set-Content` у PowerShell →
+`Access is denied`. Тому запис у workflow-файл зроблено тим самим інструментом, яким редагується весь код, а
+незмінність відкату доведена не «на віру», а `sha256` до і після (`6ec46b02…` в обох кінцях).
+
+**Перевірки цього кроку (точні коди виходу).**
+
+| Перевірка | Результат |
+| --- | --- |
+| `node --check scripts/run-security-gate.mjs` | **exit 0** |
+| `node scripts/run-security-gate.mjs --list` | **150** рядків (не змінилося — нового набору в гейт не додано) |
+| `suites`/`present`/`missing_count`/`duplicates` (read-only імпорт `SECURITY_GATE_TESTS` + `findMissingSuiteFiles`) | `suites=150 present=150 missing_count=0 duplicates=0` |
+| `node scripts/mutation-controls-check.mjs` | `rows=3 decoy=2 cosmetic=1 ok=true issues=0` — **exit 0** |
+| `npm run typecheck:tests` | **exit 0** |
+| Власний структурний чек YAML (немає YAML-парсера в залежностях: `node_modules/yaml` і `node_modules/js-yaml` **відсутні**) | `artifacts/g1-ci-triggers/check-workflows.mjs` → `files=3`, `issues=0` — **exit 0**: тригери, джоби, відсутність табів, парність відступів, відсутність trailing whitespace, унікальність top-level ключів, наявність `runs-on`/`steps` на кожну джобу, розбір рецептів |
+| Харнес, набір CI-пінів | `suites=3 tests=20 passed=20 failed=0` — **exit 0** |
+| Харнес, non-vacuity (мутації в пам'яті) | `artifacts/g1-ci-triggers/mutate.mjs` → `failures=0` — **exit 0** (11 рядків «restored … reported=true», 3 рядки «emptied … reported=true») |
+
+**Тимчасові файли цього кроку (названі; `artifacts/` у `.gitignore`, не видалялись).**
+`artifacts/g1-ci-triggers/check-workflows.mjs` (структурний чек YAML і тригерів, read-only),
+`artifacts/g1-ci-triggers/mutate.mjs` (доказ невакуумності в пам'яті, read-only). Передіснуючі
+`artifacts/c5b-policy-probe/`, `artifacts/c15-*`, `artifacts/g1-probe/` не чіпалися.
+
+
+
+---
+
 
 ## 8. Ручний чекліст G1 (поза герметичними тестами)
 
+* [ ] **Decoy-branch (G1 п.3):** `npm run mutation:branch` — очікується exit 0 (`verdict=proven`), тобто
+      прогін без мутації зелений (`baseline: … GREEN`) і обидва decoy-рядки дають `caught` із названим тестом
+      серед **нових** падінь, а cosmetic-рядок дає `ok` (exit 0). Після прогону перевірити, що `git status` і
+      `git worktree list` не змінилися, і що `artifacts/security-gate-mutation-branch.json` містить
+      `verdict: "proven"`, `baseline.green: true` і `ignoredResources` із `data/typosquat` та `artifacts`.
+      Якщо рядок `branch.workspace_path_traversal_guard` дає `not_caught` — це знахідка (path-guard
+      недоведений), її треба назвати, а не «полагодити» матрицю; якщо прогін дає exit 3 із `BASELINE RED` —
+      це стан середовища, і падіння baseline треба назвати разом із його повідомленням (§ 7.5.1/§ 7.5.6).
 * [ ] Реальний контейнер: `docker create` зі стелями C14 під навантаженням (fork bomb, `yes > file`,
       виділення пам'яті) — переконатися, що диск/пам'ять/процеси зупиняються лімітом, а не хостом.
 * [ ] Складна shell-строка (`export … && cmd`) із ворожими значеннями env — round-trip у справжньому shell.
@@ -413,13 +1115,43 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
       відмовиться створювати точку монтування, це виявиться саме тут).
 * [ ] Прогнати `npm test`, `npm run security-gate`, `npm run test:web` і обидві збірки; порівняти
       known-red baseline (`10 files / 15 tests`) — нових падінь бути не повинно.
+* [ ] **Заповнити плейсхолдери прийнятого ризику (§ 6, пункт 11).** `owner` = `OWNER_PENDING` (вписати власника
+      ризику або `repo-maintainer`), `added_at` = `2026-10-08` (підтвердити або виправити) і `expires_at` =
+      `2026-11-07` (**лише пропозиція** на 30 днів — підтвердити, скоротити або подовжити). Поки поле
+      `owner` лишається плейсхолдером, ризик **не має власника**, і це треба виправити, а не залишити так.
+* [ ] **Вирішити долю вимкненого CI (§ 7.6).** Або (а) прийняти ризик як є до `expires_at` і нагадати собі про
+      ручний прогін гейта перед кожним merge/release, або (б) повернути тригери з `RE-ENABLE RECIPE`
+      (розкоментувати `on:`, оновити піни в `tests/coding-agent-c14-ci-and-lint-gates.test.ts`) — тоді вимога
+      G1 «окрема обов'язкова job у CI» знову виконується буквально.
 
 ## 9. Sign-off
 
 * Виконано: C14 red-team hardening — каталог атак із guard'ом (3 рівні), 7 нових наборів у гейті,
   mutation-перевірка чутливості гейта (5 контролів, усі нейтралізуються **в пам'яті**), виправлена
   знайдена вада `fork_bomb` (багаторядкова форма), цей звіт.
-* Не виконано і не заявляється: результати `npm test` / `security-gate` / `test:web` / збірок (запускає
+* Виконано (G1 п.3, decoy-branch): матриця мутацій `docs/coding-agent/mutation-controls.json` (2 decoy + 1
+  cosmetic) із guard'ом **у гейті** (реальний файл, реальний якір рівно один раз, реальний набір і назва
+  тесту, обидва напрямки обов'язкові), runner `scripts/security-gate-mutation-branch.mjs` (ізольований
+  worktree, дзеркало дерева під ревʼю, junction'и, одна мутація, **реальний** гейт, класифікація, прибирання
+  й пост-умови) з npm-скриптом `mutation:branch`, 150-й набір гейта
+  `tests/coding-agent-c14-mutation-branch-controls.test.ts` (17 тестів), окремий необов'язковий CI-workflow,
+  і розділення двох тверджень у § 5.1.
+* Виконано (G1 п.6, CI): автоматичні тригери прибрано з **усіх трьох** workflow (`ci.yml`,
+  `sandbox-images.yml`, `mutation-branch.yml`) — лишився тільки `workflow_dispatch`; жоден файл, жодну джобу й
+  жоден крок не видалено, а прибраний контракт збережено в кожному файлі як машиночитний `RE-ENABLE RECIPE`.
+  Піни `tests/coding-agent-c14-ci-and-lint-gates.test.ts` переведено на новий навмисний стан (**сильніше**:
+  множина тригерів піниться повністю, а список шляхів став одним канонічним) і додано 5 регресійних тестів
+  рівня репозиторію; невакуумність доведено **і** на копіях у пам'яті, **і** на реальному файлі (`push:`
+  повернуто → 3 тести червоні; `sha256` до і після відкату збігається). Ризик записано в § 6 (пункт 11) у
+  форматі `known-failures.json` з плейсхолдером `owner` і **пропозицією** терміну, які має підтвердити власник
+  (§ 8). Деталі й точні виводи — § 7.6.
+* **Не виконано і не заявляється:** автоматичні перевірки GitHub Actions **не працюють** — обов'язковий
+  `security-gate` більше не блокує merge/release, карантин не спрацьовує на push, а єдиний компенсуючий
+  контроль — ручний локальний прогін власника (§ 6, пункт 11). Вимога G1 «окрема обов'язкова job у CI
+  (не skip-иться, блокує merge/release)» у цьому стані **не виконується**; це зафіксовано в
+  `docs/coding-agent/current-state.md`. Також не виконано і не заявляється: сам прогін `npm run mutation:branch`
+  (потрібні `git` і два повні прогони гейта — у пісочниці агента неможливо, див. § 7.5.6), тому жодного «обидва
+  напрямки підтверджені» тут немає; результати `npm test` / `security-gate` / `test:web` / збірок (запускає
   власник), реальні контейнерні перевірки зі списку § 8.
 * Рішення про rollout лишається за власником: G1 = security ready; вихід за межі internal і просування
   flags — лише після G1 **і** R1.

@@ -13,19 +13,51 @@
  * Usage: node scripts/run-security-gate.mjs [--list]
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ATTACK_CATALOGUE_PATH, findMissingCatalogueEntries, loadAttackCatalogue, validateAttackCatalogue } from "./attack-catalogue-check.mjs";
+import { MUTATION_CONTROLS_PATH, loadMutationControls, validateMutationControls } from "./mutation-controls-check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * G1 (D20): where the gate leaves its verdict.
+ *
+ * The vitest report itself is written into `mkdtempSync(...)` and removed in the script's `finally`, which
+ * left the CI job with no evidence at all — a green gate and a red gate both uploaded nothing. This artifact
+ * is the durable half: the suite counts, the catalogue counts, the test totals and the verdict. CI makes it
+ * mandatory (`if-no-files-found: error` in `.github/workflows/ci.yml`), so a run whose evidence is missing
+ * fails there, while a *local* run that cannot create `artifacts/` reports the failure and keeps its exit code
+ * about the gate's own verdict (the artifact is evidence, not a security check). Since G1 that workflow has no
+ * automatic trigger, so "CI makes it mandatory" applies to the manual dispatch the owner runs.
+ */
+export const GATE_ARTIFACT_PATH = "artifacts/security-gate-report.json";
+
+/** Writes the verdict. Returns `{ ok, path, error }` instead of throwing, so it can never mask the verdict. */
+export function writeGateArtifact(root, summary) {
+  const file = path.join(root, GATE_ARTIFACT_PATH);
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+    return { ok: true, path: GATE_ARTIFACT_PATH, error: null };
+  } catch (error) {
+    return { ok: false, path: GATE_ARTIFACT_PATH, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 /** The suites that make up the gate. Adding a security-gate suite means adding it here. */
 export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c1c-audit-log.test.ts",
   "tests/coding-agent-c1b-images.test.ts",
   "tests/coding-agent-c1b-image-api.test.ts",
+  // C1a (owner policy 5): the dark-launch gate itself — `gate_not_passed` while nothing is configured, the
+  // master flag authoritative over every sub-flag, per-company/per-user isolation, flag administration and
+  // the **kill switch**. The suite existed and was never registered here, so the policy the Coding Agent
+  // starts from ran in no gate at all; it is hermetic (an in-memory store plus `Fastify.inject`, no port, no
+  // Docker, no network) and carries no `.skip`/`.only`/`.todo`, which is what a gate suite must be.
+  "tests/coding-agent-c1a-flags.test.ts",
   "tests/coding-agent-c2-read-tools.test.ts",
   "tests/coding-agent-c2-tool-runtime.test.ts",
   "tests/coding-agent-c2-schema-parity.test.ts",
@@ -676,15 +708,18 @@ export const SECURITY_GATE_TESTS = [
   // C14 (evals, metrics and hardening). The eval corpus already lives in the gate above
   // (`tests/coding-agent-c6-eval.test.ts`, 17 hermetic tasks); these two suites cover what C14 itself changed.
   //
-  // C14: the CI workflow is an artifact with a contract. Pins that `.github/workflows/ci.yml` actually runs on
-  // `push`/`pull_request` (with identical behaviour-path filters) plus a weekly schedule and manual dispatch
-  // — before C14 it was `workflow_dispatch` only, so nothing ran on a change and "CI blocks regressions" was
-  // not true; that `typecheck:tests` and the new `lint` are steps; that the eval smoke is a job of its own
-  // with a report artifact and blocks the release; and that **no** step anywhere in the file can fail softly
-  // (`continue-on-error`). It also pins the lint guard itself in both directions: it fires on a real
-  // violation (a new file with an unrecorded cast, an unlisted `console.log`, an unrecorded `.only`/`.skip`)
-  // and produces no false positive on the repository it guards, with its own detector self-test asserted
-  // rather than trusted.
+  // C14: the CI workflow is an artifact with a contract. Pins the *gate structure* of `.github/workflows/ci.yml`
+  // (every gate step present, the mandatory `security-gate` job unconditional and never soft-failing, the eval
+  // smoke a job of its own that blocks the release, the evidence artifacts) — and, since G1, that **no** workflow
+  // in the repository carries an automatic trigger: automated CI is off on purpose (private repository, no paid
+  // Actions minutes, every job of the last automatic run failed in ~2 s without starting) and the removed trigger
+  // contract is kept verbatim as a machine-readable RE-ENABLE RECIPE, with the recipe itself used as the mutation
+  // input of the non-vacuity proof. The consequence — the gate no longer blocks a merge or a release, so it runs
+  // only on the owner's local escalated run — is an accepted risk recorded in
+  // `docs/coding-agent/security-gate-report.md` §6. It also pins the lint guard itself in both directions: it
+  // fires on a real violation (a new file with an unrecorded cast, an unlisted `console.log`, an
+  // unrecorded `.only`/`.skip`) and produces no false positive on the repository it guards, with its own detector
+  // self-test asserted rather than trusted.
   "tests/coding-agent-c14-ci-and-lint-gates.test.ts",
   // C14: `code.model_profile.<id>` really decides which profiles a run may match. Pins the silent no-op this
   // step closed: the runner's `modelProfiles` port was declared and read but never supplied by the
@@ -800,6 +835,14 @@ export const SECURITY_GATE_TESTS = [
   // before `docker create`, and the copy-back that is disabled for a mounted project.
   "tests/coding-agent-c15-mounted-workspace.test.ts",
   "tests/coding-agent-c15-mount-sandbox.test.ts",
+  // G1 (item 3, the decoy branch): the matrix of deliberate mutations and the guard that keeps it honest. The
+  // suite proves three things about `docs/coding-agent/mutation-controls.json` and about the runner that consumes
+  // it (`scripts/security-gate-mutation-branch.mjs`): every row resolves against the real file and the real
+  // anchor, a fabricated row is refused with its own issue code, and a gate run that never measured anything is
+  // classified `environment` rather than "the mutation was caught". The runner itself is **not** in this list and
+  // not in this job: it mutates a worktree and runs the whole gate twice, so it stays a separate, opt-in command
+  // (`npm run mutation:branch`) inside the same `mutation:branch` contract.
+  "tests/coding-agent-c14-mutation-branch-controls.test.ts",
 ];
 
 /**
@@ -935,11 +978,31 @@ function main() {
   const reportPath = path.join(reportDir, "vitest-report.json");
   const vitestBin = path.resolve(ROOT, "node_modules", "vitest", "vitest.mjs");
   let ok = true;
+  /**
+   * G1 (D20): the durable verdict. Every field is filled from the run itself at the point it is known, so the
+   * artifact cannot claim a count the gate did not measure.
+   */
+  const summary = {
+    gate: "security-gate",
+    script: "scripts/run-security-gate.mjs",
+    suiteList: "SECURITY_GATE_TESTS",
+    suites: { configured: SECURITY_GATE_TESTS.length, present: SECURITY_GATE_TESTS.length, missing: [] },
+    catalogue: null,
+    mutationControls: null,
+    tests: { passed: null, failed: null, skipped: null, todo: null },
+    failedTests: [],
+    missingSuites: [],
+    emptySuites: [],
+    steps: {},
+    ok: false,
+  };
   // Every configured suite must exist before vitest starts. The list is a contract, so a deleted,
   // renamed or mistyped path fails here with its own message instead of as a bare vitest exit code.
   const missingFiles = findMissingSuiteFiles(ROOT, SECURITY_GATE_TESTS);
+  summary.suites.missing = missingFiles;
+  summary.suites.present = SECURITY_GATE_TESTS.length - missingFiles.length;
   process.stdout.write(
-    `\n[security-gate] suite files: present=${SECURITY_GATE_TESTS.length - missingFiles.length} missing=${missingFiles.length}\n`,
+    `\n[security-gate] suite files: present=${summary.suites.present} missing=${missingFiles.length}\n`,
   );
   if (missingFiles.length) {
     process.stdout.write(`[security-gate] FAILED: ${missingFiles.length} configured suite file(s) do not exist:\n`);
@@ -957,11 +1020,13 @@ function main() {
   let attackCatalogue = null;
   if (catalogueState.error) {
     process.stdout.write(`[security-gate] FAILED: attack catalogue ${catalogueState.error}\n`);
+    summary.catalogue = { rows: null, issues: null, error: catalogueState.error };
     ok = false;
   } else {
     attackCatalogue = catalogueState.catalogue;
     const catalogueVerdict = validateAttackCatalogue({ root: ROOT, catalogue: attackCatalogue, suites: SECURITY_GATE_TESTS });
     const catalogueRows = Array.isArray(attackCatalogue?.classes) ? attackCatalogue.classes.length : 0;
+    summary.catalogue = { rows: catalogueRows, issues: catalogueVerdict.issues.length, exemptions: Array.isArray(attackCatalogue?.hardDenyRuleExemptions) ? attackCatalogue.hardDenyRuleExemptions.length : 0 };
     process.stdout.write(
       `\n[security-gate] attack catalogue (${ATTACK_CATALOGUE_PATH}): rows=${catalogueRows} issues=${catalogueVerdict.issues.length}\n`,
     );
@@ -969,6 +1034,40 @@ function main() {
       process.stdout.write(`[security-gate]   catalogue ${issue.code} [${issue.id}]: ${issue.detail}\n`);
     }
     if (!catalogueVerdict.ok) ok = false;
+  }
+
+  /**
+   * G1 (item 3): the mutation matrix. Checked here, before vitest, for the same reason the catalogue is: the
+   * decoy-branch runner (`scripts/security-gate-mutation-branch.mjs`) mutates files and runs this whole gate, so
+   * the matrix it reads is a contract — every row must resolve to a real file, a real anchor that occurs exactly
+   * once, a failing suite this list really runs and a test title that really exists. A row that has rotted away
+   * (a renamed test, a moved line) is a defect of the gate's own evidence and is reported here rather than being
+   * discovered by a run that then blames the mutation.
+   *
+   * The runner itself is deliberately **not** part of this gate: it needs git, a worktree and two full gate runs,
+   * so it is a separate command (`npm run mutation:branch`) whose verdict is a separate artifact.
+   */
+  const mutationState = loadMutationControls(ROOT);
+  if (mutationState.error) {
+    process.stdout.write(`[security-gate] FAILED: mutation matrix ${mutationState.error}\n`);
+    summary.mutationControls = { rows: null, issues: null, error: mutationState.error };
+    ok = false;
+  } else {
+    const mutationVerdict = validateMutationControls({ root: ROOT, controls: mutationState.controls, suites: SECURITY_GATE_TESTS });
+    summary.mutationControls = {
+      rows: mutationState.controls.length,
+      decoy: mutationVerdict.counts.decoy,
+      cosmetic: mutationVerdict.counts.cosmetic,
+      issues: mutationVerdict.issues.length,
+    };
+    process.stdout.write(
+      `\n[security-gate] mutation matrix (${MUTATION_CONTROLS_PATH}): rows=${mutationState.controls.length} ` +
+        `decoy=${mutationVerdict.counts.decoy} cosmetic=${mutationVerdict.counts.cosmetic} issues=${mutationVerdict.issues.length}\n`,
+    );
+    for (const issue of mutationVerdict.issues) {
+      process.stdout.write(`[security-gate]   mutation ${issue.code} [${issue.id}]: ${issue.detail}\n`);
+    }
+    if (!mutationVerdict.ok) ok = false;
   }
   try {
     process.stdout.write(`\n[security-gate] vitest run (${SECURITY_GATE_TESTS.length} suites)\n`);
@@ -997,7 +1096,15 @@ function main() {
         for (const line of formatFailedTests(report)) process.stdout.write(`${line}\n`);
         for (const failure of verdict.failures) process.stdout.write(`[security-gate] ${failure}\n`);
         process.stdout.write(`[security-gate] tests: passed=${verdict.numPassed} failed=${verdict.numFailed} skipped=${verdict.numPending} todo=${verdict.numTodo}\n`);
+        summary.tests = {
+          passed: verdict.numPassed,
+          failed: verdict.numFailed,
+          skipped: verdict.numPending,
+          todo: verdict.numTodo,
+        };
+        summary.failedTests = failedTests(report).map((failure) => `${failure.file} > ${failure.title}`);
         const missing = findMissingSuites(report, SECURITY_GATE_TESTS);
+        summary.missingSuites = missing;
         if (missing.length) {
           process.stdout.write(`[security-gate] FAILED: ${missing.length} configured suite(s) did not run (expected ${SECURITY_GATE_TESTS.length}, saw ${SECURITY_GATE_TESTS.length - missing.length}):\n`);
           for (const suite of missing) process.stdout.write(`[security-gate]   missing: ${suite}\n`);
@@ -1022,6 +1129,7 @@ function main() {
           }
         }
         const empty = findEmptySuites(report);
+        summary.emptySuites = empty;
         if (empty.length) {
           process.stdout.write(`[security-gate] FAILED: ${empty.length} suite(s) reported no tests at all (a file that failed to load looks like this):\n`);
           for (const suite of empty) process.stdout.write(`[security-gate]   empty: ${suite}\n`);
@@ -1047,11 +1155,26 @@ function main() {
   }
 
   // The artifact guards the gate owns, invoked exactly as documented in the runbook.
-  ok = runStep("tool schema guard", "scripts/verify-code-tool-schemas.mjs", ["--check"]) && ok;
-  ok = runStep("sandbox image guard", "scripts/sandbox-image-verify.mjs") && ok;
+  summary.steps.toolSchemas = runStep("tool schema guard", "scripts/verify-code-tool-schemas.mjs", ["--check"]);
+  ok = summary.steps.toolSchemas && ok;
+  summary.steps.sandboxImages = runStep("sandbox image guard", "scripts/sandbox-image-verify.mjs");
+  ok = summary.steps.sandboxImages && ok;
   // A stale curated typosquat dataset must fail CI here: otherwise every `code.deps.add` would silently
   // become an approval forever instead of the check being refreshed.
-  ok = runStep("typosquat dataset guard", "scripts/typosquat-dataset-generate.mjs", ["--check"]) && ok;
+  summary.steps.typosquatDataset = runStep("typosquat dataset guard", "scripts/typosquat-dataset-generate.mjs", ["--check"]);
+  ok = summary.steps.typosquatDataset && ok;
+
+  /**
+   * G1 (D20): the durable verdict, written **after** every measurement and **before** the exit code, so the
+   * artifact describes the run that really happened — including a run that failed. A write failure is
+   * reported and does not change the verdict: the artifact is evidence, and the gate's own contract is the
+   * suite list. CI turns a missing artifact into a failure at the upload step instead.
+   */
+  summary.ok = ok;
+  summary.generatedAt = new Date().toISOString();
+  const artifact = writeGateArtifact(ROOT, summary);
+  if (artifact.ok) process.stdout.write(`[security-gate] verdict artifact: ${artifact.path}\n`);
+  else process.stdout.write(`[security-gate] notice: the verdict artifact could not be written (${artifact.error}); the verdict is unaffected\n`);
 
   process.stdout.write(ok ? "\n[security-gate] PASSED\n" : "\n[security-gate] FAILED\n");
   return ok ? 0 : 1;

@@ -32,6 +32,10 @@
     "tests/coding-agent-c14-metrics-aggregation.test.ts",
     "tests/coding-agent-c14-model-profile-fallback.test.ts",
     "tests/coding-agent-c14-model-profile-flags.test.ts",
+    // G1 (item 3): the branch-mutation matrix and the guard that keeps it honest, plus the verdict reader of the
+    // decoy-branch runner. Added here together with the suite itself, so the gate's own file is type-clean by
+    // construction rather than by hope — the same rule every other suite in this list follows.
+    "tests/coding-agent-c14-mutation-branch-controls.test.ts",
     "tests/coding-agent-c14-redteam-command-output-injection.test.ts",
     "tests/coding-agent-c14-redteam-fork-bomb.test.ts",
     "tests/coding-agent-c14-redteam-new-channels.test.ts",

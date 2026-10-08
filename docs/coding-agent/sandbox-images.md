@@ -117,9 +117,20 @@ CI `verify` job asserts exactly that). Deleting it is fine, but then that CI ste
 
 ## CI (`.github/workflows/sandbox-images.yml`)
 
-- **Triggers:** `workflow_dispatch` (optional single variant, optional dry run), weekly `schedule`
-  (`0 3 * * 1`, inside the 14-day window), and `push` to `docker/sandbox/**`, the image scripts or the
-  workflow itself.
+> **Updated by G1 (2026-10-08): automatic triggers are disabled.** This workflow is now
+> **`workflow_dispatch`-only**. The weekly `schedule` (`0 3 * * 1`) and the `push` filter over
+> `docker/sandbox/**`, the image scripts and the workflow itself were removed because the repository is private
+> and has no paid Actions minutes: every job of the last automatic run failed in about 2 seconds **without
+> starting**, so the rescan never ran and the push trigger only produced a red signal. **No job and no step was
+> removed** and the removed triggers are kept verbatim as a machine-readable `RE-ENABLE RECIPE` in the workflow
+> file, so restoring them is one commit. Consequence, stated plainly: while this holds, the 14-day catalog age
+> policy is enforced by the **local** guard (`npm run audit:sandbox-images`, and the same guard inside
+> `npm run security-gate`) on the owner's escalated run, not by a scheduled rebuild. Recorded as an accepted risk
+> in `security-gate-report.md` §6 item 11 and §7.6.
+
+- **Triggers (current):** `workflow_dispatch` only — optional single variant, optional dry run. The removed
+  automatic triggers were the weekly `schedule` (`0 3 * * 1`, inside the 14-day window) and `push` to
+  `docker/sandbox/**`, the image scripts or the workflow itself; both are in the re-enable recipe.
 - **`verify`** — the local guard, plus the self-test above; no Docker, seconds to run, and it gates the
   build job.
 - **`build`** (matrix over the six variants) — `permissions: contents: read, packages: write,
@@ -128,16 +139,19 @@ CI `verify` job asserts exactly that). Deleting it is fine, but then that CI ste
   step non-zero, so the sign step never runs, the entry stays `unverified`, and nothing is published as
   usable.** The same holds for a digest mismatch: the build script refuses placeholder digests and
   writes nothing to the catalog when it cannot resolve a real one.
-- **`rescan`** (schedule/dispatch) — re-scans the published digests; on CRITICAL it comments on an
+- **`rescan`** (dispatch; formerly also schedule) — re-scans the published digests; on CRITICAL it comments on an
   existing `security,sandbox-images` issue or opens one, and fails the run.
 
 The main `ci.yml` `platform` job additionally runs `npm run audit:sandbox-images`, so a hand-edited
-catalog fails ordinary CI even without touching the images workflow.
+catalog fails CI even without touching the images workflow — with the caveat of the note above: since G1 that CI
+run happens only when a human dispatches it, so `npm run audit:sandbox-images` is also part of the owner's local
+escalated run.
 
 ## Rotation, revoking and rollback
 
-1. **Weekly rebuild** (the scheduled workflow) or **out of band** on a critical CVE in a base image,
-   language runtime or tool.
+1. **Weekly rebuild** (the scheduled workflow — since G1 that schedule is disabled, so this is a manual
+   `workflow_dispatch` or an out-of-band run until CI is re-enabled) or **out of band** on a critical CVE in a
+   base image, language runtime or tool.
 2. The new build gets a new catalog **generation** (`sandbox-node-1` → `sandbox-node-2`); the old entry
    becomes `deprecated` with `previousReference` pointing at it, so rollback is a pointer change.
 3. Rollout is staged through the C1a flags (`code.shell`, `code.full_auto_sandbox`, per-company), never
