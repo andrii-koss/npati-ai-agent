@@ -6,6 +6,7 @@ import path from "node:path";
 import type { AuthContext, Project, ProjectCheckpoint, CheckpointTrigger, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import { safeProjectPath, samePath, ProjectFileError } from "./project-workspace";
+import { managedWorkspaceBaseResolver, type WorkspaceBase, type WorkspaceBaseResolverPort } from "./workspace-base-resolver";
 import { gitApprovalPayload, normalizeGitBranch, pullRequestApprovalPayload, type GitWriteIntent } from "./code-git-write-policy";
 import type { CodeWorkspaceRevisionSnapshot, WorkspaceRevisionPhase } from "./code-workspace-revision";
 import {
@@ -269,11 +270,20 @@ export { redactSecrets as redactGitSecrets };
 
 export class ProjectGitService {
   private readonly thresholds: CheckpointThresholds;
+  /**
+   * C15: the canonical-workspace resolver. It used to be a bare root string that this class joined a second
+   * time — the same join `LocalProjectWorkspace` performed, from a value passed in separately, which is two
+   * sources of truth the moment a mounted folder can change the answer. A string is still accepted (every
+   * existing construction site and suite passes one) and is wrapped in a managed-only resolver, so the behaviour
+   * of a deployment without mounts is byte-identical while `app.ts` passes the shared resolver both consumers
+   * read.
+   */
+  private readonly bases: WorkspaceBaseResolverPort;
 
   constructor(
     private readonly workspaceStore: WorkspaceStore,
     private readonly projectService: Pick<ProjectService, "get">,
-    private readonly workspaceRoot: string,
+    workspaceRoot: string | WorkspaceBaseResolverPort,
     thresholds?: Partial<CheckpointThresholds>,
     private readonly resolveGithubCredential?: (ctx: AuthContext, companyId: string, credentialId: string) => Promise<string>,
     /**
@@ -288,6 +298,7 @@ export class ProjectGitService {
      */
     private readonly boundary?: ProjectGitBoundary,
   ) {
+    this.bases = typeof workspaceRoot === "string" ? managedWorkspaceBaseResolver(workspaceRoot) : workspaceRoot;
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
@@ -309,7 +320,7 @@ export class ProjectGitService {
     companyId: string,
     projectId: string,
     options: { create: boolean },
-  ): Promise<{ project: Project; dir: string }> {
+  ): Promise<{ project: Project; dir: string; readOnly: boolean; mounted: boolean }> {
     if (!validId(companyId) || !validId(projectId)) {
       throw new GitError("INVALID_IDENTIFIER", "Invalid company or project identifier", 400);
     }
@@ -321,9 +332,28 @@ export class ProjectGitService {
       throw new GitError("PROJECT_ARCHIVED", "Archived project cannot perform git operations", 409);
     }
     if (!ctx.permissions.some((permission) => ["*", "owner", "business:manage", "workspace:read", "workspace:write"].includes(permission))) throw new GitError("PROJECT_ACCESS_DENIED", "Git permission denied", 403);
-    const dir = path.join(this.workspaceRoot, companyId, projectId);
-    for (const segment of [this.workspaceRoot, path.join(this.workspaceRoot, companyId), dir]) {
-      if (options.create) {
+    /**
+     * C15: the workspace comes from the **same resolver** the `WorkspaceProvider` reads, so git, the file tools
+     * and the sandbox all act on one canonical directory. A mounted project's git repository is therefore the
+     * user's own repository in their own folder — not a copy under the managed root.
+     */
+    const resolved: WorkspaceBase = await this.bases.resolve(ctx, companyId, projectId);
+    const dir = resolved.base;
+    if (options.create && resolved.readOnly) {
+      // `inspectRepository` (create: false) stays allowed on an `ro` mount — reading a repository is the whole
+      // point of a read-only mount — while every path that may materialise a directory or write is refused.
+      throw new GitError("MOUNTED_FOLDER_READ_ONLY", "The mounted project folder is read only", 403);
+    }
+    /**
+     * The segments to walk differ by source. A managed workspace is created under the root, so the root, the
+     * company directory and the project directory are all checked for a link. A mounted folder already exists
+     * and its path was validated component by component by the resolver (realpath + `lstat`, which is what
+     * catches a junction), so the managed-root check must **not** be applied to it: the mount is deliberately
+     * outside that root, and comparing it against the root would refuse every legitimate mount.
+     */
+    const segments = resolved.mounted ? [dir] : [this.bases.managedRoot, path.join(this.bases.managedRoot, companyId), dir];
+    for (const segment of segments) {
+      if (options.create && !resolved.mounted) {
         await mkdir(segment).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
       }
       // A read-only caller must tolerate a segment that does not exist, and must not create it: walking one
@@ -337,7 +367,7 @@ export class ProjectGitService {
       if (!entry) break;
       if (!entry.isDirectory() || entry.isSymbolicLink()) throw new GitError("INVALID_WORKSPACE", "Symlink workspace is not allowed", 403);
     }
-    return { project, dir };
+    return { project, dir, readOnly: resolved.readOnly, mounted: resolved.mounted };
   }
 
   async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {

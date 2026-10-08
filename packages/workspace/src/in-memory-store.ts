@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecrets } from "@npati/memory";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
+import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord, ProviderContentType,
@@ -56,6 +56,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly projects = new Map<string, Project>();
   private readonly codeSessions = new Map<string, CodeSession>();
   private readonly projectCodeTrust = new Map<string, ProjectCodeTrust>();
+  /** C15: the confirmed mounted local folder of a project, keyed `companyId:projectId`. */
+  private readonly projectMountedFolders = new Map<string, ProjectMountedFolder>();
   private readonly auditLog = new Map<string, AuditEntry[]>();
   private readonly auditAnchors = new Map<string, AuditAnchor[]>();
   private readonly featureFlags = new Map<string, FeatureFlag>();
@@ -846,6 +848,51 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       updatedAt: timestamp,
     };
     this.projectCodeTrust.set(key, next);
+    return structuredClone(next);
+  }
+
+  // --- C15: the mounted local folder allowlist ------------------------------------------------
+
+  async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    this.assertCompany(context, companyId);
+    const record = this.projectMountedFolders.get(`${companyId}:${projectId}`);
+    if (!record || record.workspaceId !== context.workspaceId) return null;
+    return structuredClone(record);
+  }
+
+  /**
+   * The runner-side read. The in-memory store is the declarative-catalogue fallback of the sandbox runner
+   * (no `DATABASE_URL`), so it answers from the same map — and because nothing can have confirmed a mount in
+   * a process that is not the API, the honest default there is `null`: the runner mounts nothing.
+   */
+  async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    return structuredClone(this.projectMountedFolders.get(`${companyId}:${projectId}`) ?? null);
+  }
+
+  async setProjectMountedFolder(context: AuthContext, companyId: string, projectId: string, input: ProjectMountedFolderInput): Promise<ProjectMountedFolder> {
+    this.assertCompany(context, companyId);
+    const key = `${companyId}:${projectId}`;
+    const existing = this.projectMountedFolders.get(key);
+    if (input.expectedRevision !== (existing?.revision ?? 0)) {
+      throw new WorkspaceAccessError("Mounted folder changed by another request. Reload and try again.");
+    }
+    const timestamp = now();
+    const next: ProjectMountedFolder = {
+      id: existing?.id ?? randomUUID(),
+      workspaceId: context.workspaceId,
+      companyId,
+      projectId,
+      path: input.path,
+      mode: input.mode,
+      confirmedBy: input.confirmed ? input.actor : (existing?.confirmedBy ?? null),
+      confirmedAt: input.confirmed ? timestamp : (existing?.confirmedAt ?? null),
+      revokedBy: input.confirmed ? (existing?.revokedBy ?? null) : input.actor,
+      revokedAt: input.confirmed ? (existing?.revokedAt ?? null) : timestamp,
+      reason: input.reason ?? null,
+      revision: (existing?.revision ?? 0) + 1,
+      updatedAt: timestamp,
+    };
+    this.projectMountedFolders.set(key, next);
     return structuredClone(next);
   }
 

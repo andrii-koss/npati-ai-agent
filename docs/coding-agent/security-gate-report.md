@@ -34,7 +34,7 @@
 | `docs/coding-agent/attack-catalogue.json` | каталог: рядок на клас атаки (`id`, `class`, `suite`, точна назва тесту, `negativeControl`, назва негативного контролю, `status`) + винятки для правил hard-deny |
 | `scripts/attack-catalogue-check.mjs` | чистий (без залежностей і без TS) валідатор: статична перевірка каталогу + перевірка по звіту vitest |
 | `scripts/attack-catalogue-check.d.mts` | типи для `typecheck:tests` (той самий патерн, що `scripts/run-security-gate.d.mts`) |
-| `scripts/run-security-gate.mjs` | гейт: фіксований список наборів — було 131 до C14 → 138 у зрізі C14 → **145** фактично (7 red-team наборів цього кроку + guard-набір пост-C14 очищення, див. § 7.1), статична перевірка каталогу **до** vitest, перевірка по JSON-звіту **після** |
+| `scripts/run-security-gate.mjs` | гейт: фіксований список наборів — було 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → **148** фактично (7 red-team наборів кроку C14 + guard-набір пост-C14 очищення + набір C15 «CLI / run-start / стрім» + два набори C15 «mounted folder»: `coding-agent-c15-mounted-workspace` і `coding-agent-c15-mount-sandbox`, див. § 7.2), статична перевірка каталогу **до** vitest, перевірка по JSON-звіту **після** |
 | `apps/agent-api/src/code-shell-classifier.ts` | єдина продуктивна зміна: таблиця `HARD_DENY_RULES` експортована (щоб каталог міг її перелічити), опція `hardDenyRules` для доказової мутації, і виправлений патерн `fork_bomb` (§ 5) |
 | 7 нових наборів у `tests/` | самі red-team тести (див. § 3–5) |
 | `docs/coding-agent/security-gate-report.md` | цей файл |
@@ -245,9 +245,9 @@ red-team тест мусить реально впасти.** Механіка �
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **145** рядків |
-| Фіксований список гейта | `suites=145 present=145 missing=0 duplicates=0` (було 131; 138 у зрізі C14) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/run-security-gate.mjs`) | **145** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 144 було до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **148** рядків |
+| Фіксований список гейта | `suites=148 present=148 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start») |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/run-security-gate.mjs`) | **148** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 146 було до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=23 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -261,9 +261,12 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
 ### 7.1 Пост-C14 очищення (виконано після написання § 7)
 
 * **Розмір гейта.** У зрізі C14 цей документ говорив 138, фактичний фіксований список був 144, після
-  реєстрації guard-набору нижче — **145**. Усі згадки в цьому файлі зведені до фактичного числа, яке
-  читає guard-набір (`--list` = 145 рядків, `present=145 missing=0`); історія зростання лишена
-  явно історичною: 131 до C14 → 138 у зрізі C14 → 145 фактично.
+  реєстрації guard-набору нижче — **145**, після реєстрації набору C15 «CLI / run-start» (§ 7.2) — **146**,
+  після реєстрації двох наборів C15 «mounted folder» (§ 7.3) — **148**. Усі згадки в цьому
+  файлі зведені до фактичного числа, яке
+  читає guard-набір (`--list` = 148 рядків, `present=148 missing=0`); історія зростання лишена
+  явно історичною: 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → 146 у C15 (CLI) → 148 у C15
+  (mounted folder).
 * **Опис фаз політики.** Два коментарі (`apps/agent-api/src/code-policy-engine.ts` — заголовок двигуна, і
   `apps/agent-api/src/app.ts` — місце wiring) перелічували 8 фаз і пропускали `capability_groups`,
   `trust` і `network_enforcement`. Реальний порядок виконання в `evaluateInternal` — 11 фаз:
@@ -274,11 +277,121 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
   **лише текст коментарів**: `git diff` для `code-policy-engine.ts` містить тільки рядки коментаря,
   порядок фаз, умови й значення не змінювалися.
 * **Guard від повторного розходження.** `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts`
-  (145-й набір гейта) бере множину фаз із union-типу `PolicyPhase`, порядок фаз — із першої появи кожної
+  (145-й набір гейта; у C15 список виріс до 148 — guard читає число з документа, тож воно оновлене разом зі
+  списком) бере множину фаз із union-типу `PolicyPhase`, порядок фаз — із першої появи кожної
   назви в тілі `evaluateInternal`, а розмір гейта — із `SECURITY_GATE_TESTS` у
   `scripts/run-security-gate.mjs`, і порівнює з ними обидва коментарі та число в цьому документі. Обидві
   половини перевірені на невакуумність у самому наборі: прибрана з **копії** коментаря фаза і змінене в
   **копії** документа число валять відповідну перевірку (файли на диску не мутуються).
+
+### 7.2 C15 — CLI, run-start роут і стрім (додано до гейта після C14)
+
+* **Що додано.** 146-й набір гейта — `tests/coding-agent-c15-cli-run-start.test.ts`. Він покриває три речі,
+  яких до C15 не покривав жоден набір: (1) **run-start роут** `POST /companies/:companyId/code/runs` —
+  `code.run.start` → наявний `workspace:write`, master-flag `coding_agent.enabled` і tenant-scoped проєкт
+  перевіряються **до** `202`, відповідь несе наявний конверт версії (`apiVersion: "v1"`), серверний
+  невгадуваний `runId` і URL **наявного** стріму `…/background-stream`, а слот черги звільняється рівно один
+  раз; (2) **ізоляція токена CLI** — ключ зі скоупами лише `workspace:read` не може стартувати run, ключ без
+  `business:manage` не може ухвалити approval, а агентський/service-принципал не може бути approver'ом; (3)
+  **approvals із терміналу** — наявний роут `decide` пише запис у журнал **перед** застосуванням рішення
+  (порядок `audit.approval.decide` → `repo.decide`), і **секрет CLI** — токен із env/файлу, жодного прийняття
+  токена в `argv` (усі написання відмови), і жоден шлях помилки не друкує токен.
+* **Знайдена й закрита прогалина (стрім).** Читання background-run було ключоване **лише** `runId`:
+  авторизація питала «чи можна читати зміни *якогось* run», анти-оракул порівнював `expectedRunId` з id у
+  шляху, і ніщо не порівнювало **тенанта** запису з `companyId` у шляху — а SSE-роут віддає всі події цього
+  run разом із `sessionId`/`userId`/`projectId`. Run id випадковий і серверний, тому це не було досяжним на
+  практиці, але C15 робить id значно доступнішим (CLI його друкує), тож перевірку додано в
+  `code-background-run-routes.ts`: чужий тенант дістає **той самий** порожній 404, що й неіснуючий run — нових
+  ораклів не створено. Набір перевіряє це з **відомим** правильним id, а не з припущення про невгадуваність.
+* **Прогалина `role = null` — задокументована межа, а не тихий обхід.** Ключ API не несе ролі
+  (`company_api_keys` має `ownerUserId`, але не має колонки ролі), тому `CodeRoleRegistry.roleOf` повертає `null`
+  для
+  принципала CLI, `permissionsForRole(null) = []`, і матриця режимів сесії на ключ **не діє**: усе тримається на
+  `ctx.permissions`. Це свідома межа (ключ — це скоуп-грант, а не членство; призначення йому ролі *розширило*
+  б права), вона описана в `docs/coding-agent/ide-protocol.md` (§ «Автентифікація») і в
+  `code-cli-run-routes.ts`, а набір фіксує безпечний бік: ключ не отримує ролі, тож і розширення прав немає.
+* **Перевірки цього кроку.** `npm run typecheck` — 0 помилок у власних файлах C15
+  (`code-cli-run-routes.ts`, `code-session-run-executor.ts`, правки `app.ts`, `packages/cli/**`);
+  `node --check scripts/run-security-gate.mjs` — exit 0; на момент реєстрації цього набору список гейта був
+  `suites=146 missing=0 duplicates=0` (після наборів § 7.3 — 148).
+  `npm test` / `security-gate` / `test:web` / збірки запускає власник (див. § 9 і § 8).
+* **Межа середовища агента.** У файловій пісочниці агента `vitest` **не стартує**: Vite бандлить
+  `vitest.config.ts` через esbuild, а сервіс esbuild — дочірній процес із пайповим stdio, який пісочниця
+  відхиляє (`spawn EPERM`), тож і `node --experimental-strip-types` не рятує (сервісні модулі використовують
+  parameter properties, а strip-only режим їх не приймає). Тому обидві половини набору перевірено **реальним
+  прогоном** окремими скриптами; вони лишаються в дереві як відтворюваний доказ (це не набори гейта — `vitest`
+  їх не бачить, `include` = `tests/**` і `packages/**`), а артефактом кроку лишається сам набір:
+  * `artifacts/c15-cli-verify.mjs` — CLI (чистий `.mjs`, без трансформації): **18/18** перевірок, exit 0.
+  * `artifacts/c15-server-verify.mjs` + `artifacts/c15-ts-loader.mjs` (резолвер extensionless-імпортів і
+    `.sql`-як-текст; запуск `node --experimental-transform-types --experimental-loader …`) — серверна половина
+    проти **реальних** модулів (`code-rbac`, `code-cli-run-routes`, `code-session-run-executor`,
+    `code-background-run-routes`, `approvals-routes`): **19/19** перевірок, exit 0.
+  * `artifacts/c15-fastify-probe.mjs` — той самий роут на **справжньому** Fastify і справжньому сокеті, через
+    `fetch`: `202` із `runId`, `400` на відсутній промпт, `400 unsupported_api_version` на
+    `x-npati-api-version: v9`, `404` на чужий тенант, `500` на auth-відмову. Це саме те, чого не бачить виклик
+    хендлера напряму: реєстрація роута, парсинг тіла, серіалізація JSON і поведінка самої Fastify.
+  * Три дефекти знайшли саме ці прогони, і всі три виправлено: `fail()` у `code-cli-run-routes.ts` не додавав
+    `details` у тіло помилки (тож `flag` у відмові `code_runs_disabled` був невидимий клієнту); той самий роут
+    **не** перевіряв `x-npati-api-version` (версія лише рекламувалася у відповіді, тож `v9` отримував `202` —
+    тепер `resolveApiVersion` викликається як у `code-routes.ts`, і невідома версія є структурованим `400`);
+    а фейковий Fastify-інстанс у самому наборі реєстрував `POST /approvals/:id/decide` без обробника (маршрут має
+    форму `(url, options, handler)`), через що перевірка «audit перед apply» не викликала маршрут узагалі.
+  * Ескалований `vitest` усе одно мусить підтвердити набір **на місці** — ці прогони є доказом, не заміною.
+
+### 7.3 C15 — mounted local folder як справжній WorkspaceProvider (додано до гейта після C14)
+
+* **Що додано.** 147-й і 148-й набори гейта — `tests/coding-agent-c15-mounted-workspace.test.ts` і
+  `tests/coding-agent-c15-mount-sandbox.test.ts` (разом 148 у списку; guard-набір § 7.1 читає це число з
+  документа, тож воно оновлене разом зі списком).
+* **Перший набір — провайдер і резолвер.** Він пінить, що рішення власника виконане як «настоящий
+  `WorkspaceProvider`», а не як обхід: база береться з єдиного резолвера (`ProjectWorkspaceBaseResolver`),
+  який читають і провайдер, і `ProjectGitService`; `currentRevision()` є дайджестом **змонтованого** дерева
+  (зовнішній запис у канонічний каталог рухає ревізію — це виміряно, а не заявлено); `workspace_revision_mismatch`
+  стріляє для mounted-проєкту через **незмінений** `CodeWorkspaceRevisionGuard` (той самий код, що й для
+  managed; у самому guard-модулі немає жодної згадки mount — це перевірено пошуком по джерелу, тож «гілки для
+  mounted» не існує структурно); `rw` пише прямо в канонічний каталог і не створює другої копії під managed-коренем;
+  `ro` відхиляє будь-який запис через API; видалення проєкту **не видаляє** змонтований каталог
+  (`reason: "mounted_source_preserved"`); імпорт (ZIP або репозиторій) у mounted-проєкт відхиляється з
+  `mounted_folder_import_unsupported`, бо конвеєр імпорту пише кожен файл назад через workspace, а пісочниця вже
+  пише в той самий каталог через bind — це був би другий письменник тих самих байтів; прапорець
+  `code.mounted_folder` вимкнено → проєкт резолвиться в managed-корінь
+  і не несе mount-а; запис чужого workspace ігнорується, відкликаний запис не є mount-ом; політика дозволів
+  відхиляє каталог поза allowlist, `/`, `$HOME`, корінь даних, каталоги всередині `project-workspaces`, каталог,
+  що **містить** захищений корінь, симлінк/junction у будь-якому компоненті та `..` у написанні шляху.
+* **Другий набір — пісочниця й runner.** Він пінить аргументний рядок контейнера (з mount-ом:
+  `--mount type=bind,source=…,target=/workspace` і **без** `--tmpfs /workspace` — інакше bind був би затінений і
+  став би тихим no-op; для `ro` додається `,readonly`, тобто режим тримає Docker, а не лише API; без mount-а
+  рядок байт-у-байт той самий, що пінить набір C14, який **розширено** позитивним кейсом, а не послаблено);
+  гейт runner-а (шлях не з allowlist, непідтверджений проєкт, розширення `ro` до `rw`, ціль, відмінна від
+  `/workspace`, недоступний allowlist, не-`local` режим) і **TOCTOU**: каталог, підтверджений як справжній, до
+  моменту створення контейнера підмінюється junction-ом — runner відхиляє (`symlink_escape`), бо сам перечитує
+  allowlist із БД (`getProjectMountedFolderForSystem`) і **сам** перевіряє шлях безпосередньо перед `docker create`;
+  провайдер без гейта взагалі відмовляється монтувати (`mounted_folder_gate_unavailable`); сервіс адміністрування
+  (flag на сервері, owner/admin, обов'язкове `confirm: true`, валідація шляху, AuditLog **перед** записом,
+  `expectedRevision`, відкликання) із доказами, що відмова нічого не записала.
+* **Передумови розгортання (перевірені по коду, не припущення).** Дозволені батьківські каталоги задає
+  оператор — `NPATI_MOUNTED_FOLDER_ROOTS` (порожнє значення = «нічого не можна монтувати»), і **обидва** процеси
+  читають його окремо: API (валідація під час підтвердження) і runner (повторна перевірка перед `docker create`).
+  Гейт runner-а працює лише в `NPATI_SANDBOX_RUNNER_MODE=local`; у постаченому `docker-compose.sandbox-runner.yml`
+  режим не заданий (типово `remote` + `NPATI_SANDBOX_RUNNER_ISOLATED_HOST=true`), тому mounted-режим там вимкнений —
+  це і є вимога власника «тільки там, де runner безпечно бачить локальний шлях», а не недогляд. Для роботи
+  mounted-режиму runner має бачити підтверджений каталог **за тим самим абсолютним шляхом**, який записав API:
+  шлях перевіряється на runner-і через `realpath`/`lstat`, і шлях, який runner не може розв'язати, є відмовою
+  (`mounted_folder_not_found`), а не сподіванням, що демон його знайде. Крім того, `code.mounted_folder` (окремий
+  під-прапорець, оголошений ще в C1) тепер має читача на реальному шляху — і в API (сервіс адміністрування), і в
+  резолвері workspace-а.
+* **Перевірки цього кроку.** `npm run typecheck` — exit 0; `npm run typecheck:tests` — exit 0 (обидва набори додані
+  в `include`); `npm run lint` — exit 0; `node --check scripts/run-security-gate.mjs` — exit 0;
+  `node scripts/run-security-gate.mjs --list` — **148** рядків. `npm test` / `security-gate` / `test:web` / збірки
+  запускає власник.
+* **Межа середовища агента (та сама, що в § 7.2).** У файловій пісочниці агента `vitest` не стартує (`spawn EPERM`
+  на сервісі esbuild), тому обидва набори прогнані **in-process** через `artifacts/c15-probe` (власний
+  TS-завантажувач на `typescript.transpileModule`, без дочірніх процесів): **87/87 перевірок** з тими самими
+  твердженнями, що й у наборах — політика allowlist, резолвер, ревізія з змонтованого дерева, `ro`/`rw`,
+  збереження джерела при видаленні, відмова імпорту, аргументи `docker create`, гейт runner-а разом із TOCTOU,
+  відсутність upload/download для mounted-проєкту (і наявність обох для managed — негативний контроль),
+  сервіс адміністрування.
+  Прогін харнесом (`vitest`) лишається за ескалованим запуском власника.
 
 ---
 
@@ -292,6 +405,12 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
 * [ ] Права ролей: `owner`/`admin`/`developer`/`reviewer` на destructive-діях; жоден режим не піднімає
       `hard_deny`.
 * [ ] Мережа: SSRF-набір C4b на живому середовищі; metadata-endpoint і внутрішні сервіси недосяжні.
+* [ ] Реальний bind mount (C15): проєкт із підтвердженим `rw`-каталогом пише **саме в нього** (перевірити
+      вміст каталогу на хості після команди в пісочниці), а `ro`-каталог дає відмову запису **від ядра** (`EROFS`
+      усередині контейнера), а не лише від API; що каталог видно runner-у за тим самим абсолютним шляхом; і що
+      вкладена `--tmpfs /workspace/.npati-runtime` створюється під `--read-only` (єдина частина нового
+      аргументного рядка, яку герметичний набір перевіряє по аргументах, а не по живому демону — якщо демон
+      відмовиться створювати точку монтування, це виявиться саме тут).
 * [ ] Прогнати `npm test`, `npm run security-gate`, `npm run test:web` і обидві збірки; порівняти
       known-red baseline (`10 files / 15 tests`) — нових падінь бути не повинно.
 

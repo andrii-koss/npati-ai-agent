@@ -334,6 +334,12 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.flags.change": "business:manage",
   "code.project.trust": "business:manage",
   "code.project.untrust": "business:manage",
+  // C15: the mounted-folder allowlist. Confirming a host directory as a project's canonical workspace is an
+  // owner-level decision about the deployment's filesystem, so it maps to the same administratively-gated
+  // permission trust does; the two are separate action names so a caller can never authorize one with the
+  // other's label.
+  "code.project.mount": "business:manage",
+  "code.project.unmount": "business:manage",
   "code.approval_rule.create": "business:manage",
   "code.approval_rule.delete": "business:manage",
   // Production: the privileged permission and the operation name are one and the same surface.

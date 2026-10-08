@@ -103,7 +103,105 @@ instead of editing code: the `PolicyEngine` header comment lists an eight-phase 
 `capability_groups`, `trust` and `network_enforcement` (see `architecture.md` §4).
 
 ## Current step
-- **C14 COMPLETE — evals, metrics and hardening.** Final escalated evidence: `typecheck` 0, **`typecheck:tests` 0**,
+- **C15 COMPLETE (optional step) — mounted local folder, CLI, IDE protocol specification.** Final escalated
+  evidence: `typecheck` 0, **`typecheck:tests` 0**, **`lint` 0**, `verify-capability-matrix.mjs` 0, `upgrade-gate.mjs` 0,
+  **`security-gate` exit 0 — `passed=2080 failed=0`, 148 suites, `present=148 missing=0`**, `eval:smoke` 0,
+  **`test:web` 0 — 9 files / 76 tests**, both builds 0, and **`npm test` back at the recorded baseline
+  `10 files / 15 tests`** with **`test:known-failures` GREEN** (`actual=15 quarantined=15 undeclared=0 stale=0
+  expired=0`). Last migration is now **086**. The step was **optional**; items 1, 2 and 3 are done, item 4
+  (`ExternalAgentAdapter`) is **not** implemented (see below).
+  - **Mounted folder is a real `WorkspaceProvider` (owner decision A).** `MountedWorkspaceProvider extends
+    LocalProjectWorkspace`, so all file logic is inherited — **there is no second workspace implementation and no
+    second writer**. It adds only `mountFor()`, the fact that a mount exists. `access()` no longer builds
+    `path.join(root, companyId, projectId)`; it asks **one** resolver, and an `ro` project refuses every API write with
+    `mounted_folder_read_only`.
+  - **The revision guard was NOT given a "mounted" branch** (explicit owner prohibition). `info().currentRevision` is
+    still a digest over the base directory's tree, so a mounted workspace derives its revision from the mounted source
+    and `workspace_revision_mismatch` behaves **identically** for managed, git-clone and mounted projects —
+    measured (an out-of-band write into the mounted directory moves the digest and the guard fires), with the
+    managed case as a negative control in the same test. Structural proof: the guard file contains **zero**
+    matches for `/mount/i`. `CodeWorkspaceRevisionGuard` is unchanged.
+  - **One resolver, no second source of the base path.** `ProjectWorkspaceBaseResolver` is created once and handed to
+    both the workspace provider and `ProjectGitService`; `ProjectGitService` no longer holds `workspaceRoot`; `worker.ts`
+    uses the same provider and the same allowlist, so the background worker is not a second source. The base-path
+    expression now appears **exactly once** in `app.ts` (it was twice), and a source guard pins that count.
+  - **Audited allowlist** (migration **086**, `project_mounted_folders`, additive, `mode CHECK in ('ro','rw')`,
+    `UNIQUE(company_id, project_id)`, revision): `realpath` + per-component `lstat`, refusal of symlinks **and
+    junctions** (the `realpath === candidate` comparison is what catches a Windows junction, which `lstat` reports as an
+    ordinary directory), refusal of `..` in the raw spelling, and refusal of `/`, `$HOME`, the data root, anything
+    inside `project-workspaces`, **and any directory that contains a protected root**. The allowlist is
+    `NPATI_MOUNTED_FOLDER_ROOTS` (empty = nothing). A table rather than a `projects` column, because a mount decision
+    carries an actor, a time and a lifetime, a product `PATCH` would overwrite the column, and — decisively — **the
+    runner must read the allowlist itself** with no user context, which a column would not give it.
+  - **`ro` is enforced by Docker, not only by the API** (explicit owner requirement):
+    `--mount type=bind,source=<canonical>,target=/workspace,readonly`. Because bind and tmpfs cannot share a target —
+    and shadowing the bind with a tmpfs would be a **silent no-op** where the agent works in a throwaway filesystem while
+    the user's directory stays untouched — the workspace is either tmpfs (managed) or bind (mounted), with the runtime
+    directory (`HOME`, package caches) always on its own bounded tmpfs. The target is not client-selected: `/workspace`
+    only. The runner gate additionally requires `readOnly === (record.mode === 'ro')`, so a client can neither narrow
+    nor **widen** the mode.
+  - **TOCTOU is re-checked on the runner immediately before `docker create`**: the runner reads the allowlist from the
+    database itself (`getProjectMountedFolderForSystem`), compares path keys, requires the recorded mode, and re-runs the
+    **full** validation. Proven by a real substitution: confirm a directory, then `rm -rf` it and point a junction
+    elsewhere — the same request fails with `symlink_escape`. The provider refuses to mount at all without a gate
+    (`mounted_folder_gate_unavailable`), so "the API already checked" is never sufficient, and a remote runner never
+    receives a host path (`mounted_folder_requires_local_runner`).
+  - **No second writer / no second repository state**: `upload` returns an empty map for mounted projects and `download`
+    (copy-back) is skipped for them — measured (mounted → `create,start` with no upload/download, canonical file
+    unchanged; managed → `create,start,upload:1,download` with no mount, as a negative control). Import (ZIP/repository)
+    into a mounted project is refused with `mounted_folder_import_unsupported`, since the import pipeline would write
+    each file back over what the sandbox already wrote through the bind.
+  - **`code.mounted_folder`** finally has a reader (it had been declared in three places with none); the flag is
+    server-side, and with it off nothing changes for existing projects. `--privileged` is never allowed and no docker
+    socket appears in any argument — the C14 denial test was **extended with a positive case, not weakened**.
+  - **CLI (item 2)**: new `@npati/cli` package with a `bin` (`npati code run`, `watch`, `approvals …`), **zero new
+    dependencies**, token from env or file, `--token`/`-t`/`--api-key` refused in every spelling (argv is visible through
+    `ps`), and redaction on every output path. Backed by a new versioned **run-start route**
+    `POST /companies/:companyId/code/runs` (`code.run.start` → the existing `workspace:write` vocabulary), which admits
+    through the existing queue and registers in the existing background-run registry **before** the `202`, so the CLI
+    knows the run id immediately and a dropped connection can be resumed. The chat SSE path was **not** the entry point:
+    there the run id is unknown until the stream opens, a `clarify` arrives as HTTP 200, and chat writes history the
+    terminal does not want. The existing background-run SSE was reused — **no fourth SSE implementation**.
+  - **Three real defects were found in the new code by the escalated run and fixed** (see below); the fixes are pinned by
+    six in-memory mutations.
+  - **IDE protocol (item 3) is a specification only** (`docs/coding-agent/ide-protocol.md`): versioning, auth, run start,
+    stream + polling, approvals, other commands, limits, an explicit "what the extension stage must still decide"
+    section, and a statement that implementing the VS Code extension is a **later stage**, not C15. A row was added to
+    the "extension surfaces" table in `architecture.md`.
+  - **Deliberate boundary carried forward:** API keys have no role column, so `roleOf` = `null` and
+    `permissionsForRole(null) = []` — the session-mode matrix does **not** apply to a CLI key; everything rests on
+    `ctx.permissions`. Granting a key a role would **widen** it (a scope grant is not membership), so closing this is a
+    separate owner decision. It is documented in `ide-protocol.md` §2.1 and the CLI README rather than left silent.
+  - **Not done (item 4):** `ExternalAgentAdapter` was **not** implemented. The recon established the one safe shape —
+    a second `CodeSubagentChildRunner` implementation running the external CLI **inside the sandbox** through the
+    existing sandbox transport, with the child's `allowedTools` still the existing intersection, a digest instead of a
+    transcript, user keys **only** via `SecretLease` (audit-before-issue, production hard deny) and the existing depth-1 /
+    parallelism-4 ceilings — explicitly **not** a second agent loop and **not** a new `agentType` (which would be a
+    published-schema change requiring manifest v9→v10 and artifact/snapshot regeneration). It stays open.
+  - **Honest limits**: **no real Docker**, so the bind and `readonly` flags are proven on the `docker create` argument
+    line and by the runner gate, not inside a container — the single unverified detail (whether the nested
+    `--tmpfs /workspace/.npati-runtime` can be created under `--read-only`) is on the manual checklist; `maxFiles`
+    (default 2000) also applies to a mounted tree; each write leaves a transient `.npati-write-lock` (and
+    `setBaseline` a `.npati-baseline.json`) in the canonical directory, i.e. in the user's folder for `rw`;
+    `NPATI_MOUNTED_FOLDER_ROOTS` must be set for both the API and the runner, and the runner must see the same absolute
+    path — in the shipped compose the default is `remote`, so mounted mode is **off by default** (as required); mounted
+    mode works only with a local runner; migration **086 has not been applied to a live PostgreSQL** (as with 070–085);
+    `npm test` still carries the 15 quarantined pre-existing failures with `expires_at`; **Production ready = NO**.
+  - **Escalated verification caught six fresh failures in our own new C15 suites — the third time the quarantine gate
+    caught our own work in the session it was written** — and they were real: (1) `code-cli-run-routes.ts` accepted **any**
+    session from the port (archived sessions and sessions of another project reached `202`; the production loader
+    filtered archived but **nobody compared `projectId`**) — fixed in code; (2) the test's fake Fastify did not record a
+    handler's **returned** value, while the real approvals list route is written as `return { approvals }` — fixed in the
+    harness; (3) **the decide route authorised on `business:manage` alone and never read `classifyPrincipal`, so an agent
+    or service principal with wildcard permissions could really decide an approval** — a genuine violation of the
+    "an agent can never be an approver" invariant, fixed in code with the existing C5a classifier before the Company
+    line; (4) a test expected the deny audit under the bare action instead of the C5a `<action>.denied` convention;
+    (5) a source guard's regex did not allow comment lines between arguments (the invariant itself was intact —
+    `joins.length === 1` still holds); (6) a **non-hermetic fixture** used a fixed name in the shared temp directory and
+    was never cleaned up, so the first run in a temp directory passed and every later run died on `mkdir EEXIST` — which
+    is exactly why in-process probes, each in a fresh temp, never saw it. Six in-memory mutations confirm each fix is
+    non-vacuous.
+- Earlier: **C14 COMPLETE — evals, metrics and hardening.** Final escalated evidence: `typecheck` 0, **`typecheck:tests` 0**,
   **`lint` 0**, `verify-capability-matrix.mjs` 0 (4/4), `upgrade-gate.mjs` 0 (GREEN), **`security-gate` exit 0 —
   `passed=2002 failed=0`, 144 suites, `present=144 missing=0`**, attack catalogue `rows=23 issues=0`, `eval:smoke` 0,
   **`test:web` 0 — 9 files / 76 tests**, both builds 0, **`npm test` unchanged at `10 files / 15 tests`**, and

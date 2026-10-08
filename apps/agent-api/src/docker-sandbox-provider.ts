@@ -6,7 +6,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { chmod, chown, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxFile, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
+import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxCreateOptions, SandboxFile, SandboxMount, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
+import type { SandboxMountGate } from "./mounted-folder-gate";
 import { SandboxProviderError, sandboxProcessEnvironment } from "./sandbox-provider";
 import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
@@ -75,6 +76,24 @@ export async function assignSandboxOwner(directory: string): Promise<void> {
  * user, read-only root filesystem, all capabilities dropped, no-new-privileges, tmpfs workspace, an
  * internal network only, and (when configured) a seccomp profile. There is deliberately no
  * `--privileged`, no host path mount and no docker socket.
+ *
+ * C15 adds exactly one host path, and only when a mounted local folder was confirmed for this project:
+ * `--mount type=bind,source=<canonical folder>,target=/workspace`. The owner decision that makes this
+ * acceptable is that the folder is then the project's **canonical workspace** — the provider reads and writes
+ * the same directory — so the bind is not a copy and not a second view of the project.
+ *
+ * The conflict with the C14 `--tmpfs /workspace` is resolved by making the two **mutually exclusive**: a
+ * container has either the bounded tmpfs workspace (no mount) or the bind mount (mounted project), never both,
+ * because Docker refuses two mounts at one destination and, more importantly, a mount shadowed by a tmpfs would
+ * be a silent no-op — the agent would work in the throwaway filesystem while the user's folder stayed
+ * untouched. The runtime directory (`/workspace/.npati-runtime`, where the npm/pip caches and `HOME` live) is
+ * a **bounded tmpfs in both cases**, mounted over the subdirectory, so cache writes never land in the user's
+ * folder and the size ceilings of the sandbox still apply to everything except the mount itself.
+ *
+ * Honest limit, stated here because it is a real consequence and not a detail: `size=` bounds a tmpfs, so a
+ * mounted folder is **not** size-capped by the sandbox. It is the operator's own disk, chosen explicitly by an
+ * owner/admin through the allowlist, and the resource ceilings of the container (CPU, memory, pids) still
+ * apply to whatever runs against it.
  */
 export function buildSandboxCreateArgs(input: {
   sandboxName: string;
@@ -87,13 +106,27 @@ export function buildSandboxCreateArgs(input: {
   pids: number;
   diskBytes: number;
   seccompProfile?: string;
+  /** C15: the one host path a sandbox may see, derived from the mounted-folder allowlist. */
+  mount?: SandboxMount;
 }): string[] {
+  const runtimeTmpfs = `/workspace/.npati-runtime:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=${Math.min(input.diskBytes, 256 * 1024 * 1024)}`;
+  /**
+   * Either the bounded tmpfs workspace (what every project got before C15, byte-for-byte unchanged) or the
+   * single bind mount of the confirmed folder, followed by the bounded runtime tmpfs that keeps `HOME` and the
+   * package caches writable — which is also what makes an `ro` mount usable rather than merely mounted.
+   */
+  const workspaceMount = input.mount
+    ? [
+      "--mount", `type=bind,source=${input.mount.source},target=${input.mount.target}${input.mount.readOnly ? ",readonly" : ""}`,
+      "--tmpfs", runtimeTmpfs,
+    ]
+    : ["--tmpfs", `/workspace:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=${input.diskBytes}`];
   return [
     "create", "--name", input.sandboxName, "--label", `npati.scope=${label(input.scope)}`, "--label", `npati.sandbox=${input.sandboxId}`,
     "--network", input.network, "--network-alias", "project-preview", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     ...(input.seccompProfile ? ["--security-opt", `seccomp=${input.seccompProfile}`] : []),
     "--cpus", input.cpus, "--memory", input.memory, "--pids-limit", String(input.pids),
-    "--tmpfs", `/workspace:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=${input.diskBytes}`,
+    ...workspaceMount,
     "--tmpfs", "/tmp:rw,exec,nosuid,nodev,uid=10001,gid=10001,size=64m",
     "--workdir", "/workspace", "--env", "HOME=/workspace/.npati-runtime",
     "--env", "NPM_CONFIG_CACHE=/workspace/.npati-runtime/npm",
@@ -119,7 +152,15 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
   private touch(id: string) { this.activity.set(id, Date.now()); }
   constructor(limits: Partial<RunnerLimits> = {}, /** C1b admission policy; absent means every image is refused. */ private readonly imagePolicy?: SandboxImageAdmission,
     /** C4b enforcement probe; absent means every sandbox creation is refused (fail closed). */
-    private readonly egressEnforcement?: EgressEnforcement) { this.limits = { ...defaults, ...limits };
+    private readonly egressEnforcement?: EgressEnforcement,
+    /**
+     * C15: the mount gate. It is the **runner's own** re-check of the path it is about to hand to
+     * `docker create` — the allowlist read from the runner's database plus the same path validation the API ran
+     * — and it is a required collaborator of a mount. Without it a mount is refused
+     * (`mounted_folder_gate_unavailable`), because "the API validated this already" is exactly the assumption
+     * the TOCTOU window between the confirmation and the create invalidates.
+     */
+    private readonly mountGate?: SandboxMountGate) { this.limits = { ...defaults, ...limits };
     // An empty allowlist is a legitimate deny-all state (C4b run phase), not a configuration error.
     const allowlistEntries = this.limits.allowedHosts.split(",").map((host) => host.trim()).filter(Boolean);
     const validAllowlistEntry = (host: string) => /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
@@ -156,11 +197,32 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     const storedAt = this.activity.get(id) ?? Date.parse(startedAt ?? "");
     return { id, state: value === "running" ? "running" : value === "created" ? "created" : value === "exited" ? "stopped" : "failed", createdAt: createdAt ?? new Date().toISOString(), lastActivityAt: new Date(Number.isFinite(storedAt) ? storedAt : Date.now()).toISOString() };
   }
-  async createSandbox(scope: SandboxScope): Promise<SandboxStatus> {
+  async createSandbox(scope: SandboxScope, options: SandboxCreateOptions = {}): Promise<SandboxStatus> {
     // C1b: admission control happens before any container is created. The policy decides which digest
     // may run and returns the exact reference to use, so a tag never reaches `docker create`.
     const admitted = await this.admitImage(scope);
-    return this.createSandboxInternal(scope, admitted);
+    // C15: the mount is re-authorised here, immediately before the container exists. It reads the allowlist
+    // from the database itself rather than trusting the payload, and re-runs the path validation, so neither a
+    // path that changed since the confirmation nor a path a client invented can become a bind mount.
+    const mount = await this.authorizeMount(scope, options.mount);
+    return this.createSandboxInternal(scope, admitted, mount);
+  }
+
+  /**
+   * C15: the runner-side mount gate.
+   *
+   * The window this closes is real and narrow: an owner confirms a folder, and between that moment and the
+   * container creation the directory can be replaced by a symlink or a junction, or the API can be bypassed
+   * entirely and a payload sent straight to the runner's HTTP endpoint. So the runner does not ask "did the API
+   * approve this path" — it asks the database, with no user context, "which folder is confirmed for this
+   * project", and then validates **that** path itself. A mismatch (including a misspelled path that resolves to
+   * the same directory being accepted, because the comparison is on the canonical key) is a refusal.
+   */
+  private async authorizeMount(scope: SandboxScope, requested: SandboxMount | undefined): Promise<SandboxMount | undefined> {
+    if (!requested) return undefined;
+    const gate = this.mountGate;
+    if (!gate) throw new SandboxProviderError("mounted_folder_gate_unavailable", "The sandbox runner has no mounted-folder allowlist, so no host folder can be mounted", 403, "sandbox.create");
+    return gate.authorizeMount({ companyId: scope.companyId, projectId: scope.projectId, requested });
   }
 
   /**
@@ -192,7 +254,7 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     console.info(`[sandbox-image-admission] ${outcome} ${JSON.stringify(meta)}`);
   }
 
-  private async createSandboxInternal(scope: SandboxScope, admitted: { reference: string; dev: boolean }): Promise<SandboxStatus> {
+  private async createSandboxInternal(scope: SandboxScope, admitted: { reference: string; dev: boolean }, mount?: SandboxMount): Promise<SandboxStatus> {
     if (!scope.workspaceId || !scope.userId || !scope.companyId || !scope.projectId) throw new SandboxProviderError("invalid_scope", "Sandbox scope is incomplete", 400);
     const id = randomUUID(), names = this.names(id);
     let phase = "network.create";
@@ -227,6 +289,7 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
         sandboxName: names.sandbox, sandboxId: id, network: names.network, scope, image: admitted.reference,
         cpus: this.limits.cpu, memory: this.limits.memory, pids: this.limits.pids, diskBytes: this.limits.diskBytes,
         seccompProfile: process.env.NPATI_SANDBOX_SECCOMP_PROFILE,
+        ...(mount ? { mount } : {}),
       }));
       this.touch(id);
       return this.state(scope, id);

@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { AuthContext, Project } from "@npati/workspace";
+import type { AuthContext, MountedFolderMode, Project } from "@npati/workspace";
+import { managedWorkspaceBaseResolver, type WorkspaceBase, type WorkspaceBaseResolverPort } from "./workspace-base-resolver";
 
 export interface ProjectWorkspaceInfo {
   companyId: string;
@@ -63,8 +64,28 @@ export interface ProjectWorkspaceRemoval {
   outstanding?: string[];
 }
 
+export interface ProjectMountRequest {
+  /** The canonical host directory the container must see; the same path the workspace provider uses. */
+  source: string;
+  /** The container target. Fixed (`/workspace`), never caller-chosen. */
+  target: string;
+  /** `true` for an `ro` mount: the bind is created with `readonly` at the Docker level. */
+  readOnly: boolean;
+  mode: MountedFolderMode;
+}
+
 export interface ProjectWorkspace {
   info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectWorkspaceInfo>;
+  /**
+   * C15: the mounted folder this project's canonical workspace **is**, or `null` when the workspace is managed.
+   *
+   * It is an optional member because it is a fact only a mount-aware provider owns; a provider without an
+   * allowlist answers by omission, and its absence means "no mount", which is exactly the pre-C15 behaviour.
+   * The sandbox path reads it to decide three things at once: whether to create the container with a bind
+   * mount, and whether to skip the upload **and** the copy-back that would otherwise make the sandbox a second
+   * writer of the same directory.
+   */
+  mountFor?(ctx: AuthContext, companyId: string, projectId: string): Promise<ProjectMountRequest | null>;
   listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
@@ -227,8 +248,15 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
   private readonly root: string;
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
-  constructor(private readonly projects: { get(ctx: AuthContext, companyId: string, projectId: string): Promise<Pick<Project, "id" | "companyId" | "workspaceId" | "status" | "repositoryBranch" | "sandboxId" | "revision">> }, options: { root: string; maxFileBytes?: number; maxFiles?: number }) {
+  /**
+   * C15: the **one** resolver of this project's canonical workspace. It defaults to the managed root so every
+   * existing construction site and test keeps its exact behaviour, and `app.ts` passes the shared resolver that
+   * `ProjectGitService` reads too.
+   */
+  protected readonly bases: WorkspaceBaseResolverPort;
+  constructor(private readonly projects: { get(ctx: AuthContext, companyId: string, projectId: string): Promise<Pick<Project, "id" | "companyId" | "workspaceId" | "status" | "repositoryBranch" | "sandboxId" | "revision">> }, options: { root: string; maxFileBytes?: number; maxFiles?: number; bases?: WorkspaceBaseResolverPort }) {
     this.root = path.resolve(options.root);
+    this.bases = options.bases ?? managedWorkspaceBaseResolver(this.root);
     this.maxFileBytes = fileLimit(options.maxFileBytes, 1024 * 1024);
     this.maxFiles = fileLimit(options.maxFiles, 2000);
   }
@@ -254,6 +282,16 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     return this.activeWorktrees.get(`${companyId}:${projectId}:${agentId}`);
   }
 
+  /**
+   * C15: everything that needs the canonical workspace goes through here, so the *one* resolver decides the
+   * base and the read-only state for both the managed and the mounted case. A mounted folder is not a special
+   * branch of the file operations: it is the same operations with a base that came from the allowlist, which is
+   * what makes it a real `WorkspaceProvider` rather than a second implementation of the workspace.
+   *
+   * The read-only refusal is structural: an `ro` mount cannot be written through *this* API at all (the Docker
+   * `readonly` bind is the second, independent wall the owner decision requires, and the sandbox has it even
+   * when this layer is bypassed).
+   */
   private async access(ctx: AuthContext, companyId: string, projectId: string, mode: "read" | "write", workspaceId?: string, agentId?: string) {
     if (!validId(companyId) || !validId(projectId)) throw new ProjectFileError("invalid_project", "Invalid project identifier");
     const project = await this.projects.get(ctx, companyId, projectId);
@@ -267,19 +305,36 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     if (wtDir) {
       const entry = await lstat(wtDir).catch(() => undefined);
       if (entry?.isDirectory() && !entry.isSymbolicLink()) {
-        return { project, base: wtDir };
+        return { project, base: wtDir, readOnly: false, mounted: false };
       }
     }
 
-    const base = path.join(this.root, companyId, projectId);
+    // The single resolver: a managed base, or the canonical mounted folder, or a refusal when a confirmed mount
+    // no longer passes validation. Never a fallback — a mount that stopped being safe must stop the call.
+    const resolved: WorkspaceBase = await this.bases.resolve(ctx, companyId, projectId);
+    if (mode === "write" && resolved.readOnly) {
+      throw new ProjectFileError("mounted_folder_read_only", "The mounted project folder is read only", 409);
+    }
+    if (resolved.mounted) return { project, base: resolved.base, readOnly: resolved.readOnly, mounted: true };
+
+    const base = resolved.base;
     await mkdir(this.root, { recursive: true });
     for (const candidate of [this.root, path.join(this.root, companyId), base]) {
       await mkdir(candidate).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
       const entry = await lstat(candidate);
       if (!entry.isDirectory() || entry.isSymbolicLink()) throw new ProjectFileError("invalid_path", "Symlink workspace is not allowed");
     }
-    return { project, base };
+    return { project, base, readOnly: false, mounted: false };
   }
+  /**
+   * C15: `info()` is the only place a revision is derived, and it derives it from `tree(base)` — so for a
+   * mounted project the digest is a hash over the **mounted** tree (paths, sizes and per-file content digests).
+   * Nothing about the mount is visible to `CodeWorkspaceRevisionGuard`: it reads `currentRevision` through the
+   * same `ProjectWorkspace.info` it always used, and a change made directly in the mounted folder (by the user,
+   * or by a sandbox writing through the rw bind) moves that digest like any other write. That is why
+   * `workspace_revision_mismatch` needs no mounted branch: the comparison is between two readings of the same
+   * canonical source.
+   */
   private async target(base: string, filePath: string) {
     const clean = safeProjectPath(filePath);
     const parts = clean.split("/");
@@ -550,6 +605,19 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     if (!validId(companyId) || !validId(projectId)) throw new ProjectFileError("invalid_project", "Invalid project identifier");
     const allowed = ctx.permissions.includes("*") || ctx.permissions.includes("owner") || ctx.permissions.includes("business:manage") || ctx.permissions.includes("workspace:write");
     if (!allowed) throw new ProjectFileError("permission_denied", "Project workspace removal denied", 403);
+
+    /**
+     * C15: a mounted project has no managed directory to remove. The canonical workspace is the **user's own
+     * folder**, and deleting it is precisely the data loss a workspace cleanup must never cause — so the answer
+     * says so instead of reporting a deletion that did not happen: `alreadyAbsent: true` (no managed workspace
+     * was ever created) with the reason naming the preserved source. The in-process bookkeeping is dropped, so
+     * no lock or worktree outlives the project.
+     */
+    const mountedSource = await this.bases.mountedSource(ctx, companyId, projectId);
+    if (mountedSource) {
+      this.forgetWorkspaceState(companyId, projectId);
+      return { removed: true, alreadyAbsent: true, path: mountedSource, reason: "mounted_source_preserved" };
+    }
 
     const companyDir = path.join(this.root, companyId);
     const dir = path.join(companyDir, projectId);

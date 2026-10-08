@@ -159,6 +159,13 @@ export const SCOPED_RULE_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "code.migrations.run",
   "code.deploy.release",
   "code.project.trust",
+  /**
+   * C15: mounting a local folder and unmounting one are the same class of decision as project trust — they are
+   * made once, by an owner/admin, about one project — and repeating either through a standing rule would let a
+   * single click point a project at, or away from, a directory on the operator's host.
+   */
+  "code.project.mount",
+  "code.project.unmount",
   "code.session.mode",
 ]);
 

@@ -3,10 +3,30 @@ import { WorkspaceAccessError, type AuthContext, type WorkspaceStore } from "@np
 import type { AuthProvider } from "./auth";
 import type { CompanyApproval, CompanyApprovalsRepository, ApprovalStatus } from "./approvals-repository";
 import type { AuditLogService } from "./audit-log";
+import { isNonHumanPrincipal } from "./code-principal";
 
 async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace:read" | "business:manage") {
   const c = await auth.authenticate(r);
   if (!c.permissions.includes(permission)) throw new WorkspaceAccessError("Missing permission: " + permission);
+  return c;
+}
+
+/**
+ * C15 (owner decision 3) — the context that may **decide** an approval, as opposed to the context that may read
+ * one. `classifyPrincipal` (C5a) is the single classifier every `code.*` surface already uses, and it is
+ * deliberately conservative: a token marked `agent:`/`service:` is never a `user`, whatever permissions it
+ * carries. An agent that somehow held `business:manage` — a wildcard key, a mis-scoped service token — must not
+ * be able to approve its own work, so the invariant is asserted **here**, before the Company, the approval row or
+ * the repository is reached, rather than being inferred from a permission list.
+ *
+ * The refusal is an ordinary `403` (`WorkspaceAccessError`): "you are not allowed to do this", not "this does not
+ * exist". The repository is never called, so a refused decision cannot leave a decided row behind.
+ */
+async function userDecisionContext(auth: AuthProvider, r: FastifyRequest) {
+  const c = await ctx(auth, r, "business:manage");
+  if (isNonHumanPrincipal(c)) {
+    throw new WorkspaceAccessError("Only a user can decide an approval: an agent or service principal cannot");
+  }
   return c;
 }
 
@@ -95,7 +115,7 @@ export function registerCompanyApprovalsRoutes(
     },
     async (r, reply) => {
       try {
-        const c = await ctx(auth, r, "business:manage");
+        const c = await userDecisionContext(auth, r);
         await store.getCompany(c, r.params.companyId);
         // C1c: an approval decision is a privileged, provable action. The journal records it (with the
         // hash of the exact payload the approver saw) before the decision is applied, so an audit

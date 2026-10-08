@@ -58,6 +58,22 @@ export class ProjectImportService {
     if (project.companyId !== companyId || project.workspaceId !== ctx.workspaceId || project.status === "archived") {
       throw new ProjectImportError("project_import_denied", "Project import is not available", 403);
     }
+    /**
+     * C15: a mounted folder is the project's **canonical workspace** — a directory the user owns and already
+     * filled. Import is a different thing: it clones or unpacks a source into the sandbox and then writes every
+     * file back through this workspace. On a mount, the sandbox already writes into that folder through the bind
+     * mount, so the write-through would be a second writer of the same bytes (and, because the import writes
+     * through `createFile`, a conflict the moment the first file exists). The honest answer is a refusal with
+     * its own code, not a half-completed import.
+     */
+    const mount = this.workspace.mountFor ? await this.workspace.mountFor(ctx, companyId, projectId) : null;
+    if (mount) {
+      throw new ProjectImportError(
+        "mounted_folder_import_unsupported",
+        "This project's workspace is a mounted local folder; import would write a second copy of it",
+        409,
+      );
+    }
     if ((await this.workspace.listFiles(ctx, companyId, projectId)).length > 0) {
       throw new ProjectImportError("project_not_empty", "Import requires an empty Project workspace", 409);
     }

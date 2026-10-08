@@ -27,6 +27,36 @@ export interface SandboxCommandResult {
 }
 export interface SandboxCommandOptions { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string>; cwd?: string; }
 /**
+ * C15: a bind mount of one **mounted local project folder** into a container.
+ *
+ * It is the only shape of host mount this product has, and every field is constrained: `target` may only be
+ * `/workspace` (the container's workspace is the workspace — a caller-chosen target would be an arbitrary host
+ * mount), and `source` is not trusted by the component that creates the container. The sandbox runner re-reads
+ * the allowlist from the database itself and re-validates the path (realpath + `lstat` on every component)
+ * immediately before `docker create`, so a path that became a symlink after the confirmation, or a path a
+ * client simply invented, never reaches a container.
+ */
+export interface SandboxMount { source: string; target: string; readOnly: boolean; }
+export interface SandboxCreateOptions { runtime?: string; mount?: SandboxMount; }
+/** The only container path a mounted folder may be exposed at. */
+export const SANDBOX_MOUNT_TARGET = "/workspace";
+
+/**
+ * Validates the shape of a mount request at the client boundary. It is a *shape* check on purpose: whether the
+ * path is allowed is decided by the runner against the allowlist it reads itself, because a check that only
+ * happens in the caller is not a check on the caller.
+ */
+export function sandboxMountRequest(value: unknown): SandboxMount | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object") throw new SandboxProviderError("invalid_mount", "A sandbox mount must be an object", 400);
+  const candidate = value as { source?: unknown; target?: unknown; readOnly?: unknown };
+  if (typeof candidate.source !== "string" || !candidate.source) throw new SandboxProviderError("invalid_mount", "A sandbox mount needs a source", 400);
+  if (candidate.source.length > 1024 || candidate.source.includes("\0")) throw new SandboxProviderError("invalid_mount", "Invalid sandbox mount source", 400);
+  if (candidate.target !== SANDBOX_MOUNT_TARGET) throw new SandboxProviderError("mount_target_denied", `A mounted folder may only be exposed at ${SANDBOX_MOUNT_TARGET}`, 400);
+  if (typeof candidate.readOnly !== "boolean") throw new SandboxProviderError("invalid_mount", "A sandbox mount must state readOnly", 400);
+  return { source: candidate.source, target: SANDBOX_MOUNT_TARGET, readOnly: candidate.readOnly };
+}
+/**
  * Variables a background sandbox process (for example the Live Preview dev server) may receive.
  * Secret references stay unavailable to background processes; only the public Project API
  * client configuration is allowed, because generated sites need it at runtime.
@@ -44,7 +74,7 @@ export function sandboxProcessEnvironment(environment: Record<string, string> | 
 export interface SandboxProvider {
   proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
-  createSandbox(scope: SandboxScope, options?: { runtime?: string }): Promise<SandboxStatus>;
+  createSandbox(scope: SandboxScope, options?: SandboxCreateOptions): Promise<SandboxStatus>;
   startSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
   stopSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
   destroySandbox(scope: SandboxScope, sandboxId: string): Promise<void>;
@@ -66,7 +96,7 @@ export class SandboxProviderError extends Error {
 }
 export class RemoteSandboxProvider implements SandboxProvider {
   private readonly endpoint: URL;
-  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote")) {
+  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote")) {
     if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");
     this.endpoint = new URL(url);
     const loopback = ["127.0.0.1", "localhost"].includes(this.endpoint.hostname);
@@ -101,7 +131,22 @@ export class RemoteSandboxProvider implements SandboxProvider {
     }
     return data.result as T;
   }
-  createSandbox(scope: SandboxScope, options: { runtime?: string } = {}) { return this.request<SandboxStatus>("createSandbox", { scope, options }); }
+  /**
+   * C15: the mount travels in the payload and is **re-validated by the runner** against the allowlist it reads
+   * from the database itself. The client-side shape check here exists so a malformed request is refused before
+   * a socket is opened, not so that the runner can trust the value.
+   *
+   * A mount is also refused outright unless this client is in `local` mode: the confirmed path names a directory
+   * on the runner's host, and a remote runner is on another machine where that path means something else (or
+   * nothing). The runner enforces the same rule, so the two layers cannot disagree about which mode may mount.
+   */
+  async createSandbox(scope: SandboxScope, options: SandboxCreateOptions = {}): Promise<SandboxStatus> {
+    const mount = sandboxMountRequest(options.mount);
+    if (mount && this.mode !== "local") {
+      throw new SandboxProviderError("mounted_folder_requires_local_runner", "A mounted local folder is only available on a local sandbox runner", 403, "createSandbox");
+    }
+    return this.request<SandboxStatus>("createSandbox", { scope, options: { runtime: options.runtime, ...(mount ? { mount } : {}) } });
+  }
   startSandbox(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("startSandbox", { scope, sandboxId }); }
   stopSandbox(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("stopSandbox", { scope, sandboxId }); }
   destroySandbox(scope: SandboxScope, sandboxId: string) { return this.request<void>("destroySandbox", { scope, sandboxId }); }

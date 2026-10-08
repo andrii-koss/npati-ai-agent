@@ -1,0 +1,16 @@
+{
+  "name": "@npati/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "npati code — the Coding Agent CLI (C15, owner decision 2): token auth against the local NPATI API, run streaming, approvals in the terminal.",
+  "bin": { "npati": "./bin/npati.mjs" },
+  "exports": {
+    ".": "./src/main.mjs",
+    "./commands": "./src/commands.mjs",
+    "./api": "./src/api.mjs",
+    "./token": "./src/token.mjs"
+  },
+  "engines": { "node": ">=22.22.2 <23 || >=24.0.0 <27" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

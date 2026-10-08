@@ -13,7 +13,13 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
-    "noEmit": true
+    "noEmit": true,
+    // C15: the CLI (`packages/cli`) is plain ESM JavaScript with JSDoc types, checked by its own
+    // `packages/cli/tsconfig.json` with `checkJs`. This project has to be allowed to *read* a `.js`/`.mjs` module
+    // at all before it can use the types that project already validates; without `allowJs` every import from
+    // `packages/cli` is `TS7016` and the suite would have to re-declare the CLI's types by hand — a second copy
+    // of them, which is exactly the drift this repository's guards exist to prevent.
+    "allowJs": true
   },
   "include": [
     "tests/coding-agent-c6-eval.test.ts",
@@ -39,6 +45,14 @@
     // C14 (post-step cleanup): the source guard over the phase order and the security-gate suite count. It is
     // added here together with the suite itself, for the same reason.
     "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
+    // C15 (owner decisions 2 and 3): the run-start route, the CLI token boundary and the approvals/stream halves.
+    // Added here together with the suite itself, so the gate's own file is type-clean by construction rather than
+    // by hope — the same rule every other suite in this list follows.
+    "tests/coding-agent-c15-cli-run-start.test.ts",
+    // C15 (mounted local folder): the provider/resolver half and the sandbox/runner half. Added here together
+    // with the suites themselves, so they are type-clean by construction rather than by hope.
+    "tests/coding-agent-c15-mount-sandbox.test.ts",
+    "tests/coding-agent-c15-mounted-workspace.test.ts",
     "tests/control-plane-ui-and-revisions.test.ts",
     "tests/full-capability-regression.test.ts",
     "tests/invariants-and-anti-patterns.test.ts",

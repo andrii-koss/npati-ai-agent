@@ -779,6 +779,27 @@ export const SECURITY_GATE_TESTS = [
   // type, the `evaluateInternal` body, both comments and the document itself, holds no copy of either fact, and
   // proves both halves non-vacuous on in-memory copies rather than on the files.
   "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
+  // C15 (owner decisions 2 and 3): the CLI/terminal entry point into the Coding Agent, and the two surfaces it
+  // needs. Pins that the run-start route (`POST /companies/:companyId/code/runs`) is authorized by the existing
+  // `code.run.start` action and the existing `workspace:write` permission, that the master flag and a tenant-scoped
+  // project are checked **before** the `202` (a flag-off or foreign project is an HTTP refusal, not a success
+  // followed by silence), that the response carries the C1a version envelope plus a server-minted unguessable run
+  // id and the URL of the **existing** background stream, and that the queue slot is released exactly once. The
+  // isolation half is the owner's acceptance test — a key scoped `workspace:read` cannot start a run, a key without
+  // `business:manage` cannot decide an approval, and an agent/service principal can never be an approver — driven
+  // through the real `CodeRbac` with the shipped matrix. The approval half pins audit-**before**-apply on the
+  // existing decide route (the journal entry is written first, so an audit outage refuses the decision), and the
+  // stream half pins that the existing background-stream SSE surface serves the run the CLI started and answers a
+  // foreign tenant the same empty 404 as an unknown run. The CLI half is the secret boundary: the token comes from
+  // the environment or a file and never from `argv` (refused in every spelling), and no error path prints it.
+  "tests/coding-agent-c15-cli-run-start.test.ts",
+  // C15 (mounted local folder): the allowlist policy, the single workspace resolver, the provider that serves a
+  // mounted folder as the project's canonical workspace, the revision that provider derives from the mounted tree
+  // (so `workspace_revision_mismatch` needs no mounted branch), and the sandbox side of the same feature — the
+  // bind argument, its Docker-level `readonly` flag, the runner's own re-validation of the path immediately
+  // before `docker create`, and the copy-back that is disabled for a mounted project.
+  "tests/coding-agent-c15-mounted-workspace.test.ts",
+  "tests/coding-agent-c15-mount-sandbox.test.ts",
 ];
 
 /**
