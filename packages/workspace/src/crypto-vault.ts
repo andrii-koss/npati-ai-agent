@@ -6,6 +6,14 @@ const SALT_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
 const DEVELOPMENT_MASTER_KEY = "npati-development-only-master-key-change-me";
 
+/**
+ * The three refusals, spelled once. Their codes are the public contract of this module and are never reworded:
+ * an operator reads them out of a log, and a caller switches on them.
+ */
+const PRODUCTION_KEY_REQUIRED = "NPATI_ENCRYPTION_KEY_REQUIRED: production encryption key is not configured";
+const UNSAFE_DEVELOPMENT_KEY = "NPATI_ENCRYPTION_KEY_UNSAFE_DEFAULT: replace the local development key before production";
+const KEY_TOO_SHORT = "NPATI_ENCRYPTION_KEY_TOO_SHORT: encryption key must contain at least 32 characters";
+
 export interface EncryptedPayload {
   version: "v1";
   salt: string;
@@ -14,24 +22,59 @@ export interface EncryptedPayload {
   ciphertext: string;
 }
 
+/**
+ * Why a configuration cannot be used, or `null` when it can. One implementation for both callers, so the
+ * eagerly validated (explicit key) and the deferred (ambient `process.env` key) paths cannot drift apart.
+ */
+function detectRefusal(configuredKey: string | undefined, masterKey: string): string | null {
+  if (!configuredKey && process.env.NODE_ENV === "production") return PRODUCTION_KEY_REQUIRED;
+  if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) return UNSAFE_DEVELOPMENT_KEY;
+  if (masterKey.length < 32) return KEY_TOO_SHORT;
+  return null;
+}
+
 export class CryptoVault {
   private readonly masterKey: string;
+  /**
+   * The reason this vault cannot perform cryptography, already decided when it was built. `null` when it can.
+   *
+   * It is *stored* rather than thrown because the timing of the refusal is the whole point: this class is
+   * constructed at **module load** by `defaultVault` below, so a throw from the constructor is a throw from
+   * `import` — which is how a production deployment whose runner merely imports this module (transitively, via
+   * the `@npati/workspace` barrel) crash-looped before it ever called `encrypt`. The refusal is therefore raised
+   * by `assertUsable()`, i.e. at the first cryptographic operation and only there.
+   *
+   * The guarantee is unchanged: in production, no key means no ciphertext and no plaintext — an operation on an
+   * unusable configuration throws instead of falling back to the development key. What moved is the moment.
+   */
+  private readonly refusal: string | null;
 
   constructor(masterKey?: string) {
     const configuredKey = masterKey || process.env.NPATI_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
-    if (!configuredKey && process.env.NODE_ENV === "production") {
-      throw new Error("NPATI_ENCRYPTION_KEY_REQUIRED: production encryption key is not configured");
-    }
-    if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) {
-      throw new Error("NPATI_ENCRYPTION_KEY_UNSAFE_DEFAULT: replace the local development key before production");
-    }
     this.masterKey = configuredKey || DEVELOPMENT_MASTER_KEY;
-    if (this.masterKey.length < 32) {
-      throw new Error("NPATI_ENCRYPTION_KEY_TOO_SHORT: encryption key must contain at least 32 characters");
-    }
+    this.refusal = detectRefusal(configuredKey, this.masterKey);
+    // A key handed to this constructor explicitly is validated **here**: the caller is asking for that key at
+    // that moment, so a bad one is that call's failure and there is nothing to wait for.
+    //
+    // An ambient key (`process.env`) is not. `new CryptoVault()` is evaluated at module load by every importer of
+    // the barrel, including importers that encrypt nothing, so an unusable ambient configuration must not be able
+    // to stop a module from loading. `assertUsable()` raises it instead. Note the asymmetry can only make the
+    // refusal *earlier*, never later, and never absent.
+    if (masterKey && this.refusal !== null) throw new Error(this.refusal);
+  }
+
+  /**
+   * Fail closed at the only place it matters: every operation that touches key material goes through here, so an
+   * unusable configuration can never derive a key and therefore can never encrypt or decrypt. Called before the
+   * payload shape is examined, because "this vault has no usable key" is the stronger fact and answering a format
+   * question first would answer something the caller did not ask.
+   */
+  private assertUsable(): void {
+    if (this.refusal !== null) throw new Error(this.refusal);
   }
 
   private deriveKey(salt: Buffer): Buffer {
+    this.assertUsable();
     return scryptSync(this.masterKey, salt, KEY_LENGTH);
   }
 
@@ -57,6 +100,7 @@ export class CryptoVault {
    * Throws an error if ciphertext or tag was tampered with.
    */
   decrypt(encryptedString: string): string {
+    this.assertUsable();
     const parts = encryptedString.split("$");
     if (parts.length !== 5 || parts[0] !== "v1") {
       throw new Error("INVALID_ENCRYPTED_PAYLOAD_FORMAT");
