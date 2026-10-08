@@ -881,6 +881,39 @@ export const SECURITY_GATE_TESTS = [
   // evaluation throw, and removing the derivation guard makes a production vault encrypt with the development
   // key. The files on disk are never mutated, and every `process.env` change is restored in `finally`.
   "tests/coding-agent-g1-crypto-vault-production-key-timing.test.ts",
+  // R1-C (items 11–13): the data lifecycle of the Coding Agent. Three claims that were false before this step
+  // and are measured here without a database: `toolResultRetentionDays`/`transcriptRetentionDays` were
+  // configured and read by **nobody** (the suite drives the reaper step and derives every window from those two
+  // limits, so a step that never fires fails); the audit journal is untouchable (the erasable family list and
+  // the forbidden list are pinned as disjoint, with `audit_log`/`audit_anchors` named in the second one); and
+  // erasure is fail-closed (the journal entry is written **before** the delete, a Website Builder project is
+  // refused by name, and the answer is the store's own read-back measurement rather than a success message).
+  // It also pins that the export's new **diff** section travels through the same secret scanner the C10 export
+  // already refuses with, so a credential in a diff refuses the download instead of printing it.
+  //
+  // The database half of the same step — rows really disappear, fresh rows survive, `until_deleted` is never
+  // expired, and a Website Builder checkpoint is never touched — is **not** in this hermetic list: it needs
+  // PostgreSQL, so it lives in `tests/coding-agent-r1c-data-lifecycle-postgres.test.ts` and is run by hand with
+  // `DATABASE_URL`/`NPATI_SECURITY_GATE_DB=1` until the owner decides which gate list owns it. Adding a suite
+  // that reports `skipped` to this list would make the gate red on every machine without a database
+  // (`evaluateVitestReport` fails a run that reports a skipped test).
+  "tests/coding-agent-r1c-data-lifecycle.test.ts",
+  // R1-A (section A, items 1, 2, 3 and 5): the limits and quotas of the Coding Agent, and the proof that they
+  // are not bypassed. Two hermetic suites, split the way the step is split: the first covers the run limits
+  // (the **periodic** limiter per user and per Company with the window's own retry-after; the R1 queue defaults
+  // of 5 per Company and 50 waiting; the single admission door every entry point goes through, pinned
+  // structurally so a third surface cannot call `queue.acquire` itself; the daily per-user/per-Company budgets
+  // enforced through the **existing** `A2AQuotaManager` with 80 %/100 % threshold notifications; the read-only,
+  // tenant-scoped queue-status route driven through `Fastify.inject`; and the structural proof that the
+  // Company-run/Automation path and a delegated sub-agent cannot reach the code-run door). The second covers the
+  // sandbox resource ceilings and host admission: the R1 start values (2 vCPU / 4 GB / 10 GB / 512 pids) are
+  // asserted through the real `docker create` argument list, the aggregate Company quota adds them up and
+  // refuses the sandbox past it, host admission refuses above 80 % CPU or below 15 % free memory while admitting
+  // exactly at both boundaries, the provider applies both **before** any Docker call and releases the Company's
+  // capacity when a creation fails, and the Company-run gate in `app.ts` is pinned as untouched. Neither suite
+  // needs Docker, PostgreSQL or a port.
+  "tests/coding-agent-r1a-limits-and-quotas.test.ts",
+  "tests/coding-agent-r1a-sandbox-quotas.test.ts",
 ];
 
 /**

@@ -49,6 +49,11 @@
     // C14 (post-step cleanup): the source guard over the phase order and the security-gate suite count. It is
     // added here together with the suite itself, for the same reason.
     "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
+    // R1-A (section A, items 1–5): the limits-and-quotas suites. Added here together with the suites themselves,
+    // so the gate's own new files are type-clean by construction rather than by hope — the same rule every other
+    // suite in this list follows. Both are hermetic (no Postgres, no Docker, no port).
+    "tests/coding-agent-r1a-limits-and-quotas.test.ts",
+    "tests/coding-agent-r1a-sandbox-quotas.test.ts",
     // C15 (owner decisions 2 and 3): the run-start route, the CLI token boundary and the approvals/stream halves.
     // Added here together with the suite itself, so the gate's own file is type-clean by construction rather than
     // by hope — the same rule every other suite in this list follows.

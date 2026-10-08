@@ -36,11 +36,19 @@ export interface CodeRunQueueLimits {
   maxQueueDepth: number;
 }
 
+/**
+ * The R1 start values (section A, items 1 and 3). `maxConcurrentPerCompany` moved 4 → **5** and
+ * `maxQueueDepth` moved 200 → **50** in R1: the first is the requirement's "5 parallel runs per Company", the
+ * second is its "bounded queue length, start value 50". Both changes are explicit and both are only the
+ * *default* — `NPATI_CODE_RUN_MAX_CONCURRENT_PER_COMPANY` and `NPATI_CODE_RUN_QUEUE_MAX_DEPTH` still override
+ * them and every value is still clamped by the ceilings below. `maxConcurrentPerUser` (2) and
+ * `queueTimeoutMs` (120 s) are unchanged, because R1 starts them at exactly those values.
+ */
 export const DEFAULT_CODE_RUN_QUEUE_LIMITS: CodeRunQueueLimits = {
   maxConcurrentPerUser: 2,
-  maxConcurrentPerCompany: 4,
+  maxConcurrentPerCompany: 5,
   queueTimeoutMs: 120_000,
-  maxQueueDepth: 200,
+  maxQueueDepth: 50,
 };
 
 /** Hard ceilings: configuration may lower these, never raise them past the point a single node can serve. */
@@ -83,7 +91,12 @@ export interface CodeRunTicket {
   sessionId: string;
 }
 
-export type CodeRunRefusalCode = "queue_timeout" | "queue_cancelled";
+/**
+ * `rate_limited` is not a queue state: it is the **periodic** limit (R1 section A, item 1) refusing a start
+ * before the queue is even consulted. It is carried by the queue's own error type so every existing caller —
+ * the chat route's 429, the CLI's status table — keeps mapping a refusal without learning a second vocabulary.
+ */
+export type CodeRunRefusalCode = "queue_timeout" | "queue_cancelled" | "rate_limited";
 
 export class CodeRunRefusedError extends Error {
   constructor(

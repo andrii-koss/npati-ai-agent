@@ -446,7 +446,13 @@ describe("security-gate: C15 wiring — one resolver, and the runner reads the a
     expect(runner).toContain("new RunnerMountGate({");
     // The runner's own read, with no user context — this is what makes the re-validation independent of the API.
     expect(runner).toContain("store.getProjectMountedFolderForSystem(companyId, projectId)");
-    expect(runner).toContain("runnerMountGate)");
+    /**
+     * R1 (section A, item 4) appended two more provider collaborators **after** the mount gate, so the exact
+     * substring this line used to assert (`runnerMountGate)`) no longer appears. The assertion is updated to the
+     * new argument list rather than dropped: the mount gate is still passed positionally, and the line is now
+     * strictly stronger, because it also pins that the aggregate Company quota and host admission were wired in.
+     */
+    expect(runner).toContain("runnerMountGate, sandboxCompanyQuota, hostAdmission)");
     expect(runner).toContain("p.options as SandboxCreateOptions | undefined");
 
     const provider = readFileSync(path.resolve("apps/agent-api/src/docker-sandbox-provider.ts"), "utf8");

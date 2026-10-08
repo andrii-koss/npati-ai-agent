@@ -12,6 +12,7 @@ import { SandboxProviderError, sandboxProcessEnvironment } from "./sandbox-provi
 import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
+import { DEFAULT_SANDBOX_RESOURCE_LIMITS, sandboxMemoryArg, type HostAdmissionController, type SandboxCompanyQuota } from "./sandbox-resource-quota";
 
 interface RunnerLimits {
   cpu: string; memory: string; diskBytes: number; pids: number; image: string; proxyImage: string; maxFiles: number; maxBytes: number; allowedHosts: string;
@@ -24,7 +25,20 @@ interface RunnerLimits {
  */
 const defaultAllowedHosts = process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({ env: process.env }));
 const defaults: RunnerLimits = {
-  cpu: "1", memory: "1536m", diskBytes: 1536 * 1024 * 1024, pids: 128,
+  /**
+   * R1 (section A, item 4): the per-sandbox ceilings are the module-level start values of
+   * `sandbox-resource-quota.ts` — 2 vCPU / 4096 MB / 10 GiB / 512 pids — and no longer literals local to this
+   * file. The change from the previous literals (1 vCPU / 1536m / 1536 MiB / 128 pids) is explicit and is
+   * recorded in `docs/coding-agent/r1a-limits-and-quotas-report.md`; a deployment overrides every one of them
+   * with `NPATI_SANDBOX_CPU/MEMORY/DISK_BYTES/PIDS`, which the sandbox runner reads.
+   *
+   * Single-sourced on purpose: the aggregate Company quota multiplies these same values, so a ceiling that
+   * moved in one place and not the other would make the aggregate either stricter or looser than it claims.
+   */
+  cpu: String(DEFAULT_SANDBOX_RESOURCE_LIMITS.cpu),
+  memory: sandboxMemoryArg(DEFAULT_SANDBOX_RESOURCE_LIMITS.memoryMb),
+  diskBytes: DEFAULT_SANDBOX_RESOURCE_LIMITS.diskBytes,
+  pids: DEFAULT_SANDBOX_RESOURCE_LIMITS.pids,
   image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: defaultAllowedHosts,
 };
 const DATABASE_HOST_PATTERN = /(^|[.-])(postgres|postgresql|pg|db|database)([.-]|$)/;
@@ -160,7 +174,22 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
      * (`mounted_folder_gate_unavailable`), because "the API validated this already" is exactly the assumption
      * the TOCTOU window between the confirmation and the create invalidates.
      */
-    private readonly mountGate?: SandboxMountGate) { this.limits = { ...defaults, ...limits };
+    private readonly mountGate?: SandboxMountGate,
+    /**
+     * R1 (section A, item 4): the aggregate Company quota — five parallel sandboxes and their summed CPU,
+     * memory, disk and pids. Applied in `createSandbox` **before** any Docker call, so a Company over its quota
+     * costs no container, no network and no pull; released in `destroySandbox`.
+     *
+     * Optional, and `undefined` means "not configured": a provider constructed by an existing test or by a
+     * deployment that has not opted in behaves exactly as it did before this step.
+     */
+    private readonly companyQuota?: SandboxCompanyQuota,
+    /**
+     * R1 (section A, item 4): admission control on the **host's** own load. It gates container creation and
+     * nothing else — see the header of `sandbox-resource-quota.ts` for why it must never be wired into the
+     * Company run gate.
+     */
+    private readonly hostAdmission?: HostAdmissionController) { this.limits = { ...defaults, ...limits };
     // An empty allowlist is a legitimate deny-all state (C4b run phase), not a configuration error.
     const allowlistEntries = this.limits.allowedHosts.split(",").map((host) => host.trim()).filter(Boolean);
     const validAllowlistEntry = (host: string) => /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
@@ -198,14 +227,36 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     return { id, state: value === "running" ? "running" : value === "created" ? "created" : value === "exited" ? "stopped" : "failed", createdAt: createdAt ?? new Date().toISOString(), lastActivityAt: new Date(Number.isFinite(storedAt) ? storedAt : Date.now()).toISOString() };
   }
   async createSandbox(scope: SandboxScope, options: SandboxCreateOptions = {}): Promise<SandboxStatus> {
-    // C1b: admission control happens before any container is created. The policy decides which digest
-    // may run and returns the exact reference to use, so a tag never reaches `docker create`.
-    const admitted = await this.admitImage(scope);
-    // C15: the mount is re-authorised here, immediately before the container exists. It reads the allowlist
-    // from the database itself rather than trusting the payload, and re-runs the path validation, so neither a
-    // path that changed since the confirmation nor a path a client invented can become a bind mount.
-    const mount = await this.authorizeMount(scope, options.mount);
-    return this.createSandboxInternal(scope, admitted, mount);
+    /**
+     * R1 (section A, item 4): the two **deployment** limits, checked before anything else and before any Docker
+     * call. Order matters for the diagnosis: "the host is overloaded" and "this Company is at its quota" are
+     * operational facts an operator acts on differently, and neither should be reported as an image-policy
+     * refusal. The host comes first because it is a property of the machine rather than of the tenant.
+     */
+    this.hostAdmission?.assertAdmitted();
+    let quotaHeld = false;
+    if (this.companyQuota) {
+      this.companyQuota.admit({ companyId: scope.companyId, projectId: scope.projectId });
+      quotaHeld = true;
+    }
+    try {
+      // C1b: admission control happens before any container is created. The policy decides which digest
+      // may run and returns the exact reference to use, so a tag never reaches `docker create`.
+      const admitted = await this.admitImage(scope);
+      // C15: the mount is re-authorised here, immediately before the container exists. It reads the allowlist
+      // from the database itself rather than trusting the payload, and re-runs the path validation, so neither a
+      // path that changed since the confirmation nor a path a client invented can become a bind mount.
+      const mount = await this.authorizeMount(scope, options.mount);
+      return await this.createSandboxInternal(scope, admitted, mount);
+    } catch (error) {
+      /**
+       * A creation that failed must not keep the Company's capacity: the container does not exist, and a leak
+       * here would refuse the Company its next sandbox for the life of the process. `release` is idempotent, so
+       * a failure that happened after the container was really removed cannot double-count either.
+       */
+      if (quotaHeld) this.companyQuota?.release({ companyId: scope.companyId, projectId: scope.projectId });
+      throw error;
+    }
   }
 
   /**
@@ -312,7 +363,7 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     return this.state(scope, id);
   }
   async stopSandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); if ((await this.state(scope, id)).state === "running") await this.docker(["stop", "--time", "5", names.sandbox], 15_000); return this.state(scope, id); }
-  async destroySandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); await this.docker(["rm", "-f", names.sandbox]); await this.docker(["rm", "-f", names.proxy]); await this.docker(["network", "rm", names.network]); this.activity.delete(id); }
+  async destroySandbox(scope: SandboxScope, id: string) { const names = await this.inspect(scope, id); await this.docker(["rm", "-f", names.sandbox]); await this.docker(["rm", "-f", names.proxy]); await this.docker(["network", "rm", names.network]); this.activity.delete(id); this.companyQuota?.release({ companyId: scope.companyId, projectId: scope.projectId }); }
   async getStatus(scope: SandboxScope, id: string) { return this.state(scope, id); }
   async executeCommand(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);

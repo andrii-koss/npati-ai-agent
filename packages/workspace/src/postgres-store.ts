@@ -18,8 +18,10 @@ import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, B
   CreateSnapshotConfigVersionInput, CodeActivityEventKind, CodeActivityEventRecord,
   CreateCodeActivityEventInput, ListCodeActivityEventsInput, ReplayBundleRecord, ReplayBundleStepRecord,
   ReplayMode, ReplayStepKind, CreateReplayBundleInput, ListReplayBundlesInput,
-  CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput } from "./types";
-import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError, codeRunRequestStatus } from "./types";
+  CodeContextSummaryRecord, CreateCodeContextSummaryInput, ListCodeContextSummariesInput,
+  CodeRetentionWindows, CodeDataRetentionReport, CodeDataErasureReport, CodeDataErasureTarget,
+  CodeDataErasureOutcome, CodeDataFamilyOutcome, CodeDataLifecycleStore } from "./types";
+import { DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, isClassificationAtLeast, isCompanyRole, isProviderDataPolicyKind, isProviderTrainingPolicy, isProviderContentType, isProviderRedactionKind, isExternalRetention, MANDATORY_PROVIDER_REDACTIONS, mergeCodeRunToolCalls, mergeCodeRunTurnOutcome, clampScanLimit, decodeCodeRunScanCursor, encodeCodeRunScanCursor, decodeCodeActivityCursor, ExecutionSnapshotImmutableError, codeRunRequestStatus, CODE_RETENTION_FAMILIES, CODE_APPEND_ONLY_EVIDENCE_FAMILIES, EXPIRABLE_RETENTION_CLASSES } from "./types";
 import { diffSnapshotPayloads, snapshotPayloadHash } from "./execution-snapshot-hash";
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { mountedFolderPathKey } from "./mounted-folder";
@@ -54,6 +56,243 @@ import type {
   ReplaceCodeSessionTodosInput, SetCodeGoalCriterionStatusInput, UpdateCodeGoalInput,
 } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
+
+/**
+ * R1-C (items 11–13): the data-lifecycle SQL.
+ *
+ * Every table name and every column name used below is a **literal** in one of the frozen maps in this
+ * module. The maps are keyed by table name and the keys are checked against the family lists in `types.ts`,
+ * so the SQL text is never built from caller input — a caller supplies a Company id, a session id or a
+ * project id (all bound parameters), never an identifier. That is the whole safety argument for interpolating
+ * identifiers here, and it is why the maps are closed `Record`s rather than a function of their argument:
+ * a missing key is a thrown error, not a silently empty query.
+ */
+
+/**
+ * `table → FROM clause with the alias `t``, for every family retention measures. Keys are exactly
+ * `CODE_RETENTION_FAMILIES`: a table added to that vocabulary without a clause here throws rather than
+ * silently contributing zero to a sweep.
+ */
+const RETENTION_FROM: Readonly<Record<string, string>> = Object.freeze({
+  code_run_turns: "code_run_turns t",
+  project_checkpoints: "project_checkpoints t",
+  code_run_states: "code_run_states t",
+  code_session_plans: "code_session_plans t",
+  code_goals: "code_goals t",
+  code_session_todos: "code_session_todos t",
+  code_session_rewinds: "code_session_rewinds t",
+  code_session_forks: "code_session_forks t",
+  code_user_questions: "code_user_questions t",
+  code_session_heads: "code_session_heads t",
+});
+
+/**
+ * The `project_checkpoints` predicate for an **erasure**, and the reason it is written as its own constant:
+ * this table is **shared**. `packages/workspace/src/migration-056.ts` created it before `code_project`
+ * existed, and `project.git.checkpoint` / `project.git.restore_checkpoint`
+ * (`packages/shared/src/project-git-capabilities.ts`) let any project type write a checkpoint — the Website
+ * Builder and Data Studio included. An erasure must therefore never delete a checkpoint without proving the
+ * project it belongs to is a `code_project`, and it does that in the **same statement** as the delete rather
+ * than by a separate lookup a concurrent reclassification could invalidate.
+ *
+ * This is the negative control the erasure's contract names: a checkpoint of a Website Builder project is not
+ * deleted "for any reason", and `tests/coding-agent-r1c-data-lifecycle-postgres.test.ts` measures it.
+ * `$1` is the Company id and `$2` the project id.
+ */
+const CODE_PROJECT_CHECKPOINT_PREDICATE =
+  "company_id=$1 AND project_id=$2 AND EXISTS (SELECT 1 FROM projects p WHERE p.id=project_checkpoints.project_id AND p.company_id=$1 AND p.type='code_project')";
+
+/**
+ * The shared-table guard for a **retention sweep**, expressed as a statement fragment with **no parameter of
+ * its own**.
+ *
+ * That is not a stylistic choice: the sweep's `$1`–`$7` are already taken (Company id, the four windows, "now"
+ * and the expirable classes), and a fragment that reused `$2` would ask PostgreSQL to compare a project id
+ * with the ephemeral window's integer — `operator does not exist: text = integer`. A guard that binds nothing
+ * cannot collide with the parameters of the statement it is appended to, whatever they become.
+ *
+ * It is applied to **every** family that carries a `project_id`, not only to `project_checkpoints`. Retention
+ * is a code feature, and the table that carries a project reference is the only place a non-code project could
+ * be reached through one: proving `type = 'code_project'` in the same statement as the delete is what makes
+ * "a Website Builder project is never expired" a structural fact rather than an assumption about which ids are
+ * passed. `EXISTS` on `projects.id` is a primary-key lookup, so the guard costs an index probe per candidate
+ * row and never a scan.
+ */
+const CODE_PROJECT_GUARD_FOR = (alias: string): string =>
+  `EXISTS (SELECT 1 FROM projects p WHERE p.id=${alias}.project_id AND p.company_id=${alias}.company_id AND p.type='code_project')`;
+
+/** `table → the age column`, used for the bound. `code_session_heads` ages by `updated_at` (it is a cursor). */
+const RETENTION_AGE_COLUMN: Readonly<Record<string, string>> = Object.freeze({
+  code_run_turns: "t.started_at",
+  project_checkpoints: "t.created_at",
+  code_run_states: "t.started_at",
+  code_session_plans: "t.created_at",
+  code_goals: "t.updated_at",
+  code_session_todos: "t.updated_at",
+  code_session_rewinds: "t.created_at",
+  code_session_forks: "t.created_at",
+  code_user_questions: "t.created_at",
+  code_session_heads: "t.updated_at",
+});
+
+/**
+ * Per-family extra predicate a **retention** sweep must satisfy before it deletes: the code-project guard for
+ * every family that carries a `project_id`. A family without an entry has no project reference to prove (a
+ * question points at a session, a turn at a run that belongs to a code session), so there is nothing to guard.
+ */
+const RETENTION_EXTRA_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  project_checkpoints: CODE_PROJECT_GUARD_FOR("t"),
+  code_run_states: CODE_PROJECT_GUARD_FOR("t"),
+  code_session_plans: CODE_PROJECT_GUARD_FOR("t"),
+  code_goals: CODE_PROJECT_GUARD_FOR("t"),
+  code_session_todos: CODE_PROJECT_GUARD_FOR("t"),
+  code_session_rewinds: CODE_PROJECT_GUARD_FOR("t"),
+  code_session_forks: CODE_PROJECT_GUARD_FOR("t"),
+});
+
+/**
+ * The shape every interpolated SQL fragment must have. It is a **guard against a future edit**, not against a
+ * caller: no identifier reaches these statements from outside this module (a caller supplies a Company id, a
+ * session id or a project id, all bound parameters), and the maps above are closed literals. Asserting the
+ * shape anyway means a fragment that somehow acquired a semicolon, a comment marker or a quote it should not
+ * have throws here instead of being concatenated into a statement, so the safety argument stays true as the
+ * maps grow.
+ */
+const SQL_FRAGMENT_SHAPE = /^[A-Za-z0-9_$.(),*=<>!:'\- ]+$/;
+
+function assertSqlFragment(fragment: string, what: string): string {
+  if (!SQL_FRAGMENT_SHAPE.test(fragment)) {
+    throw new CodeRunStateStoreError("code_data_lifecycle_sql_fragment_invalid", `The mapped ${what} is not a plain SQL fragment`);
+  }
+  return fragment;
+}
+
+/**
+ * The retention rule, as one SQL expression over the row's **own** class. `$2`–`$5` are the four windows
+ * (ephemeral, tool-result, transcript, extended) and `$6` is "now"; `$1` is the Company id (or `NULL` for the
+ * reaper's cross-tenant sweep) and `$7` the list of expirable classes. A class that is not in that list fails
+ * the `= ANY` test and is therefore never expired — which is how `until_deleted` means "until the user deletes
+ * it" rather than "the clock decides".
+ */
+const RETENTION_WINDOW_EXPR =
+  "($6::timestamptz - make_interval(days => CASE t.retention_class" +
+  " WHEN 'ephemeral' THEN $2::int WHEN 'short' THEN $3::int WHEN 'standard' THEN $4::int WHEN 'extended' THEN $5::int" +
+  " ELSE 2147483647 END))";
+
+/** The families an erasure deletes, keyed by table. Keys are exactly `CODE_RETENTION_FAMILIES`. */
+const ERASE_FROM: Readonly<Record<string, string>> = Object.freeze({
+  code_run_turns: "code_run_turns",
+  project_checkpoints: "project_checkpoints",
+  code_run_states: "code_run_states",
+  code_session_plans: "code_session_plans",
+  code_goals: "code_goals",
+  code_session_todos: "code_session_todos",
+  code_session_rewinds: "code_session_rewinds",
+  code_session_forks: "code_session_forks",
+  code_user_questions: "code_user_questions",
+  code_session_heads: "code_session_heads",
+});
+
+/** `table → the scope predicate for a delete` with `$1` the Company id and `$2` the session id. */
+const ERASE_SCOPE_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  // A turn is reached through its run: the turn row carries no session column, and reaching it by
+  // `company_id` alone would erase another session's turns in the same tenant.
+  code_run_turns: "company_id=$1 AND run_id IN (SELECT run_id FROM code_run_states WHERE company_id=$1 AND session_id=$2)",
+  // The shared-table predicate (see above): an erasure only removes a checkpoint whose project is a code
+  // project, so `DELETE …/code/projects/:id/data` on a Website Builder id removes nothing at all.
+  project_checkpoints: CODE_PROJECT_CHECKPOINT_PREDICATE,
+  code_run_states: "company_id=$1 AND session_id=$2",
+  code_session_plans: "company_id=$1 AND session_id=$2",
+  code_goals: "company_id=$1 AND session_id=$2",
+  code_session_todos: "company_id=$1 AND session_id=$2",
+  code_session_rewinds: "company_id=$1 AND session_id=$2",
+  code_session_forks: "company_id=$1 AND session_id=$2",
+  code_user_questions: "company_id=$1 AND session_id=$2",
+  code_session_heads: "company_id=$1 AND session_id=$2",
+});
+
+/**
+ * The same families for a **project-scoped** erasure, where the caller names a project rather than a session.
+ * Every row of the project is in scope — including the session-scoped ones, reached through `code_sessions` —
+ * but the two shared/derived shapes need their own statement:
+ *
+ *  - `code_run_turns` has no session column, so it is reached through `code_run_states` **joined to the
+ *    project** rather than through a session id that a project-scoped call does not have;
+ *  - `project_checkpoints` is the shared table, so the predicate still proves `code_project` in the same
+ *    statement as the delete (see `CODE_PROJECT_CHECKPOINT_PREDICATE`).
+ *
+ * `$1` is the Company id and `$2` the project id.
+ */
+const ERASE_PROJECT_SCOPE_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  code_run_turns: "company_id=$1 AND run_id IN (SELECT run_id FROM code_run_states WHERE company_id=$1 AND project_id=$2)",
+  project_checkpoints: CODE_PROJECT_CHECKPOINT_PREDICATE,
+  code_run_states: "company_id=$1 AND project_id=$2",
+  code_session_plans: "company_id=$1 AND project_id=$2",
+  code_goals: "company_id=$1 AND project_id=$2",
+  code_session_todos: "company_id=$1 AND project_id=$2",
+  code_session_rewinds: "company_id=$1 AND project_id=$2",
+  code_session_forks: "company_id=$1 AND project_id=$2",
+  code_user_questions: "company_id=$1 AND project_id=$2",
+  code_session_heads: "company_id=$1 AND project_id=$2",
+});
+
+/**
+ * A project whose sessions are gone keeps its approval rules: the rules are policy, not session content.
+ * Only the `session_id` binding of a session-scoped rule is cleared, so a rule that was scoped to the erased
+ * session stops pointing at a session that no longer exists while the project's policy survives.
+ */
+const ERASE_CLEAR_SESSION_REFERENCE: Readonly<Record<string, { table: string; column: string }>> = Object.freeze({
+  code_approval_rules: { table: "code_approval_rules", column: "session_id" },
+});
+
+/**
+ * The **code-owned, project-scoped** rows a whole-project erasure must not leave behind.
+ *
+ * They carry a `project_id` but not a session, so no family in `CODE_RETENTION_FAMILIES` reaches them, and
+ * relying on the `projects` foreign keys to cascade would be relying on an assumption: `deleteProject`'s
+ * cascades were written for the record's own lifecycle, not for this contract, and "the project's data is
+ * gone" has to be true for the policy, the trust decision, the mount confirmation, the approval rules, the
+ * deployments and the QA reports too. Each is deleted **and read back** so the report's `verified` covers it.
+ *
+ * They are deliberately absent from the retention families: policy and trust are not content that ages, and
+ * expiring a mount confirmation or an approval rule on a clock would change what the project is allowed to do.
+ *
+ * `code_approval_rules` is deliberately **not** in this list even though it carries a `project_id`: a
+ * session-scoped rule has a `session_id` and a `project_id`, so `project_id = $2` would delete a rule that
+ * belongs to another session of the same project. The rule rows follow the project record's own cascade when
+ * the project itself is removed, which is the mechanism the existing lifecycle already relies on.
+ */
+const PROJECT_SCOPED_ERASE_TABLES: readonly string[] = [
+  "code_project_data_policies",
+  "project_code_trust",
+  "project_mounted_folders",
+  "project_deployments",
+  "project_qa_reports",
+];
+
+/**
+ * The append-only families that carry their **own** age, so the rows retention *would* have expired can be
+ * counted honestly. `code_replay_bundle_steps` is deliberately absent: it has no timestamp and no retention
+ * class of its own, so it is counted through its header (`code_replay_bundles`, which carries both), and its
+ * own entry reports zero with the same reason rather than an invented number.
+ */
+const APPEND_ONLY_COUNTABLE: Readonly<Record<string, string>> = Object.freeze({
+  execution_snapshots: "execution_snapshots t",
+  code_replay_bundles: "code_replay_bundles t",
+  code_context_summaries: "code_context_summaries t",
+  code_run_recovery_notices: "code_run_recovery_notices t",
+  code_activity_events: "code_activity_events t",
+});
+
+/** `table → its retention age column`, for the append-only families that carry one. */
+const APPEND_ONLY_AGE_COLUMN: Readonly<Record<string, string>> = Object.freeze({
+  execution_snapshots: "t.created_at",
+  code_replay_bundles: "t.created_at",
+  code_context_summaries: "t.created_at",
+  code_run_recovery_notices: "t.created_at",
+  code_activity_events: "t.created_at",
+});
+
 
 const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id AS "ownerUserId", name,
   business_type AS "businessType", industry, niche, country, market, website, business_stage AS "businessStage",
@@ -1284,6 +1523,23 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const { runMigration086 } = await import("./migration-086");
         await runMigration086(client);
         await client.query("INSERT INTO schema_migrations(version) VALUES ('086_project_mounted_folders')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    // R1-C (item 13): classification and retention on the three families that had neither. Additive: 087 adds
+    // two NOT NULL columns **with defaults** (so an existing row, and an insert from a previous application
+    // version, keeps working), the established CHECK vocabulary, and one retention index per table. No
+    // previous version reads any of it, and no row changes meaning — which is what "expand only" has to mean
+    // for `project_checkpoints`, a table the Website Builder also writes.
+    const dataRetentionMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='087_code_data_retention'");
+    if (!dataRetentionMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration087 } = await import("./migration-087");
+        await runMigration087(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('087_code_data_retention')");
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
@@ -4417,5 +4673,291 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       payloadHash: String(row.payloadHash),
       createdAt: new Date(row.createdAt as string | Date),
     };
+  }
+
+  // --- R1-C (items 11–13): retention and erasure ------------------------------------------------------
+
+  /**
+   * The data-lifecycle port. It is a getter rather than a set of methods on the store so that the port's
+   * surface is exactly what the reaper and the erasure service are allowed to call: a caller cannot reach
+   * `this.pool` through it, and a future backend without the capability simply has no member here.
+   */
+  private readonly codeDataLifecyclePort: CodeDataLifecycleStore = {
+    planCodeDataRetention: (input) => this.planCodeDataRetention(input),
+    eraseCodeData: (input) => this.eraseCodeData(input),
+  };
+
+  /**
+   * Counts — and, unless this is a dry run, deletes — the code rows of one Company whose **own**
+   * `retention_class` names a window they have outlived.
+   *
+   * Two properties are load-bearing:
+   *
+   *  1. **Nothing is inferred.** The eligible tables are `CODE_RETENTION_FAMILIES`; a table that is missing
+   *     from the frozen identifier maps throws (`code_data_lifecycle_table_unmapped`) instead of silently
+   *     contributing nothing, so adding a family to the vocabulary cannot half-work.
+   *  2. **The append-only evidence is counted, never deleted, and reported as retained.** A retention pass
+   *     that reported zero for `execution_snapshots` would be indistinguishable from one that had purged it;
+   *     the `retained` count plus its reason is what makes the difference visible in the reaper's metrics.
+   *
+   * The count and the delete happen in one transaction, so an insert between them cannot make `purged`
+   * disagree with what was measured.
+   */
+  private async planCodeDataRetention(input: {
+    companyId?: string;
+    windows: CodeRetentionWindows;
+    now: Date;
+    dryRun: boolean;
+  }): Promise<CodeDataRetentionReport> {
+    const client = await this.pool.connect();
+    const families: CodeDataFamilyOutcome[] = [];
+    /**
+     * The tenant filter is part of every statement, not of a suffix a caller may forget: `$1` is either a
+     * Company id or `NULL` (the reaper's cross-tenant sweep), and `($1::text IS NULL OR …)` makes the two
+     * spellings one statement. Retention never runs without a tenant predicate, so a sweep cannot be widened
+     * into "every tenant's rows are one tenant's".
+     */
+    const tenant = input.companyId ?? null;
+    const windowParams = () => [
+      tenant,
+      input.windows.ephemeralDays,
+      input.windows.toolResultDays,
+      input.windows.transcriptDays,
+      input.windows.extendedDays,
+      input.now,
+      [...EXPIRABLE_RETENTION_CLASSES],
+    ];
+    try {
+      await client.query("BEGIN");
+      for (const family of CODE_RETENTION_FAMILIES) {
+        const mappedFrom = RETENTION_FROM[family.table];
+        const mappedAge = RETENTION_AGE_COLUMN[family.table];
+        if (!mappedFrom || !mappedAge) {
+          throw new CodeRunStateStoreError("code_data_lifecycle_table_unmapped", `No retention SQL is mapped for ${family.table}`);
+        }
+        const from = assertSqlFragment(mappedFrom, `FROM clause for ${family.table}`);
+        const ageColumn = assertSqlFragment(mappedAge, `age column for ${family.table}`);
+        const extra = RETENTION_EXTRA_PREDICATE[family.table];
+        const where =
+          `($1::text IS NULL OR t.company_id=$1) AND ${ageColumn} < ${RETENTION_WINDOW_EXPR}` +
+          ` AND t.retention_class = ANY($7::text[])` +
+          // The shared-table guard is part of the same statement as the delete, never a separate lookup: a
+          // checkpoint is only ever expired together with the proof that its project is a code project.
+          (extra ? ` AND ${extra}` : "");
+        const params = windowParams();
+        const counted = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${from} WHERE ${where}`, params);
+        const expired = Number(counted.rows[0]?.n ?? 0);
+        let purged = 0;
+        if (!input.dryRun && expired > 0) {
+          const removed = await client.query(`DELETE FROM ${from} WHERE ${where}`, params);
+          purged = removed.rowCount ?? 0;
+        }
+        families.push({ table: family.table, scope: family.scope, expired, purged, retained: 0 });
+      }
+      const retainedFamilies: CodeDataFamilyOutcome[] = [];
+      for (const family of CODE_APPEND_ONLY_EVIDENCE_FAMILIES) {
+        // The row's own age rule, exactly as for the erasable families — the only difference is that the
+        // matching rows are **counted and kept**, and the count is reported as `retained` with its reason so a
+        // pass can never look like a clean sweep of evidence it is forbidden to delete.
+        const mappedFrom = APPEND_ONLY_COUNTABLE[family.table];
+        const mappedAge = APPEND_ONLY_AGE_COLUMN[family.table];
+        if (!mappedFrom || !mappedAge) {
+          // A recording whose steps have no timestamp of their own is counted through its header, and its own
+          // entry says so with the same reason instead of inventing a number.
+          retainedFamilies.push({
+            table: family.table,
+            scope: family.scope,
+            expired: 0,
+            purged: 0,
+            retained: 0,
+            ...(family.retentionRefusal ? { retainedReason: family.retentionRefusal } : {}),
+          });
+          continue;
+        }
+        const from = assertSqlFragment(mappedFrom, `FROM clause for ${family.table}`);
+        const ageColumn = assertSqlFragment(mappedAge, `age column for ${family.table}`);
+        const where =
+          `($1::text IS NULL OR t.company_id=$1) AND ${ageColumn} < ${RETENTION_WINDOW_EXPR}` +
+          ` AND t.retention_class = ANY($7::text[])`;
+        const counted = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${from} WHERE ${where}`, windowParams());
+        const matched = Number(counted.rows[0]?.n ?? 0);
+        retainedFamilies.push({
+          table: family.table,
+          scope: family.scope,
+          expired: matched,
+          purged: 0,
+          retained: matched,
+          ...(family.retentionRefusal ? { retainedReason: family.retentionRefusal } : {}),
+        });
+      }
+      await client.query("COMMIT");
+      const all = [...families, ...retainedFamilies];
+      return {
+        companyId: input.companyId ?? "*",
+        windows: input.windows,
+        families: all,
+        expired: all.reduce((sum, entry) => sum + entry.expired, 0),
+        purged: all.reduce((sum, entry) => sum + entry.purged, 0),
+        retained: all.reduce((sum, entry) => sum + entry.retained, 0),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** The data-lifecycle port, or `undefined` when this backend cannot delete code data. */
+  get codeDataLifecycle(): CodeDataLifecycleStore | undefined {
+    return this.codeDataLifecyclePort;
+  }
+
+  /**
+   * Forgets one session's — or one whole code project's — data, then reads back what remains.
+   *
+   * The sequence is deliberate: **delete, then verify, in the same transaction**, so the `remaining` numbers
+   * are a measurement of the state the erasure left behind rather than of a later one. `verified` is
+   * `outstanding.length === 0`, and `outstanding` is computed from those measurements, so a caller cannot
+   * report success over a family that still holds rows.
+   *
+   * Scope: only the code tables and only the caller's Company. The shared `projects` table is read (to answer
+   * "was this a code project, and is it still there?") and, for `kind: "project"`, deleted — which is the
+   * existing `deleteProject` semantics the lifecycle route already uses, including its cascade. No NPATI table
+   * outside the code surface is touched.
+   */
+  private async eraseCodeData(input: {
+    companyId: string;
+    target: CodeDataErasureTarget;
+  }): Promise<CodeDataErasureReport> {
+    const target = input.target;
+    const key = target.kind === "session" ? target.sessionId : target.projectId;
+    const client = await this.pool.connect();
+    const families: CodeDataErasureOutcome[] = [];
+    const preserved: Array<{ table: string; reason: string }> = [];
+    try {
+      await client.query("BEGIN");
+      /**
+       * The project the project-scoped families are keyed by. For a session it is the session's own project —
+       * a checkpoint belongs to the project, so "everything of this session" includes the checkpoints taken
+       * while it ran. When the session row is already gone (a repeated erasure, which must stay idempotent) the
+       * project-scoped families are skipped rather than guessed.
+       */
+      let projectId: string | undefined = target.kind === "project" ? target.projectId : target.projectId;
+      if (target.kind === "session") {
+        const session = await client.query<{ project_id: string }>(
+          "SELECT project_id FROM code_sessions WHERE company_id=$1 AND id=$2",
+          [input.companyId, target.sessionId],
+        );
+        if ((session.rowCount ?? 0) > 0) projectId = session.rows[0]!.project_id;
+      }
+      const projectScoped = target.kind === "project";
+      /**
+       * The statement shape this erasure uses: a session names a session id, a project names a project id.
+       * `projectId` is undefined only when the named session could not be resolved, which the loop below turns
+       * into "skip the project-scoped families" rather than "delete from every project".
+       */
+      const scopeKey = projectScoped ? projectId : key;
+      const predicateSet = projectScoped ? ERASE_PROJECT_SCOPE_PREDICATE : ERASE_SCOPE_PREDICATE;
+      for (const family of CODE_RETENTION_FAMILIES) {
+        const boundKey = family.scope === "project" && !projectScoped ? projectId : scopeKey;
+        // A project-scoped family with no known project is not this erasure's business: skipping it is what
+        // keeps a repeated session erasure from deleting every checkpoint of a project it cannot identify.
+        if (boundKey === undefined) continue;
+        const mappedTable = ERASE_FROM[family.table];
+        const mappedPredicate = predicateSet[family.table];
+        if (!mappedTable || !mappedPredicate) {
+          throw new CodeRunStateStoreError("code_data_lifecycle_table_unmapped", `No erasure SQL is mapped for ${family.table}`);
+        }
+        const table = assertSqlFragment(mappedTable, `table for ${family.table}`);
+        const predicate = assertSqlFragment(mappedPredicate, `scope predicate for ${family.table}`);
+        const removed = await client.query(`DELETE FROM ${table} WHERE ${predicate}`, [input.companyId, boundKey]);
+        // Read back in the same transaction: this is the measurement the report's `verified` is computed from.
+        const left = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${table} WHERE ${predicate}`, [input.companyId, boundKey]);
+        families.push({
+          table: family.table,
+          scope: family.scope,
+          expired: removed.rowCount ?? 0,
+          purged: removed.rowCount ?? 0,
+          retained: 0,
+          remaining: Number(left.rows[0]?.n ?? 0),
+        });
+      }
+      // The session rows themselves. For a session erasure the targeted session is deleted **after** the
+      // families above, because several of their predicates reach the run rows through `code_run_states` —
+      // deleting it first would leave those rows unreachable and therefore unverified. For a project erasure
+      // every session of the project goes: a project whose sessions survived would still answer a session list,
+      // and "the project's data is gone" would be false in the one place a caller looks first. The cascade from
+      // `code_sessions` removes the heads and goals that have a foreign key to it; the rest were erased above.
+      const sessionsRemoved = target.kind === "session"
+        ? await client.query("DELETE FROM code_sessions WHERE company_id=$1 AND id=$2 RETURNING id", [input.companyId, key])
+        : await client.query("DELETE FROM code_sessions WHERE company_id=$1 AND project_id=$2 RETURNING id", [input.companyId, target.projectId]);
+      // A session-scoped approval rule is a reference, not content: the binding is cleared so the rule stops
+      // pointing at a session that no longer exists, and the project's policy survives.
+      if (target.kind === "session") {
+        for (const reference of Object.values(ERASE_CLEAR_SESSION_REFERENCE)) {
+          await client.query(
+            `UPDATE ${assertSqlFragment(reference.table, "reference table")} SET ${assertSqlFragment(reference.column, "reference column")}=NULL` +
+            " WHERE company_id=$1 AND " + `${assertSqlFragment(reference.column, "reference column")}=$2`,
+            [input.companyId, key],
+          );
+        }
+      }
+      /**
+       * The rest of a whole project's code-owned rows. They are erased **after** the families, because their
+       * predicates are independent of the run/turn subqueries, and each one is read back so the answer's
+       * `outstanding` covers them: a project erasure that left its approval rules or its mount confirmation
+       * behind would be a partial erasure reported as a complete one.
+       */
+      if (projectScoped) {
+        for (const name of PROJECT_SCOPED_ERASE_TABLES) {
+          const table = assertSqlFragment(name, "project-scoped table");
+          const predicate = assertSqlFragment("company_id=$1 AND project_id=$2", "project-scoped predicate");
+          const removed = await client.query(`DELETE FROM ${table} WHERE ${predicate}`, [input.companyId, key]);
+          const left = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${table} WHERE ${predicate}`, [input.companyId, key]);
+          families.push({
+            table,
+            scope: "project",
+            expired: removed.rowCount ?? 0,
+            purged: removed.rowCount ?? 0,
+            retained: 0,
+            remaining: Number(left.rows[0]?.n ?? 0),
+          });
+        }
+      }
+      // The append-only evidence is named in the report on purpose: a caller must be able to see that the
+      // erasure was complete for the erasable data **and** that this evidence was deliberately not part of it.
+      for (const family of CODE_APPEND_ONLY_EVIDENCE_FAMILIES) {
+        preserved.push({ table: family.table, reason: family.retentionRefusal ?? "append_only_evidence" });
+      }
+      await client.query("COMMIT");
+      /**
+       * The session rows are part of the measurement too. A session erasure names one session and a project
+       * erasure names all of its sessions, and a project whose session rows survived would still answer a
+       * session list — so "nothing left" has to include them or the verification would be narrower than the
+       * erasure it is supposed to prove.
+       */
+      const sessionsLeft = await client.query<{ n: string }>(
+        "SELECT count(*)::bigint AS n FROM code_sessions WHERE company_id=$1 AND " +
+          (target.kind === "session" ? "id=$2" : "project_id=$2"),
+        [input.companyId, key],
+      );
+      const outstanding = families.filter((entry) => entry.remaining > 0).map((entry) => entry.table);
+      if (Number(sessionsLeft.rows[0]?.n ?? 0) > 0) outstanding.push("code_sessions");
+      return {
+        companyId: input.companyId,
+        target,
+        families,
+        erased: families.reduce((sum, entry) => sum + entry.purged, 0) + (sessionsRemoved.rowCount ?? 0),
+        outstanding,
+        preserved,
+        verified: outstanding.length === 0,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
