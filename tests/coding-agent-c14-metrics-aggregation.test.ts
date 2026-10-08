@@ -557,7 +557,15 @@ describe("[C14] [security-gate] the metrics route serves the aggregator's number
   });
 
   it("is registered in the security gate and wired in the composed application", () => {
-    const gate = readFileSync(new URL("../scripts/run-security-gate.mjs", import.meta.url), "utf8");
+    // G1 (item 5): the fixed list moved into the library, because a suite must import plain JavaScript — the
+    // executable wrapper's shebang was the defect that made eight gate suites unloadable outside this layout.
+    // Pinning only the library would let the wrapper stop re-exporting it (the gate CI and `package.json` name
+    // the wrapper), so both sides of the split are pinned: the wrapper must reach the library, and the library
+    // must carry this suite. Reading the wrapper for the list is what used to pass by accident.
+    const wrapper = readFileSync(new URL("../scripts/run-security-gate.mjs", import.meta.url), "utf8");
+    expect(wrapper).toContain('export * from "./lib/run-security-gate.mjs"');
+    expect(wrapper).toContain('export { main } from "./lib/run-security-gate.mjs"');
+    const gate = readFileSync(new URL("../scripts/lib/run-security-gate.mjs", import.meta.url), "utf8");
     expect(gate).toContain("tests/coding-agent-c14-metrics-aggregation.test.ts");
     const app = readFileSync(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
     // A route module that is never registered is a surface nobody can reach: the composition is part of the

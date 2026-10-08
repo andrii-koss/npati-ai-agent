@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
+import { SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
 import {
   IN_MEMORY_CONTROLS_SUITE,
   MUTATION_CONTROLS_PATH,
@@ -11,7 +11,7 @@ import {
   loadMutationControls,
   renderMutation,
   validateMutationControls,
-} from "../scripts/mutation-controls-check.mjs";
+} from "../scripts/lib/mutation-controls-check.mjs";
 import {
   GATE_IGNORED_RESOURCES,
   MUTATION_ARTIFACT_PATH,
@@ -62,7 +62,12 @@ import {
  */
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const GATE_SCRIPT_PATH = "scripts/run-security-gate.mjs";
+/**
+ * G1 (item 5): the gate's implementation is the library `scripts/lib/run-security-gate.mjs`; the path
+ * `scripts/run-security-gate.mjs` is the thin executable wrapper that owns the shebang. This suite scans the
+ * **implementation**, because that is where the guard calls and their order relative to vitest live.
+ */
+const GATE_SCRIPT_PATH = "scripts/lib/run-security-gate.mjs";
 const BRANCH_SUITE_PATH = "tests/coding-agent-c14-mutation-branch-controls.test.ts";
 
 function readRepoFile(relativePath: string): string {

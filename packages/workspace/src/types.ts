@@ -1461,6 +1461,16 @@ export class ProviderDataPolicyStoreError extends WorkspaceAccessError {
 
 export interface WorkspaceStore {
   initialize(context?: AuthContext): Promise<void>;
+  /**
+   * G1 (item 2): releases the resources the store owns — for the PostgreSQL implementation the connection
+   * pool it created and that nothing else owns (`apps/agent-api/src/app.ts` closes it **last** in `onClose`,
+   * because `ApiKeysRepository`, `ScopedMemoryEngine` and `GuardrailPolicyRepository` borrow that pool).
+   *
+   * Optional on purpose: a store without owned resources (the in-memory one) has nothing to release, so a
+   * caller must write `close?.()`. Closing is idempotent from the caller's side — `pg`'s `Pool.end()`
+   * resolves when it has already been ended — so a shutdown path and a test can both call it.
+   */
+  close?(): Promise<void>;
   getUserSetting(context: AuthContext, key: string): Promise<UserSetting | null>;
   setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number): Promise<UserSetting | null>;
   health(): Promise<"ok" | "unavailable">;

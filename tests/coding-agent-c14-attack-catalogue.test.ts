@@ -7,8 +7,8 @@ import {
   itTitlesIn,
   loadAttackCatalogue,
   validateAttackCatalogue,
-} from "../scripts/attack-catalogue-check.mjs";
-import { SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
+} from "../scripts/lib/attack-catalogue-check.mjs";
+import { SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
 import { HARD_DENY_RULES, classifyShellCommand } from "../apps/agent-api/src/code-shell-classifier";
 
 /**

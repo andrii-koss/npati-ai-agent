@@ -29,8 +29,10 @@
     "cert:scale:up": "docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d scale-api-a scale-api-b",
     "cert:scale:down": "docker compose -f docker-compose.yml -f docker-compose.scale.yml rm -s -f scale-api-a scale-api-b",
     "gate:upgrade": "node scripts/upgrade-gate.mjs",
+    "gate:upgrade:db": "node scripts/upgrade-gate.mjs --db",
     "gate:agent": "tsx scripts/execute-agent-mediated-gate.mjs",
     "security-gate": "node scripts/run-security-gate.mjs",
+    "security-gate:db": "node scripts/run-security-gate.mjs --db",
     "mutation:branch": "node scripts/security-gate-mutation-branch.mjs",
     "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
     "docker:config": "docker compose config --quiet"

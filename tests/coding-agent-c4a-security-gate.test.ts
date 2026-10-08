@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { evaluateVitestReport, findEmptySuites, findMissingSuites, suiteKey, SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
+import { evaluateVitestReport, findEmptySuites, findMissingSuites, suiteKey, SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
+import { runWithCleanup } from "./support/run-with-cleanup";
 
 /**
  * C4a: the mandatory security-gate job must be strict about the rule "security-gate tests are never
@@ -99,5 +100,40 @@ describe("security-gate: C4a gate verdict", () => {
     expect(evaluateVitestReport({ numPassedTests: 3, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 })).toMatchObject({ ok: true });
     expect(findMissingSuites(fewerTests, configured)).toEqual([]);
     expect(findEmptySuites(fewerTests)).toEqual([]);
+  });
+});
+
+/**
+ * G1 (item 2): the gate's own evidence. A `finally` that throws replaces the exception propagating out of `try`,
+ * so a broken teardown in a DB-backed suite reported **itself** instead of the assertion that had just failed —
+ * `tests/coding-agent-c1c-audit-postgres.test.ts` was read for nine escalated runs as
+ * `TypeError: store.close is not a function`, the teardown, while the real defect stayed invisible.
+ *
+ * `runWithCleanup` is what that suite now uses. These two cases pin the property hermetically, so it is asserted
+ * on every `npm run security-gate` run — including one with no database at all, where the suite it protects is
+ * skipped.
+ */
+describe("security-gate: G1 the teardown cannot replace the verdict", () => {
+  it("throws the body's error when the cleanup fails too, and names both", async () => {
+    const bodyFailure = new Error("the assertion that explains the test");
+    const cleanupFailure = new Error("store.close is not a function");
+    const thrown: unknown = await runWithCleanup(
+      async () => { throw bodyFailure; },
+      async () => { throw cleanupFailure; },
+    ).then(() => null, (error: unknown) => error);
+
+    // Identity, not a message match: the error the reader sees is the body's own error object.
+    expect(thrown).toBe(bodyFailure);
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain("the assertion that explains the test");
+    // …and the cleanup failure is appended rather than dropped, so the second defect is still visible.
+    expect(message).toContain("store.close is not a function");
+  });
+
+  it("returns the body's value when both succeed, and reports a cleanup-only failure", async () => {
+    expect(await runWithCleanup(async () => 7, async () => undefined)).toBe(7);
+    const cleanupOnly: unknown = await runWithCleanup(async () => "ok", async () => { throw new Error("pool.end failed"); })
+      .then(() => null, (error: unknown) => error);
+    expect(String(cleanupOnly)).toContain("pool.end failed");
   });
 });

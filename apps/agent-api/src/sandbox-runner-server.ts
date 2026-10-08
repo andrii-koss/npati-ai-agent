@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure } from "./sandbox-runner-diagnostics";
 import { SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
-import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type WorkspaceStore } from "@npati/workspace";
+import { InMemoryWorkspaceStore, PostgresWorkspaceStore } from "@npati/workspace";
+import { resolveRunnerStore } from "./sandbox-runner-store";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
 import { dockerEgressProbe, resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
@@ -29,20 +30,23 @@ import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
  * trusting the path an API sent — that read is what makes the TOCTOU re-validation an independent check rather
  * than a echo of the caller. Without a database the runner's store is the in-memory fallback, which cannot
  * contain an API-confirmed mount, so it mounts nothing (fail closed).
+ *
+ * G1 (item 4): resolving that store is `resolveRunnerStore`, which keeps the reason a failed migration
+ * initialization gave (`runnerStoreResolution.failure`) instead of logging it once and carrying on with a store
+ * that cannot answer. `imageAdmission` refuses with `runner_store_unavailable` while that reason is set, so no
+ * container is created from a catalogue the runner cannot read.
  */
-async function createRunnerStore(): Promise<{ store: WorkspaceStore; database: boolean }> {
-  const databaseUrl = process.env.DATABASE_URL ?? process.env.NPATI_DATABASE_URL;
-  if (databaseUrl) {
-    const postgres = new PostgresWorkspaceStore(databaseUrl);
-    await postgres.initialize().catch((error) => console.error(`[sandbox-image-policy] database unavailable ${error instanceof Error ? error.message : ""}`));
-    return { store: postgres, database: true };
-  }
-  const memory = new InMemoryWorkspaceStore();
-  await memory.initialize();
-  console.warn("[sandbox-image-policy] DATABASE_URL is not set: image revocations from the API are not visible to this runner");
-  return { store: memory, database: false };
-}
-const runnerStore = createRunnerStore();
+const runnerStoreResolution = resolveRunnerStore({
+  databaseUrl: process.env.DATABASE_URL ?? process.env.NPATI_DATABASE_URL,
+  createPostgresStore: (databaseUrl) => new PostgresWorkspaceStore(databaseUrl),
+  createMemoryStore: () => new InMemoryWorkspaceStore(),
+  report: (notice) => {
+    const line = `[sandbox-image-policy] ${JSON.stringify(notice)}`;
+    if (notice.event === "runner_store_unavailable") console.error(line);
+    else console.warn(line);
+  },
+});
+const runnerStore = runnerStoreResolution.then((resolution) => ({ store: resolution.store, database: resolution.database }));
 async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
   const config = sandboxImagePolicyConfig(process.env);
   const { store } = await runnerStore;
@@ -52,7 +56,24 @@ async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
   });
 }
 const runnerImagePolicy = createRunnerImagePolicy();
-const imageAdmission: SandboxImageAdmission = { admit: async (context, input) => (await runnerImagePolicy).admit(context, input) };
+const imageAdmission: SandboxImageAdmission = {
+  admit: async (context, input) => {
+    // G1 (item 4): fail closed. A store whose migration chain could not be initialized answers neither the
+    // catalogue nor the revocation list, so admitting an image through it would be an admission decided by a
+    // failure. The reason travels in the error, and `DockerSandboxProvider.admitImage` turns it into a structured
+    // refusal carrying this code and this message.
+    const resolution = await runnerStoreResolution;
+    if (resolution.failure !== null) {
+      throw new SandboxProviderError(
+        "runner_store_unavailable",
+        `Sandbox image admission is unavailable: the runner's workspace store could not be initialized (${resolution.failure})`,
+        503,
+        "image_admission",
+      );
+    }
+    return (await runnerImagePolicy).admit(context, input);
+  },
+};
 
 /**
  * C15: the runner's mount gate. It reads the allowlist **itself** (the store above, with no user context) and

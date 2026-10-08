@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { GATE_ARTIFACT_PATH, SECURITY_GATE_TESTS, writeGateArtifact } from "../scripts/run-security-gate.mjs";
+import { GATE_ARTIFACT_PATH, SECURITY_GATE_TESTS, writeGateArtifact } from "../scripts/lib/run-security-gate.mjs";
 import {
   LINT_RULES,
   RECORDED_ALLOWANCES,
@@ -12,7 +12,7 @@ import {
   runSelfTest,
   scanLintSources,
   scanText,
-} from "../scripts/lint-guard.mjs";
+} from "../scripts/lib/lint-guard.mjs";
 
 /**
  * C14 (hardening): the two gates this step added or repaired are themselves pinned as artifacts.
@@ -484,6 +484,43 @@ describe("[C14] [security-gate] the CI workflow's gate structure is intact and i
     expect(rootConfig).toContain('"tests/**/*.test.ts"');
   });
 
+  it("runs the database half of the mandatory gate as its own job, over the production PostgreSQL image", () => {
+    /**
+     * G1 (item 2 / D1). The database-level audit guarantees cannot be proven without PostgreSQL, while the
+     * hermetic `security-gate` job must stay runnable where there is none — and it fails a run that reports a
+     * skipped test, so a database suite cannot simply be added to its list. This job is the answer: a second
+     * mandatory job whose connection string is always set, whose steps run the two database scripts, and which the
+     * release gate `needs`. Pinned here so it cannot be dropped, softened or made conditional without a red suite.
+     */
+    const job = blocks["security-gate-db"] ?? "";
+    // The production image, because migration 014 runs `CREATE EXTENSION IF NOT EXISTS vector`.
+    expect(job).toContain("image: pgvector/pgvector:pg17");
+    expect(job).toContain("pg_isready");
+    expect(job).toContain("DATABASE_URL: postgres://");
+    // Both halves of the database gate, each invoked through its own script (never inline).
+    expect(job).toContain("run: npm run security-gate:db");
+    expect(job).toContain("run: npm run gate:upgrade:db");
+    expect(commands.filter((command) => command === "npm run security-gate:db")).toHaveLength(1);
+    expect(commands.filter((command) => command === "npm run gate:upgrade:db")).toHaveLength(1);
+    // Unconditional, like the hermetic job: no `if:`, no path filter, no soft failure.
+    expect(/^\s*if:/m.test(job)).toBe(false);
+    expect(job).not.toContain("continue-on-error");
+    expect(/^\s*paths:/m.test(job)).toBe(false);
+    // A run that produced no verdict artifact fails, so the job's evidence is mandatory on both scripts.
+    expect(job).toContain("artifacts/security-gate-db-report.json");
+    expect(job).toContain("artifacts/upgrade-gate-db-report.json");
+    expect(job).toContain("if-no-files-found: error");
+
+    const pkg = JSON.parse(readFileSync(path.join(workspaceRoot, "package.json"), "utf8"));
+    expect(pkg.scripts["security-gate:db"]).toBe("node scripts/run-security-gate.mjs --db");
+    expect(pkg.scripts["gate:upgrade:db"]).toBe("node scripts/upgrade-gate.mjs --db");
+
+    // The database gate blocks the release beside the hermetic one — "mandatory" is `needs`, not a job name.
+    const release = blocks["release-gate"] ?? "";
+    const needs = /needs:\s*\[([^\]]*)\]/.exec(release)?.[1]?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+    expect(needs).toContain("security-gate-db");
+  });
+
   it("keeps the eval smoke a hermetic reuse of the existing corpus, not a second runner", () => {
     const pkg = JSON.parse(readFileSync(path.join(workspaceRoot, "package.json"), "utf8"));
     expect(pkg.scripts["eval:smoke"]).toContain("tests/coding-agent-c6-eval.test.ts");
@@ -538,12 +575,15 @@ describe("[G1] [security-gate] no workflow in this repository has an automatic t
   it("keeps every job and step, and keeps each removed trigger as a machine-readable re-enable recipe", () => {
     // "CI is off" must not become "the CI configuration was deleted": the jobs of `ci.yml` are still all there,
     // and every workflow still says in code-adjacent prose exactly which triggers it lost.
+    // G1 (item 2 / D1): `security-gate-db` is added, not substituted — the five jobs that shipped stay, and the
+    // database half of the mandatory gate is pinned as its own job rather than folded into the hermetic one.
     expect(Object.keys(jobBlocks(ciCode)).sort()).toEqual([
       "docker",
       "evals",
       "platform",
       "release-gate",
       "security-gate",
+      "security-gate-db",
     ]);
     for (const [file, source] of WORKFLOW_SOURCES) {
       expect(Object.keys(jobBlocks(codeLines(source))).length, file).toBeGreaterThan(0);

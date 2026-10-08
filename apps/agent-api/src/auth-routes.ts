@@ -1,9 +1,29 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { NpatiAuthClient } from "@npati/hub-connector";
-import type { WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import { AuthenticationError, createMockNpatiJwt } from "./auth";
 import { OidcDashboardGate } from "./security-guardrails-and-tokens";
+
+/**
+ * G1 (item 4): the workspace store's lazy initialization on the registration/login path.
+ *
+ * Both handlers swallowed the failure in an empty `catch` block, so a store that could not be initialized — a
+ * missing table, an unreachable database, a failed migration chain — left the caller with `success: true` and left
+ * **nothing** anywhere saying why their next request would fail. The response contract is deliberately unchanged
+ * (the account was created upstream, so failing the response would misreport a registration that really happened);
+ * what the caller and the operator now get is the reason, with the workspace it belongs to.
+ */
+async function initializeWorkspaceFor(context: AuthContext, workspaceStore: WorkspaceStore, request: FastifyRequest): Promise<void> {
+  try {
+    await workspaceStore.initialize(context);
+  } catch (error) {
+    request.log.error(
+      { err: error, workspaceId: context.workspaceId, code: "workspace_store_init_failed" },
+      "Workspace store initialization failed after authentication succeeded",
+    );
+  }
+}
 
 export interface AuthRoutesOptions {
   authClient?: NpatiAuthClient;
@@ -93,11 +113,7 @@ export function registerAuthRoutes(
         permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"],
       };
 
-      try {
-        await workspaceStore.initialize(authContext);
-      } catch {
-        // Workspace store lazy initialization
-      }
+      await initializeWorkspaceFor(authContext, workspaceStore, request);
 
       const userPayload = {
         id: user.id,
@@ -169,11 +185,7 @@ export function registerAuthRoutes(
         permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"],
       };
 
-      try {
-        await workspaceStore.initialize(authContext);
-      } catch {
-        // Workspace store lazy initialization
-      }
+      await initializeWorkspaceFor(authContext, workspaceStore, request);
 
       const userPayload = {
         id: user.id,

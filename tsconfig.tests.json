@@ -57,6 +57,16 @@
     // with the suites themselves, so they are type-clean by construction rather than by hope.
     "tests/coding-agent-c15-mount-sandbox.test.ts",
     "tests/coding-agent-c15-mounted-workspace.test.ts",
+    // G1 (item 2 and 3): the two suites of the **database** gate, added here together with the suites
+    // themselves — the same rule every other suite in this list follows. They are skipped by `npm test` (they
+    // require `DATABASE_URL` and the `NPATI_SECURITY_GATE_DB=1` marker their gate scripts set), and the type gate
+    // is what keeps their connection/cleanup code honest while they cannot run on a machine without PostgreSQL.
+    "tests/coding-agent-c1c-audit-postgres.test.ts",
+    "tests/coding-agent-g1-migrations-postgres.test.ts",
+    // G1 (item 5): the clean-clone prerequisite suite, added here together with the suite itself — the same rule
+    // every other suite in this list follows. It generates datasets into temporary trees, so the type gate is
+    // what keeps its path handling honest.
+    "tests/coding-agent-g1-clean-clone-prerequisites.test.ts",
     "tests/control-plane-ui-and-revisions.test.ts",
     "tests/full-capability-regression.test.ts",
     "tests/invariants-and-anti-patterns.test.ts",

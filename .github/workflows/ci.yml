@@ -121,6 +121,63 @@ jobs:
           path: artifacts/security-gate-report.json
           if-no-files-found: error
 
+  # G1 (item 2 / D1): the **database-backed** half of the gate. "The audit journal is append-only at the database
+  # level" cannot be proven without PostgreSQL, and the hermetic `security-gate` job must stay runnable on a machine
+  # that has none — so the database suites are a second, mandatory job with their own lists
+  # (`SECURITY_GATE_DB_TESTS`, `UPGRADE_GATE_DB_TESTS`) and their own scripts, rather than entries added to the
+  # hermetic list (which fails a run that reports a skipped test, and would therefore go red everywhere without a
+  # database). This job has no `if:` and no `continue-on-error`, and `release-gate` `needs` it, so a red database
+  # gate blocks the release exactly as the hermetic one does.
+  security-gate-db:
+    name: Security gate DB (SG-1 / D1)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        # The same image docker-compose.yml uses for the application database: migration 014 runs
+        # `CREATE EXTENSION IF NOT EXISTS vector`, so a plain `postgres` image cannot apply the chain at all
+        # (which is exactly how an earlier escalated run "found" a break at migration 014 that did not exist).
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: npati
+          POSTGRES_PASSWORD: npati
+          POSTGRES_DB: npati_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U npati -d npati_agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    # Set for **every** step of this job: neither database script skips when it is missing, it fails with that
+    # reason, so a run that cannot see a database is red instead of being silently reduced to zero executed tests.
+    env:
+      DATABASE_URL: postgres://npati:npati@127.0.0.1:5432/npati_agent
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: npm ci
+      # D1: the append-only journal measured under the **application role**, not under the superuser this
+      # connection string names — UPDATE/DELETE refused while that role holds the privilege, a rogue INSERT that
+      # would fork the chain refused, `verifyChain` detecting an out-of-band edit, and the trigger proven
+      # load-bearing by removing it.
+      - run: npm run security-gate:db
+      # The migration chain on a real, clean database: exactly the registered set is applied, a second run changes
+      # `schema_migrations` by nothing, and an older database is brought forward.
+      - run: npm run gate:upgrade:db
+      - name: Keep the database gate verdicts as evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-gate-db-report
+          path: |
+            artifacts/security-gate-db-report.json
+            artifacts/upgrade-gate-db-report.json
+          if-no-files-found: error
+
   platform:
     name: Node 22 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -225,7 +282,9 @@ jobs:
     # G1 (D6): so does `security-gate`. It was missing from this list, which meant a release could go out
     # green while the mandatory security gate was red — the one job whose failure the project treats as
     # non-negotiable blocked nothing.
-    needs: [platform, docker, evals, security-gate]
+    # G1 (item 2 / D1): and so does `security-gate-db` — the database-level audit guarantees are the reason this
+    # step exists, so they block the release beside the hermetic half rather than living in a job nobody needs.
+    needs: [platform, docker, evals, security-gate, security-gate-db]
     steps:
       - uses: actions/checkout@v7
         with:

@@ -1,9 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { CAPABILITY_MATRIX, CAPABILITY_CATALOG } from "@npati/shared";
 import { OmniRouteEngine } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { AuthContext } from "@npati/workspace";
+import { checkMigrationRegistry, readMigrationRegistry, validateMigrationRegistry } from "../scripts/migration-registry-check.mjs";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
+
+/**
+ * G1 (item 3): the migration facts are read from the repository, not remembered in this file. The chain check is
+ * the same module the upgrade gate's static step uses, so the suite and the gate cannot hold two ideas of what
+ * the chain is.
+ */
+const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   describe("Upgrade Sandbox & Version Compatibility Matrix", () => {
@@ -489,6 +499,10 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
   });
 
   describe("Database Migration Idempotency & Rollback Path", () => {
+    // The in-memory store below proves the store's restart contract. What no in-memory double can prove — the
+    // registered set really applied to a **clean PostgreSQL**, a second `initialize()` that changes nothing, and
+    // the DDL of the last migrations being re-runnable — lives in the database half of the upgrade gate
+    // (`tests/coding-agent-g1-migrations-postgres.test.ts`, run by `npm run gate:upgrade:db`).
     it("proves migration execution is fully idempotent and safe across repeated runs", async () => {
       const store = new InMemoryWorkspaceStore();
       await store.initialize();
@@ -506,17 +520,56 @@ describe("PHASE 13: Upgrade Compatibility and Release Gate", () => {
       expect(comp.id).toBeDefined();
     });
 
-    it("validates that schema versioning maintains forward-audit and rollback readiness", () => {
-      const TOTAL_MIGRATIONS = 24;
-      const appliedMigrations: string[] = [];
+    it("pins the real migration chain: every registered version has its file, its guard and its insert", () => {
+      // The test this replaces asserted that `migration-001..024.ts` exist, because 24 was the chain length when
+      // it was written — and then kept passing for the next 62 migrations, exactly like the sentence
+      // `scripts/upgrade-gate.mjs` printed beside it. The facts are now read from the repository (files,
+      // registration, guards, inserts) instead of being copied into the test, so no number here can go stale.
+      const registry = checkMigrationRegistry(workspaceRoot);
+      expect(registry.issues).toEqual([]);
+      expect(registry.ok).toBe(true);
+      const { files, registered, guarded, inserted } = registry.versions;
+      expect(files.length).toBeGreaterThan(0);
+      expect(files[0]).toBe("001");
+      expect(registered.length).toBe(files.length);
+      expect(registered.map((version) => version.slice(0, 3))).toEqual(files);
+      expect([...guarded].sort()).toEqual([...registered].sort());
+      expect([...inserted].sort()).toEqual([...registered].sort());
+    });
 
-      for (let m = 1; m <= TOTAL_MIGRATIONS; m++) {
-        appliedMigrations.push(`migration-${m.toString().padStart(3, "0")}`);
-      }
+    it("is not vacuous: dropping one registration pair, or one migration file, is reported", () => {
+      const { storeSource, migrationFiles } = readMigrationRegistry(workspaceRoot);
+      const untouched = validateMigrationRegistry({ storeSource, migrationFiles });
+      expect(untouched.ok).toBe(true);
 
-      expect(appliedMigrations.length).toBe(24);
-      expect(appliedMigrations[0]).toBe("migration-001");
-      expect(appliedMigrations[23]).toBe("migration-024");
+      // One registration line deleted: the file still exists, the insert does not.
+      const droppedInsert = storeSource.replace(
+        "INSERT INTO schema_migrations(version) VALUES ('086_project_mounted_folders')",
+        "SELECT 1",
+      );
+      expect(droppedInsert).not.toBe(storeSource);
+      const insertVerdict = validateMigrationRegistry({ storeSource: droppedInsert, migrationFiles });
+      expect(insertVerdict.ok).toBe(false);
+      expect(insertVerdict.issues.map((issue) => issue.code)).toContain("migration_registration_insert_missing");
+
+      // One version pair removed from the guard side as well.
+      const droppedGuard = storeSource.replace(
+        "SELECT 1 FROM schema_migrations WHERE version='085_mcp_tool_policies'",
+        "SELECT 1 FROM schema_migrations WHERE version='085_removed'",
+      );
+      expect(droppedGuard).not.toBe(storeSource);
+      expect(validateMigrationRegistry({ storeSource: droppedGuard, migrationFiles }).ok).toBe(false);
+
+      // One migration module deleted: the chain has a hole, which is reported as a gap and not as a shorter list.
+      const fileVerdict = validateMigrationRegistry({
+        storeSource,
+        migrationFiles: migrationFiles.filter((file) => file !== "migration-042.ts"),
+      });
+      expect(fileVerdict.ok).toBe(false);
+      expect(fileVerdict.issues.map((issue) => issue.code)).toContain("migration_chain_gap");
+
+      // …and the unmutated input is still green, so the mutation — not the fixture — is what turned it red.
+      expect(validateMigrationRegistry({ storeSource, migrationFiles }).ok).toBe(true);
     });
   });
 

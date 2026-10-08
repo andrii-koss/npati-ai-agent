@@ -15,8 +15,8 @@ import {
   parseKnownFailures,
   unevaluatedSuites,
   type KnownFailureEntry,
-} from "../scripts/check-known-failures.mjs";
-import { failedTests, formatFailedTests } from "../scripts/run-security-gate.mjs";
+} from "../scripts/lib/check-known-failures.mjs";
+import { failedTests, formatFailedTests } from "../scripts/lib/run-security-gate.mjs";
 
 /**
  * C14 (owner decision 1): the quarantine gate itself is pinned, and the pinned list is the real baseline.
