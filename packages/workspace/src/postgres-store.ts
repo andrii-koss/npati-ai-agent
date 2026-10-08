@@ -96,8 +96,32 @@ const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "compan
   const projectMountedFolderColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
   path, mode, confirmed_by AS "confirmedBy", confirmed_at AS "confirmedAt", revoked_by AS "revokedBy", revoked_at AS "revokedAt",
   reason, revision, updated_at AS "updatedAt"`;
-  const auditEntryColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", sequence,
-  created_at AS "createdAt", actor, actor_role AS "actorRole", request_id AS "requestId",
+  /**
+   * G1 (D1): the **read** form of an audit entry has to reproduce, byte for byte, the value that
+   * `appendAuditEntry` hashed — `audit-chain.ts` hashes the material with `canonicalJson`, which renders
+   * anything that is not a primitive through `Object.entries`. Two columns did not survive that round trip
+   * and made `verifyAuditEntries` answer `entry_hash does not match the entry content` for **every** real
+   * entry — a false CRITICAL that `AuditLogService` then blocked privileged writes on:
+   *
+   *  - `created_at` came back as a JavaScript `Date`, and `canonicalJson` renders a `Date` as `{}`, so an
+   *    entry could never match its own hash. The writer hashes `new Date().toISOString()`, so the reader
+   *    formats exactly that string: `AT TIME ZONE 'UTC'` removes the session time zone (the hash is UTC)
+   *    and the template is the shape `Date.prototype.toISOString()` produces — four-digit year, literal
+   *    `T`, `HH24:MI:SS`, three-digit milliseconds, literal `Z`, no spaces. `created_at::text` is **not**
+   *    that string (`2026-10-08 13:51:09.288+00`), which is why the format is spelled out instead.
+   *  - `sequence` came back as a JavaScript **string** (`pg` parses `int8` as text, which is why the writer
+   *    itself reads the head with `Number(head.rows[0].sequence)`), while the writer hashed a number: the
+   *    hash saw `"sequence":"1"` where `1` had been hashed. `::int` is the same coercion the writer already
+   *    performs; a sequence above 2^31-1 raises `integer out of range` (a loud failure) rather than hashing
+   *    a silently different number.
+   *
+   * The **write** path is deliberately untouched, so a chain written before this fix keeps its hashes: it
+   * was hashed over the ISO string and the number, which is what the reader returns again.
+   */
+  const auditEntryColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId",
+  sequence::int AS "sequence",
+  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
+  actor, actor_role AS "actorRole", request_id AS "requestId",
   correlation_id AS "correlationId", snapshot_id AS "snapshotId", action, resource_type AS "resourceType",
   resource_id AS "resourceId", project_id AS "projectId", decision, payload_hash AS "payloadHash",
   prev_hash AS "prevHash", entry_hash AS "entryHash", metadata`;
@@ -245,6 +269,20 @@ type StoredUserSetting = import('./types').UserSetting;
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private readonly pool: Pool;
   constructor(databaseUrl: string) { this.pool = new Pool({ connectionString: databaseUrl, max: 10 }); }
+
+  /**
+   * G1 (item 2): the store owns this pool, so it is the component that must release it.
+   *
+   * Before this method existed the pool outlived every consumer: `apps/agent-api/src/app.ts` closed fifteen
+   * other repositories in its `onClose` hook and never this one, and the only place that tried to close it was
+   * a test that called a `close()` which did not exist anywhere in the repository — so the attempt threw
+   * *inside* a `finally` block and replaced the real assertion failure with `store.close is not a function`.
+   *
+   * Three repositories are built **on this same pool** (`ApiKeysRepository`, `ScopedMemoryEngine`,
+   * `GuardrailPolicyRepository` — they are handed `workspaceStore`'s pool by the composition), which is why the
+   * caller closes it last and why this method must not be reachable from those repositories: none of them owns it.
+   */
+  async close(): Promise<void> { await this.pool.end(); }
 
   async initialize(context?: AuthContext) {
     await this.pool.query("CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");

@@ -43,6 +43,40 @@ export interface NpatiBackendAuthProviderOptions {
   apiKeysRepository?: ApiKeysRepository;
   remoteTokensManager?: ScopedRemoteAccessTokenManager;
   oidcConfig?: Partial<OidcVerificationConfig>;
+  /**
+   * G1 (item 4): where a failed `workspaceStore.initialize()` is reported. Defaults to a structured
+   * `console.error` — the one behaviour this must not have is the silence `.catch(() => undefined)` produced.
+   */
+  onWorkspaceInitFailure?: (failure: WorkspaceInitFailure) => void;
+  /** G1 (item 4): consecutive failed attempts per workspace before the negative cache starts holding. */
+  workspaceInitMaxAttempts?: number;
+  /** G1 (item 4): how long the negative cache holds once that budget is spent. */
+  workspaceInitRetryMs?: number;
+}
+
+/**
+ * G1 (item 4): what is known about a workspace whose migration initialization failed.
+ *
+ * `auth.ts` is deliberately lazy — it initializes the store for a workspace on the first authenticated request
+ * that names it, and several requests for the same workspace share one in-flight attempt. The defect was not the
+ * laziness, it was `.catch(() => undefined)`: the failure was **invisible**, the workspace was never marked
+ * initialized, and so every later request retried a migration chain that could not succeed. A transient failure
+ * still retries (that contract is pinned by `tests/auth-single-flight.test.ts`); a failure that keeps happening
+ * is reported once with its reason and then cached negatively until `retryAfter`, instead of being retried on
+ * every request forever. The HTTP contract does not change: `authenticate` still does not throw because of this,
+ * so a broken database keeps failing where it used to fail (on the query) rather than turning every route into a
+ * 500 in a new place.
+ */
+export interface WorkspaceInitFailure {
+  workspaceId: string;
+  /** Failed attempts since the last success (or since the process started). */
+  attempts: number;
+  /** The reason the last attempt failed, verbatim. */
+  message: string;
+  firstFailedAt: number;
+  lastFailedAt: number;
+  /** When the next attempt is allowed, or `null` while the attempt budget is not yet spent. */
+  retryAfter: number | null;
 }
 
 export interface NpatiJwtPayload {
@@ -66,6 +100,11 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   private readonly oidcConfig: OidcVerificationConfig;
   private readonly initializedWorkspaces = new Set<string>();
   private readonly initializingWorkspaces = new Map<string, Promise<void>>();
+  /** G1 (item 4): the negative cache of failed initializations, keyed by workspace. */
+  private readonly workspaceInitFailures = new Map<string, WorkspaceInitFailure>();
+  private readonly onWorkspaceInitFailure: (failure: WorkspaceInitFailure) => void;
+  private readonly workspaceInitMaxAttempts: number;
+  private readonly workspaceInitRetryMs: number;
 
   constructor(options: NpatiBackendAuthProviderOptions = {}) {
     this.jwtSecret = options.jwtSecret || process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET;
@@ -82,20 +121,74 @@ export class NpatiBackendAuthProvider implements AuthProvider {
       allowedAlgorithms: options.oidcConfig?.allowedAlgorithms || (process.env.OIDC_SHARED_SECRET ? ["RS256", "HS256"] : ["RS256"]),
     };
     this.devFallback = new LocalDevAuthProvider();
+    this.workspaceInitMaxAttempts = Math.max(1, options.workspaceInitMaxAttempts ?? 3);
+    this.workspaceInitRetryMs = Math.max(0, options.workspaceInitRetryMs ?? 30_000);
+    this.onWorkspaceInitFailure = options.onWorkspaceInitFailure ?? ((failure) => {
+      const retry = failure.retryAfter === null
+        ? `retrying on the next request (attempt ${failure.attempts}/${this.workspaceInitMaxAttempts})`
+        : `negative cache holds until ${new Date(failure.retryAfter).toISOString()}`;
+      console.error(
+        `[auth] workspace store initialization failed for ${failure.workspaceId}: ${failure.message} (${retry})`,
+      );
+    });
   }
 
   private async ensureWorkspaceInitialized(authContext: AuthContext): Promise<void> {
     const workspaceId = authContext.workspaceId;
-    if (this.workspaceStore && !this.initializedWorkspaces.has(workspaceId)) {
-      let initializing = this.initializingWorkspaces.get(workspaceId);
-      if (!initializing) {
-        initializing = this.workspaceStore.initialize(authContext)
-          .then(() => { this.initializedWorkspaces.add(workspaceId); }).catch(() => undefined)
-          .finally(() => { this.initializingWorkspaces.delete(workspaceId); });
-        this.initializingWorkspaces.set(workspaceId, initializing);
-      }
-      await initializing;
+    if (!this.workspaceStore || this.initializedWorkspaces.has(workspaceId)) return;
+    /**
+     * G1 (item 4): while the negative cache holds, no attempt is made and nothing is logged again — the reason
+     * and the attempt count are already recorded, so repeating them per request would be noise, and re-running a
+     * migration chain that just failed on every request is the defect this replaced.
+     */
+    const failed = this.workspaceInitFailures.get(workspaceId);
+    if (failed && failed.retryAfter !== null && Date.now() < failed.retryAfter) return;
+    let initializing = this.initializingWorkspaces.get(workspaceId);
+    if (!initializing) {
+      initializing = this.workspaceStore.initialize(authContext)
+        .then(() => {
+          this.initializedWorkspaces.add(workspaceId);
+          this.workspaceInitFailures.delete(workspaceId);
+        })
+        .catch((error: unknown) => {
+          this.recordWorkspaceInitFailure(workspaceId, error);
+        })
+        .finally(() => { this.initializingWorkspaces.delete(workspaceId); });
+      this.initializingWorkspaces.set(workspaceId, initializing);
     }
+    await initializing;
+  }
+
+  /**
+   * G1 (item 4): records a failed initialization and reports it with its reason. Deliberately not a throw: this
+   * is the lazy-init path of the existing routes, and turning it into an exception would change their status
+   * codes for a failure they already report on the query itself.
+   */
+  private recordWorkspaceInitFailure(workspaceId: string, error: unknown): void {
+    const now = Date.now();
+    const previous = this.workspaceInitFailures.get(workspaceId);
+    const attempts = (previous?.attempts ?? 0) + 1;
+    const budgetSpent = attempts >= this.workspaceInitMaxAttempts;
+    const failure: WorkspaceInitFailure = {
+      workspaceId,
+      attempts,
+      message: error instanceof Error ? error.message : String(error),
+      firstFailedAt: previous?.firstFailedAt ?? now,
+      lastFailedAt: now,
+      retryAfter: budgetSpent ? now + this.workspaceInitRetryMs : null,
+    };
+    this.workspaceInitFailures.set(workspaceId, failure);
+    this.onWorkspaceInitFailure(failure);
+  }
+
+  /** G1 (item 4): the workspaces whose initialization failed, with the reason and the retry state. */
+  workspaceInitializationFailures(): WorkspaceInitFailure[] {
+    return [...this.workspaceInitFailures.values()];
+  }
+
+  /** G1 (item 4): whether the store is known initialized for this workspace (i.e. the failure state is gone). */
+  isWorkspaceInitialized(workspaceId: string): boolean {
+    return this.initializedWorkspaces.has(workspaceId);
   }
 
   async authenticate(request: FastifyRequest): Promise<AuthContext> {

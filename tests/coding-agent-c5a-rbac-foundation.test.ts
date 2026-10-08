@@ -436,7 +436,7 @@ describe("security-gate: C5a RBAC foundation — the required permission comes f
 
 describe("security-gate: C5a RBAC foundation — the suite is part of SG-1", () => {
   it("is registered in the gate list, and every configured suite file exists", async () => {
-    const { SECURITY_GATE_TESTS, findMissingSuiteFiles } = await import("../scripts/run-security-gate.mjs");
+    const { SECURITY_GATE_TESTS, findMissingSuiteFiles } = await import("../scripts/lib/run-security-gate.mjs");
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     // SG-1 runs a fixed list, so a suite that is green but unlisted protects nothing: this one and its
     // C5a siblings must all be on it.

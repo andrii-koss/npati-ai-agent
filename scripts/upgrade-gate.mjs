@@ -19,8 +19,24 @@ import {
   printCapabilityAuditReport,
   readPublishedToolSchemaManifest,
 } from "./capability-audit-runtime.mjs";
+import { checkMigrationRegistry } from "./migration-registry-check.mjs";
+import { runDatabaseSuiteGate } from "./lib/run-security-gate.mjs";
 
 const rootDir = SCRIPTS_ROOT;
+
+/**
+ * G1 (item 3): the DB half of this gate. `UPGRADE_GATE_DB_TESTS` is a list of its own — the hermetic run must
+ * not depend on PostgreSQL (`npm run gate:upgrade` is a step of the `platform` CI job), while the database
+ * facts (applied set on a clean database, idempotency of a second run) are mandatory in the DB job
+ * (`npm run gate:upgrade:db`, which requires `DATABASE_URL` and fails without it instead of skipping).
+ */
+export const UPGRADE_GATE_DB_TESTS = [
+  "tests/coding-agent-g1-migrations-postgres.test.ts",
+];
+export const UPGRADE_GATE_DB_ARTIFACT_PATH = "artifacts/upgrade-gate-db-report.json";
+
+/** Whether this run was asked for the database half (`--db`, i.e. `npm run gate:upgrade:db`). */
+const withDatabase = process.argv.includes("--db");
 
 // Before the first line of output: if this process cannot import TypeScript it re-executes itself once,
 // and a caller must see the gate's report exactly once rather than twice.
@@ -58,20 +74,46 @@ if (!printCapabilityAuditReport(auditReport, (line) => console.log(line))) {
 }
 
 // 3. Database Migration Sequence & Idempotency Check
-console.log("\n[3/5] Checking Database Migration Integrity (Migrations 001..024)...");
-const workspaceSrc = path.join(rootDir, "packages", "workspace", "src");
-let missingMigrations = 0;
-for (let m = 1; m <= 24; m++) {
-  const mName = `migration-${m.toString().padStart(3, "0")}.ts`;
-  const mPath = path.join(workspaceSrc, mName);
-  if (!fs.existsSync(mPath)) {
-    console.error(`  ❌ Missing migration file: ${mName}`);
-    missingMigrations++;
-    gateFailed = true;
-  }
+//
+// G1 (item 3) replaced the previous check — `fs.existsSync(migration-001..024.ts)` followed by
+// "✓ All 24 migrations present with schema_migrations registration and idempotent DDL" — because the sentence
+// was false three times over: the repository has 86 migrations, nothing checked the registration, and nothing
+// checked idempotency. The step is now split in two, and the split is what keeps the platform job hermetic:
+//
+//   - **static** (this run, no database): every migration file has a version guard *and* an
+//     `INSERT INTO schema_migrations` registration in `postgres-store.ts`, no version is registered twice and
+//     the numbering has no hole. That is `scripts/migration-registry-check.mjs`, whose parser is pure so the
+//     non-vacuity proof (delete one registration line, delete one version pair) is an in-memory unit test.
+//   - **database** (`npm run gate:upgrade:db`, the DB job): the chain really runs twice on a clean database —
+//     exactly the registered set is applied, and the second run changes `schema_migrations` by nothing. That is
+//     a statement about PostgreSQL, so it cannot be printed from here without being measured.
+console.log("\n[3/5] Checking Database Migration Integrity (files, registration, chain continuity)...");
+const registry = checkMigrationRegistry(rootDir);
+const registryVersions = registry.versions;
+console.log(
+  `  • Migrations : ${registryVersions.files.length} file(s) in packages/workspace/src, ` +
+    `${registryVersions.registered.length} registered version(s), ${registryVersions.registered[0] ?? "-"} .. ${registryVersions.registered.at(-1) ?? "-"}`,
+);
+console.log(`  • Registration: packages/workspace/src/postgres-store.ts (one SELECT guard + one INSERT per version)`);
+if (registry.ok) {
+  console.log(
+    `  ✓ every migration file has a version guard and a schema_migrations registration; no duplicate, no gap in ${registryVersions.files[0] ?? "-"}..${registryVersions.files.at(-1) ?? "-"}`,
+  );
+} else {
+  for (const issue of registry.issues) console.error(`  ❌ ${issue.code}: ${issue.detail}`);
+  gateFailed = true;
 }
-if (missingMigrations === 0) {
-  console.log("  ✓ All 24 migrations present with schema_migrations registration and idempotent DDL");
+if (withDatabase) {
+  console.log("  • Database half: running the chain twice on a clean database (upgrade path + idempotency)...");
+  const status = runDatabaseSuiteGate({
+    gate: "upgrade-gate:db",
+    suiteListName: "UPGRADE_GATE_DB_TESTS",
+    suites: UPGRADE_GATE_DB_TESTS,
+    artifactPath: UPGRADE_GATE_DB_ARTIFACT_PATH,
+  });
+  if (status !== 0) gateFailed = true;
+} else {
+  console.log("  • Database half deferred: `npm run gate:upgrade:db` runs it (requires DATABASE_URL, never skipped)");
 }
 
 // 4. Upstream Endpoint Contract Files Check

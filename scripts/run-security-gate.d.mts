@@ -1,44 +1,9 @@
 /**
- * Types for `scripts/run-security-gate.mjs`, so the suites that read the gate's contract can be part of
- * `npm run typecheck:tests` (the same pattern `scripts/scan-web-xss.d.mts` uses for the XSS scanner).
+ * Types for `scripts/run-security-gate.mjs` — the **executable** half of the gate.
  *
- * The report arguments are `unknown` on purpose: vitest's JSON report is external input, and the gate's
- * readers are written to defend themselves against a missing or malformed shape (that is what
- * `evaluateVitestReport({})` failing is about), so the declaration must not pretend otherwise.
+ * G1 (item 5): the implementation moved to `scripts/lib/run-security-gate.mjs`, which owns the declarations
+ * (`scripts/lib/run-security-gate.d.mts`). The wrapper re-exports that whole surface, so this file re-exports it
+ * too: a suite that imports either path sees one declaration of the gate's contract, and there is no second copy
+ * to drift.
  */
-
-export declare const SECURITY_GATE_TESTS: string[];
-
-/**
- * G1 (D20): the durable verdict artifact and its writer. The summary is `unknown` here for the same reason
- * the report arguments are: the writer only serialises it, and the shape it is given is this script's own
- * business. The writer returns a result instead of throwing, so a caller can assert both directions.
- */
-export declare const GATE_ARTIFACT_PATH: string;
-export declare function writeGateArtifact(root: string, summary: unknown): { ok: boolean; path: string; error: string | null };
-
-export interface VitestReportVerdict {
-  ok: boolean;
-  failures: string[];
-  numPassed: number;
-  numFailed: number;
-  numPending: number;
-  numTodo: number;
-}
-
-/** One failing test of a report, in the normalised shape both the gate and the quarantine compare. */
-export interface VitestFailedTest {
-  file: string;
-  title: string;
-  messages: string[];
-}
-
-export declare function findMissingSuiteFiles(root: string, suites: readonly string[]): string[];
-export declare function evaluateVitestReport(report: unknown): VitestReportVerdict;
-export declare function suiteKey(value: unknown): string;
-export declare function findMissingSuites(report: unknown, expected: readonly string[]): string[];
-export declare function findEmptySuites(report: unknown): string[];
-/** The single traversal of `assertionResults`; `formatFailedTests` prints what this returns. */
-export declare function failedTests(report: unknown): VitestFailedTest[];
-export declare function formatFailedTests(report: unknown): string[];
-export declare function isEntryPoint(argv?: readonly string[], moduleUrl?: string): boolean;
+export * from "./lib/run-security-gate.mjs";

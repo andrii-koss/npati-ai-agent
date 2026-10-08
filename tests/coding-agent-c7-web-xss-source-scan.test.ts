@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cardLinkHtml, escapeInlineText, isSafeCardHref } from "../apps/web/src/chat-markdown-inline";
-import { ALLOWLIST, scanWebSources } from "../scripts/scan-web-xss.mjs";
+import { ALLOWLIST, scanWebSources } from "../scripts/lib/scan-web-xss.mjs";
 
 /**
  * [security-gate] C7: web-source XSS invariant.

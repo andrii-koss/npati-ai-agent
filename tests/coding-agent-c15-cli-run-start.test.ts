@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -746,18 +747,25 @@ describe("security-gate: C15 CLI — the secret stays out of argv, logs and erro
 
   it("reads the token from the environment or a file, and never from argv", () => {
     expect(resolveToken({ env: { [TOKEN_ENV_VAR]: ` ${SECRET} ` } }).token).toBe(SECRET);
-    // A file written by hand: surrounding whitespace, a trailing newline and quotes are all tolerated.
-    const file = path.join(workspaceRoot, "artifacts", "c15-token-fixture.txt");
-    expect(existsSync(path.dirname(file))).toBe(true);
-    writeFileSync(file, `  "${SECRET}"\n`, "utf8");
+    /**
+     * G1 (item 5, finding C): the fixture directory is **this test's own** `mkdtemp`, not the repository's
+     * `artifacts/`. The old version wrote into `artifacts/` and asserted `existsSync(path.dirname(file))` first,
+     * which made the suite depend on a side effect of another step: the gate creates `artifacts/` in
+     * `writeGateArtifact`, i.e. *after* vitest, so this test passed in every run except the first one on a clean
+     * checkout (and in every fresh worktree). A test must create the directory it writes into.
+     */
+    const directory = mkdtempSync(path.join(tmpdir(), "npati-c15-token-"));
+    const file = path.join(directory, "c15-token-fixture.txt");
     try {
+      // A file written by hand: surrounding whitespace, a trailing newline and quotes are all tolerated.
+      writeFileSync(file, `  "${SECRET}"\n`, "utf8");
       expect(resolveToken({ env: {}, tokenFile: file }).token).toBe(SECRET);
+      // A missing token is its own refusal with an actionable message, not a crash.
+      expect(() => resolveToken({ env: {}, tokenFile: path.join(directory, "c15-no-such-token.txt") }))
+        .toThrowError(/No API token found/);
     } finally {
-      rmSync(file, { force: true });
+      rmSync(directory, { recursive: true, force: true });
     }
-    // A missing token is its own refusal with an actionable message, not a crash.
-    expect(() => resolveToken({ env: {}, tokenFile: path.join(workspaceRoot, "artifacts", "c15-no-such-token.txt") }))
-      .toThrowError(/No API token found/);
   });
 
   it("redacts the resolved token and any credential shape from text and URLs", () => {

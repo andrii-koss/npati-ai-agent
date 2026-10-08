@@ -34,12 +34,15 @@
 | `docs/coding-agent/attack-catalogue.json` | каталог: рядок на клас атаки (`id`, `class`, `suite`, точна назва тесту, `negativeControl`, назва негативного контролю, `status`) + винятки для правил hard-deny |
 | `scripts/attack-catalogue-check.mjs` | чистий (без залежностей і без TS) валідатор: статична перевірка каталогу + перевірка по звіту vitest |
 | `scripts/attack-catalogue-check.d.mts` | типи для `typecheck:tests` (той самий патерн, що `scripts/run-security-gate.d.mts`) |
-| `scripts/run-security-gate.mjs` | гейт: фіксований список наборів (див. рядок про розмір нижче), статична перевірка каталогу атак **до** vitest, статична перевірка матриці мутацій **до** vitest, перевірка по JSON-звіту **після** |
+| `scripts/run-security-gate.mjs` + `.d.mts` | гейт: фіксований список наборів (див. рядок про розмір нижче), статична перевірка каталогу атак **до** vitest, статична перевірка матриці мутацій **до** vitest, перевірка по JSON-звіту **після**. **G1 п.5**: це лише executable-обгортка (shebang + `isEntryPoint`) — реалізація в `scripts/lib/run-security-gate.mjs` |
 | `apps/agent-api/src/code-shell-classifier.ts` | єдина продуктивна зміна: таблиця `HARD_DENY_RULES` експортована (щоб каталог міг її перелічити), опція `hardDenyRules` для доказової мутації, і виправлений патерн `fork_bomb` (§ 5) |
 | `docs/coding-agent/mutation-controls.json` | **G1 п.3**: матриця мутацій decoy-branch — рядок на мутацію (`id`, `kind` = `decoy`/`cosmetic`, `op` = `replace`/`delete_line`, `file`, `find` (якір), `replace`, `expectedGateExit`, `expectedFailingSuite`, `expectedFailingTest`, `inMemoryCounterpart`, `rationale`) |
 | `scripts/mutation-controls-check.mjs` + `.d.mts` | **G1 п.3**: guard матриці (статичний, запускається гейтом **до** vitest: реальний файл, якір рівно один раз, набір із фіксованого списку, назва тесту як `it("…")`, обидва напрямки обов'язкові) і чистий рендерер мутації; CLI `--matrix <path>` для доказу невакуумності |
 | `scripts/security-gate-mutation-branch.mjs` + `.d.mts` | **G1 п.3**: decoy-branch runner: ізольований `git worktree`, дзеркало дерева під ревʼю, junction'и `node_modules` і підмодулів, одна мутація, **реальний** `run-security-gate.mjs`, класифікація вердикту, прибирання і пост-умови. Це **не** крок гейта |
 | `tests/coding-agent-c14-mutation-branch-controls.test.ts` | **G1 п.3**: 150-й набір гейта — матриця резолвиться, guard невакуумний (13 фабрикацій), а «гейт не зміг виміряти» ніколи не читається як «мутацію спіймано» |
+| `scripts/lib/*.mjs` | **G1 п.5 (дефект A)**: бібліотечні половини шести скриптів гейта **без shebang** — `run-security-gate`, `attack-catalogue-check`, `scan-web-xss`, `lint-guard`, `check-known-failures`, `mutation-controls-check` (плюс `typosquat-dataset-generate`, який переїхав разом зі своїм CLI). Саме їх імпортують набори гейта; `scripts/*.mjs` лишилися тонкими executable-обгортками зі shebang, які ре-експортують бібліотеку і викликають `main()`. Причина: `#!/usr/bin/env node` у файлі, який бандлер віддає в `node:vm` без трансформації, — синтаксична помилка (`Invalid or unexpected token`), і набір, що його імпортує, рапортує «no tests at all» |
+| `tests/coding-agent-g1-clean-clone-prerequisites.test.ts` | **G1 п.5 (дефект B)**: 151-й набір гейта — фаза підготовки гейта (див. § 5.2): генерація `data/typosquat` у дерево, якому її назвали, відсутність побічних ефектів у цьому checkout, ідемпотентність, «застаріле лишається червоним», fail-closed без генератора |
+| `scripts/typosquat-dataset-generate.mjs` + `scripts/lib/typosquat-dataset-generate.mjs` | **G1 п.5 (дефект B)**: генератор став root-aware (`--root` / `NPATI_TYPOSQUAT_ROOT`): гейт генерує набір **для того дерева, яке перевіряє**, а не для того, в якому лежить сам скрипт. Раніше `--root` не існував, тому фаза підготовки в тимчасовому дереві писала в реальний checkout |
 | 7 нових наборів у `tests/` | самі red-team тести (див. § 3–5) |
 | `docs/coding-agent/security-gate-report.md` | цей файл |
 
@@ -322,7 +325,7 @@ npm run mutation:branch -- --json          # той самий вердикт м
 
 Та сама матриця, але справжня: `[mutation-controls] rows=3 decoy=2 cosmetic=1 ok=true issues=0` (exit 0).
 Набір `tests/coding-agent-c14-mutation-branch-controls.test.ts` зареєстровано у фіксованому списку гейта, тож
-після цього кроку → **150** наборів (було 149).
+після кроку G1 п.5 (§ 5.2) → **151** наборів (було 150; до кроку G1 п.3 — 149).
 
 **Чесні межі decoy-branch (і чому він не всередині гейта).**
 
@@ -412,9 +415,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **150** рядків |
-| Фіксований список гейта | `suites=150 present=150 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/run-security-gate.mjs`) | **150** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 149 було до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **151** рядків |
+| Фіксований список гейта | `suites=151 present=151 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **151** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 150 було до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -431,11 +434,12 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
   реєстрації guard-набору нижче — **145**, після реєстрації набору C15 «CLI / run-start» (§ 7.2) — **146**,
   після реєстрації двох наборів C15 «mounted folder» (§ 7.3) — **148**, після реєстрації набору C1a
   «dark launch / kill switch» кроком G1 (§ 7.4) — **149**, після реєстрації guard-набору матриці мутацій
-  кроком G1 (§ 5.1) — **150**. Усі згадки в цьому
+  кроком G1 (§ 5.1) — **150**, після реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2) —
+  **151**. Усі згадки в цьому
   файлі зведені до фактичного числа, яке
-  читає guard-набір (`--list` = 150 рядків, `present=150 missing=0`); історія зростання лишена
+  читає guard-набір (`--list` = 151 рядків, `present=151 missing=0`); історія зростання лишена
   явно історичною: 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → 146 у C15 (CLI) → 148 у C15
-  (mounted folder) → 149 у G1 (C1a) → 150 у G1 (матриця мутацій).
+  (mounted folder) → 149 у G1 (C1a) → 150 у G1 (матриця мутацій) → 151 у G1 (передумови чистого клону).
 * **Опис фаз політики.** Два коментарі (`apps/agent-api/src/code-policy-engine.ts` — заголовок двигуна, і
   `apps/agent-api/src/app.ts` — місце wiring) перелічували 8 фаз і пропускали `capability_groups`,
   `trust` і `network_enforcement`. Реальний порядок виконання в `evaluateInternal` — 11 фаз:
@@ -973,7 +977,7 @@ npm run mutation:branch                # очікується exit 0, verdict=pr
 
 | Файл | Було (тригери) | Стало | Що зникло з коду | Що лишилось |
 | --- | --- | --- | --- | --- |
-| `.github/workflows/ci.yml` | `workflow_dispatch` + `schedule` (`0 4 * * 1`) + `push` (25 path-фільтрів) + `pull_request` (ті самі 25) | `workflow_dispatch` | `push:`, `pull_request:`, `schedule:` і обидва списки `paths:` | 5 джоб (`security-gate`, `platform`, `evals`, `docker`, `release-gate`), усі кроки, `permissions`, `concurrency`, `needs: [platform, docker, evals, security-gate]`, `if-no-files-found: error` — усе без змін |
+| `.github/workflows/ci.yml` | `workflow_dispatch` + `schedule` (`0 4 * * 1`) + `push` (25 path-фільтрів) + `pull_request` (ті самі 25) | `workflow_dispatch` | `push:`, `pull_request:`, `schedule:` і обидва списки `paths:` | 5 джоб (`security-gate`, `platform`, `evals`, `docker`, `release-gate`), усі кроки, `permissions`, `concurrency`, `needs: [platform, docker, evals, security-gate]`, `if-no-files-found: error` — усе без змін; **G1 п.2** пізніше додав **шосту** джобу `security-gate-db` (див. § 7.7) — це додавання, а не зміна тригерів |
 | `.github/workflows/sandbox-images.yml` | `workflow_dispatch` (з `inputs: variant`/`dry_run`) + `schedule` (`0 3 * * 1`) + `push` (3 шляхи) | `workflow_dispatch` (з тими самими `inputs`) | `schedule:` і `push:` зі списком | 3 джоби (`verify`, `build`, `rescan`), усі кроки, `env`, `permissions`; обидва `if:` зі `github.event_name` лишені **свідомо** (вони частина контракту повернення, і з `workflow_dispatch` обидві джоби досяжні) |
 | `.github/workflows/mutation-branch.yml` | `workflow_dispatch` + `schedule` (`0 5 * * 1`) | `workflow_dispatch` | `schedule:` | джоба `mutation-branch`, `timeout-minutes: 120`, крок `npm run mutation:branch`, крок артефакту з `if: always()` |
 
@@ -988,7 +992,7 @@ npm run mutation:branch                # очікується exit 0, verdict=pr
 * `(schedule)` — точний cron.
 
 **Як оновлено піни (що було, що стало і чому нове сильніше).** Файл `tests/coding-agent-c14-ci-and-lint-gates.test.ts`
-(набір **у гейті**, тому число наборів не змінилося — **150**). Обидва старі тести замінено, жодної асерції не
+(набір **у гейті**, тому на кроці G1 п.3 число наборів не змінилося — **150**; після кроку G1 п.5, § 5.2, — **151**). Обидва старі тести замінено, жодної асерції не
 видалено без заміни:
 
 | Було (C14) | Стало (G1) | Чому нове сильніше |
@@ -1071,8 +1075,8 @@ node artifacts/g1-ci-triggers/check-workflows.mjs
 | Перевірка | Результат |
 | --- | --- |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **150** рядків (не змінилося — нового набору в гейт не додано) |
-| `suites`/`present`/`missing_count`/`duplicates` (read-only імпорт `SECURITY_GATE_TESTS` + `findMissingSuiteFiles`) | `suites=150 present=150 missing_count=0 duplicates=0` |
+| `node scripts/run-security-gate.mjs --list` | **151** рядків (було **150** на кроці G1 п.3; +1 набір у § 5.2) |
+| `suites`/`present`/`missing_count`/`duplicates` (read-only імпорт `SECURITY_GATE_TESTS` + `findMissingSuiteFiles`) | `suites=151 present=151 missing_count=0 duplicates=0` |
 | `node scripts/mutation-controls-check.mjs` | `rows=3 decoy=2 cosmetic=1 ok=true issues=0` — **exit 0** |
 | `npm run typecheck:tests` | **exit 0** |
 | Власний структурний чек YAML (немає YAML-парсера в залежностях: `node_modules/yaml` і `node_modules/js-yaml` **відсутні**) | `artifacts/g1-ci-triggers/check-workflows.mjs` → `files=3`, `issues=0` — **exit 0**: тригери, джоби, відсутність табів, парність відступів, відсутність trailing whitespace, унікальність top-level ключів, наявність `runs-on`/`steps` на кожну джобу, розбір рецептів |
@@ -1089,8 +1093,206 @@ node artifacts/g1-ci-triggers/check-workflows.mjs
 ---
 
 
+### 7.7. G1 п.2–4 — D1 під application role, реальний `upgrade-gate`, видима помилка init (виконано)
+
+**Що змінено (точний перелік).** Код і коментарі — англійською, як і решта репозиторію.
+
+| Пункт | Файли | Що саме |
+| --- | --- | --- |
+| п.2 (D1) | `tests/coding-agent-c1c-audit-postgres.test.ts` (переписано), `tests/support/run-with-cleanup.ts` (новий), `packages/workspace/src/postgres-store.ts`, `packages/workspace/src/types.ts`, `apps/agent-api/src/app.ts` | прибирання без маскування + реальний cleanup; append-only перевірено під application role; `close()` у стора + `onClose` останнім |
+| п.2 (гейт) | `scripts/run-security-gate.mjs` (+`.d.mts`), `package.json`, `.github/workflows/ci.yml` | окремий список `SECURITY_GATE_DB_TESTS`, режим `--db`, скрипт `security-gate:db`, обов'язкова джоба `security-gate-db` з `pgvector/pgvector:pg17` |
+| п.3 | `scripts/migration-registry-check.mjs` (+`.d.mts`) (новий), `scripts/upgrade-gate.mjs`, `tests/coding-agent-g1-migrations-postgres.test.ts` (новий), `tests/upgrade-compatibility-and-release-gate.test.ts`, `package.json` | статична частина = файли + реєстрація + неперервність; DB-частина = upgrade path на чистій БД + ідемпотентність; скрипт `gate:upgrade:db` |
+| п.4 | `apps/agent-api/src/auth.ts`, `apps/agent-api/src/auth-routes.ts`, `apps/agent-api/src/sandbox-runner-store.ts` (новий), `apps/agent-api/src/sandbox-runner-server.ts`, `tests/coding-agent-c10-route-auth-wiring.test.ts`, `tests/coding-agent-c15-mount-sandbox.test.ts`, `tests/coding-agent-c4a-security-gate.test.ts` | три «ковтальні» місця прибрано; доказ видимості — тестами |
+| піни | `tests/coding-agent-c14-ci-and-lint-gates.test.ts` | джоб стало шість; новий пін на `security-gate-db`; жодна наявна асерція не послаблена |
+
+**Точний механізм прибирання замість вигаданого `store.close()`.** У `tests/support/run-with-cleanup.ts` є
+`runWithCleanup(body, cleanup)`: тіло виконується, потім прибирання, обидві помилки збираються, і
+**кидається помилка тіла** (ідентичність об'єкта, не текст), а помилка прибирання **дописується** до її
+`message` рядком `[cleanup also failed] …`. Чому саме так: виняток із `finally` **заміщає** виняток із `try`, тому
+`finally { …; await store.close(); }` показував `TypeError: store.close is not a function` — тобто саме
+прибирання — замість реального падіння асерції. Доказ, що маскування зникло, **герметичний** (без БД) і живе в
+наборі гейта `tests/coding-agent-c4a-security-gate.test.ts`: «тіло падає + прибирання падає» → кинуто саме
+об'єкт помилки тіла, а в повідомленні є **обидва** тексти; «тіло ок + прибирання падає» → кинуто помилку
+прибирання (теж не тихо). Сам `store.close()` тепер **існує**: `PostgresWorkspaceStore.close()` завершує
+`Pool`, який стор володіє, а `WorkspaceStore.close?()` — опційний (у пам'яті власних ресурсів немає). У `onClose`
+`app.ts` стор закривається **останнім**: `ApiKeysRepository`, `ScopedMemoryEngine` і `GuardrailPolicyRepository`
+побудовані на тому самому пулі (`(workspaceStore as any).pool`), і закрити його раніше означало б ламати їхні
+запити під час зупинки. `worker.ts` і `app.ts` не змінювали поведінку на «падати на тлі нормальної роботи»:
+`onReady` як і раніше прокидає помилку ініціалізації, а новий `close?.()` — це лише шлях зупинки.
+
+**Під якою роллю перевірено append-only.** Набір провізіони́ть роль `npati_g1_app` (`LOGIN`, окремий пароль
+локального тесту), і всі ворожі запити йдуть через **окремий пул, який реально логіниться цією роллю**, а не через
+`DATABASE_URL`. Перед перевірками набір стверджує три факти з `pg_roles`/`pg_class`: `current_user = 'npati_g1_app'`,
+`rolsuper = false`, власник `audit_log` ≠ `npati_g1_app`; окремо — що цій ролі **відмовлено** в
+`ALTER TABLE audit_log DISABLE TRIGGER` (потрібен власник). Тому суперюзер тут не вимірюється: адміністративне
+з'єднання робить лише те, що йому й належить (міграції, провізіонинг ролі, суперюзерський обхід для симуляції
+tamper). Роль **навмисно** має `GRANT SELECT, INSERT, UPDATE, DELETE ON audit_log`: відмова має походити від
+тригера **при наявній привілегії**, а привілегійний шар доводиться окремо (grant → відмова, `REVOKE` →
+`permission denied`). Невакуумність виміряна, а не заявлена: з вимкненим тригером той самий `UPDATE` **проходить**
+(і потім рядок відновлюється байт-у-байт, метадані входять у `entry_hash`), з вимкненим chain-guard проходить
+rogue `INSERT` (і видаляється в тому ж вікні), а `REVOKE` робить `UPDATE` відмовленим навіть без тригера. Додатково
+перевіряється, що `PUBLIC` не має жодної привілегії на `audit_log` через `aclexplode`.
+
+**Спостереження про продакшн-роль (не виправлялося — це рішення власника).** У `docker-compose.yml` застосунок
+підключається роллю `NPATI_POSTGRES_USER` (типово `npati`), а офіційний образ `postgres` створює `POSTGRES_USER`
+**суперюзером**. Тобто в розгортанні, як воно зараз описане в compose, `REVOKE … FROM PUBLIC` для застосунку
+нічого не важить (суперюзер обходить привілегії) і таблиці належать цій самій ролі — єдиним чинним бар'єром
+лишається **тригер**, і саме тому набір доводить його невакуумність (вимкнений тригер → той самий `UPDATE`
+проходить). Це не дефект тесту, а факт про конфігурацію: якщо потрібен і привілегійний шар, роль застосунку треба
+зробити окремою не-суперюзерською роллю (міграція такої ролі не створює — перевірено: `CREATE ROLE`/`GRANT` у
+`packages/workspace/src/*.ts` відсутні). Тут це лише названо; зміна ролі в compose — поза обсягом цього кроку.
+
+**Як D1 став блокером (і чому саме так).** `SECURITY_GATE_TESTS` — **герметичний** контракт, і гейт валить прогін
+на `skipped`/`todo` (`evaluateVitestReport`). Якби DB-набір додали літерально туди, `npm run security-gate`
+почав би падати на **кожній** машині без PostgreSQL, тобто перестав би бути герметичним. Тому зроблено
+**окремий обов'язковий список** `SECURITY_GATE_DB_TESTS` і **окремий режим** `node scripts/run-security-gate.mjs
+--db` (`npm run security-gate:db`): без `DATABASE_URL` він **негайно виходить 1** з названою причиною (це
+перевірено тут: exit 1), ніколи не скіпає і вимагає нуль пропущених тестів; DB-прогін маркується
+`NPATI_SECURITY_GATE_DB=1`, тому звичайний `npm test` цих тестів не бачить навіть із виставленим `DATABASE_URL`
+(інакше поїхав би baseline 10 файлів / 15 тестів). Блокером він став через **окрему обов'язкову джобу**
+`security-gate-db`, яку `release-gate` має в `needs`. Число **герметичного** списку не змінилося (150) — саме тому
+число в § 7.5.1/§ 7.6 цього документа не оновлювалося; guard читає його з документа, і він лишається чинним.
+
+**Що додано в CI (тригери не чіпалися).** У `.github/workflows/ci.yml` додано джобу `security-gate-db`:
+`services: postgres` з образом **`pgvector/pgvector:pg17`** (той самий, що в `docker-compose.yml:348` — бо
+`migration-014` робить `CREATE EXTENSION IF NOT EXISTS vector`, і голий `postgres` не може застосувати ланцюг),
+healthcheck `pg_isready -U npati -d npati_agent` (`--health-interval 5s --health-timeout 5s --health-retries 20`),
+`env.DATABASE_URL` виставлений **на всю джобу** (`postgres://npati:npati@127.0.0.1:5432/npati_agent`), кроки
+`npm run security-gate:db` і `npm run gate:upgrade:db`, артефакт `security-gate-db-report` із
+`if-no-files-found: error`. У джоби немає `if:`, немає `paths:`, немає `continue-on-error`; `release-gate` тепер
+`needs: [platform, docker, evals, security-gate, security-gate-db]`. Тригери **не змінювалися**: `on:` як і раніше
+єдиний `workflow_dispatch`, `RE-ENABLE RECIPE` на місці (пункт 7 — власник).
+
+**Точний новий механізм `upgrade-gate`.** Крок `[3/5]` більше не перевіряє існування 24 файлів:
+* **статична частина** (`npm run gate:upgrade`, герметична, без БД, викликається `platform`-джобою): модуль
+  `scripts/migration-registry-check.mjs` читає `packages/workspace/src/migration-NNN.ts` **і**
+  `packages/workspace/src/postgres-store.ts` як дані та вимагає на кожну версію **пару** «`SELECT … WHERE version
+  = 'NNN_name'` + `INSERT INTO schema_migrations(version) VALUES ('NNN_name')`», рівність множин «файли» ↔
+  «реєстрація», відсутність дублікатів і **відсутність дірки** в нумерації. Реальний вивід:
+  `files=86 registered=86 first=001_business_workspace last=086_project_mounted_folders issues=0`, exit 0;
+  фальшиве речення «All 24 migrations present … idempotent DDL» прибрано, бо воно не перевіряло ні реєстрації, ні
+  ідемпотентності.
+* **DB-частина** (`npm run gate:upgrade:db` → `node scripts/upgrade-gate.mjs --db`, тільки DB-джоба): набір
+  `tests/coding-agent-g1-migrations-postgres.test.ts` створює **чисту** БД, застосовує ланцюг і вимагає рівно
+  зареєстрований набір (ті самі версії, та сама кількість, та сама відповідність номерам файлів); потім
+  `initialize()` **удруге** і порівнює рядки `schema_migrations` разом з `applied_at` (мікросекунди) — «прогнався
+  ще раз» не зараховується; потім прибирає дві останні реєстрації (стан старішого деплою) і вимагає, щоб той самий
+  `initialize()` довів базу вперед, тобто щоб DDL цих міграцій справді був повторно виконуваним. Без
+  `DATABASE_URL` скрипт **не скіпає**, а виходить 1 (перевірено тут: exit 1, `[upgrade-gate:db] FAILED`).
+
+**Доказ невакуумності `upgrade-gate`** — двічі. (1) `tests/upgrade-compatibility-and-release-gate.test.ts`
+(набір із `npm test`): там замінено фіктивний тест `TOTAL_MIGRATIONS = 24` (він «доводив», що 24 міграції
+існують, і проходив далі ще 62 міграції) на перевірку реального ланцюга **і** на мутації в пам'яті: видалення
+одного `INSERT`-рядка → `migration_registration_insert_missing`, перейменування одного guard'а →
+`migration_registration_guard_missing`, видалення файлу `migration-042.ts` → `migration_chain_gap`; непорушений
+вхід лишається зеленим. (2) Прогін `node .g1-probe/registry-nonvacuous.mjs` на реальних файлах, точний вивід:
+
+```
+unmutated repository            : ok=true issues=0 codes=[]
+one INSERT row removed (086)    : ok=false issues=1 codes=[migration_registration_insert_missing]
+one SELECT guard renamed (085)  : ok=false issues=2 codes=[migration_registration_guard_missing,migration_registration_insert_missing]
+one INSERT row duplicated (084) : ok=false issues=1 codes=[migration_registration_duplicate_insert]
+one migration file removed (042): ok=false issues=2 codes=[migration_file_missing,migration_chain_gap]
+one extra migration file (087)  : ok=false issues=1 codes=[migration_file_unregistered]
+the 001-003 loop insert removed : ok=false issues=4 codes=[migration_registration_loop_unpaired,migration_registration_insert_missing,…]
+```
+
+**Що зроблено з трьома `.catch` і чим доведено, що помилка стала видимою.** (1) `apps/agent-api/src/auth.ts`:
+`.catch(() => undefined)` замінено на `recordWorkspaceInitFailure` — **причина** (текст помилки), кількість
+спроб, час першої/останньої невдачі та `retryAfter` тепер зберігаються й **репортуються** (за замовчуванням
+структурований `console.error`; `app.ts` може передати свій репортер). Легитимний лінивий init **не зламаний**:
+контракт «наступний запит повторює спробу» лишається (це пінить `tests/auth-single-flight.test.ts` — 2 спроби на 2
+запити), а після вичерпання бюджету спроб (`workspaceInitMaxAttempts`, типово 3) вмикається **негативний кеш** на
+`workspaceInitRetryMs` (типово 30 с), тому вічного повтору на кожен запит немає; HTTP-контракт наявних роутів не
+змінився — `authenticate` і далі не кидає через це. (2) `apps/agent-api/src/auth-routes.ts`: `catch { /* lazy */ }`
+(двічі — у реєстрації та логіні) замінено на `initializeWorkspaceFor(...)` з
+`request.log.error({ err, workspaceId, code: "workspace_store_init_failed" }, …)`; відповідь **навмисно** лишилась
+`success: true` (акаунт уже створено upstream, і падати тут означало б збрехати про реєстрацію, яка відбулася).
+(3) `apps/agent-api/src/sandbox-runner-server.ts`: `await postgres.initialize().catch((error) => console.error(…))`
+замінено на `resolveRunnerStore(...)` (новий модуль) — він зберігає причину в `failure` і **репортує** її
+структуровано (`runner_store_unavailable`), а `imageAdmission.admit` при непорожньому `failure` **відмовляє**
+(`SandboxProviderError("runner_store_unavailable", …)`), тобто контейнер не створюється за каталогом, який runner
+не може прочитати (fail-closed). Відсутній `DATABASE_URL` — це **інший** стан (`runner_store_not_configured`,
+in-memory fallback), і він репортується окремо, а не як помилка ініціалізації. Доказ видимості — три тести в
+наборі гейта `tests/coding-agent-c10-route-auth-wiring.test.ts` (репорт із причиною + незмінений контракт запиту;
+збережений retry-контракт; негативний кеш із названим `retryAfter`; очищення стану після успіху) і три в
+`tests/coding-agent-c15-mount-sandbox.test.ts` (причина `extension "vector" is not available` видима в стані **і**
+в структурованому повідомленні; здоровий стор не репортує нічого; admission закритий, `.catch(` навколо
+`initialize()` не повернувся). Обидва набори **в герметичному гейті**, тому доказ не залежить від наявності БД.
+
+**Перевірки цього кроку (що виміряно тут).** `npm run typecheck` → 0; `npm run typecheck:tests` → 0;
+`npm run lint` → 0; `node --check` на кожному зміненому `.mjs` → 0; `node scripts/run-security-gate.mjs --list` →
+150 рядків, `--db --list` → `SECURITY_GATE_DB_TESTS`; `node scripts/run-security-gate.mjs --db` без `DATABASE_URL` →
+**exit 1** з названою причиною; `node scripts/upgrade-gate.mjs` → **exit 0**, `[3/5]` друкує
+`files=86 registered=86 … issues=0`; `node scripts/upgrade-gate.mjs --db` без `DATABASE_URL` → **exit 1**;
+`node scripts/migration-registry-check.mjs` → **exit 0**; `node scripts/mutation-controls-check.mjs` →
+`rows=3 decoy=2 cosmetic=1 ok=true issues=0`; `.g1-probe/registry-nonvacuous.mjs` → усі 6 мутацій червоні,
+непорушений вхід зелений.
+
+**Харнес цього кроку (дозволяючий оракул, не заміна vitest) і його чесні межі.** У пісочниці агента `vitest`
+не запускається (`esbuild` піднімає сервіс-процес → `spawn EPERM`), тому всі набори прогнано локальним харнесом
+`artifacts/c5b-policy-probe/run.mjs` (міні-шім vitest API, `node --experimental-transform-types`), точні виводи:
+
+| Прогін | Результат |
+| --- | --- |
+| `coding-agent-c4a-security-gate` + `coding-agent-c14-policy-phase-and-gate-size-guard` | `suites=4 tests=19 passed=19 failed=0` — **exit 0** (це і є перевірка нового маскування-доказу і того, що документ усе ще називає правильне число наборів) |
+| `coding-agent-c14-ci-and-lint-gates` | `suites=3 tests=21 passed=21 failed=0` — **exit 0** (піни CI, нова джоба, `npm run lint`) |
+| `coding-agent-c15-mount-sandbox` | `suites=5 tests=20 passed=20 failed=0` — **exit 0** (три нові тести runner-стора) |
+| `coding-agent-c10-route-auth-wiring` | `suites=2 tests=8 passed=8 failed=0` — **exit 0** (чотири нові тести ініціалізації) |
+| `c13-capability-catalog-audit`, `c14-attack-catalogue`, `c14-mutation-branch-controls`, `c5b-policy-rbac`, `c5a-rbac-foundation` | `suites=23 tests=95 passed=95 failed=0` — **exit 0** (усі, хто читає `SECURITY_GATE_TESTS` зі скрипта, і пін порядку «guard до vitest») |
+| `c1-foundation`, `c15-mounted-workspace`, `c14-gate-mutation-sensitivity`, `c9-test-integrity` | `suites=11 tests=50 passed=49 failed=1` — єдине падіння **не моє**: `c15-mounted-workspace` «refuses a mount whose directory changed after the confirmation» падає в **прибиранні** тимчасового каталогу (`ENOTEMPTY: directory not empty, rmdir …\npati-c15-allow-…`) — цей набір створює Windows-junction (це його предмет) і зривається на видаленні каталогу з нею; файл цим кроком **не змінювався** (`git status` це підтверджує), і під vitest на машині власника набір зелений |
+| `npati-backend-auth` | `suites=1 tests=19 passed=19 failed=0` — **exit 0** (реальний провайдер із реальним стором не зламано) |
+| `c1c-audit-log`, `c6a-migration-safety`, `c6a-reaper`, `c1a-flags`, `c14-known-failures` | `suites=22 tests=86 passed=84 failed=2` — обидва падіння в `c1c-audit-log` — це `expect.stringContaining is not a function` (шім його не має), файл не змінювався |
+| `upgrade-compatibility-and-release-gate` | `suites=6 tests=35 passed=31 failed=4` — усі чотири падіння з шімових обмежень (`vi.stubGlobal`, `vi.fn().mockImplementation`, `resolves.not`), **два нові тести реєстру пройшли**; інші тести цього файлу шім не підтримує |
+| `production-p01-security` + `session-stream-routes` | `suites=8 tests=12 passed=8 failed=4` — усі чотири — `toThrow("рядок")`, який шім не підтримує (він матчить лише RegExp/клас/`objectContaining`), файли не змінювалися |
+
+Межі харнеса названі чесно: він **не** замінює vitest, не має таймаутів, не ізолює набори й реалізує лише ту
+частину API, яку використовують набори, для яких його писали (`expect.stringContaining`, `vi.stubGlobal`,
+`vi.fn().mockImplementation`, `resolves.not`, `toThrow("рядок")` — відсутні, тому «падіння» з цими
+повідомленнями в чужих наборах нічого не кажуть про цей крок).
+
+**Два факти, які харнес дав саме про цей крок.** (1) DB-набори **виконуються**, а маскування справді зникло:
+із виставленим маркером і недосяжним `DATABASE_URL` (`connect_timeout=1`) `c1c-audit-postgres` дає
+`suites=1 tests=3 passed=0 failed=3`, і кожне падіння показує **обидві** помилки — `connect ECONNREFUSED …` як
+помилку тіла і `[cleanup also failed] Error: connect ECONNREFUSED …` як дописану; `g1-migrations-postgres` дає
+те саме (`tests=2`). До цієї правки ті самі три тести повідомляли `TypeError: store.close is not a function`.
+(2) Контракт `auth.ts` перевірено **окремим** пробником `.g1-probe/auth-retry-contract.mjs` проти реального
+провайдера: `initialize` викликається 2 рази на 2 запити (закріплений контракт `auth-single-flight`), 1 раз на
+1000 конкурентних, і 2 рази на 6 запитів після вичерпання бюджету спроб (`retryAfter` виставлено, причина
+збережена) — `PROBE: all properties hold`, exit 0.
+
+**Одна чесна примітка про пін порядку.** `tests/coding-agent-c14-mutation-branch-controls.test.ts` пінить
+«guard до vitest» через `indexOf('vitestBin, "run"')` — тобто через **ім'я локальної змінної** в `main()`.
+Оскільки нова функція DB-гейта резолвить точку входу проти свого параметра `root`, вона називає її
+`vitestEntryPoint`; `main()` не змінювався, і перевірено чисельно, що `indexOf("validateMutationControls(") = 97553`
+< `indexOf('vitestBin, "run"') = 98691`, а пін (і весь харнес-прогін вище) зелений. Властивість, яку пін описує,
+не змінилася: у герметичному прогоні guard і далі виконується до vitest.
+
+**Що лишається ескалованому запуску власника (і чому).** У пісочниці агента **не запускається `vitest`**
+(esbuild/Vite піднімає сервіс-процес → `spawn EPERM`) і **недоступні `artifacts/`** для запису (`EPERM` на
+`artifacts/security-gate-db-report.json` — скрипт це коректно репортує як «notice», не змінюючи вердикт), тому
+**не** перевірено тут: `npm test` (мусить лишитись **10 файлів / 15 тестів**), `npm run security-gate` (150
+наборів), `npm run test:web` (9/76), обидві збірки і **обидва DB-прогони на pgvector** —
+`npm run security-gate:db` (append-only під application role: UPDATE/DELETE відхилено, rogue `INSERT` відхилено,
+`verifyChain` виявляє out-of-band правку, trigger-removal демонструє невакуумність) і `npm run gate:upgrade:db`
+(чиста БД → рівно зареєстрований набір, другий прогін нічого не змінює, база доводиться вперед).
+
+**Тимчасові файли цього кроку (названі; `delete` у пісочниці заборонено, тому не видалялися).**
+`.g1-probe/registry-nonvacuous.mjs` (доказ невакуумності `migration-registry-check` у пам'яті, read-only —
+жодного запису в репозиторій). `artifacts/` цього разу **не** використовувався: запис туди заборонений
+пісочницею (`EPERM`), тому артефакти вердиктів DB-гейтів з'являться лише в ескалованому прогоні. Передіснуючі
+`.c5a-probe/`, `artifacts/c5b-policy-probe/`, `artifacts/g1-*`, `artifacts/c15-*` не чіпалися.
+
+---
+
 ## 8. Ручний чекліст G1 (поза герметичними тестами)
 
+* [ ] **DB-гейт (G1 п.2, D1): `npm run security-gate:db` і `npm run gate:upgrade:db`** на
+      `pgvector/pgvector:pg17` (як у `docker-compose.yml`) — очікується exit 0. Перший доводить append-only
+      **під application role** (UPDATE/DELETE відхилено при наявній привілегії, rogue `INSERT` відхилено,
+      `verifyChain` виявляє out-of-band правку, і з вимкненим тригером відмова зникає), другий — що чиста БД
+      отримує рівно зареєстрований набір, другий прогін не змінює `schema_migrations`, а старіша база
+      доводиться вперед. Без `DATABASE_URL` обидва **мусять** упасти (exit 1), а не скіпнути.
 * [ ] **Decoy-branch (G1 п.3):** `npm run mutation:branch` — очікується exit 0 (`verdict=proven`), тобто
       прогін без мутації зелений (`baseline: … GREEN`) і обидва decoy-рядки дають `caught` із названим тестом
       серед **нових** падінь, а cosmetic-рядок дає `ok` (exit 0). Після прогону перевірити, що `git status` і
@@ -1155,3 +1357,143 @@ node artifacts/g1-ci-triggers/check-workflows.mjs
   власник), реальні контейнерні перевірки зі списку § 8.
 * Рішення про rollout лишається за власником: G1 = security ready; вихід за межі internal і просування
   flags — лише після G1 **і** R1.
+
+---
+
+## 5.2 G1 п.5 — три структурні дефекти гейта (shebang-імпорт, `data/typosquat` на чистому клоні, `artifacts/` як передумова тесту)
+
+Три дефекти, знайдені під час прогону decoy-branch, усунуто без перенесення worktree, без послаблення жодної
+асерції, без `.skip`/`.only`/`.todo`, без `as any`/`@ts-ignore`/`@ts-expect-error` і без нових залежностей.
+
+### A. Вісім наборів гейта не завантажувались поза звичним розташуванням дерева
+
+**Механізм (встановлений, а не припущений).** `node:vm` **не** знімає shebang: проба
+`.g1-probe/vm-shebang-probe.cjs` подає фрагмент із `#!/usr/bin/env node` у `new vm.Script(...)` і отримує
+`Invalid or unexpected token`. Саме те, що робить `VitestExecutor.runModule`, коли бандлер віддає файл без
+трансформації. У звичному дереві файл трансформується (shebang знімається), у git-worktree — ні, тому набір, який
+його імпортує, рапортує «no tests at all».
+
+**Точний перелік 8 наборів** (обчислено, див. `.g1-probe/shebang-probe.cjs`: перебір `SECURITY_GATE_TESTS` ×
+імпорти `../scripts/*.mjs` × перший рядок `#!`):
+
+| # | Набір гейта | Імпортував (shebang) |
+| --- | --- | --- |
+| 1 | `tests/coding-agent-c4a-security-gate.test.ts` | `scripts/run-security-gate.mjs` |
+| 2 | `tests/coding-agent-c5b-policy-rbac.test.ts` | `scripts/run-security-gate.mjs` |
+| 3 | `tests/coding-agent-c7-web-xss-source-scan.test.ts` | `scripts/scan-web-xss.mjs` |
+| 4 | `tests/coding-agent-c14-ci-and-lint-gates.test.ts` | `scripts/run-security-gate.mjs`, `scripts/lint-guard.mjs` |
+| 5 | `tests/coding-agent-c14-known-failures.test.ts` | `scripts/check-known-failures.mjs`, `scripts/run-security-gate.mjs` |
+| 6 | `tests/coding-agent-c14-attack-catalogue.test.ts` | `scripts/attack-catalogue-check.mjs`, `scripts/run-security-gate.mjs` |
+| 7 | `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` | `scripts/run-security-gate.mjs` |
+| 8 | `tests/coding-agent-c14-mutation-branch-controls.test.ts` | `scripts/run-security-gate.mjs`, `scripts/mutation-controls-check.mjs`, `scripts/security-gate-mutation-branch.mjs` |
+
+**Механізм усунення (той самий для кожного).** Бібліотечна логіка переїхала в `scripts/lib/<ім'я>.mjs`
+**без shebang**, а `scripts/<ім'я>.mjs` лишився тонкою executable-обгорткою: shebang, рішення про entry point
+(з **власним** `import.meta.url`, бо дефолтний параметр `isEntryPoint` обчислюється в модулі, де функція
+оголошена) і `export * from "./lib/…"` + явний `export { main }`, щоб наявні імпортери не змінилися.
+
+| Було | Стало: бібліотека (без shebang) | Стало: executable (shebang) |
+| --- | --- | --- |
+| `scripts/run-security-gate.mjs` (1374 р.) | `scripts/lib/run-security-gate.mjs` (реалізація + `main` + `prepareTyposquatDataset`) | `scripts/run-security-gate.mjs` (11 р.) |
+| `scripts/attack-catalogue-check.mjs` | `scripts/lib/attack-catalogue-check.mjs` | `scripts/attack-catalogue-check.mjs` (ре-експорт) |
+| `scripts/scan-web-xss.mjs` | `scripts/lib/scan-web-xss.mjs` (`main(argv)`) | `scripts/scan-web-xss.mjs` |
+| `scripts/lint-guard.mjs` | `scripts/lib/lint-guard.mjs` (`main(argv)`) | `scripts/lint-guard.mjs` |
+| `scripts/check-known-failures.mjs` | `scripts/lib/check-known-failures.mjs` (`main(argv)`) | `scripts/check-known-failures.mjs` |
+| `scripts/mutation-controls-check.mjs` | `scripts/lib/mutation-controls-check.mjs` (`main(argv)`, `readGateSuiteList`, `GATE_SCRIPT_PATH`) | `scripts/mutation-controls-check.mjs` |
+| `scripts/security-gate-mutation-branch.mjs` (імпортується набором 8) | — (лишається на місці) | — ; **shebang знято** — файл імпортується як модуль, а `package.json`/runbook викликають його як `node scripts/…`, не `./scripts/…` |
+| `scripts/typosquat-dataset-generate.mjs` | `scripts/lib/typosquat-dataset-generate.mjs` (root-aware, див. B) | `scripts/typosquat-dataset-generate.mjs` |
+
+**Перевірка, що залежності більше немає.** Харнес `.g1-probe/gate-pieces-harness.mjs` будує **граф імпортів усіх
+151 набору** гейта (рекурсивно, відносні специфікатори) і перевіряє, що жоден набір не досягає файлу, який
+починається з `#!`, **окрім** `scripts/lib/**` (бібліотеки без shebang) — `PASS: no gate suite reaches a shebang
+module through its import graph`. До правки цей самий перебір давав 8 наборів (див. `.g1-probe/shebang-probe.cjs`,
+вивід у звіті агента).
+
+**CLI працює як раніше** (усі перевірено, коди виходу):
+
+| Команда | Результат |
+| --- | --- |
+| `node scripts/attack-catalogue-check.mjs` | exit 0 (як було: модуль без CLI-виводу) |
+| `node scripts/run-security-gate.mjs --list` | 151 рядок, перший `tests/coding-agent-c1c-audit-log.test.ts`, останній `tests/coding-agent-g1-clean-clone-prerequisites.test.ts` |
+| `node scripts/mutation-controls-check.mjs` | `rows=3 decoy=2 cosmetic=1 ok=true issues=0` — exit 0 |
+| `node scripts/typosquat-dataset-generate.mjs --check` | `[typosquat] datasets are up to date` — exit 0 |
+| `node scripts/lint-guard.mjs` | `self-test 19/19`, 1031 файл, `allowances 7/7`, **OK** — exit 0 |
+| `node scripts/scan-web-xss.mjs` | 73 файли, `allowlisted sites 7/7`, **OK** — exit 0 |
+
+### B. `data/typosquat` не відтворювався на чистому клоні
+
+**Вибір (обґрунтований).** Обрано **явну фазу підготовки** гейта, а не «генерацію всередині кроку-охоронця»:
+
+1. набір `data/typosquat` потрібен **п'ятьом наборам гейта**, а вони виконуються в тому самому прогоні vitest,
+   який крок-охоронець запускається **після** — генерація всередині охоронця лишила б **перший** прогін гейта
+   червоним;
+2. «згенерувати → перевірити» однією командою робить власний доказ гейта нечитабельним: одна команда і лікує, і
+   судить.
+
+Тому гейт тепер має `prepareTyposquatDataset({ root })` (`scripts/lib/run-security-gate.mjs`), який виконується
+**завжди, до vitest**, і:
+* генерує **лише коли файла немає** (стан чистого клона) — наявний набір завжди йде в `--check`;
+* **не лікує застаріле**: набір, що існує, але не збігається з генератором, лишається **червоним** (крок
+  `typosquat dataset guard` → exit 1), а генератор відмовляє `--check`-невідповідністю;
+* повідомляє відмову з **названою причиною**, якщо генератора немає (fail-closed, не «зелено над відсутнім»).
+
+**Друга частина того ж дефекту (знайдена під час правки).** Генератор визначав ціль від **власного** розташування
+(`import.meta.dirname/..`), тому фаза підготовки в тимчасовому дереві писала б у **реальний checkout** (перевірено:
+перший варіант харнеса справді створив `data/typosquat/*.json` у репозиторії). Генератор став root-aware:
+`--root <dir>` / `NPATI_TYPOSQUAT_ROOT`, а фаза підготовки викликає його як
+`[generator, "--root", root]`. Набір новий тест перевіряє це фингерпринтом вмісту `data/typosquat` до і після
+підготовки чужого дерева.
+
+**Новий набір** `tests/coding-agent-g1-clean-clone-prerequisites.test.ts` (151-й у списку) перевіряє **саме фазу
+підготовки** — це названо прямо в його заголовку: повний гейт у тимчасовому дереві не запускається (це був би
+другий повний прогін гейта на тест), тому тимчасове дерево — копія файлів, які фаза виконує, а не `git clone`.
+Невакуумність: (1) до генерації фаза доповідає **усі 6 екосистем** відсутніми, після — дерево повне й генерація
+не потрібна; (2) вміст згенерованого дерева **побайтово збігається** з наявним `data/typosquat` репозиторію
+(fingerprint sha256), тож «зелений на чистому клоні» — це ті самі байти, які перевіряє охоронець; (3) застарілий
+набір → `--check` exit 1; (4) без генератора → `ok:false` з названою причиною.
+
+**Документ.** Число наборів гейта оновлено **150 → 151** одночасно з реєстрацією набору — у всіх місцях, які
+читає guard-набір: канонічне речення, рядок `--list`, число після стрілки, пара `suites=`/`present=` (перевірено
+пробою `.g1-probe/size-guard-probe.cjs` → `SIZE GUARD: PASS`, 5 тверджень, `missing=0`).
+
+### C. `artifacts/` як передумова тесту
+
+`tests/coding-agent-c15-cli-run-start.test.ts` писав фікстуру токена в `artifacts/c15-token-fixture.txt` і першим
+ділом твердив `expect(existsSync(path.dirname(file))).toBe(true)`. `artifacts/` у `.gitignore`, а гейт створює його
+лише **після** vitest (`writeGateArtifact`), тому тест падав **лише в першому** прогоні (і в кожному свіжому
+worktree) — залежність від побічного ефекту іншого кроку.
+
+Тепер тест створює **власний** каталог: `mkdtempSync(path.join(tmpdir(), "npati-c15-token-"))`, пише фікстуру туди,
+перевіряє відсутній токен тим самим каталогом і прибирає його в `finally`. Жодного читання `artifacts/` у наборі не
+лишилося; `GATE_IGNORED_RESOURCES` у `scripts/security-gate-mutation-branch.mjs` оновлено відповідно (доказовий
+рядок споживача — `mkdtempSync(path.join(tmpdir(), "npati-c15-token-"))`), тож декларація дзеркала лишається
+невакуумною. Невакуумність: тест проходить із **видаленим** `artifacts/` — жодного `existsSync` на нього в наборі
+немає, а шлях фікстури не містить `artifacts`.
+
+### Тимчасові файли цього кроку (названі)
+
+* `scripts/lib/probe.mjs` — **нульовий файл (0 байтів)**, лишився від першої перевірки, чи доступний на запис
+  каталог `scripts/lib/`. Нічим не імпортується, ніде не згадується і не впливає на гейт; видалити його з агента
+  не вдалося (ACL пісочниці: `Remove-Item`/`cmd /c del` → «Access is denied»), тому він лишається порожнім і його
+  можна безпечно видалити вручну.
+* `.g1-probe/` — тимчасові проби й харнес (не входять до гейта, `npm test` їх не бачить):
+  `shebang-probe.cjs` (перелік 8 наборів), `vm-shebang-probe.cjs` (доказ, що `node:vm` не знімає shebang),
+  `stdio-probe.cjs` (доказ заборони pipe-stdio в пісочниці), `gate-pieces-harness.mjs` (23/23 PASS: фаза
+  підготовки, граф імпортів 151 набору, контракт експортів), `prepare-before-after.mjs` (чистий клон: RED → GREEN,
+  застаріле лишається RED), `prepare-debug.mjs`, `c15-artifacts-probe.mjs` (6/6 PASS), `size-guard-probe.cjs`
+  (читачі guard-набору розміру → PASS), `shebang-check.mjs`, логи прогонів (`vitest-c4a.log`,
+  `typecheck-tests.log`, `lint.log`, `xss.log`, `harness.log`).
+
+### Чого цей крок **не** зробив (чесні межі)
+
+* `npm test`, `security-gate`, `test:web`, обидві збірки, обидва DB-гейти й decoy-branch **не** прогнані тут:
+  пісочниця агента забороняє `child_process` зі **pipe**-stdio (`spawn EPERM`, проба
+  `.g1-probe/stdio-probe.cjs`: `pipe → EPERM`, `inherit → ok`, `ignore → ok`), а vitest/vite/esbuild стартують саме
+  так — тому запуск лишається ескалованому прогону власника;
+* тому замість vitest тут: `node --check` (16 файлів, 0 падінь), `typecheck` (exit 0), `typecheck:tests` (exit 0),
+  `lint` (обидві половини, exit 0), усі CLI-команди з таблиці вище, проба розміру документа й харнес графа
+  імпортів (23/23 PASS);
+* повна фаза підготовки в тимчасовому дереві (з реальним spawn генератора) тут **не** виміряна — виміряна її
+  логіка рішення (`generated=true`, 6 відсутніх екосистем) і сам генератор окремо (`--root`, усі 6 файлів,
+  побайтово = `data/typosquat` репозиторію, `.g1-probe/gate-pieces-harness.mjs` та однойменний набір). Це прямо
+  названо в заголовку нового набору: він доводить **фазу підготовки**, а не другий повний прогін гейта.

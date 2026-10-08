@@ -1,7 +1,13 @@
-#!/usr/bin/env node
 /**
  * G1 item 3 (PLAN.md): the **decoy branch** — proof that the real security gate goes red when a guard is
  * removed from the code, and stays green when a line that controls nothing is changed.
+ *
+ * G1 (item 5): this file carries **no shebang** on purpose. It is imported as a module by
+ * `tests/coding-agent-c14-mutation-branch-controls.test.ts`, which pins its verdict reader, and a
+ * `#!/usr/bin/env node` first line is a syntax error when a bundler hands the file to `node:vm` untransformed —
+ * the mechanism that made the gate suites importing `scripts/lib/*.mjs` report "no tests at all" in a git
+ * worktree. Nothing needs the shebang here: `package.json` (`mutation:branch`) and the runbook below both invoke
+ * this file as `node scripts/security-gate-mutation-branch.mjs`, never as `./scripts/…`.
  *
  * Why this exists next to `tests/coding-agent-c14-gate-mutation-sensitivity.test.ts`: that suite neutralises
  * five guards **in memory**. It proves each guard is load-bearing *in the seam it exposes*, and it is a real
@@ -83,8 +89,8 @@ import {
   loadMutationControls,
   renderMutation,
   validateMutationControls,
-} from "./mutation-controls-check.mjs";
-import { SECURITY_GATE_TESTS } from "./run-security-gate.mjs";
+} from "./lib/mutation-controls-check.mjs";
+import { SECURITY_GATE_TESTS } from "./lib/run-security-gate.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -559,31 +565,35 @@ export function mirrorWorkingTree(root, worktree, log = () => {}) {
  * entry here answers "which gate test or gate step fails without this?", and an ignored path that fails that
  * question stays out.
  *
- * Note the hermeticity finding this list records rather than fixes (see
- * `docs/coding-agent/security-gate-report.md`): the mandatory `security-gate` job depends on `data/typosquat`,
- * which `.gitignore` excludes, which `npm ci` does not create and which `npm run security-gate` does not
- * generate. The mirror reproduces the tree under review faithfully; it does not make the gate self-contained.
+ * Note the hermeticity finding this list recorded (see `docs/coding-agent/security-gate-report.md`): the
+ * mandatory `security-gate` job depends on `data/typosquat`, which `.gitignore` excludes and which `npm ci` does
+ * not create. G1 (item 5) closed the dependency rather than the mirror: the gate's own preparation phase
+ * (`prepareTyposquatDataset` in `scripts/lib/run-security-gate.mjs`) generates a **missing** dataset before
+ * vitest, so a clean clone is gate-ready, while a dataset that exists but is stale still fails the `--check`
+ * guard. The mirror still reproduces the tree under review faithfully; what changed is that the gate no longer
+ * needs the resource to be pre-seeded.
  */
 export const GATE_IGNORED_RESOURCES = [
   {
     path: "data/typosquat",
     kind: "directory",
     reason:
-      "The curated typosquat dataset. `.gitignore` excludes `data/`, `npm ci` does not create it and no `npm run` step generates it, yet five gate tests load it and the gate's own `typosquat dataset guard` step refuses a missing dataset as stale.",
+      "The curated typosquat dataset. `.gitignore` excludes `data/` and `npm ci` does not create it, yet five gate tests load it and the gate's own `typosquat dataset guard` step refuses a missing dataset as stale. Since G1 (item 5) the gate generates a missing dataset in its preparation phase, so this resource is mirrored for the tests that read it rather than to repair the gate.",
     consumers: [
       { file: "tests/coding-agent-c4a-typosquat-dataset.test.ts", evidence: 'path.join(REPO_ROOT, "data", "typosquat")' },
       { file: "tests/coding-agent-c4a-deps-guard.test.ts", evidence: 'path.resolve(import.meta.dirname, "..", "data", "typosquat")' },
-      { file: "scripts/typosquat-dataset-generate.mjs", evidence: 'path.join(ROOT, "data", "typosquat")' },
+      { file: "scripts/lib/typosquat-dataset-generate.mjs", evidence: 'export const DATASET_DIRECTORY_RELATIVE = path.join("data", "typosquat");' },
+      { file: "scripts/lib/run-security-gate.mjs", evidence: 'const TYPOSQUAT_GENERATOR_PATH = "scripts/typosquat-dataset-generate.mjs";' },
     ],
   },
   {
     path: "artifacts",
     kind: "directory",
     reason:
-      "The gate's evidence directory. The gate writes `artifacts/security-gate-report.json` into it (creating it if needed) and `tests/coding-agent-c15-cli-run-start.test.ts` writes a token fixture into it, so a worktree without the directory fails a gate test for a reason that has nothing to do with the mutation.",
+      "The gate's evidence directory. The gate writes `artifacts/security-gate-report.json` into it (creating it if needed), while `tests/coding-agent-c15-cli-run-start.test.ts` writes its token fixture into a `mkdtemp` directory of its own (G1 item 5 removed that suite's dependency on this one). A worktree with no `artifacts/` therefore fails a gate test for a reason that has nothing to do with the mutation only if a step really reads it.",
     consumers: [
-      { file: "scripts/run-security-gate.mjs", evidence: 'export const GATE_ARTIFACT_PATH = "artifacts/security-gate-report.json";' },
-      { file: "tests/coding-agent-c15-cli-run-start.test.ts", evidence: 'path.join(workspaceRoot, "artifacts", "c15-token-fixture.txt")' },
+      { file: "scripts/lib/run-security-gate.mjs", evidence: 'export const GATE_ARTIFACT_PATH = "artifacts/security-gate-report.json";' },
+      { file: "tests/coding-agent-c15-cli-run-start.test.ts", evidence: 'mkdtempSync(path.join(tmpdir(), "npati-c15-token-"))' },
     ],
   },
 ];

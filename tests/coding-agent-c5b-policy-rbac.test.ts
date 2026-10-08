@@ -15,7 +15,7 @@ import {
   assertNoSensitiveProviderPolicyEvent,
 } from "../apps/agent-api/src/provider-data-policy-service";
 // The gate's own list is imported so this suite fails if a C5b suite silently drops out of SG-3.
-import { SECURITY_GATE_TESTS, findMissingSuiteFiles } from "../scripts/run-security-gate.mjs";
+import { SECURITY_GATE_TESTS, findMissingSuiteFiles } from "../scripts/lib/run-security-gate.mjs";
 
 /**
  * C5b security-gate (SG-3): **who may decide what leaves NPATI**.

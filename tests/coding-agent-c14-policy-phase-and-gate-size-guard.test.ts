@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SECURITY_GATE_TESTS } from "../scripts/run-security-gate.mjs";
+import { SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
 
 /**
  * C14 (post-step cleanup) — the two descriptions that had silently drifted are pinned to a source the guard
@@ -40,7 +40,12 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const GUARD_PATH = "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts";
 const ENGINE_PATH = "apps/agent-api/src/code-policy-engine.ts";
 const WIRING_PATH = "apps/agent-api/src/app.ts";
-const GATE_SCRIPT_PATH = "scripts/run-security-gate.mjs";
+/**
+ * G1 (item 5): the gate's implementation — and therefore its fixed list — is the library
+ * `scripts/lib/run-security-gate.mjs`; `scripts/run-security-gate.mjs` is the thin executable wrapper that owns
+ * the shebang and re-exports the library.
+ */
+const GATE_SCRIPT_PATH = "scripts/lib/run-security-gate.mjs";
 const REPORT_PATH = "docs/coding-agent/security-gate-report.md";
 
 /** The method whose call sites are the order of execution, and the two comments that describe it. */

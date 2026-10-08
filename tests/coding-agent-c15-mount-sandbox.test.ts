@@ -9,6 +9,7 @@ import { SANDBOX_MOUNT_TARGET, RemoteSandboxProvider, sandboxMountRequest, type 
 import { RunnerMountGate, type SandboxMountGate } from "../apps/agent-api/src/mounted-folder-gate";
 import { CodeMountedFolderService } from "../apps/agent-api/src/code-mounted-folder";
 import { mountedFolderRoots } from "../apps/agent-api/src/project-mount-policy";
+import { resolveRunnerStore, type RunnerStoreNotice } from "../apps/agent-api/src/sandbox-runner-store";
 
 /**
  * C15 security-gate suite, second half — the **sandbox side**: how a mounted folder reaches a container, and
@@ -465,5 +466,81 @@ describe("security-gate: C15 wiring — one resolver, and the runner reads the a
     // writer of the canonical folder.
     expect(service).toContain("if (mount) return new Map<string, SandboxFile>();");
     expect(service).toContain("if (!startProcess && !ready.mount) await this.download(");
+  });
+});
+
+/**
+ * G1 (item 4): the runner's own workspace store. The runner reads its image catalogue **and** its confirmed
+ * mounted folder from this store, so a store whose migration chain failed to initialize is not a degraded runner —
+ * it is a runner that cannot answer either question. The behaviour that used to be there,
+ * `await postgres.initialize().catch((error) => console.error(…))`, reported the failure through a bare
+ * `console.error`, kept the uninitialized store, and could not be tested at all because it lived in a module that
+ * starts an HTTP server at import time. `resolveRunnerStore` is that decision as a function of injected factories,
+ * so both directions are asserted here without Docker and without a database.
+ */
+describe("security-gate: G1 the runner's workspace store fails closed and says why", () => {
+  /** A store that cannot be initialized, for the reason a missing `vector` extension gives in production. */
+  class UninitializableStore extends InMemoryWorkspaceStore {
+    override async initialize(): Promise<void> {
+      throw new Error('migration 014 failed: extension "vector" is not available');
+    }
+  }
+
+  it("surfaces the reason of a failed initialization instead of logging it and carrying on", async () => {
+    const notices: RunnerStoreNotice[] = [];
+    const resolution = await resolveRunnerStore({
+      databaseUrl: "postgres://postgres:postgres@127.0.0.1:55432/npati_agent",
+      createPostgresStore: () => new UninitializableStore(),
+      createMemoryStore: () => new InMemoryWorkspaceStore(),
+      report: (notice) => notices.push(notice),
+    });
+
+    // The state, not a log line: the reason is carried forward to the component that decides admissions.
+    expect(resolution.database).toBe(true);
+    expect(resolution.failure).toContain("vector");
+    // …and the failure is reported once, structured, with the same reason — this is what was silence before.
+    expect(notices.length).toBe(1);
+    const notice = notices[0]!;
+    expect(notice.event).toBe("runner_store_unavailable");
+    expect(notice.code).toBe("runner_store_unavailable");
+    expect(notice.database).toBe(true);
+    expect(notice.message).toContain('extension "vector" is not available');
+  });
+
+  it("reports nothing when the store initializes, and reports the in-memory fallback as its own state", async () => {
+    const healthy: RunnerStoreNotice[] = [];
+    const withDatabase = await resolveRunnerStore({
+      databaseUrl: "postgres://postgres:postgres@127.0.0.1:55432/npati_agent",
+      createPostgresStore: () => new InMemoryWorkspaceStore(),
+      createMemoryStore: () => new InMemoryWorkspaceStore(),
+      report: (notice) => healthy.push(notice),
+    });
+    expect(withDatabase).toMatchObject({ database: true, failure: null });
+    expect(healthy).toEqual([]);
+
+    // No `DATABASE_URL` is a deliberate fallback, not an initialization failure: a revocation issued through the
+    // API is invisible here, and that is what the notice says.
+    const fallback: RunnerStoreNotice[] = [];
+    const withoutDatabase = await resolveRunnerStore({
+      databaseUrl: undefined,
+      createPostgresStore: () => new InMemoryWorkspaceStore(),
+      createMemoryStore: () => new InMemoryWorkspaceStore(),
+      report: (notice) => fallback.push(notice),
+    });
+    expect(withoutDatabase).toMatchObject({ database: false, failure: null });
+    expect(fallback.map((notice) => notice.event)).toEqual(["runner_store_not_configured"]);
+    expect(fallback[0]?.message).toContain("revocations");
+  });
+
+  it("keeps the runner's admission closed while the store is unavailable, and no longer swallows the error", () => {
+    const runner = readFileSync(path.resolve("apps/agent-api/src/sandbox-runner-server.ts"), "utf8");
+    // The resolution is read by the admission, which refuses with its own code rather than querying a store that
+    // cannot answer — a container must never be admitted on the strength of a failed initialization.
+    expect(runner).toContain("resolution.failure !== null");
+    expect(runner).toContain('"runner_store_unavailable"');
+    expect(runner).toContain("resolveRunnerStore({");
+    // The defect itself: a `.catch(...)` that logs and continues must not come back.
+    expect(runner).not.toContain("initialize().catch(");
+    expect(runner).not.toContain("database unavailable");
   });
 });
